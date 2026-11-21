@@ -125,6 +125,10 @@
     {
       "platformVersion": "1.9.1",
       "schemaDigest": "3810ac5b9236ce945b748d5e51a11c929fa55f6b1de7acd4a95b33ea5585a62e"
+    },
+    {
+      "platformVersion": "1.9.3",
+      "schemaDigest": "cf1552816a0fd3d5b6bc2830549c50652fc60a5f68446ae2cffea55f41a06cde"
     }
   ]
 }
