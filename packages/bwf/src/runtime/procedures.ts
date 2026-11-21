@@ -5,12 +5,14 @@ import {
   type AnyProcedure,
   type Registry,
 } from '@builtbyfriends/realtime';
-import { analyticsEngine } from '@builtbyfriends/realtime-analytics';
+import { analyticsEngine, fanOut, posthog } from '@builtbyfriends/realtime-analytics';
 import { rpcHandler } from '@builtbyfriends/realtime-http';
 import type { Hono } from 'hono';
 
 /** The Analytics Engine binding bwf adds when an app has procedures. */
 export const ANALYTICS_BINDING = 'ANALYTICS';
+/** The Worker secret that turns on PostHog for procedure events. `POSTHOG_HOST` picks the region. */
+export const POSTHOG_KEY = 'POSTHOG_KEY';
 export const RPC_BASE_PATH = '/rpc';
 export const MCP_PATH = '/mcp';
 
@@ -40,9 +42,22 @@ const consoleAnalytics: AnalyticsProvider = {
   track: (event) => console.log('[analytics]', JSON.stringify(event)),
 };
 
+const posthogWhenSet: AnalyticsProvider = {
+  name: 'posthog',
+  track(event, env: Record<string, unknown> | undefined) {
+    const apiKey = env?.[POSTHOG_KEY];
+    if (typeof apiKey !== 'string' || !apiKey) {
+      return;
+    }
+    const host = typeof env?.POSTHOG_HOST === 'string' ? env.POSTHOG_HOST : undefined;
+    return posthog({ apiKey, host }).track(event, env);
+  },
+};
+
 /**
  * Builds the registry and serves it at /rpc. Called at the top of the generated route
  * table, so a registry problem stops the Worker from starting and the deploy fails.
+ * Events go to Analytics Engine, and to PostHog when `POSTHOG_KEY` is set.
  * In dev, events go to the console, so a remote-mode session never writes to the
  * deployed project's Analytics Engine dataset.
  */
@@ -52,7 +67,9 @@ export function mountProcedures(
   options: { dev: boolean; name: string; version: string },
 ): Registry {
   const registry = defineRegistry(collectProcedures(modules), {
-    analytics: options.dev ? consoleAnalytics : analyticsEngine({ binding: ANALYTICS_BINDING }),
+    analytics: options.dev
+      ? consoleAnalytics
+      : fanOut(analyticsEngine({ binding: ANALYTICS_BINDING }), posthogWhenSet),
   });
   const rpc = rpcHandler(registry, {
     basePath: RPC_BASE_PATH,

@@ -520,9 +520,7 @@ describe('detectFramework', () => {
       expect(entry).toContain('import __platformDurableObject0 from');
       expect(entry).toContain('/durable-objects/shopping-cart.ts');
       expect(entry).toContain('__platformDurableObject0.__bind("SHOPPING_CART")');
-      expect(entry).toContain(
-        'export const ShoppingCartDurableObject = __platformDurableObject0.class',
-      );
+      expect(entry).toContain('const ShoppingCartDurableObject = __platformDurableObject0.class');
     } finally {
       cwd.mockRestore();
     }

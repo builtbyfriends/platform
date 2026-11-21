@@ -946,7 +946,7 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const durableObjectExports = durableObjects
     .map(
       ({ bindingName, className, name }, index) =>
-        `__platformDurableObject${index}.__bind(${JSON.stringify(bindingName)}${name !== undefined ? `, ${JSON.stringify(name)}` : ''});\nexport const ${className} = __platformDurableObject${index}.class;`,
+        `__platformDurableObject${index}.__bind(${JSON.stringify(bindingName)}${name !== undefined ? `, ${JSON.stringify(name)}` : ''});\nconst ${className} = __platformDurableObject${index}.class;\nexport { ${className} };`,
     )
     .join('\n');
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;

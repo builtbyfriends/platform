@@ -11,6 +11,7 @@ import {
   resolveAssetRoutingPolicy,
   type AssetRoutingPolicy,
 } from './asset-routing.ts';
+import { parseJsoncObject } from './cli/generated-wrangler-config.ts';
 import { mergeRoutingRules } from './cli/headers.ts';
 import { readDeploymentPlatform } from './cli/project.ts';
 import {
@@ -55,6 +56,7 @@ import { DEFAULT_SCAN_DIRS } from './plugin-inference.ts';
 import { migrationPlugin } from './plugin-migration.ts';
 import { restartPlugin } from './plugin-restart.ts';
 import { routingPlugin } from './plugin-routing.ts';
+import { sentry } from './plugin-sentry.ts';
 import { mergeWorkerBindings } from './plugin-worker-bindings.ts';
 import {
   createServerRuntimeOptimizerPlugin,
@@ -273,6 +275,8 @@ export function bwfPlugin(options?: {
   // Decision: Config function that merges inferred bindings with the resolved Cloudflare
   // config. Bindings already declared there (with real IDs) take precedence;
   // placeholders are added only for inferred bindings that are missing.
+  const sentryIntegration = sentry(root);
+
   function mergeBindings(resolved: WorkerConfig): Partial<WorkerConfig> {
     const merged = mergeWorkerBindings(resolved, {
       websocketRoutes,
@@ -297,6 +301,14 @@ export function bwfPlugin(options?: {
       remoteMode,
     });
     versionMetadataBinding = merged.versionMetadataBinding;
+    sentryIntegration.writeConfig([
+      cloudflareConfigPath
+        ? parseJsoncObject(readFileSync(cloudflareConfigPath, 'utf8'))
+        : undefined,
+      workerConfig,
+      resolved,
+      merged.patch,
+    ] as never);
     return merged.patch;
   }
 
@@ -674,6 +686,7 @@ export function bwfPlugin(options?: {
         clientRoutes?.api.finalizeCloudflareAssets(clientDir, environment!.config.build.assetsDir);
       },
     }),
+    ...sentryIntegration.plugins,
     implicitDeployGuard,
   ];
 }

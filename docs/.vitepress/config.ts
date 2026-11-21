@@ -140,6 +140,7 @@ const integrationItems = [
   { text: 'Coding Agents', link: '/integrations/agents' },
   { text: 'Hono', link: '/integrations/hono' },
   { text: 'Cloudflare', link: '/integrations/cloudflare' },
+  { text: 'Sentry and PostHog', link: '/integrations/sentry-posthog' },
 ];
 
 const integrationLinks = {

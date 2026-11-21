@@ -560,7 +560,9 @@ describe('compileWorkerEntry', () => {
       'import __platformDurableObject0 from "/app/durable-objects/counter.ts";',
     );
     expect(code).toContain('__platformDurableObject0.__bind("COUNTER");');
-    expect(code).toContain('export const CounterDurableObject = __platformDurableObject0.class;');
+    expect(code).toContain(
+      'const CounterDurableObject = __platformDurableObject0.class;\nexport { CounterDurableObject };',
+    );
   });
 
   it('re-exports the live Durable Object class when enabled', () => {
