@@ -110,11 +110,13 @@ import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
 import emailConfirm from './routes/email-confirm.ts';
 import emailRoutes from './routes/email.ts';
+import { githubAppRoutes } from './routes/github-app.ts';
 import { githubProjectRoutes, githubRoutes } from './routes/github.ts';
 import internalAiLogging from './routes/internal-ai-logging.ts';
 import internalCredential from './routes/internal-credential.ts';
 import internalEmailActions from './routes/internal-email-actions.ts';
 import internalEmailDomainCredential from './routes/internal-email.ts';
+import internalGitHubApp from './routes/internal-github-app.ts';
 import internalGitHubWebhook from './routes/internal-github-webhook.ts';
 import internalResolveResource from './routes/internal-resolve-resource.ts';
 import internalResolveWorker from './routes/internal-resolve-worker.ts';
@@ -559,12 +561,14 @@ const app = new Hono<ApiEnv>()
   .route('/internal/github-webhook', internalGitHubWebhook)
   .route('/internal/resolve-resource', internalResolveResource)
   .route('/internal/credential', internalCredential)
+  .route('/internal/github-app', internalGitHubApp)
   .route('/internal/ai-logging', internalAiLogging)
   .route('/internal/resolve-worker', internalResolveWorker)
   .route('/internal/verify-owner', internalVerifyOwner)
   .route('/billing/stripe', stripeWebhookRoutes)
   .use('/webhooks/*', capabilityMiddleware('managedBuilds'))
   .route('/webhooks', webhookRoutes)
+  .route('/github-app', githubAppRoutes)
   .use('/github/*', capabilityMiddleware('managedBuilds'))
   .route('/github', githubRoutes)
   // Decision: The gateway relays this exact route through its API service binding. The HMAC-signed token is the

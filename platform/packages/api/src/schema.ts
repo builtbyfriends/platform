@@ -1234,6 +1234,27 @@ export const projectCredentials = pgTable(
   (table) => [primaryKey({ columns: [table.project_id, table.provider] })],
 );
 
+// Decision: project_github_installations: a GitHub App installation an app's own people connected
+// for one of the app's spaces (`scope`, the app's id for it, such as a server). The proxy mints that
+// installation's token per call, so the app never holds the App key or a long-lived token.
+export const projectGitHubInstallations = pgTable(
+  'project_github_installations',
+  {
+    project_id: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull(),
+    installation_id: text('installation_id').notNull(),
+    account_login: text('account_login').notNull(),
+    account_id: text('account_id').notNull(),
+    /** The nonce of the signed state the connection was made under, so the app can match it. */
+    state_nonce: text('state_nonce').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.project_id, table.scope] })],
+);
+
 // Decision: `user_id` is the owner of a personal (account_type='User') installation and is null for
 // organization installations, which are reached only through `github_installation_members`. A
 // personal installation can be unlinked (install before sign-in) until the GitHub OAuth callback

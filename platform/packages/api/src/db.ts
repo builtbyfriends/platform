@@ -106,6 +106,9 @@ export {
   getProjectCredential,
   upsertProjectCredential,
   deleteProjectCredential,
+  getProjectGitHubInstallation,
+  upsertProjectGitHubInstallation,
+  deleteProjectGitHubInstallation,
 } from './db/credentials.ts';
 
 export {

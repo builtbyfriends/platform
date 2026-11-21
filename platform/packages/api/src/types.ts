@@ -12,6 +12,7 @@ import type {
   platformEvents,
   projectDatabaseCredentials,
   projectCredentials,
+  projectGitHubInstallations,
   projectInvitations,
   projectMembers,
   projectOwnershipPeriods,
@@ -64,6 +65,7 @@ export type EmailDestination = InferSelectModel<typeof emailDestinations>;
 export type PlatformEvent = InferSelectModel<typeof platformEvents>;
 export type Invitation = InferSelectModel<typeof invitations>;
 export type ProjectCredential = InferSelectModel<typeof projectCredentials>;
+export type ProjectGitHubInstallation = InferSelectModel<typeof projectGitHubInstallations>;
 export type ProjectDatabaseCredentials = InferSelectModel<typeof projectDatabaseCredentials>;
 export type Build = InferSelectModel<typeof builds>;
 export type GitHubConnection = InferSelectModel<typeof githubConnections>;

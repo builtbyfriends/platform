@@ -125,3 +125,78 @@ describe('POST /github/request', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('GitHub App installations', () => {
+  let aiToken: string;
+  const originalFetch = globalThis.fetch;
+
+  beforeAll(async () => {
+    aiToken = await signAiToken(PROJECT);
+  });
+  beforeEach(clearProxyTokenStateCache);
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('uses the scope’s installation token for any repository the installation reaches', async () => {
+    const upstream = vi.fn(async () => Response.json({ ok: true }));
+    globalThis.fetch = upstream as unknown as typeof fetch;
+    const env = createEnv(Response.json({ token: 'ghs_install', installation: true }));
+    const res = await worker.fetch(
+      post({ projectId: PROJECT, aiToken, scope: 'server_1', path: '/repos/anyone/repo/pulls' }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const [, init] = env.API.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ provider: 'github', scope: 'server_1' });
+    const [, upstreamInit] = upstream.mock.calls[0] as unknown as [string, RequestInit];
+    expect((upstreamInit.headers as Record<string, string>).authorization).toBe(
+      'Bearer ghs_install',
+    );
+  });
+
+  it('forwards app operations to the API with the project bound', async () => {
+    const env = createEnv(null);
+    env.API.fetch.mockImplementation(async () =>
+      Response.json({ url: 'https://github.com/apps/x' }),
+    );
+    const res = await worker.fetch(
+      new Request('https://proxy/github/app', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId: PROJECT,
+          aiToken,
+          op: 'install-url',
+          scope: 'server_1',
+          returnUrl: 'https://app.test/back',
+          extra: 'dropped',
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = env.API.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`https://api/internal/github-app/${PROJECT}`);
+    expect(JSON.parse(init.body as string)).toEqual({
+      op: 'install-url',
+      scope: 'server_1',
+      returnUrl: 'https://app.test/back',
+    });
+  });
+
+  it('refuses an unknown app operation', async () => {
+    const env = createEnv(null);
+    const res = await worker.fetch(
+      new Request('https://proxy/github/app', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectId: PROJECT, aiToken, op: 'token', scope: 's' }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(env.API.fetch).not.toHaveBeenCalled();
+  });
+});

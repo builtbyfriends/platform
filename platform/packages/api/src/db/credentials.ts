@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import { projectCredentials } from '../schema.ts';
-import type { ProjectCredential } from '../types.ts';
+import { projectCredentials, projectGitHubInstallations } from '../schema.ts';
+import type { ProjectCredential, ProjectGitHubInstallation } from '../types.ts';
 import { type Db } from './client.ts';
 
 export async function listProjectCredentials(
@@ -64,5 +64,60 @@ export async function deleteProjectCredential(
     .delete(projectCredentials)
     .where(
       and(eq(projectCredentials.project_id, projectId), eq(projectCredentials.provider, provider)),
+    );
+}
+
+export async function getProjectGitHubInstallation(
+  db: Db,
+  projectId: string,
+  scope: string,
+): Promise<ProjectGitHubInstallation | null> {
+  const [row] = await db
+    .select()
+    .from(projectGitHubInstallations)
+    .where(
+      and(
+        eq(projectGitHubInstallations.project_id, projectId),
+        eq(projectGitHubInstallations.scope, scope),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function upsertProjectGitHubInstallation(
+  db: Db,
+  input: Pick<
+    ProjectGitHubInstallation,
+    'project_id' | 'scope' | 'installation_id' | 'account_login' | 'account_id' | 'state_nonce'
+  >,
+): Promise<void> {
+  await db
+    .insert(projectGitHubInstallations)
+    .values(input)
+    .onConflictDoUpdate({
+      target: [projectGitHubInstallations.project_id, projectGitHubInstallations.scope],
+      set: {
+        installation_id: input.installation_id,
+        account_login: input.account_login,
+        account_id: input.account_id,
+        state_nonce: input.state_nonce,
+        updated_at: sql`now()`,
+      },
+    });
+}
+
+export async function deleteProjectGitHubInstallation(
+  db: Db,
+  projectId: string,
+  scope: string,
+): Promise<void> {
+  await db
+    .delete(projectGitHubInstallations)
+    .where(
+      and(
+        eq(projectGitHubInstallations.project_id, projectId),
+        eq(projectGitHubInstallations.scope, scope),
+      ),
     );
 }

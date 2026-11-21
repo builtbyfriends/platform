@@ -435,6 +435,13 @@
       "when": 1795124602042,
       "tag": "0068_project_mode_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795294023318,
+      "tag": "0069_project_github_installations",
+      "breakpoints": true
     }
   ]
 }

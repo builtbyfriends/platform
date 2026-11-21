@@ -331,7 +331,8 @@ export type ProxyInternalRoute =
   | 'resolve-worker'
   | 'resolve-resource'
   | 'ai-logging'
-  | 'credential';
+  | 'credential'
+  | 'github-app';
 
 function proxyInternalMessage(route: ProxyInternalRoute, projectId: string): string {
   return `void-proxy-internal\n${route}\n${projectId}`;

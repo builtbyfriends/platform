@@ -13,7 +13,9 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 /**
  * Calls the GitHub REST API with the project's stored token. The token stays in the proxy:
  * the caller (a sandbox or generated code) sends only a method, a path and a body, and the
- * path must name a repository the credential was stored for.
+ * path must name a repository the credential was stored for. With a `scope` the app connected
+ * a GitHub App installation for, it uses that installation's token instead, which GitHub
+ * limits to the installation's repositories.
  */
 const github = new Hono<ProxyEnv>();
 
@@ -45,6 +47,10 @@ github.post('/request', async (context) => {
   if (!repository) {
     return context.json({ error: 'path must name a repository' }, 400);
   }
+  const scope = body.scope === undefined ? undefined : asString(body.scope);
+  if (body.scope !== undefined && !scope) {
+    return context.json({ error: 'scope must be a string' }, 400);
+  }
 
   const res = await context.env.API.fetch(`https://api/internal/credential/${projectId}`, {
     method: 'POST',
@@ -56,16 +62,31 @@ github.post('/request', async (context) => {
         projectId,
       ),
     },
-    body: JSON.stringify({ provider: 'github' }),
+    body: JSON.stringify({ provider: 'github', ...(scope && { scope }) }),
   });
   if (res.status === 404) {
-    return context.json({ error: 'no GitHub credential stored for this project' }, 404);
+    return context.json(
+      {
+        error: scope
+          ? 'no GitHub installation connected for this scope'
+          : 'no GitHub credential stored for this project',
+      },
+      404,
+    );
+  }
+  if (res.status === 400) {
+    return context.json(await res.json(), 400);
   }
   if (!res.ok) {
     return context.json({ error: 'credential unavailable' }, 502);
   }
-  const credential = await res.json<{ token: string; repositories: Array<string> }>();
-  if (!credential.repositories.some((name) => name.toLowerCase() === repository)) {
+  const credential = await res.json<
+    { token: string; installation: true } | { token: string; repositories: Array<string> }
+  >();
+  if (
+    !('installation' in credential) &&
+    !credential.repositories.some((name) => name.toLowerCase() === repository)
+  ) {
     return context.json({ error: `credential does not cover ${repository}` }, 403);
   }
 
@@ -86,6 +107,47 @@ github.post('/request', async (context) => {
   return new Response(text, {
     status: upstream.status,
     headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/json' },
+  });
+});
+
+const APP_OPS = new Set(['install-url', 'describe', 'repositories', 'disconnect']);
+
+/**
+ * Manages the GitHub App installations the app connects for its own spaces. The app sends
+ * `op` and `scope` (its id for the space, such as a server) and the API does the rest; the
+ * App key and its tokens stay in Platform.
+ */
+github.post('/app', async (context) => {
+  const body = context.get('body');
+  const projectId = context.get('projectId');
+  const op = asString(body.op);
+  if (!op || !APP_OPS.has(op)) {
+    return context.json(
+      { error: 'op must be install-url, describe, repositories or disconnect' },
+      400,
+    );
+  }
+  const res = await context.env.API.fetch(`https://api/internal/github-app/${projectId}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      [PROXY_INTERNAL_AUTH_HEADER]: await deriveProxyInternalAuth(
+        context.env.JWT_SECRET,
+        'github-app',
+        projectId,
+      ),
+    },
+    body: JSON.stringify({
+      op,
+      scope: body.scope,
+      ...(body.returnUrl !== undefined && { returnUrl: body.returnUrl }),
+      ...(body.state !== undefined && { state: body.state }),
+      ...(body.page !== undefined && { page: body.page }),
+    }),
+  });
+  return new Response(res.body, {
+    status: res.status,
+    headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' },
   });
 });
 

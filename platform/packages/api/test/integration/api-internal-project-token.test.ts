@@ -234,6 +234,7 @@ describe('proxy credential on the metadata routes', () => {
     'resolve-resource',
     'ai-logging',
     'credential',
+    'github-app',
   ];
 
   async function liveProject() {
@@ -260,6 +261,7 @@ describe('proxy credential on the metadata routes', () => {
       'resolve-resource': { type: 'kv', binding: 'CACHE' },
       'ai-logging': {},
       credential: { provider: 'github' },
+      'github-app': { op: 'disconnect', scope: 'server_1' },
     };
     const expected: Record<ProxyInternalRoute, unknown> = {
       'resolve-worker': {
@@ -270,6 +272,7 @@ describe('proxy credential on the metadata routes', () => {
       'resolve-resource': { cf_id: 'cf-kv-id' },
       'ai-logging': { mode: 'inherit' },
       credential: { token: 'ghp_stored', repositories: ['acme/widgets'] },
+      'github-app': { removed: true },
     };
     return { project, deployment, bodies, expected };
   }
