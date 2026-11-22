@@ -20,8 +20,8 @@ export interface SendEmailOptions {
    * Sender envelope address. Optional. When omitted, `bwf dev` and
    * `bwf deploy --platform cloudflare` use `email.from` from bwf.config.ts,
    * and a bwf platform deploy uses `<project-slug>+noreply@<mail-domain>`.
-   * Without either, `sendEmail` returns `INVALID_FROM`; it never falls back
-   * to a baked-in domain.
+   * Without either, `sendEmail` returns `INVALID_FROM` if a transport is available
+   * or `BINDING_MISSING` if none is configured. It never falls back to a baked-in domain.
    */
   from?: Address;
   to: Address | Array<Address>;

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { toSlash } from 'pathslash';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
+import { resolveCloudflareStaticPreset } from '../../src/cli/deploy-cloudflare-static.ts';
 import {
   detectPreset,
   findBackendSources,
@@ -10,6 +11,7 @@ import {
   hasBackendFiles,
   resolveProjectCommand,
 } from '../../src/cli/preset.ts';
+import type { BwfConfig } from '../../src/config.ts';
 
 const TMP = join(import.meta.dirname, '.tmp-preset');
 
@@ -250,6 +252,31 @@ describe('detectPreset — strictBackend', () => {
       dirs: ['routes'],
     });
     expect(detectPreset(root, { strictBackend: true })).toBeNull();
+  });
+});
+
+describe('resolveCloudflareStaticPreset — configured app type', () => {
+  const vitepressPkg = { devDependencies: { vitepress: '^1.0.0' } };
+
+  it('returns null for a configured appType "platform" with an SSG plus backend', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    const bwfConfig = { inference: { appType: 'platform' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, bwfConfig, {})).toBeNull();
+  });
+
+  it('still refuses the unconfigured SSG plus backend case', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    expect(() => resolveCloudflareStaticPreset(root, {} as BwfConfig, {})).toThrow('vitepress');
+  });
+
+  it('keeps resolving a configured static app that also has backend sources', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    const bwfConfig = { inference: { appType: 'static' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, bwfConfig, {})).toEqual({
+      buildCommand: 'vitepress build',
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
+      appType: 'static',
+    });
   });
 });
 

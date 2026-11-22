@@ -76,6 +76,9 @@ export function resolveCloudflareStaticPreset(
       ),
     };
   }
+  if (bwfConfig.inference?.appType) {
+    return null;
+  }
   const detected = detectPreset(root, { spa: options.spa, strictBackend: true });
   return detected
     ? {

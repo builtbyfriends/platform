@@ -1,4 +1,4 @@
 # Last upstream Void commit this fork has reviewed. scripts/upstream-sync.ts reads it.
 upstream https://github.com/voidzero-dev/void main
-commit 92a01567b5f9e435249433e2e00da3e89d6744aa
-subject test: record the HTTP errors toast opening before it dismisses
+commit 822c7a31441a8e1bc20ff7cbf24c8c5355d3375d
+subject Report missing email transport when no sender is configured, closes #899.
