@@ -115,7 +115,7 @@ If you remove a plan from the list later, people who hold it keep their Stripe s
 
 Platform counts what an application reports for its people (AI and sandbox time) and what the hosted projects they pay for use. Once an hour it reads each project's use from Cloudflare's analytics for today and yesterday and stores it under the project's payer. If one reading fails, Platform keeps the numbers it stored before for that reading and stores the others.
 
-Set the price of each meter under **Admin → Connected apps → Usage prices**. Each price is in dollars for the meter's unit. The defaults are Cloudflare's own list prices, so at the defaults Platform charges about what Cloudflare charges you. To charge twice your cost, double each price.
+Set the price of each meter under **Admin → Connected apps → Usage prices**. Each price is in dollars for the meter's unit. The defaults are Cloudflare's own list prices, so at the defaults Platform charges about what Cloudflare charges you. To charge twice your cost, double each price. For AI prices and how the installation pays for AI, see [Paying for AI](./ai-billing.md).
 
 ### Hosted costs
 
