@@ -23,7 +23,7 @@ import {
   subscriptionRenewsAt,
 } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
-import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
+import { resolvePlanLimits } from '../plans.ts';
 import { appPeople, appUsage, appUsageEvents, appUsageSources } from '../schema.ts';
 
 const isPersonId = (value: unknown): value is string =>
@@ -130,8 +130,13 @@ async function hostedUse(context: BillingContext, person: string) {
 async function standing(context: BillingContext, person: string) {
   const db = context.get('db');
   const clientId = context.get('billingClient');
-  const { row, meters, credits } = await applyCredits(context.env, db, clientId, person);
-  const plan = row?.plan ?? (await getDefaultPlan(db)).id;
+  const { row, meters, credits, paid, defaultPlanId } = await applyCredits(
+    context.env,
+    db,
+    clientId,
+    person,
+  );
+  const plan = row?.plan ?? defaultPlanId;
   const limits = await resolvePlanLimits(db, plan);
   const period = currentPeriod();
   const quantity = (meter: Meter) => meters.find((entry) => entry.meter === meter)!.quantity;
@@ -160,6 +165,7 @@ async function standing(context: BillingContext, person: string) {
     : within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
   return {
     plan,
+    paid,
     billingPeriodStart: `${period}T00:00:00.000Z`,
     caps: {
       aiNeuronsPerMonth: limits.aiNeuronsPerMonth,
@@ -315,6 +321,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         aiNeuronsUsed: now.used.aiNeurons,
         sandboxSecondsUsed: now.used.sandboxSeconds,
         withinCaps: now.withinCaps,
+        paid: now.paid,
         outOfCredits: now.credits?.out ?? false,
         creditsRemainingMicros: now.credits?.remainingMicros ?? null,
       },

@@ -1,6 +1,7 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
+import { installationDefaultPlan } from './plans.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
 import { appPeople, appUsage, appUsageDaily, oauthClients, projects, users } from './schema.ts';
 
@@ -346,13 +347,16 @@ export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string)
  * the accounts they pay for stamp or lift the AI pause on their hosted projects.
  */
 export async function applyCredits(
-  env: Pick<Bindings, 'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO'>,
+  env: Pick<
+    Bindings,
+    'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO' | 'PLATFORM_INSTALLATION_ID'
+  >,
   db: Db,
   clientId: string,
   person: string,
 ) {
   const period = currentPeriod();
-  const [[row], plans, prices, use] = await Promise.all([
+  const [[row], plans, prices, use, defaultPlan] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -360,8 +364,12 @@ export async function applyCredits(
     clientPlans(env, db, clientId),
     readMeterPrices(db),
     payerUse(db, clientId, person, period),
+    installationDefaultPlan(db, env),
   ]);
-  const standing = creditStanding(use, prices, row ? (plans[row.plan]?.creditMicros ?? 0) : 0);
+  // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
+  // that ends writes the default plan on the row.
+  const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
+  const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0);
   const out = standing.credits?.out ? period : null;
   // Decision: Credits belong to a plan a person holds, so a person with no plan row has no balance to run out.
   if (row && row.out_of_credits_period !== out) {
@@ -384,5 +392,5 @@ export async function applyCredits(
         });
     }
   }
-  return { ...standing, row };
+  return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
 }

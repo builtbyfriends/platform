@@ -1,3 +1,4 @@
+import { createDefaultPlanCatalog } from '@builtbyfriends/platform/plans';
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vite-plus/test';
 import { addProjectUse, payerOutOfCredits } from '../../src/app-credits.ts';
@@ -10,7 +11,7 @@ import {
 import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import rawApp from '../../src/index.ts';
-import { resolvePlanLimits } from '../../src/plans.ts';
+import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { setProjectAiBlock } from '../../src/routing.ts';
 import { appPeople, oauthClients, projects, resources, users } from '../../src/schema.ts';
@@ -40,6 +41,9 @@ type Hosted = {
   projects: Array<{ projectId: string; slug: string; person: string }>;
 };
 type Answer = {
+  plan: string;
+  paid: boolean;
+  subscribed: boolean;
   hosted?: Hosted | null;
   hostedAsOf: string | null;
   withinCaps: boolean;
@@ -272,6 +276,36 @@ describe('app billing', () => {
     const ended = await dataOf(call('/usage.status', { person: 'p1' }));
     expect(ended).toMatchObject({ plan: 'free', subscribed: false });
     expect(ended).not.toHaveProperty('renewsAt');
+  });
+
+  it('says plainly whether a person pays, whatever the default plan is called', async () => {
+    env.PLATFORM_INSTALLATION_ID = 'installation-1';
+    try {
+      const status = (person: string) => dataOf(call('/usage.status', { person }));
+      expect(await status('p1')).toMatchObject({ plan: 'custom', paid: false, credits: null });
+      expect(await dataOf(call('/usage.record', { person: 'p1' }))).toMatchObject({ paid: false });
+
+      await sellCredits('p1', 'solo', 20_000_000);
+      expect(await status('p1')).toMatchObject({ plan: 'solo', paid: true });
+      const metadata = { clientId: registration.client.id, personId: 'p1' };
+      await webhook({ type: 'customer.subscription.deleted', data: { object: { metadata } } });
+      expect(await status('p1')).toMatchObject({ plan: 'custom', paid: false, credits: null });
+
+      // Decision: A default plan that shares an id with the app's list still leaves a cancelled person unpaid.
+      await writePlanCatalog(env.db, {
+        ...createDefaultPlanCatalog('custom'),
+        defaultPlanId: 'solo',
+      });
+      await sellCredits('p2', 'pro', 20_000_000);
+      expect(await status('p2')).toMatchObject({ plan: 'pro', paid: true });
+      await webhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { metadata: { ...metadata, personId: 'p2' } } },
+      });
+      expect(await status('p2')).toMatchObject({ plan: 'solo', paid: false, credits: null });
+    } finally {
+      delete env.PLATFORM_INSTALLATION_ID;
+    }
   });
 
   it('bills an old caller’s project to the person it was built for', async () => {
