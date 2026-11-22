@@ -282,6 +282,17 @@ function err(code: SendEmailErrorCode, message: string, cause?: unknown): SendEm
   return { ok: false, error: makeError(code, message, cause) };
 }
 
+function missingEmailBinding(): SendEmailResult {
+  return err(
+    'BINDING_MISSING',
+    'email: neither SEND_EMAIL nor __PLATFORM_PROXY is available, so nothing was sent. Deploy via bwf to bind the platform proxy, ' +
+      'or set `email.from` in bwf.config.ts, run `bwf email setup --platform cloudflare`, and redeploy. ' +
+      'Under `bwf dev` messages are captured by the local inbox at /__platform/inbox instead — reaching this error there means ' +
+      'that path was bypassed by the deprecated `sendInDev: true` (it never delivers) or unavailable ' +
+      '(the worker has no assets binding to reach the dev server through).',
+  );
+}
+
 interface ProxySendBody {
   projectId: string;
   /** Project HMAC accepted by the shared proxy authentication middleware. */
@@ -702,8 +713,18 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
       'email: idempotencyKey must contain 1–128 printable non-space ASCII characters.',
     );
   }
+  const rawEnv = tryGetRawRuntimeEnv();
+  const {
+    __PLATFORM_PROXY: proxy,
+    __PROJECT_ID: projectId,
+    __PLATFORM_PROXY_TOKEN: proxyToken,
+  } = (rawEnv as ProxyEnv | undefined) ?? {};
   const resolvedOpts = resolveDefaultFrom(opts);
   if (resolvedOpts.from === undefined) {
+    const capturable = !opts.sendInDev && (hasActiveSink() || resolveDevInbox(rawEnv));
+    if (!capturable && !resolveSendEmailBinding(rawEnv) && (!proxy || !projectId || !proxyToken)) {
+      return missingEmailBinding();
+    }
     return err(
       'INVALID_FROM',
       "email: 'from' is required. Set it explicitly or deploy via bwf so the platform-injected __PLATFORM_PROJECT_SLUG and __PLATFORM_EMAIL_DOMAIN can default it to <slug>+noreply@<domain>.",
@@ -728,8 +749,6 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
     }
     return err('MIME_ERROR', e instanceof Error ? e.message : String(e), e);
   }
-
-  const rawEnv = tryGetRawRuntimeEnv();
 
   // Decision: A sink in this isolate (`createEmailTestHarness`) owns the capture; do
   // not also post it to the dev inbox.
@@ -768,19 +787,8 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
     return sendViaBinding(sendBinding, normalized.from.email, recipients, raw, messageId);
   }
 
-  const env = rawEnv as ProxyEnv | undefined;
-  const proxy = env?.__PLATFORM_PROXY;
-  const projectId = env?.__PROJECT_ID;
-  const proxyToken = env?.__PLATFORM_PROXY_TOKEN;
   if (!proxy || !projectId || !proxyToken) {
-    return err(
-      'BINDING_MISSING',
-      'email: neither SEND_EMAIL nor __PLATFORM_PROXY is available, so nothing was sent. Deploy via bwf to bind the platform proxy, ' +
-        'or set `email.from` in bwf.config.ts so `bwf deploy --platform cloudflare` provisions the SEND_EMAIL binding. ' +
-        'Under `bwf dev` messages are captured by the local inbox at /__platform/inbox instead — reaching this error there means ' +
-        'that path was bypassed by the deprecated `sendInDev: true` (it never delivers) or unavailable ' +
-        '(the worker has no assets binding to reach the dev server through).',
-    );
+    return missingEmailBinding();
   }
 
   const body: ProxySendBody = {
