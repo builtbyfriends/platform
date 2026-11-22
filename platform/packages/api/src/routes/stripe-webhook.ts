@@ -4,7 +4,7 @@ import { applyCredits, clientPlans, paidOwnerIds } from '../app-credits.ts';
 import { PAID_PLANS, verifyStripeSignature, type PaidPlan } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
-import { getDefaultPlan } from '../plans.ts';
+import { installationDefaultPlan } from '../plans.ts';
 import { appPeople } from '../schema.ts';
 
 type StripeEvent = {
@@ -77,7 +77,7 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
       await db
         .update(appPeople)
         .set({
-          plan: (await getDefaultPlan(db)).id,
+          plan: (await installationDefaultPlan(db, context.env)).id,
           stripe_subscription_id: null,
           updated_at: new Date().toISOString(),
         })
@@ -97,7 +97,11 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
   if (event.type === 'checkout.session.completed' && isPaidPlan(metadata.plan)) {
     await changeOperatorUserPlan(context, userId, metadata.plan);
   } else if (event.type === 'customer.subscription.deleted') {
-    await changeOperatorUserPlan(context, userId, (await getDefaultPlan(db)).id);
+    await changeOperatorUserPlan(
+      context,
+      userId,
+      (await installationDefaultPlan(db, context.env)).id,
+    );
   } else {
     return context.json({ ok: true, ignored: true });
   }

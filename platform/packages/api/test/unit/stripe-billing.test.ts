@@ -62,4 +62,49 @@ describe('stripe billing', () => {
     );
     expect(url).toBe('https://checkout.stripe.com/c/1');
   });
+
+  it('adds tax and promotion codes to Checkout only when the operator turns them on', async () => {
+    const sent = async (env: Record<string, string>, customer?: string) => {
+      let form = new URLSearchParams();
+      await createCheckoutSession(
+        { STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_SOLO: 'price_solo', ...env },
+        {
+          reference: 'usr_1',
+          metadata: { userId: 'usr_1' },
+          email: 'a@example.com',
+          ...(customer ? { customerId: customer } : {}),
+          plan: 'solo',
+          returnUrl: 'https://app.example/billing',
+        },
+        (async (_url: string, init?: RequestInit) => {
+          form = new URLSearchParams(String(init?.body));
+          return Response.json({ url: 'https://checkout.stripe.com/c/1' });
+        }) as never,
+      );
+      return Object.fromEntries(form);
+    };
+    const plain = await sent({});
+    expect(await sent({ STRIPE_AUTOMATIC_TAX: 'false', STRIPE_PROMOTION_CODES: 'false' })).toEqual(
+      plain,
+    );
+    expect(plain).not.toHaveProperty('automatic_tax[enabled]');
+    expect(plain).not.toHaveProperty('allow_promotion_codes');
+
+    const taxed = await sent({ STRIPE_AUTOMATIC_TAX: 'true' });
+    expect(taxed).toEqual({ ...plain, 'automatic_tax[enabled]': 'true' });
+    expect(taxed).not.toHaveProperty('customer_update[address]');
+    const { customer_email: _, ...known } = plain;
+    expect(await sent({ STRIPE_AUTOMATIC_TAX: 'true' }, 'cus_1')).toEqual({
+      ...known,
+      customer: 'cus_1',
+      'automatic_tax[enabled]': 'true',
+      'customer_update[address]': 'auto',
+    });
+    expect(await sent({}, 'cus_1')).not.toHaveProperty('customer_update[address]');
+
+    expect(await sent({ STRIPE_PROMOTION_CODES: 'true' })).toEqual({
+      ...plain,
+      allow_promotion_codes: 'true',
+    });
+  });
 });

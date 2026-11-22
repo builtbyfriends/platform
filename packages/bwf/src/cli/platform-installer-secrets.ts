@@ -796,8 +796,14 @@ export function readPlatformBillingInput(
       throw new Error(`platform: ${name} must be a Stripe price ID (price_...).`);
     }
   }
-  if (billing.STRIPE_LIVE_ENABLED && !['true', 'false'].includes(billing.STRIPE_LIVE_ENABLED)) {
-    throw new Error('platform: STRIPE_LIVE_ENABLED must be true or false.');
+  for (const name of [
+    'STRIPE_LIVE_ENABLED',
+    'STRIPE_AUTOMATIC_TAX',
+    'STRIPE_PROMOTION_CODES',
+  ] as const) {
+    if (billing[name] && !['true', 'false'].includes(billing[name])) {
+      throw new Error(`platform: ${name} must be true or false.`);
+    }
   }
   return billing;
 }
