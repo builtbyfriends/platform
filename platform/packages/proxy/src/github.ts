@@ -110,12 +110,12 @@ github.post('/request', async (context) => {
   });
 });
 
-const APP_OPS = new Set(['install-url', 'describe', 'repositories', 'disconnect']);
+const APP_OPS = new Set(['install-url', 'describe', 'repositories', 'disconnect', 'clone-token']);
 
 /**
  * Manages the GitHub App installations the app connects for its own spaces. The app sends
- * `op` and `scope` (its id for the space, such as a server) and the API does the rest; the
- * App key and its tokens stay in Platform.
+ * `op` and `scope` (its id for the space, such as a server) and the API does the rest. The
+ * App key stays in Platform, and the only token that leaves it is `clone-token`'s, which reads one repository.
  */
 github.post('/app', async (context) => {
   const body = context.get('body');
@@ -123,7 +123,7 @@ github.post('/app', async (context) => {
   const op = asString(body.op);
   if (!op || !APP_OPS.has(op)) {
     return context.json(
-      { error: 'op must be install-url, describe, repositories or disconnect' },
+      { error: 'op must be install-url, describe, repositories, disconnect or clone-token' },
       400,
     );
   }
