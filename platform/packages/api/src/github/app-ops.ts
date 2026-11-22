@@ -16,7 +16,9 @@ import {
   stateOwner,
   verifyAppInstallState,
 } from './app-installations.ts';
-import { getInstallationToken } from './installation-token.ts';
+import { getInstallationToken, GITHUB_API_BASE, GITHUB_API_VERSION } from './installation-token.ts';
+
+const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 type OpResult = Readonly<{ status: 200 | 400 | 404 | 410 | 503; body: Record<string, unknown> }>;
 const fail = (status: OpResult['status'], error: string): OpResult => ({ status, body: { error } });
@@ -29,6 +31,8 @@ const fail = (status: OpResult['status'], error: string): OpResult => ({ status,
  * - `describe` (`state` optional): the connected installation, and whether it was made under `state`.
  * - `repositories` (`page`): one page of the repositories the installation reaches.
  * - `disconnect`: forgets the installation for this scope.
+ * - `clone-token` (`repo` as owner/name): a token that can only read that one repository, for a `git clone` the
+ *   owner runs in its own sandbox. GitHub expires it within the hour.
  */
 export async function githubAppOp(
   env: ApiEnv['Bindings'],
@@ -107,6 +111,37 @@ export async function githubAppOp(
       status: 200,
       body: { repositories: await listInstallationRepositoryPage(token, page) },
     };
+  }
+
+  if (op === 'clone-token') {
+    const repo = body?.repo;
+    if (typeof repo !== 'string' || !REPO_PATTERN.test(repo) || repo.includes('..')) {
+      return fail(400, 'repo must be owner/name');
+    }
+    const wide = await getInstallationToken(env, row.installation_id);
+    const res = await fetch(`${GITHUB_API_BASE}/repos/${repo}`, {
+      headers: {
+        Authorization: `Bearer ${wide}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        'User-Agent': 'platform-api',
+      },
+      redirect: 'manual',
+    });
+    if (!res.ok) {
+      return fail(404, 'the connected installation does not reach that repository');
+    }
+    const found = (await res.json()) as { id?: number; full_name?: string };
+    if (typeof found.id !== 'number') {
+      return fail(404, 'the connected installation does not reach that repository');
+    }
+    // Decision: The token leaves Platform, so it is narrowed to one repository and read-only contents. A
+    // dependency script in the sandbox that reads it can't write anywhere or reach the installation's other repositories.
+    const token = await getInstallationToken(env, row.installation_id, {
+      repositoryIds: [String(found.id)],
+      permissions: { contents: 'read' },
+    });
+    return { status: 200, body: { token, repo: found.full_name ?? repo } };
   }
 
   return fail(400, 'unknown op');

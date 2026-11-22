@@ -15,7 +15,14 @@ import {
 
 vi.mock('../../src/github/installation-token.ts', async (original) => ({
   ...(await original<typeof import('../../src/github/installation-token.ts')>()),
-  getInstallationToken: async (_env: unknown, id: string) => `ghs_for_${id}`,
+  getInstallationToken: async (
+    _env: unknown,
+    id: string,
+    opts?: { repositoryIds?: Array<string>; permissions?: Record<string, string> },
+  ) =>
+    opts
+      ? `ghs_scoped_${id}_${opts.repositoryIds?.join(',')}_${JSON.stringify(opts.permissions)}`
+      : `ghs_for_${id}`,
 }));
 vi.mock('../../src/github/app-jwt.ts', () => ({ createAppJwt: async () => 'app-jwt' }));
 const authorized = vi.fn(async (_env: unknown, code: string, _id: string) => ({
@@ -53,6 +60,9 @@ beforeEach(async () => {
         repository_selection: 'all',
         permissions: { contents: 'write', pull_requests: 'write' },
       });
+    }
+    if (href === 'https://api.github.com/repos/acme/site') {
+      return Response.json({ id: 5, full_name: 'acme/site' });
     }
     if (href.includes('/installation/repositories')) {
       return Response.json({
@@ -291,6 +301,44 @@ describe('GitHub App installations for a connected application', () => {
 
     await call('app', a.basic, { op: 'disconnect', scope: 'server_1' });
     expect((await call('app', a.basic, { op: 'describe', scope: 'server_1' })).status).toBe(404);
+  });
+
+  it('gives a read-only token for one repository the installation reaches', async () => {
+    const a = await client();
+    Object.assign(env, { PLATFORM_APP_PERSON_CLIENTS: a.id });
+    const started = await call('app', a.basic, {
+      op: 'install-url',
+      scope: 'server_1',
+      returnUrl: 'https://app.test/github/callback',
+    });
+    const { state } = (await started.json()) as { state: string };
+    await callback({ state, installation_id: '77', code: 'good' });
+
+    const res = await call('app', a.basic, {
+      op: 'clone-token',
+      scope: 'server_1',
+      repo: 'acme/site',
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      token: 'ghs_scoped_77_5_{"contents":"read"}',
+      repo: 'acme/site',
+    });
+    const other = await call('app', a.basic, {
+      op: 'clone-token',
+      scope: 'server_1',
+      repo: 'acme/other',
+    });
+    expect(other.status).toBe(404);
+    for (const repo of ['acme', '../x', 'acme/site/x', 1]) {
+      expect(
+        (await call('app', a.basic, { op: 'clone-token', scope: 'server_1', repo })).status,
+      ).toBe(400);
+    }
+    expect(
+      (await call('app', a.basic, { op: 'clone-token', scope: 'server_2', repo: 'acme/site' }))
+        .status,
+    ).toBe(404);
   });
 
   it('refuses a client that is not listed, and wrong credentials', async () => {
