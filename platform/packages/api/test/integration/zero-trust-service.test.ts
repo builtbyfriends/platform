@@ -10,6 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import type { ApiEnv } from '../../src/env.ts';
+import { FAST_MAINTENANCE_KEY } from '../../src/fast-maintenance.ts';
 import { FAST_CRON, scheduled } from '../../src/index.ts';
 import {
   domains,
@@ -546,6 +547,7 @@ describe('project Zero Trust reconciliation', () => {
       initializeNewProjectZeroTrust(bindings, env.db, unseeded!.id),
     ).resolves.toMatchObject({ desired_protected: false, status: 'reconciling' });
 
+    await env.ROUTING.put(FAST_MAINTENANCE_KEY, 'armed');
     const controller = {
       cron: FAST_CRON,
       scheduledTime: Date.now(),
