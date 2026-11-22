@@ -75,6 +75,13 @@ const HOSTED_FIELDS = {
   aiNeurons: 'hostedAiNeurons',
   sandboxSeconds: 'hostedSandboxSeconds',
   cpuMs: 'hostedCpuMs',
+  d1RowsRead: 'hostedD1RowsRead',
+  d1RowsWritten: 'hostedD1RowsWritten',
+  r2ClassAOps: 'hostedR2ClassAOps',
+  r2ClassBOps: 'hostedR2ClassBOps',
+  kvReads: 'hostedKvReads',
+  kvWrites: 'hostedKvWrites',
+  queueOps: 'hostedQueueOps',
 } as const satisfies Record<string, Meter>;
 // Decision: Storage is shown as what's stored now. The month's byte-days only decide its cost.
 const STORED_FIELDS = {
@@ -321,7 +328,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     });
   })
   .post('/plans.list', async (context) => {
-    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    const plans = await clientPlans(context.get('db'), context.get('billingClient'));
     return context.json({
       data: {
         // Decision: Stored JSON doesn't keep its order, so the list goes from the smallest plan up.
@@ -336,7 +343,10 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
     }
-    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    const plans = await clientPlans(context.get('db'), context.get('billingClient'));
+    if (Object.keys(plans).length === 0) {
+      return context.json({ error: 'no_plans' }, 400);
+    }
     if (typeof body?.plan !== 'string' || !Object.hasOwn(plans, body.plan)) {
       return context.json({ error: 'bad_plan' }, 400);
     }

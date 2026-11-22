@@ -176,6 +176,7 @@ const platformSidebar = [
       { text: 'Connected apps', link: '/guide/platform/administration/connected-apps' },
       { text: 'Users and Projects', link: '/guide/platform/administration/projects' },
       { text: 'Plans and Limits', link: '/guide/platform/administration/plans' },
+      { text: 'Paying for AI', link: '/guide/platform/administration/ai-billing' },
       { text: 'Project Zero Trust', link: '/guide/platform/administration/zero-trust' },
       { text: 'Email', link: '/guide/platform/administration/email' },
       { text: 'Operations', link: '/guide/platform/administration/operations' },
