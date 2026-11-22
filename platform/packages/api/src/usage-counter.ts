@@ -1,7 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
+import { billedAccountPlanId } from './app-payer.ts';
 import {
   createDb,
-  getUser,
+  getUser as getAccount,
   getProjectOwnershipPeriodsByProjectIds,
   getProjectsByIds,
   suspendUser,
@@ -25,6 +26,12 @@ import {
   type PlanLimits,
 } from './tiers.ts';
 import { SANDBOX_USAGE_RETENTION_MS } from './usage-auth.ts';
+
+/** The account with the plan that pays for its shared monthly meters. */
+async function getUser(db: Db, id: string) {
+  const user = await getAccount(db, id);
+  return user && { ...user, plan: await billedAccountPlanId(db, user) };
+}
 
 export type CounterState = {
   /** Account represented by this counter, learned from trusted API requests. */

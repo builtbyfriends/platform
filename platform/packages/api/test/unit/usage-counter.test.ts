@@ -9,6 +9,9 @@ const dbCalls = {
   suspend: [] as Array<{ id: string; reason: string }>,
   unsuspendIfReason: [] as Array<{ id: string; reason: string }>,
 };
+vi.mock('../../src/app-payer.ts', () => ({
+  billedAccountPlanId: async (_db: unknown, user: { plan: string }) => user.plan,
+}));
 vi.mock('../../src/db.ts', () => ({
   createDb: () => ({
     __mock: 'db',

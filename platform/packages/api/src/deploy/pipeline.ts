@@ -1,6 +1,7 @@
 import { platformProjectHostnames, readPlatformApplication } from '@builtbyfriends/platform';
 import { and, eq, or, sql as drizzleSql } from 'drizzle-orm';
 import { type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
 import { findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
   computeAssetHash,
@@ -38,7 +39,7 @@ import {
 } from '../deployment-execution.ts';
 import type { ApiEnv } from '../env.ts';
 import { type DeployLogger } from '../observability/logger.ts';
-import { PLAN_CATALOG_SETTING, resolvePlanLimits } from '../plans.ts';
+import { PLAN_CATALOG_SETTING } from '../plans.ts';
 import { getPlatformSetting } from '../platform-settings.ts';
 import { ensureProjectIngress } from '../project-ingress.ts';
 import {
@@ -133,7 +134,7 @@ export async function runDeploymentPipeline(input: {
     deployBuild,
     workerFiles,
   } = input;
-  const planLimits = await resolvePlanLimits(context.get('db'), owner.plan);
+  const planLimits = await billedPlanLimits(context.get('db'), owner, project);
 
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream();
@@ -447,7 +448,7 @@ export async function runDeploymentPipeline(input: {
           : null;
         const currentLimits = refreshPolicy
           ? computeDispatchLimits(
-              await resolvePlanLimits(txDb, currentOwner.plan),
+              await billedPlanLimits(txDb, currentOwner, currentProject),
               committedManifest?.limits,
             )
           : null;

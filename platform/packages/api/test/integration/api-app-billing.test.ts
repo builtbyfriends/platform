@@ -1,6 +1,11 @@
+import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vite-plus/test';
-import { registerOAuthClient } from '../../src/auth/oauth.ts';
+import { billedAccountPlanId, billedPlanId, billedPlanLimits } from '../../src/app-payer.ts';
+import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import rawApp from '../../src/index.ts';
+import { resolvePlanLimits } from '../../src/plans.ts';
+import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
+import { projects, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -22,7 +27,13 @@ let env: TestEnv & {
 let registration: Awaited<ReturnType<typeof registerOAuthClient>>;
 
 const basic = () => 'Basic ' + btoa(registration.client.id + ':' + registration.clientSecret);
+type Hosted = {
+  requests: number;
+  projects: Array<{ projectId: string; slug: string; person: string }>;
+};
 type Answer = {
+  hosted?: Hosted | null;
+  breakdown: Array<{ model: string; source: string; aiNeurons: number; sandboxSeconds: number }>;
   caps: { aiNeuronsPerMonth: number };
   aiNeuronsUsed: number;
   used: { aiNeurons: number };
@@ -42,6 +53,47 @@ async function call(path: string, body: unknown, authorization = basic()) {
     env,
     ctx,
   );
+}
+
+async function preview(person: string, body: Record<string, unknown>) {
+  (env as unknown as Record<string, string>).PLATFORM_APP_PERSON_CLIENTS = registration.client.id;
+  await setOAuthPreviewPermission(env.db, registration.client.id, true);
+  const issued = await app.fetch(
+    new Request(origin + '/oauth/token', {
+      method: 'POST',
+      headers: { Authorization: basic(), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: APP_PERSON_GRANT, person }),
+    }),
+    env,
+    ctx,
+  );
+  const { access_token } = (await issued.json()) as { access_token: string };
+  const response = await app.fetch(
+    new Request(origin + '/app-rpc/previews.create', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + access_token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    env,
+    ctx,
+  );
+  if (response.status !== 200) {
+    return { status: response.status, project: null, owner: null };
+  }
+  const { project_id } = rpcData<{ project_id: string }>(await response.json());
+  const [project] = await env.db.select().from(projects).where(eq(projects.id, project_id));
+  const [owner] = await env.db.select().from(users).where(eq(users.id, project!.user_id));
+  return { status: 200, project: project!, owner: owner! };
+}
+
+// Decision: The dev bypass answers with zeros, which keeps the analytics backend out of the test.
+async function hosted(person: string) {
+  env.DEV_AUTH_BYPASS = 'true';
+  try {
+    return (await dataOf(call('/usage.status', { person, hosted: true }))).hosted;
+  } finally {
+    delete env.DEV_AUTH_BYPASS;
+  }
 }
 
 async function webhook(event: unknown, secret = 'whsec_test') {
@@ -185,6 +237,92 @@ describe('app billing', () => {
     const ended = await dataOf(call('/usage.status', { person: 'p1' }));
     expect(ended).toMatchObject({ plan: 'free', subscribed: false });
     expect(ended).not.toHaveProperty('renewsAt');
+  });
+
+  it('bills an old caller’s project to the person it was built for', async () => {
+    const { project } = await preview('p1', { workspace: 'w1' });
+    expect(project!.payer_person_id).toBeNull();
+    expect(await dataOf(call('/usage.status', { person: 'p1' }))).not.toHaveProperty('hosted');
+    expect(await hosted('p1')).toMatchObject({
+      requests: 0,
+      projects: [{ projectId: project!.id, slug: project!.slug, person: 'p1' }],
+    });
+  });
+
+  it('bills a project to the payer the application names', async () => {
+    expect((await preview('p1', { workspace: 'w1', payer: 'stranger' })).status).toBe(400);
+    await call('/usage.record', { person: 'boss', aiNeurons: 1 });
+    const { project } = await preview('p1', { workspace: 'w1', payer: 'boss' });
+    expect(project!.payer_person_id).toBe('boss');
+    expect((await hosted('boss'))!.projects).toEqual([
+      expect.objectContaining({ projectId: project!.id, person: 'p1' }),
+    ]);
+    expect((await hosted('p1'))!.projects).toEqual([]);
+  });
+
+  it('leaves the hosted numbers out when the analytics backend is down', async () => {
+    await preview('p1', { workspace: 'w1' });
+    const offline = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.error());
+    const answer = await dataOf(call('/usage.status', { person: 'p1', hosted: true }));
+    offline.mockRestore();
+    expect(answer).toMatchObject({ plan: 'free', hosted: null });
+  });
+
+  it('raises a hosted app’s limits when its payer buys a plan', async () => {
+    await call('/usage.record', { person: 'boss', aiNeurons: 1 });
+    const paid = await preview('p1', { workspace: 'w1', payer: 'boss' });
+    const own = await preview('p1', { workspace: 'w2' });
+    expect(await billedPlanId(env.db, paid.owner!, paid.project!)).toBe('free');
+
+    const metadata = { clientId: registration.client.id, personId: 'boss', plan: 'solo' };
+    await webhook({
+      type: 'checkout.session.completed',
+      data: { object: { metadata, customer: 'cus_1', subscription: 'sub_1' } },
+    });
+    const solo = await resolvePlanLimits(env.db, 'solo');
+    expect(await billedPlanLimits(env.db, paid.owner!, paid.project!)).toEqual(solo);
+    expect(solo.requestsPerMonth).not.toBe(
+      (await resolvePlanLimits(env.db, 'free')).requestsPerMonth,
+    );
+    expect(await billedPlanId(env.db, own.owner!, own.project!)).toBe('free');
+    expect(paid.owner!.plan).toBe('free');
+    // Decision: The owner's two projects have different payers, so the shared monthly meters stay on the owner's plan.
+    expect(await billedAccountPlanId(env.db, paid.owner!)).toBe('free');
+    await env.db
+      .update(projects)
+      .set({ payer_person_id: 'boss' })
+      .where(eq(projects.id, own.project!.id));
+    expect(await billedAccountPlanId(env.db, paid.owner!)).toBe('solo');
+  });
+
+  it('keeps a report’s split by model and source', async () => {
+    const report = {
+      person: 'p1',
+      aiNeurons: 7,
+      breakdown: [
+        { model: 'm1', source: 'bot-a', aiNeurons: 5 },
+        { model: 'm2', source: 'bot-a', aiNeurons: 2, sandboxSeconds: 3 },
+      ],
+    };
+    await call('/usage.record', report);
+    expect(await dataOf(call('/usage.record', report))).toMatchObject({ aiNeuronsUsed: 14 });
+    const { breakdown } = await dataOf(call('/usage.status', { person: 'p1' }));
+    expect(breakdown).toHaveLength(2);
+    expect(breakdown).toContainEqual({
+      model: 'm1',
+      source: 'bot-a',
+      aiNeurons: 10,
+      sandboxSeconds: 0,
+    });
+    expect(breakdown).toContainEqual({
+      model: 'm2',
+      source: 'bot-a',
+      aiNeurons: 4,
+      sandboxSeconds: 6,
+    });
+    expect((await call('/usage.record', { person: 'p1', breakdown: [{ model: 1 }] })).status).toBe(
+      400,
+    );
   });
 
   it('refuses an unsigned webhook', async () => {

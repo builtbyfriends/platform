@@ -1,10 +1,10 @@
-import { and, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { and, eq, or } from 'drizzle-orm';
+import { Hono, type Context } from 'hono';
 import { PAID_PLANS, verifyStripeSignature, type PaidPlan } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
-import { changeOperatorUserPlan } from '../operator/tenant-service.ts';
+import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
 import { getDefaultPlan } from '../plans.ts';
-import { appPeople } from '../schema.ts';
+import { appPeople, projects, users } from '../schema.ts';
 
 type StripeEvent = {
   type: string;
@@ -20,6 +20,27 @@ type StripeEvent = {
 
 const isPaidPlan = (value: unknown): value is PaidPlan =>
   typeof value === 'string' && Object.hasOwn(PAID_PLANS, value);
+
+/** Applies a person's new plan to the limits of the projects they pay for. */
+async function reconcilePaidProjects(context: Context<ApiEnv>, clientId: string, person: string) {
+  const owners = await context
+    .get('db')
+    .selectDistinct({ id: users.id })
+    .from(users)
+    .leftJoin(projects, eq(projects.user_id, users.id))
+    .where(
+      and(
+        eq(users.provider, `app:${clientId}`),
+        or(eq(users.provider_id, person), eq(projects.payer_person_id, person)),
+      ),
+    );
+  for (const owner of owners) {
+    // Decision: The plan is already saved, and the scheduled reconciliation applies it later if this fails.
+    await reconcileOperatorUserPlan(context, owner.id).catch((error: unknown) => {
+      console.error('[billing] payer plan reconcile failed', { userId: owner.id, error });
+    });
+  }
+}
 
 /**
  * Stripe tells the platform when a subscription starts or ends, and the account's plan follows.
@@ -67,6 +88,7 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     } else {
       return context.json({ ok: true, ignored: true });
     }
+    await reconcilePaidProjects(context, key.client_id, key.person_id);
     return context.json({ ok: true });
   }
 

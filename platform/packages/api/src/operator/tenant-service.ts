@@ -21,6 +21,7 @@ import {
   type UserAiLoggingPublishProgress,
 } from '../ai-logging-plans.ts';
 import { readProjectAiLoggingStatus } from '../ai-logging.ts';
+import { billedAccountPlanId, billedPlanLimits } from '../app-payer.ts';
 import {
   type Db,
   ACTIVE_BUILD_STATUSES,
@@ -44,7 +45,7 @@ import {
 import type { ApiEnv } from '../env.ts';
 import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
 import { generateId } from '../id.ts';
-import { initialPlanDefaultFor, requireAssignablePlan, resolvePlanLimits } from '../plans.ts';
+import { initialPlanDefaultFor, requireAssignablePlan } from '../plans.ts';
 import { teardownProject } from '../provisioning/cleanup.ts';
 import {
   getAccountUsageProjectWindows,
@@ -683,7 +684,7 @@ async function republishProjectOwnerState(
       manifest = JSON.parse(activeDeployment.manifest) as DeployManifest;
     }
     const dispatchLimits = computeDispatchLimits(
-      await resolvePlanLimits(tx, owner.plan),
+      await billedPlanLimits(tx, owner, project),
       manifest?.limits,
     );
     const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);
@@ -957,7 +958,7 @@ export async function reconcileOperatorUserPlan(context: Context<ApiEnv>, id: st
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId: id,
-        plan: user.plan,
+        plan: await billedAccountPlanId(db, user),
         billingPeriodStart: getCurrentBillingPeriodStart(
           user.billing_cycle_start ?? user.created_at,
         ).toISOString(),

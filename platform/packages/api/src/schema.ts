@@ -117,6 +117,27 @@ export const appUsage = pgTable(
   (table) => [primaryKey({ columns: [table.client_id, table.person_id, table.period] })],
 );
 
+/** The same month's use split by model and by where the application says it came from. */
+export const appUsageSources = pgTable(
+  'app_usage_sources',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    person_id: text('person_id').notNull(),
+    period: text('period').notNull(),
+    model: text('model').notNull().default(''),
+    source: text('source').notNull().default(''),
+    ai_neurons: integer('ai_neurons').notNull().default(0),
+    sandbox_seconds: integer('sandbox_seconds').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.client_id, table.person_id, table.period, table.model, table.source],
+    }),
+  ],
+);
+
 /** Reports already counted, so an application can send one again after a timeout. */
 export const appUsageEvents = pgTable(
   'app_usage_events',
@@ -432,6 +453,9 @@ export const projects = pgTable(
     preview_client_id: text('preview_client_id').references(() => oauthClients.id),
     preview_workspace_id: text('preview_workspace_id'),
     preview_expires_at: timestamp('preview_expires_at', { mode: 'string', withTimezone: true }),
+    // Decision: The connected application's person who pays for this project, when the application named one.
+    // Empty means the person it was built for pays (see app-payer.ts).
+    payer_person_id: text('payer_person_id'),
     type: text('mode').notNull().default('platform').$type<'platform' | 'spa' | 'static'>(),
     active_deployment_id: text('active_deployment_id'),
     websocket_version: integer('websocket_version').notNull().default(0),

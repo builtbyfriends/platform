@@ -432,6 +432,8 @@ export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: n
     .select({
       id: users.id,
       plan: users.plan,
+      provider: users.provider,
+      provider_id: users.provider_id,
       billing_cycle_start: users.billing_cycle_start,
       suspended_reason: users.suspended_reason,
     })

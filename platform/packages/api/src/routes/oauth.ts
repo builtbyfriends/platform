@@ -10,6 +10,7 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { calculatePKCECodeChallenge } from 'oauth4webapi';
+import { namedPayer } from '../app-payer.ts';
 import { readAuthSettings, readEnabledLoginConnections } from '../auth/configuration.ts';
 import { signJwt, verifyJwt } from '../auth/jwt.ts';
 import type { OAuthRequestData, OAuthSession, OAuthScope } from '../auth/oauth-types.ts';
@@ -833,6 +834,7 @@ export type PublishRequestBody = {
   slug: string;
   checkpoint: string;
   artifact: DeployArtifact;
+  payer?: string;
 };
 
 /** Starts a publish: the returned URL is where the signed-in user approves or refuses it. */
@@ -874,7 +876,9 @@ export async function requestPublishApproval(
     );
   }
   const artifact = createDeployArtifact(body.artifact);
+  const payer = await namedPayer(db, grant, body.payer);
   const data: OAuthRequestData = {
+    ...(payer === undefined ? {} : { payer }),
     kind: 'deployment',
     grantId: grant.id,
     redirectUri: body.redirect_uri,

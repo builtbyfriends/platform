@@ -24,6 +24,7 @@ import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
 import adminZeroTrust from './admin/routes/zero-trust.tsx';
 import { sweepAiLogging } from './ai-logging-sweep.ts';
+import { billedAccountPlanId } from './app-payer.ts';
 import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { purgeExpiredOAuthRequests } from './auth/oauth.ts';
@@ -1148,7 +1149,14 @@ export async function cleanupStalePendingDomains(
 async function processUserRollover(
   env: ApiEnv['Bindings'],
   db: Db,
-  user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
+  user: {
+    id: string;
+    plan: string;
+    provider: string;
+    provider_id: string;
+    billing_cycle_start: string;
+    suspended_reason: string | null;
+  },
   userProjects: ReadonlyArray<{ id: string; slug: string; created_at: string }>,
   needsUsageReconciliation: boolean,
 ): Promise<void> {
@@ -1214,6 +1222,7 @@ async function processUserRollover(
 
   const doId = env.USAGE_COUNTER.idFromName(user.id);
   const stub = env.USAGE_COUNTER.get(doId);
+  const plan = await billedAccountPlanId(db, user);
 
   // Decision: The rollover check (the DO resets only if the period changed). The DO does the sandbox-block KV
   // delete and the sandbox_runtime DB unsuspend inline because it owns that state; request-suspension
@@ -1222,7 +1231,7 @@ async function processUserRollover(
     new Request('https://do/rollover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billingPeriodStart, plan: user.plan, userId: user.id }),
+      body: JSON.stringify({ billingPeriodStart, plan, userId: user.id }),
     }),
   );
 
@@ -1266,7 +1275,7 @@ async function processUserRollover(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        plan: user.plan,
+        plan,
         billingPeriodStart,
         projectSlugs,
         projectOwnershipStarts,

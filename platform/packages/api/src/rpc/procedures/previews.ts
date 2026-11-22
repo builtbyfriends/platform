@@ -49,7 +49,7 @@ async function permitted(caller: AppCaller): Promise<AppCaller> {
 export const create = appProcedure('previews.create')
   .use(connectedApp)
   .noAuthz({ reason: 'The grant must hold preview:deploy, checked in the handler' })
-  .input(type({ workspace: 'string' }))
+  .input(type({ workspace: 'string', 'payer?': 'string' }))
   .output(type({ project_id: 'string', url: 'string', deployment_id: 'string | null' }))
   .errors(PREVIEW_ERRORS)
   .noMcp({ reason: 'Connected applications call this over /app-rpc with their grant' })

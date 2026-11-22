@@ -79,7 +79,33 @@ export async function getAccountUsage(
   if (projectWindows.length === 0) {
     return { requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] };
   }
+  return usageForWindows(env, projectWindows, since);
+}
 
+/** Usage of the given projects from `since` until now, whoever owns them. */
+export function getProjectsUsageSince(
+  env: Bindings,
+  projects: ReadonlyArray<Project>,
+  since: Date,
+) {
+  const end = new Date();
+  return usageForWindows(
+    env,
+    projects.map((project) => ({ project, intervals: [{ start: since, end }] })),
+    since,
+  );
+}
+
+async function usageForWindows(
+  env: Bindings,
+  projectWindows: ReadonlyArray<AccountUsageProjectWindow>,
+  since: Date,
+): Promise<
+  UsageTotals & {
+    billingPeriodStart: string;
+    projects: Array<UsageTotals & { projectId: string; slug: string }>;
+  }
+> {
   if (isDevBypass(env)) {
     return {
       billingPeriodStart: since.toISOString(),

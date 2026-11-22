@@ -17,6 +17,8 @@ export type OAuthRequestData = {
   artifactDigest?: string;
   workerModules?: Array<string>;
   projectId?: string;
+  /** The person the application named to pay for the published project. */
+  payer?: string;
 };
 export type OAuthSession = Pick<JwtPayload, 'sub' | 'aud' | 'sid' | 'exp'> & {
   // Decision: Attested by Platform's Access middleware during consent, not by the client.

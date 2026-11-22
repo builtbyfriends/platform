@@ -1,3 +1,4 @@
+import { billedAccountPlanId } from './app-payer.ts';
 import { createDb, getProjectUsageOwnershipSnapshot, getUser } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { getCurrentBillingPeriodStart } from './tiers.ts';
@@ -195,7 +196,7 @@ export async function processUsageEventBatch(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             events: userEvents,
-            plan: user.plan,
+            plan: await billedAccountPlanId(db, user),
             userId,
             billingPeriodStart: getCurrentBillingPeriodStart(
               user.billing_cycle_start ?? user.created_at,

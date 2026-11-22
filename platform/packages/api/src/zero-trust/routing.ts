@@ -1,5 +1,6 @@
 import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import { and, eq, gt } from 'drizzle-orm';
+import { billedPlanLimits } from '../app-payer.ts';
 import type { Db, DbOrTx } from '../db.ts';
 import {
   getActiveDeployment,
@@ -9,7 +10,6 @@ import {
   getUser,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { computeDispatchLimits } from '../routing-limits.ts';
 import { projectRouteKey } from '../routing.ts';
 import { domains } from '../schema.ts';
@@ -268,7 +268,7 @@ function routingMatchesDeployment(
 export async function publishProjectZeroTrustRoutingLocked(
   env: Pick<ApiEnv['Bindings'], 'ROUTING'>,
   db: Db,
-  project: Pick<Project, 'id' | 'slug' | 'user_id' | 'active_deployment_id'>,
+  project: Pick<Project, 'id' | 'slug' | 'user_id' | 'active_deployment_id' | 'payer_person_id'>,
   protection: ProjectZeroTrustRouting | null,
   budget = { remaining: MAX_ROUTING_KEYS_PER_RUN },
 ): Promise<boolean> {
@@ -297,7 +297,7 @@ export async function publishProjectZeroTrustRoutingLocked(
     ? (JSON.parse(routeDeployment.manifest) as DeployManifest)
     : null;
   const dispatchLimits = computeDispatchLimits(
-    await resolvePlanLimits(db, owner.plan),
+    await billedPlanLimits(db, owner, project),
     manifest?.limits,
   );
   const suspensionReason = routingSuspensionReason(owner.suspended_reason);

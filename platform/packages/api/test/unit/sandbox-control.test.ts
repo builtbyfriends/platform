@@ -49,7 +49,13 @@ function authority() {
       admission_protocol: 3,
       manifest: JSON.stringify({ sandbox: { runtime: { protocol: 1 } } }),
     },
-    owner: { id: identity.userId, plan: 'solo', suspended_reason: null as string | null },
+    owner: {
+      id: identity.userId,
+      plan: 'solo',
+      provider: 'github',
+      provider_id: '1',
+      suspended_reason: null as string | null,
+    },
     candidateFresh: false,
   };
 }

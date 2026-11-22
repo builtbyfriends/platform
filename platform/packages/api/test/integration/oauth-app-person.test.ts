@@ -123,7 +123,7 @@ describe('app-person grant', () => {
   });
 
   it('turns a publish the person approved in the app into a one-build deploy credential', async () => {
-    const publish = async () => {
+    const publish = async (payer?: string) => {
       const { access_token } = (await (await token({ person: 'p1' })).json()) as {
         access_token: string;
       };
@@ -135,6 +135,7 @@ describe('app-person grant', () => {
         slug: 'my-app',
         checkpoint: 'checkpoint-1',
         artifact,
+        ...(payer ? { payer } : {}),
       });
       expect(response.status).toBe(200);
       return (rpcData(await response.json()) as { request_id: string }).request_id;
@@ -158,16 +159,19 @@ describe('app-person grant', () => {
       .from(projects)
       .where(eq(projects.id, credential.project_id));
     expect(project.slug).toBe('my-app');
+    expect(project.payer_person_id).toBeNull();
     const [record] = await env.db.select().from(oauthRequests).where(eq(oauthRequests.id, id));
     expect(record.approved_at).not.toBeNull();
     expect(record.consumed_at).not.toBeNull();
 
     expect((await token({ person: 'p1', publish_request: id })).status).toBe(400);
     const next = (await (
-      await token({ person: 'p1', publish_request: await publish() })
+      await token({ person: 'p1', publish_request: await publish('p2') })
     ).json()) as {
       project_id: string;
     };
     expect(next.project_id).toBe(credential.project_id);
+    const [paid] = await env.db.select().from(projects).where(eq(projects.id, next.project_id));
+    expect(paid.payer_person_id).toBe('p2');
   });
 });

@@ -6,7 +6,7 @@ import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
 import { createUser, getProject, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { projectUrl } from '../project-url.ts';
-import { oauthGrants, oauthRequests, users } from '../schema.ts';
+import { oauthGrants, oauthRequests, projects, users } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
 
 /**
@@ -193,6 +193,12 @@ export async function appPersonToken(
         grantId,
         projectId: await approval.project(context, tx as Db, request.data.slug!, user),
       };
+      if (data.payer !== undefined) {
+        await tx
+          .update(projects)
+          .set({ payer_person_id: data.payer })
+          .where(eq(projects.id, data.projectId));
+      }
       const [approved] = await tx
         .update(oauthRequests)
         .set({

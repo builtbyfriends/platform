@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
 import { type AssetManifestEntry } from '../assets.ts';
 import { deleteDispatchScript } from '../cf-api.ts';
 import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
@@ -15,7 +16,6 @@ import {
 import type { ApiEnv } from '../env.ts';
 import { getProjectQueueName } from '../naming.ts';
 import { type DeployLogger } from '../observability/logger.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { addQueueConsumer, removeQueueConsumer } from '../provisioning/cloudflare-api.ts';
 import {
   deleteContainerApplicationIdempotent,
@@ -263,7 +263,7 @@ export async function publishWorkerDeployment(input: {
   markPhase('routing_switch');
   await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
     const dispatchLimits = computeDispatchLimits(
-      await resolvePlanLimits(txDb, currentOwner.plan),
+      await billedPlanLimits(txDb, currentOwner, project),
       manifest.limits,
     );
     const existingRouting = await context.env.ROUTING.get(projectRouteKey(project));

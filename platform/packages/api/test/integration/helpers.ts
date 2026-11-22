@@ -594,6 +594,7 @@ export async function clearTables(db: Db): Promise<void> {
     deployments,
     projects,
     schema.appUsage,
+    schema.appUsageSources,
     schema.appUsageEvents,
     schema.appPeople,
     schema.oauthGrants,
