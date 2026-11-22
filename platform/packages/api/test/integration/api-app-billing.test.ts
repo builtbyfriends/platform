@@ -323,7 +323,7 @@ describe('app billing', () => {
       })),
     );
     const stored = (max: Record<string, number>, dimensions: Record<string, string>) => ({
-      data: { viewer: { accounts: [{ storage: [{ max, dimensions }] }] } },
+      data: { viewer: { accounts: [{ groups: [{ max, dimensions }] }] } },
     });
     const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const query = String(init?.body);
@@ -437,7 +437,7 @@ describe('app billing', () => {
       sandboxWithinCap: false,
       credits: { includedMicros: 1_000_000, usedMicros: 1_050_000, remainingMicros: 0, out: true },
     });
-    expect(status.meters).toHaveLength(10);
+    expect(status.meters).toHaveLength(17);
     expect(status.daily.at(-1)).toMatchObject({
       costMicros: 1_050_000,
       meters: { aiNeurons: 50_000, sandboxSeconds: 18_000 },
@@ -454,6 +454,64 @@ describe('app billing', () => {
     await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
     expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBeNull();
     expect((await dataOf(call('/usage.status', { person: 'p1' }))).withinCaps).toBe(true);
+  });
+
+  it('counts a hosted app’s database rows and storage operations, and keeps the others when one read fails', async () => {
+    const { project } = await preview('p1', { workspace: 'w1' });
+    await env.db.insert(resources).values(
+      (['d1', 'kv', 'r2', 'queue'] as const).map((type) => ({
+        id: `res_${type}`,
+        project_id: project!.id,
+        type,
+        cf_id: `${type}-1`,
+        binding_name: type,
+      })),
+    );
+    const groups = (...rows: Array<Record<string, unknown>>) =>
+      Response.json({ data: { viewer: { accounts: [{ groups: rows }] } } });
+    const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const query = String(init?.body);
+      if (query.includes('d1AnalyticsAdaptiveGroups')) {
+        return groups({
+          sum: { rowsRead: 2e6, rowsWritten: 1e6 },
+          dimensions: { databaseId: 'd1-1' },
+        });
+      }
+      if (query.includes('r2OperationsAdaptiveGroups')) {
+        return groups(
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'r2-1', actionType: 'PutObject' } },
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'r2-1', actionType: 'GetObject' } },
+          { sum: { requests: 9 }, dimensions: { bucketName: 'r2-1', actionType: 'DeleteObject' } },
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'other', actionType: 'PutObject' } },
+        );
+      }
+      if (query.includes('queueMessageOperationsAdaptiveGroups')) {
+        return groups({ sum: { billableOperations: 1e6 }, dimensions: { queueId: 'queue-1' } });
+      }
+      return Response.json({ errors: [{ message: 'unavailable' }] }, { status: 500 });
+    });
+    const noon = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
+    await syncHostedUse(env as never, env.db, noon);
+    analytics.mockRestore();
+
+    const days = noon.getUTCDate() === 1 ? 1 : 2;
+    const { hosted, meters } = await dataOf(call('/usage.status', { person: 'p1', hosted: true }));
+    expect(hosted).toMatchObject({
+      d1RowsRead: 2e6 * days,
+      d1RowsWritten: 1e6 * days,
+      r2ClassAOps: 1e6 * days,
+      r2ClassBOps: 1e6 * days,
+      kvReads: 0,
+      kvWrites: 0,
+      queueOps: 1e6 * days,
+      requests: 0,
+      costMicros: (1_000_000 + 2_000 + 4_500_000 + 360_000 + 400_000) * days,
+    });
+    expect(meters).toContainEqual({
+      meter: 'hostedD1RowsWritten',
+      quantity: 1e6 * days,
+      costMicros: 1_000_000 * days,
+    });
   });
 
   it('sells an application its own plans at its own prices', async () => {

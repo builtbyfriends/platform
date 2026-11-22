@@ -21,6 +21,13 @@ export const METERS = {
   hostedD1ByteDays: { unit: 30e9, price: 0.75 },
   hostedR2ByteDays: { unit: 30e9, price: 0.015 },
   hostedKvByteDays: { unit: 30e9, price: 0.5 },
+  hostedD1RowsRead: { unit: 1e6, price: 0.001 },
+  hostedD1RowsWritten: { unit: 1e6, price: 1 },
+  hostedR2ClassAOps: { unit: 1e6, price: 4.5 },
+  hostedR2ClassBOps: { unit: 1e6, price: 0.36 },
+  hostedKvReads: { unit: 1e6, price: 0.5 },
+  hostedKvWrites: { unit: 1e6, price: 5 },
+  hostedQueueOps: { unit: 1e6, price: 0.4 },
 } as const;
 export type Meter = keyof typeof METERS;
 export type MeterPrices = Record<Meter, number>;

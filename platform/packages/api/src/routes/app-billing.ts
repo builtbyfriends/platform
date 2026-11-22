@@ -75,6 +75,13 @@ const HOSTED_FIELDS = {
   aiNeurons: 'hostedAiNeurons',
   sandboxSeconds: 'hostedSandboxSeconds',
   cpuMs: 'hostedCpuMs',
+  d1RowsRead: 'hostedD1RowsRead',
+  d1RowsWritten: 'hostedD1RowsWritten',
+  r2ClassAOps: 'hostedR2ClassAOps',
+  r2ClassBOps: 'hostedR2ClassBOps',
+  kvReads: 'hostedKvReads',
+  kvWrites: 'hostedKvWrites',
+  queueOps: 'hostedQueueOps',
 } as const satisfies Record<string, Meter>;
 // Decision: Storage is shown as what's stored now. The month's byte-days only decide its cost.
 const STORED_FIELDS = {
