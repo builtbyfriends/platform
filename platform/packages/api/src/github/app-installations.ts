@@ -1,4 +1,5 @@
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
+import type { GitHubInstallationOwner } from '../db/credentials.ts';
 import type { ApiEnv } from '../env.ts';
 import { createAppJwt } from './app-jwt.ts';
 import { GITHUB_API_BASE, GITHUB_API_VERSION } from './installation-token.ts';
@@ -10,12 +11,23 @@ import { GITHUB_API_BASE, GITHUB_API_VERSION } from './installation-token.ts';
  */
 export type AppInstallState = Readonly<{
   purpose: 'github-app';
-  projectId: string;
   scope: string;
   returnUrl: string;
   nonce: string;
   exp: number;
-}>;
+}> &
+  GitHubInstallationOwner;
+
+/** The state's owner, and nothing else from it. */
+export function stateOwner(state: AppInstallState): GitHubInstallationOwner {
+  return state.projectId !== undefined
+    ? { projectId: state.projectId }
+    : { clientId: state.clientId };
+}
+
+export function sameOwner(a: GitHubInstallationOwner, b: GitHubInstallationOwner): boolean {
+  return a.projectId === b.projectId && a.clientId === b.clientId;
+}
 
 export const APP_INSTALL_STATE_TTL_MS = 30 * 60 * 1000;
 
@@ -59,7 +71,7 @@ export async function verifyAppInstallState(
     const state = JSON.parse(atob(encoded)) as Partial<AppInstallState>;
     if (
       state.purpose !== 'github-app' ||
-      typeof state.projectId !== 'string' ||
+      (typeof state.projectId === 'string') === (typeof state.clientId === 'string') ||
       typeof state.scope !== 'string' ||
       typeof state.returnUrl !== 'string' ||
       typeof state.nonce !== 'string' ||

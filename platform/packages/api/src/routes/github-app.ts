@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
-import { upsertProjectGitHubInstallation } from '../db.ts';
+import { upsertOwnedGitHubInstallation } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import {
   getInstallationDetails,
   looksLikeAppInstallState,
+  stateOwner,
   verifyAppInstallState,
 } from '../github/app-installations.ts';
 import { authorizeInstallViaUserToken } from '../github/user-installations.ts';
@@ -55,9 +56,7 @@ export const githubAppRoutes = new Hono<ApiEnv>().get('/callback', async (contex
   if (!details) {
     return back({ error: 'GitHub did not describe that installation' });
   }
-  await upsertProjectGitHubInstallation(context.get('db'), {
-    project_id: state.projectId,
-    scope: state.scope,
+  await upsertOwnedGitHubInstallation(context.get('db'), stateOwner(state), state.scope, {
     installation_id: installationId,
     account_login: details.accountLogin,
     account_id: details.accountId,

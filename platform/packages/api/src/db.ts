@@ -109,6 +109,10 @@ export {
   getProjectGitHubInstallation,
   upsertProjectGitHubInstallation,
   deleteProjectGitHubInstallation,
+  getOwnedGitHubInstallation,
+  upsertOwnedGitHubInstallation,
+  deleteOwnedGitHubInstallation,
+  type GitHubInstallationOwner,
 } from './db/credentials.ts';
 
 export {

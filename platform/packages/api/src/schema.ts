@@ -1255,6 +1255,27 @@ export const projectGitHubInstallations = pgTable(
   (table) => [primaryKey({ columns: [table.project_id, table.scope] })],
 );
 
+/**
+ * The same as `project_github_installations`, for a connected application that Platform does
+ * not host. The application is the owner, and `scope` is its own id for the space.
+ */
+export const appGitHubInstallations = pgTable(
+  'app_github_installations',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull(),
+    installation_id: text('installation_id').notNull(),
+    account_login: text('account_login').notNull(),
+    account_id: text('account_id').notNull(),
+    state_nonce: text('state_nonce').notNull(),
+    created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { mode: 'string' }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.client_id, table.scope] })],
+);
+
 // Decision: `user_id` is the owner of a personal (account_type='User') installation and is null for
 // organization installations, which are reached only through `github_installation_members`. A
 // personal installation can be unlinked (install before sign-in) until the GitHub OAuth callback
