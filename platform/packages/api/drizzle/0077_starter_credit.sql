@@ -1,0 +1,2 @@
+ALTER TABLE "oauth_clients" ADD COLUMN "starter_credit_micros" bigint;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_app_credit_grants_starter" ON "app_credit_grants" USING btree ("client_id","payer_id","livemode") WHERE "app_credit_grants"."source" = 'starter';

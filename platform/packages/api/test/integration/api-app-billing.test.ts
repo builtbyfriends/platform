@@ -953,6 +953,53 @@ describe('app billing', () => {
     });
   });
 
+  describe('starter credit', () => {
+    const starter = async (amount: number | null) =>
+      env.db
+        .update(oauthClients)
+        .set({ starter_credit_micros: amount })
+        .where(eq(oauthClients.id, registration.client.id));
+
+    it('answers that there is none when the operator set no amount', async () => {
+      const answer = await call('/credits.starter', { person: 'p1' });
+      expect(answer.status).toBe(404);
+      expect(await answer.json()).toEqual({ error: 'no_starter_credit' });
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).credits).toBeNull();
+    });
+
+    it('gives a person the starter credit once, spends it, and runs them out at zero', async () => {
+      await starter(1_000_000);
+      expect(await dataOf(call('/credits.starter', { person: 'p1' }))).toEqual({
+        granted: true,
+        amountMicros: 1_000_000,
+      });
+      expect(await dataOf(call('/credits.starter', { person: 'p1', amountMicros: 9e9 }))).toEqual({
+        granted: false,
+        amountMicros: 0,
+      });
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).credits).toMatchObject({
+        remainingMicros: 1_000_000,
+        starterMicros: 1_000_000,
+        grants: [{ source: 'starter', expiresAt: null }],
+      });
+      await call('/usage.record', { person: 'p1', sandboxSeconds: 36_000 });
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'free',
+        withinCaps: false,
+        credits: { remainingMicros: 0, starterMicros: 0, out: true },
+      });
+
+      const second = await registerOAuthClient(env.db, {
+        name: 'Other',
+        operator: 'Other Co',
+        redirectUris: ['https://other.example/callback'],
+        scopes: ['profile'],
+      });
+      const asOther = 'Basic ' + btoa(second.client.id + ':' + second.clientSecret);
+      expect((await dataOf(call('/usage.status', { person: 'p1' }, asOther))).credits).toBeNull();
+    });
+  });
+
   describe('stripe events', () => {
     const planOf = async (person: string) =>
       (await env.db.select().from(appPeople).where(eq(appPeople.person_id, person)))[0];

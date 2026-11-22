@@ -26,6 +26,7 @@ export function ConnectedAppsPage({
     redirect_uris: Array<string>;
     scopes: Array<string>;
     plans?: Record<string, { stripePriceId: string; creditMicros: number }> | null;
+    starter_credit_micros?: number | null;
   }>;
   meterPrices?: Record<string, number>;
   meterUnits?: Record<string, number>;
@@ -131,6 +132,14 @@ export function ConnectedAppsPage({
                   name="plans"
                   placeholder='{ "solo": { "stripePriceId": "price_…", "creditMicros": 12000000 } }'
                   initialValue={client.plans ? JSON.stringify(client.plans, null, 2) : ''}
+                />
+                <FormTextInput
+                  label="Starter credit in micros, given once to each person the app names. Empty gives none."
+                  name="starterCreditMicros"
+                  placeholder="2000000"
+                  initialValue={
+                    client.starter_credit_micros ? String(client.starter_credit_micros) : ''
+                  }
                 />
                 <Button type="submit" label="Save plans" />
               </SectionStack>

@@ -22,10 +22,10 @@ import {
   createPortalSession,
   stripeLiveMode,
 } from '../billing/stripe.ts';
-import { payerBlocked } from '../credit-ledger.ts';
+import { grantCredits, payerBlocked } from '../credit-ledger.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
-import { appPeople, appUsage, appUsageEvents, appUsageSources } from '../schema.ts';
+import { appPeople, appUsage, appUsageEvents, appUsageSources, oauthClients } from '../schema.ts';
 
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
@@ -321,6 +321,34 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         outOfCredits: now.credits?.out ?? false,
         creditsRemainingMicros: now.credits?.remainingMicros ?? null,
       },
+    });
+  })
+  .post('/credits.starter', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.person)) {
+      return context.json({ error: 'bad_person' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    // Decision: The amount is the operator's setting, never the request's, so a leaked client secret can't mint
+    // credits of any size.
+    const [client] = await db
+      .select({ amount: oauthClients.starter_credit_micros })
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId));
+    if (!client?.amount) {
+      return context.json({ error: 'no_starter_credit' }, 404);
+    }
+    const grant = await grantCredits(db, {
+      clientId,
+      payer: body.person,
+      source: 'starter',
+      amountMicros: client.amount,
+      livemode: stripeLiveMode(context.env),
+    });
+    await applyCredits(context.env, db, clientId, body.person);
+    return context.json({
+      data: { granted: Boolean(grant), amountMicros: grant ? client.amount : 0 },
     });
   })
   .post('/plans.list', async (context) => {

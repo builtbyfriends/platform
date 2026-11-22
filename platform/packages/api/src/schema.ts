@@ -80,6 +80,8 @@ export const oauthClients = pgTable('oauth_clients', {
   enabled: boolean('enabled').notNull().default(true),
   /** The plans this application's people can buy: each one's Stripe price and monthly credits. */
   plans: jsonb('plans').$type<Record<string, { stripePriceId: string; creditMicros: number }>>(),
+  /** The one-time credit each person can be given once, set by an operator. Null gives none. */
+  starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
   created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -243,6 +245,9 @@ export const appCreditGrants = pgTable(
     uniqueIndex('idx_app_credit_grants_invoice')
       .on(table.client_id, table.stripe_invoice_id)
       .where(sql`${table.stripe_invoice_id} IS NOT NULL`),
+    uniqueIndex('idx_app_credit_grants_starter')
+      .on(table.client_id, table.payer_id, table.livemode)
+      .where(sql`${table.source} = 'starter'`),
     uniqueIndex('idx_app_credit_grants_payment')
       .on(table.client_id, table.stripe_payment_intent_id)
       .where(sql`${table.stripe_payment_intent_id} IS NOT NULL`),

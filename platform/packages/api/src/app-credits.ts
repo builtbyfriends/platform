@@ -188,6 +188,9 @@ export function creditStanding(
           owedMicros: balance.owedMicros,
           out: balance.balanceMicros <= 0,
           outSince: balance.outSince,
+          starterMicros: balance.grants
+            .filter((grant) => grant.source === 'starter')
+            .reduce((sum, grant) => sum + grant.remainingMicros, 0),
           grants: balance.grants,
         }
       : null,

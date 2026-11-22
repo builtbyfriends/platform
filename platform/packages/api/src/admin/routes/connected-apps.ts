@@ -72,7 +72,16 @@ app.post('/usage-prices', async (context) => {
 });
 app.post('/:id/plans', async (context) => {
   const db = context.get('db');
-  const text = String((await context.req.parseBody()).plans ?? '').trim();
+  const body = await context.req.parseBody();
+  const text = String(body.plans ?? '').trim();
+  const starterText = String(body.starterCreditMicros ?? '').trim();
+  const starter = starterText ? Number(starterText) : null;
+  if (starter !== null && (!Number.isSafeInteger(starter) || starter < 0)) {
+    throw new OAuthError(
+      'invalid_request',
+      'Give the starter credit in micros, a whole number from 0 up.',
+    );
+  }
   const plans = text ? parseClientPlans(json(text)) : null;
   const known = new Set((await readPlanCatalog(db)).plans.map((plan) => plan.id));
   if ((text && !plans) || Object.keys(plans ?? {}).some((id) => !known.has(id))) {
@@ -81,12 +90,15 @@ app.post('/:id/plans', async (context) => {
       'Give each plan from the plan catalog a stripePriceId and a creditMicros amount.',
     );
   }
-  const input = { id: context.req.param('id'), plans };
+  const input = { id: context.req.param('id'), plans, starterCreditMicros: starter || null };
   return executeAuditedMutation(
     context,
     operatorAuditIntent('oauth/clients/plans', input),
     async () => {
-      await db.update(oauthClients).set({ plans }).where(eq(oauthClients.id, input.id));
+      await db
+        .update(oauthClients)
+        .set({ plans, starter_credit_micros: input.starterCreditMicros })
+        .where(eq(oauthClients.id, input.id));
       return { succeeded: true, response: context.redirect('/admin/connected-apps') };
     },
   );

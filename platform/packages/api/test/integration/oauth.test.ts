@@ -834,6 +834,19 @@ describe('registered OAuth applications', () => {
     expect(stored!.secret_hash).not.toBe(clientSecret);
     const listed = await request('/admin/connected-apps', { headers });
     expect(await adminHtml(listed)).not.toContain(clientSecret);
+    const plans = (starterCreditMicros: string) =>
+      request('/admin/connected-apps/' + clientId + '/plans', {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({ plans: '', starterCreditMicros }),
+      });
+    expect((await plans('-1')).status).toBe(400);
+    expect((await plans('2000000')).status).toBe(302);
+    const [withStarter] = await env.db
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId));
+    expect(withStarter!.starter_credit_micros).toBe(2_000_000);
     expect(
       (await request('/admin/connected-apps/' + clientId + '/disable', { method: 'POST', headers }))
         .status,
@@ -842,7 +855,7 @@ describe('registered OAuth applications', () => {
       .select()
       .from(operatorEvents)
       .where(eq(operatorEvents.user_id, admin.id));
-    expect(events.map((event) => event.status)).toEqual(['success', 'success']);
+    expect(events.map((event) => event.status)).toEqual(['success', 'success', 'success']);
     expect(JSON.stringify(events)).not.toContain(clientSecret);
   });
   it('keeps the account-token login bridge on Platform’s own domain', async () => {
