@@ -469,6 +469,24 @@ describe('suspension check', () => {
       reason: 'monthly_quota',
     });
   });
+
+  it("answers a page saying the app isn't available after an operator takedown", async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'operator_takedown' },
+    });
+
+    const page = await app.fetch(
+      new Request('https://my-app.void.app/', { headers: { Accept: 'text/html' } }),
+      env,
+      createCtx(),
+    );
+    expect(page.status).toBe(403);
+    expect(await page.text()).toContain("This app isn't available");
+    const api = await app.fetch(new Request('https://my-app.void.app/api/hello'), env, createCtx());
+    expect(api.status).toBe(403);
+    expect(await api.text()).not.toContain('usage limit');
+    expect(dispatchGet).not.toHaveBeenCalled();
+  });
 });
 
 describe('custom limits', () => {

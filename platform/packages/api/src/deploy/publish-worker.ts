@@ -66,6 +66,7 @@ export async function publishWorkerDeployment(input: {
     mutate: (
       txDb: Db,
       currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+      lockedProject: Project,
     ) => Promise<T>,
   ) => Promise<T>;
   readonly snapshotTrackedQueueConsumer: (queueId: string, scriptName: string) => Promise<void>;
@@ -261,7 +262,7 @@ export async function publishWorkerDeployment(input: {
   await snapshotCronState();
   await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
   markPhase('routing_switch');
-  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
+  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner, lockedProject) => {
     const dispatchLimits = computeDispatchLimits(
       await billedPlanLimits(txDb, currentOwner, project),
       manifest.limits,
@@ -278,6 +279,7 @@ export async function publishWorkerDeployment(input: {
       deploymentId: deployment.id,
       dispatchLimits,
       suspended:
+        lockedProject.suspended_reason ??
         existingEntry?.suspended ??
         (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
           ? REASON_REQUESTS_EXCEEDED

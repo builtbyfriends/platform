@@ -38,14 +38,18 @@ List projects across the platform, filter them by owner, or inspect one project'
 bwf platform project list [--user <user-id>] [--search <text>] [--page <n>] [--limit <n>]
 bwf platform project show <id>
 bwf platform project normalize <id> [--plan | --yes]
+bwf platform project suspend <id> [--note <text>] [--operator-note <text>]
+bwf platform project restore <id> [--operator-note <text>]
 bwf platform project delete <id>
 bwf platform project owner <project-id> <user-id>
 bwf platform project ai-logging <project-id> <inherit|off|metadata|full> [--plan | --yes]
 ```
 
-Search matches a project's slug, ID, or owner's login. `show` includes resources, domains, the latest 10 deployments, and the latest 20 builds. `delete` removes the project and its resources.
+Search matches a project's slug, ID, owner's login, or custom domain. You can also paste the address a reporter gives you, such as `https://shop.example.com/page`, and it finds the project by its custom domain or platform address. `show` includes resources, domains, the latest 10 deployments, and the latest 20 builds. `delete` removes the project and its resources.
 
 If deployment reports that a project requires normalization, an operator can preview `normalize <id> --plan`, then apply it with `--yes`. It verifies the serving deployment and any recorded queue names before updating project records. It leaves traffic and Cloudflare resources in place and refuses changes while deployment or recovery is active. If a verified queue name differs from the expected delivery routing name, normalization refuses the change; reconcile that queue routing before retrying. If the serving deployment cannot be verified, investigate the reported route before retrying. Finish interrupted deployment recovery on the previous compatible platform runtime before upgrading a project whose active deployment is missing.
+
+`suspend` takes one project offline and keeps its data. Its address, custom domains and preview route answer with a page saying the app isn't available. Its scheduled jobs, queue delivery, AI calls, outgoing email and sandboxes stop. The owner's other projects keep running. `--note` is a short reason the owner sees with the project; `--operator-note` stays in the audit log only. Queue messages are retried and dropped when their retries run out, as with a [suspended user](#operator-users). The project stays suspended through a new deploy, an ownership transfer, and the owner's account being suspended and restored. `restore` brings it back. If the owner's account is also suspended, the project stays offline until the account is restored.
 
 `owner` transfers a project to another registered user. Preview it with `--plan`; apply it interactively or with `--yes`. The preview reports active-work blockers and the account plan that will apply. The former owner becomes a project administrator, existing project-scoped CI deploy credentials are revoked, and usage already incurred remains with the former owner.
 

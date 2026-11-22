@@ -21,7 +21,7 @@ import {
 import type { Tx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
-import { getDefaultPlan } from '../plans.ts';
+import { installationDefaultPlan } from '../plans.ts';
 import { appCreditGrants, appPeople, stripeEvents } from '../schema.ts';
 
 type Metadata = Record<string, string>;
@@ -126,7 +126,7 @@ async function grantPlanCredits(
     console.warn('[billing] no credits for a payer blocked by a dispute', { id: event.id });
     return false;
   }
-  const plans = await clientPlans(context.env, tx, key.client_id);
+  const plans = await clientPlans(tx, key.client_id);
   // Decision: A plan change's invoice also lists a credit line for the old plan's unused time, so the line that
   // costs the most is the new plan.
   const line = invoice.lines?.data?.reduce((most, next) =>
@@ -263,7 +263,7 @@ async function saveSubscription(
     });
     return false;
   }
-  const plans = await clientPlans(context.env, tx, key.client_id);
+  const plans = await clientPlans(tx, key.client_id);
   const byPrice = planForPrice(plans, subscription.priceId);
   if (!byPrice) {
     console.warn('[billing] subscription price matches no plan', {
@@ -311,11 +311,7 @@ async function applyAppPersonEvent(
     return saveSubscription(context, tx, event, key, subscription);
   }
   const plan = object.metadata?.plan;
-  if (
-    checkoutPaid(event) &&
-    plan &&
-    Object.hasOwn(await clientPlans(context.env, tx, key.client_id), plan)
-  ) {
+  if (checkoutPaid(event) && plan && Object.hasOwn(await clientPlans(tx, key.client_id), plan)) {
     const subscriptionId = object.subscription ?? null;
     const row = {
       plan,
@@ -342,7 +338,7 @@ async function applyAppPersonEvent(
     const ended = await tx
       .update(appPeople)
       .set({
-        plan: (await getDefaultPlan(tx)).id,
+        plan: (await installationDefaultPlan(tx, context.env)).id,
         stripe_subscription_id: null,
         subscription_status: 'canceled',
         current_period_end: null,
@@ -393,7 +389,7 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
   }
   const db = context.get('db');
   if (live) {
-    await dropTestPlans(db);
+    await dropTestPlans(db, context.env);
   }
   const seen = { event_id: event.id, type: event.type, livemode: event.livemode };
   const metadata = eventMetadata(event.data.object);
@@ -455,7 +451,11 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     await changeOperatorUserPlan(context, userId, metadata.plan);
     applied = true;
   } else if (userId && event.type === 'customer.subscription.deleted') {
-    await changeOperatorUserPlan(context, userId, (await getDefaultPlan(db)).id);
+    await changeOperatorUserPlan(
+      context,
+      userId,
+      (await installationDefaultPlan(db, context.env)).id,
+    );
     applied = true;
   }
   await db.insert(stripeEvents).values(seen).onConflictDoNothing();

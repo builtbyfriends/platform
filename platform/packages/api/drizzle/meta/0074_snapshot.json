@@ -1,190 +1,9 @@
 {
-  "id": "9072e634-a55f-43b0-b667-6af2181eee88",
-  "prevId": "1e668c30-0f30-43b7-abd7-9b00039baf28",
+  "id": "1e668c30-0f30-43b7-abd7-9b00039baf28",
+  "prevId": "b7af3654-4abd-4b30-81e3-f594a329f53b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.app_credit_grants": {
-      "name": "app_credit_grants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payer_id": {
-          "name": "payer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "amount_micros": {
-          "name": "amount_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "remaining_micros": {
-          "name": "remaining_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "giver_id": {
-          "name": "giver_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_invoice_id": {
-          "name": "stripe_invoice_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_payment_intent_id": {
-          "name": "stripe_payment_intent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "livemode": {
-          "name": "livemode",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "void_reason": {
-          "name": "void_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_app_credit_grants_payer": {
-          "name": "idx_app_credit_grants_payer",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "payer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_app_credit_grants_invoice": {
-          "name": "idx_app_credit_grants_invoice",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "stripe_invoice_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"app_credit_grants\".\"stripe_invoice_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_app_credit_grants_payment": {
-          "name": "idx_app_credit_grants_payment",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "stripe_payment_intent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"app_credit_grants\".\"stripe_payment_intent_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "app_credit_grants_client_id_oauth_clients_id_fk": {
-          "name": "app_credit_grants_client_id_oauth_clients_id_fk",
-          "tableFrom": "app_credit_grants",
-          "tableTo": "oauth_clients",
-          "columnsFrom": ["client_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.app_github_installations": {
       "name": "app_github_installations",
       "schema": "",
@@ -256,59 +75,6 @@
         "app_github_installations_client_id_scope_pk": {
           "name": "app_github_installations_client_id_scope_pk",
           "columns": ["client_id", "scope"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.app_payers": {
-      "name": "app_payers",
-      "schema": "",
-      "columns": {
-        "client_id": {
-          "name": "client_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payer_id": {
-          "name": "payer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owed_micros": {
-          "name": "owed_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "out_since": {
-          "name": "out_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "app_payers_client_id_oauth_clients_id_fk": {
-          "name": "app_payers_client_id_oauth_clients_id_fk",
-          "tableFrom": "app_payers",
-          "tableTo": "oauth_clients",
-          "columnsFrom": ["client_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "app_payers_client_id_payer_id_pk": {
-          "name": "app_payers_client_id_payer_id_pk",
-          "columns": ["client_id", "payer_id"]
         }
       },
       "uniqueConstraints": {},
@@ -491,13 +257,6 @@
         },
         "quantity": {
           "name": "quantity",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "cost_micros": {
-          "name": "cost_micros",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
@@ -5846,6 +5605,24 @@
         },
         "email_alias": {
           "name": "email_alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_reason": {
+          "name": "suspended_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_note": {
+          "name": "suspended_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false

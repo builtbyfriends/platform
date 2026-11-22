@@ -3,7 +3,7 @@ import { stripeLiveMode } from './billing/stripe.ts';
 import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { getDefaultPlan } from './plans.ts';
+import { installationDefaultPlan } from './plans.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
 import {
   appCreditGrants,
@@ -33,6 +33,13 @@ export const METERS = {
   hostedD1ByteDays: { unit: 30e9, price: 0.75 },
   hostedR2ByteDays: { unit: 30e9, price: 0.015 },
   hostedKvByteDays: { unit: 30e9, price: 0.5 },
+  hostedD1RowsRead: { unit: 1e6, price: 0.001 },
+  hostedD1RowsWritten: { unit: 1e6, price: 1 },
+  hostedR2ClassAOps: { unit: 1e6, price: 4.5 },
+  hostedR2ClassBOps: { unit: 1e6, price: 0.36 },
+  hostedKvReads: { unit: 1e6, price: 0.5 },
+  hostedKvWrites: { unit: 1e6, price: 5 },
+  hostedQueueOps: { unit: 1e6, price: 0.4 },
 } as const;
 export type Meter = keyof typeof METERS;
 export type MeterPrices = Record<Meter, number>;
@@ -94,25 +101,13 @@ export function parseClientPlans(value: unknown): ClientPlans | null {
   return plans;
 }
 
-/**
- * The plans an application's people can buy. An application without its own list sells the two
- * plans priced in the environment, with no credits, as each application did before.
- */
-export async function clientPlans(
-  env: Pick<Bindings, 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO'>,
-  db: DbOrTx,
-  clientId: string,
-): Promise<ClientPlans> {
+/** The plans an application's people can buy. An application without its own list sells none. */
+export async function clientPlans(db: DbOrTx, clientId: string): Promise<ClientPlans> {
   const [client] = await db
     .select({ plans: oauthClients.plans })
     .from(oauthClients)
     .where(eq(oauthClients.id, clientId));
-  return (
-    client?.plans ?? {
-      solo: { stripePriceId: env.STRIPE_PRICE_SOLO ?? '', creditMicros: 0 },
-      pro: { stripePriceId: env.STRIPE_PRICE_PRO ?? '', creditMicros: 0 },
-    }
-  );
+  return client?.plans ?? {};
 }
 
 /** First day of this calendar month in UTC, as `YYYY-MM-01`. */
@@ -377,8 +372,11 @@ export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string)
  * are read in many places without the Stripe key, so the test rows are changed once instead of
  * skipped on each read.
  */
-export async function dropTestPlans(db: DbOrTx): Promise<void> {
-  const free = (await getDefaultPlan(db)).id;
+export async function dropTestPlans(
+  db: DbOrTx,
+  env: { PLATFORM_INSTALLATION_ID?: string | undefined },
+): Promise<void> {
+  const free = (await installationDefaultPlan(db, env)).id;
   await db
     .update(appPeople)
     .set({
@@ -406,7 +404,11 @@ export async function dropTestPlans(db: DbOrTx): Promise<void> {
 export async function applyCredits(
   env: Pick<
     Bindings,
-    'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO' | 'STRIPE_SECRET_KEY'
+    | 'USAGE_COUNTER'
+    | 'STRIPE_PRICE_SOLO'
+    | 'STRIPE_PRICE_PRO'
+    | 'PLATFORM_INSTALLATION_ID'
+    | 'STRIPE_SECRET_KEY'
   >,
   db: Db,
   clientId: string,
@@ -414,23 +416,22 @@ export async function applyCredits(
 ) {
   const period = currentPeriod();
   const payer = { clientId, payer: person };
-  const [[stored], plans, prices, use, balance] = await Promise.all([
+  const [[stored], plans, prices, use, balance, defaultPlan] = await Promise.all([
     db
       .select()
       .from(appPeople)
       .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
-    clientPlans(env, db, clientId),
+    clientPlans(db, clientId),
     readMeterPrices(db),
     payerUse(db, clientId, person, period),
     creditBalance(db, payer),
+    installationDefaultPlan(db, env),
   ]);
   const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
-  const standing = creditStanding(
-    use,
-    prices,
-    row ? (plans[row.plan]?.creditMicros ?? 0) : 0,
-    balance,
-  );
+  // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
+  // that ends writes the default plan on the row.
+  const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
+  const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0, balance);
   // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide.
   if (balance && (await markOut(db, payer, standing.credits!.out))) {
     for (const id of await paidOwnerIds(db, clientId, person)) {
@@ -448,5 +449,5 @@ export async function applyCredits(
         });
     }
   }
-  return { ...standing, row };
+  return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
 }

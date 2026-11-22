@@ -24,7 +24,7 @@ import {
 } from '../billing/stripe.ts';
 import { grantCredits, payerBlocked } from '../credit-ledger.ts';
 import type { ApiEnv } from '../env.ts';
-import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
+import { resolvePlanLimits } from '../plans.ts';
 import { appPeople, appUsage, appUsageEvents, appUsageSources, oauthClients } from '../schema.ts';
 
 const isPersonId = (value: unknown): value is string =>
@@ -76,6 +76,13 @@ const HOSTED_FIELDS = {
   aiNeurons: 'hostedAiNeurons',
   sandboxSeconds: 'hostedSandboxSeconds',
   cpuMs: 'hostedCpuMs',
+  d1RowsRead: 'hostedD1RowsRead',
+  d1RowsWritten: 'hostedD1RowsWritten',
+  r2ClassAOps: 'hostedR2ClassAOps',
+  r2ClassBOps: 'hostedR2ClassBOps',
+  kvReads: 'hostedKvReads',
+  kvWrites: 'hostedKvWrites',
+  queueOps: 'hostedQueueOps',
 } as const satisfies Record<string, Meter>;
 // Decision: Storage is shown as what's stored now. The month's byte-days only decide its cost.
 const STORED_FIELDS = {
@@ -131,8 +138,13 @@ async function hostedUse(context: BillingContext, person: string) {
 async function standing(context: BillingContext, person: string) {
   const db = context.get('db');
   const clientId = context.get('billingClient');
-  const { row, meters, credits } = await applyCredits(context.env, db, clientId, person);
-  const plan = row?.plan ?? (await getDefaultPlan(db)).id;
+  const { row, meters, credits, paid, defaultPlanId } = await applyCredits(
+    context.env,
+    db,
+    clientId,
+    person,
+  );
+  const plan = row?.plan ?? defaultPlanId;
   const limits = await resolvePlanLimits(db, plan);
   const period = currentPeriod();
   const quantity = (meter: Meter) => meters.find((entry) => entry.meter === meter)!.quantity;
@@ -161,6 +173,7 @@ async function standing(context: BillingContext, person: string) {
     : within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
   return {
     plan,
+    paid,
     billingPeriodStart: `${period}T00:00:00.000Z`,
     caps: {
       aiNeuronsPerMonth: limits.aiNeuronsPerMonth,
@@ -318,6 +331,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         aiNeuronsUsed: now.used.aiNeurons,
         sandboxSecondsUsed: now.used.sandboxSeconds,
         withinCaps: now.withinCaps,
+        paid: now.paid,
         outOfCredits: now.credits?.out ?? false,
         creditsRemainingMicros: now.credits?.remainingMicros ?? null,
       },
@@ -352,7 +366,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     });
   })
   .post('/plans.list', async (context) => {
-    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    const plans = await clientPlans(context.get('db'), context.get('billingClient'));
     return context.json({
       data: {
         // Decision: Stored JSON doesn't keep its order, so the list goes from the smallest plan up.
@@ -367,7 +381,10 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
     }
-    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    const plans = await clientPlans(context.get('db'), context.get('billingClient'));
+    if (Object.keys(plans).length === 0) {
+      return context.json({ error: 'no_plans' }, 400);
+    }
     if (typeof body?.plan !== 'string' || !Object.hasOwn(plans, body.plan)) {
       return context.json({ error: 'bad_plan' }, 400);
     }

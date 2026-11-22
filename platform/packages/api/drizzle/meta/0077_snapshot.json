@@ -1,6 +1,6 @@
 {
-  "id": "695592d2-d4d2-4843-b4ae-a0812eb95427",
-  "prevId": "f2dd168a-98c1-4378-9fd5-07cc46a58266",
+  "id": "f2dd168a-98c1-4378-9fd5-07cc46a58266",
+  "prevId": "c1b605b5-4306-43fe-9176-6f75ba1fcf22",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -162,34 +162,6 @@
           ],
           "isUnique": true,
           "where": "\"app_credit_grants\".\"stripe_invoice_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_app_credit_grants_starter": {
-          "name": "idx_app_credit_grants_starter",
-          "columns": [
-            {
-              "expression": "client_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "payer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "livemode",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"app_credit_grants\".\"source\" = 'starter'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2899,12 +2871,6 @@
         "plans": {
           "name": "plans",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "starter_credit_micros": {
-          "name": "starter_credit_micros",
-          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -5932,6 +5898,24 @@
         },
         "email_alias": {
           "name": "email_alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_reason": {
+          "name": "suspended_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_note": {
+          "name": "suspended_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false

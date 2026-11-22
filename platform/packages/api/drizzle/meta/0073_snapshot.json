@@ -1,5 +1,5 @@
 {
-  "id": "1e668c30-0f30-43b7-abd7-9b00039baf28",
+  "id": "b7af3654-4abd-4b30-81e3-f594a329f53b",
   "prevId": "4a5c313b-694e-4923-b546-0ab99b0c25ac",
   "version": "7",
   "dialect": "postgresql",
@@ -115,13 +115,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "livemode": {
-          "name": "livemode",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "out_of_credits_period": {
           "name": "out_of_credits_period",
@@ -5609,6 +5602,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "suspended_reason": {
+          "name": "suspended_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_note": {
+          "name": "suspended_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -5874,44 +5885,6 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.stripe_events": {
-      "name": "stripe_events",
-      "schema": "",
-      "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "livemode": {
-          "name": "livemode",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {},

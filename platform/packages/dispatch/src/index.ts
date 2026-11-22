@@ -68,7 +68,7 @@ type RoutingEntry = Readonly<{
 }>;
 
 // Decision: The API writes this key (projectSuspensionKey in suspension.ts) while an administrator has
-// suspended the project's owner.
+// suspended the project or its owner.
 async function isProjectSuspended(env: Env, projectId: string): Promise<boolean> {
   try {
     return (await env.ROUTING.get(`project-suspended:${projectId}`, { cacheTtl: 60 })) !== null;
@@ -678,6 +678,11 @@ const dispatcher = {
 
     if (routing.suspended === 'requests_exceeded') {
       return limitResponse('requests');
+    }
+    if (routing.suspended === 'operator_takedown') {
+      return createErrorResponse(request, 403, "This app isn't available", {
+        'Cache-Control': 'public, s-maxage=30, max-age=0',
+      });
     }
     if (routing.suspended) {
       return Response.json(

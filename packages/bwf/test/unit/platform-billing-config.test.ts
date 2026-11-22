@@ -130,6 +130,15 @@ describe('bwf platform config billing', () => {
     expect(() => readPlatformBillingInput({}, `${SECRET_KEY}`)).toThrow(
       /^platform: Line 1 of stdin is not NAME=value\.$/,
     );
+    expect(
+      readPlatformBillingInput(
+        { STRIPE_AUTOMATIC_TAX: 'true', STRIPE_PROMOTION_CODES: 'false' },
+        null,
+      ),
+    ).toEqual({ STRIPE_AUTOMATIC_TAX: 'true', STRIPE_PROMOTION_CODES: 'false' });
+    expect(() => readPlatformBillingInput({ STRIPE_AUTOMATIC_TAX: 'yes' }, null)).toThrow(
+      'STRIPE_AUTOMATIC_TAX must be true or false',
+    );
     expect(() => readPlatformBillingInput({ STRIPE_PRICE_SOLO: 'prod_1' }, null)).toThrow(
       'STRIPE_PRICE_SOLO must be a Stripe price ID',
     );

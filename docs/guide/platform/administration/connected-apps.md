@@ -98,3 +98,75 @@ person=<the application's id for the person>
 Platform finds or makes a user for that person (provider `app:<client id>`) and returns an access token for one hour, with the client's `profile` and `preview:deploy` permissions. There's no refresh token: ask again when it runs out. Each token is its own grant, so two parts of the application can work for one person at the same time.
 
 A publish still needs the person's approval, but the application asks for it in its own interface. Make the publish request as usual with the token, then, once the person approves, send the same token request with `publish_request` set to the returned `request_id`. The answer is the publish credential that the browser approval gives (`project_id`, `approval_id` and a `deploy:approve` token). Platform takes this request as the person's approval, so only list a client you trust to ask its people first.
+
+## Sell plans to an application's people
+
+An application can sell plans to its people through Platform's billing. Open **Admin → Connected apps** and fill in **Plans its people can buy** for the application. Each entry pairs a plan id from the [plan catalog](./plans.md) with the Stripe price that charges for it and the credits it includes each month, in millionths of a dollar:
+
+```json
+{ "starter": { "stripePriceId": "price_…", "creditMicros": 20000000 } }
+```
+
+An application with no plan list has nothing on sale. Its plan list answers an empty list, and checkout answers `no_plans`. Checkout answers `bad_plan` for a plan that isn't in the list, and Platform ignores a payment for one.
+
+If you remove a plan from the list later, people who hold it keep their Stripe subscription, and Stripe keeps charging them. They get no credits, and only the plan's limits in the catalog hold their use, until you move them to a plan in the list or cancel the subscription in Stripe.
+
+## Charge for use
+
+Platform counts what an application reports for its people (AI and sandbox time) and what the hosted projects they pay for use. Once an hour it reads each project's use from Cloudflare's analytics for today and yesterday and stores it under the project's payer. If one reading fails, Platform keeps the numbers it stored before for that reading and stores the others.
+
+Set the price of each meter under **Admin → Connected apps → Usage prices**. Each price is in dollars for the meter's unit. The defaults are Cloudflare's own list prices, so at the defaults Platform charges about what Cloudflare charges you. To charge twice your cost, double each price. For AI prices and how the installation pays for AI, see [Paying for AI](./ai-billing.md).
+
+### Hosted costs
+
+| Cloudflare cost                       | Meter                  | Unit                 | Default price | State                                                       |
+| ------------------------------------- | ---------------------- | -------------------- | ------------- | ----------------------------------------------------------- |
+| Worker requests                       | `hostedRequests`       | 1 million requests   | $0.30         | Counted                                                     |
+| Worker CPU time                       | `hostedCpuMs`          | 1 million ms         | $0.02         | Counted                                                     |
+| AI through the gateway                | `hostedAiNeurons`      | 1 neuron             | $0.000011     | Counted                                                     |
+| Sandbox time                          | `hostedSandboxSeconds` | 1 hour               | $0.10         | Counted                                                     |
+| D1 storage                            | `hostedD1ByteDays`     | 1 GB-month           | $0.75         | Counted                                                     |
+| D1 rows written                       | `hostedD1RowsWritten`  | 1 million rows       | $1.00         | Counted                                                     |
+| D1 rows read                          | `hostedD1RowsRead`     | 1 million rows       | $0.001        | Counted                                                     |
+| R2 storage                            | `hostedR2ByteDays`     | 1 GB-month           | $0.015        | Counted                                                     |
+| R2 Class A operations (writes, lists) | `hostedR2ClassAOps`    | 1 million operations | $4.50         | Counted                                                     |
+| R2 Class B operations (reads)         | `hostedR2ClassBOps`    | 1 million operations | $0.36         | Counted                                                     |
+| KV storage                            | `hostedKvByteDays`     | 1 GB-month           | $0.50         | Counted                                                     |
+| KV writes, deletes and lists          | `hostedKvWrites`       | 1 million operations | $5.00         | Counted                                                     |
+| KV reads                              | `hostedKvReads`        | 1 million operations | $0.50         | Counted                                                     |
+| Queue operations                      | `hostedQueueOps`       | 1 million operations | $0.40         | Counted                                                     |
+| Bandwidth                             | `hostedBandwidthBytes` | 1 GB                 | $0            | Absorbed: Cloudflare doesn't charge for Worker or R2 egress |
+| R2 deletes                            | none                   |                      |               | Absorbed: Cloudflare doesn't charge for them                |
+| Workers Logs                          | none                   |                      |               | Absorbed. See below                                         |
+| Durable Objects                       | none                   |                      |               | Absorbed. See below                                         |
+| Containers                            | none                   |                      |               | Not counted yet                                             |
+| Platform's own log rows               | none                   |                      |               | Absorbed: Workers Analytics Engine isn't billed at present  |
+
+Platform charges from the first unit. It doesn't pass on the amounts Cloudflare includes with your plan each month, so those stay with you.
+
+**Workers Logs.** Each hosted request writes at least one invocation log event, and Cloudflare charges $0.60 for each million events past the 20 million a month that Workers Paid includes. That's more than the default request price. Cloudflare moves Workers Logs to new Observability pricing on 2026-12-01. To keep this cost at zero, use [minimal runtime logs](/guide/platform/installation/setup#runtime-logs): they turn Workers Logs off for hosted projects, and Platform's own log rows still record each request. Otherwise, add the log cost to the request price.
+
+**Durable Objects.** Requests to an object usually come through the app's own requests, which the plan's monthly request limit holds. Duration, alarms and WebSocket messages aren't held or counted yet.
+
+Not confirmed: whether a request that goes through Platform's dispatch Worker and then the app's Worker bills as one request or two. If it bills as two, set the request price to at least $0.60 to cover your cost.
+
+### Example: a busy app
+
+One month of a busy hosted app, at the default prices:
+
+| Use                      | Amount  | Cost       |
+| ------------------------ | ------- | ---------- |
+| Requests                 | 10 M    | $3.00      |
+| CPU time                 | 50 M ms | $1.00      |
+| D1 rows written          | 1 M     | $1.00      |
+| D1 rows read             | 100 M   | $0.10      |
+| D1 storage               | 2 GB    | $1.50      |
+| R2 Class A operations    | 1 M     | $4.50      |
+| R2 Class B operations    | 10 M    | $3.60      |
+| R2 storage               | 10 GB   | $0.15      |
+| KV writes                | 1 M     | $5.00      |
+| KV reads                 | 10 M    | $5.00      |
+| Queue operations         | 1 M     | $0.40      |
+| **Charged to the payer** |         | **$25.25** |
+
+Cloudflare charges you the same $25.25 for this use, less what your plan includes. With Workers Logs on, the app's 10 million invocation events can add up to $6.00 more, so turn them off or add them to the request price as shown above. At twice each default price, the payer pays $50.50.

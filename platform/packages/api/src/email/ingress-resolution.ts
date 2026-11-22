@@ -254,6 +254,7 @@ app.post('/resolve-ingress', async (context) => {
     await db
       .select({
         projectStatus: projects.status,
+        projectSuspendedReason: projects.suspended_reason,
         suspendedReason: users.suspended_reason,
         owner: users,
         payer_person_id: projects.payer_person_id,
@@ -269,6 +270,7 @@ app.post('/resolve-ingress', async (context) => {
   if (
     !authority ||
     authority.projectStatus !== 'active' ||
+    authority.projectSuspendedReason ||
     authority.suspendedReason ||
     authority.emailSuspendedAt
   ) {

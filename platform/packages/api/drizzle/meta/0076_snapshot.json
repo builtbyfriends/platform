@@ -1,6 +1,6 @@
 {
-  "id": "f2dd168a-98c1-4378-9fd5-07cc46a58266",
-  "prevId": "c1b605b5-4306-43fe-9176-6f75ba1fcf22",
+  "id": "c1b605b5-4306-43fe-9176-6f75ba1fcf22",
+  "prevId": "9072e634-a55f-43b0-b667-6af2181eee88",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -43,27 +43,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
-        },
-        "taken_micros": {
-          "name": "taken_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "voided_remaining_micros": {
-          "name": "voided_remaining_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "voided_owed_micros": {
-          "name": "voided_owed_micros",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "giver_id": {
           "name": "giver_id",
@@ -310,18 +289,6 @@
         "out_since": {
           "name": "out_since",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "blocked_at": {
-          "name": "blocked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "blocked_reason": {
-          "name": "blocked_reason",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -5898,6 +5865,24 @@
         },
         "email_alias": {
           "name": "email_alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_reason": {
+          "name": "suspended_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspended_note": {
+          "name": "suspended_note",
           "type": "text",
           "primaryKey": false,
           "notNull": false

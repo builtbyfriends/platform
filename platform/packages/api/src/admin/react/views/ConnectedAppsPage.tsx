@@ -128,9 +128,9 @@ export function ConnectedAppsPage({
                 action={`/admin/connected-apps/${client.id}/plans`}
               >
                 <FormTextArea
-                  label="Plans its people can buy (JSON). Empty uses the two prices from the environment, with no credits."
+                  label="Plans its people can buy (JSON). Empty puts nothing on sale."
                   name="plans"
-                  placeholder='{ "solo": { "stripePriceId": "price_…", "creditMicros": 12000000 } }'
+                  placeholder='{ "plan-id": { "stripePriceId": "price_…", "creditMicros": 0 } }'
                   initialValue={client.plans ? JSON.stringify(client.plans, null, 2) : ''}
                 />
                 <FormTextInput

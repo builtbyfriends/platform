@@ -1,3 +1,4 @@
+import { createDefaultPlanCatalog } from '@builtbyfriends/platform/plans';
 import { eq } from 'drizzle-orm';
 import {
   afterAll,
@@ -20,7 +21,7 @@ import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
-import { resolvePlanLimits } from '../../src/plans.ts';
+import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { setProjectAiBlock } from '../../src/routing.ts';
 import {
@@ -47,7 +48,6 @@ const ctx = createMockExecutionContext();
 let env: TestEnv & {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
-  STRIPE_PRICE_SOLO?: string;
 };
 let registration: Awaited<ReturnType<typeof registerOAuthClient>>;
 
@@ -58,6 +58,8 @@ type Hosted = {
 };
 type Answer = {
   plan: string;
+  paid: boolean;
+  subscribed: boolean;
   hosted?: Hosted | null;
   hostedAsOf: string | null;
   withinCaps: boolean;
@@ -128,7 +130,7 @@ async function preview(person: string, body: Record<string, unknown>) {
 const hosted = async (person: string) =>
   (await dataOf(call('/usage.status', { person, hosted: true }))).hosted;
 
-async function sellCredits(person: string, plan: string, creditMicros: number) {
+async function savePlans(creditMicros = 0) {
   await env.db
     .update(oauthClients)
     .set({
@@ -138,12 +140,17 @@ async function sellCredits(person: string, plan: string, creditMicros: number) {
       },
     })
     .where(eq(oauthClients.id, registration.client.id));
+}
+
+async function sellCredits(person: string, plan: string, creditMicros: number) {
+  await savePlans(creditMicros);
   await webhook({
     type: 'checkout.session.completed',
     data: {
       object: {
         metadata: { clientId: registration.client.id, personId: person, plan },
         customer: 'cus_1',
+        subscription: `sub_${person}`,
         payment_status: 'paid',
       },
     },
@@ -232,7 +239,6 @@ describe('app billing', () => {
     env = await setupEnv();
     env.STRIPE_SECRET_KEY = 'sk_test_x';
     env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
-    env.STRIPE_PRICE_SOLO = 'price_solo';
   });
   afterAll(teardownEnv);
   beforeEach(async () => {
@@ -289,7 +295,20 @@ describe('app billing', () => {
     ).toBe(400);
   });
 
+  it('sells nothing when the application has no plan list', async () => {
+    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [] });
+    const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
+    const checkout = await call('/billing.checkout', order);
+    expect(checkout.status).toBe(400);
+    expect(await checkout.json()).toEqual({ error: 'no_plans' });
+
+    const metadata = { clientId: registration.client.id, personId: 'p1', plan: 'solo' };
+    await webhook({ type: 'checkout.session.completed', data: { object: { metadata } } });
+    expect(await env.db.select().from(appPeople)).toEqual([]);
+  });
+
   it('moves a person to the plan they bought and back when the subscription ends', async () => {
+    await savePlans();
     const periodEnd = Date.UTC(2026, 11, 19, 12) / 1000;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       if (String(input) === 'https://api.stripe.com/v1/subscriptions/sub_1') {
@@ -356,6 +375,84 @@ describe('app billing', () => {
     expect(ended).not.toHaveProperty('renewsAt');
   });
 
+  it('says plainly whether a person pays, whatever the default plan is called', async () => {
+    env.PLATFORM_INSTALLATION_ID = 'installation-1';
+    try {
+      const status = (person: string) => dataOf(call('/usage.status', { person }));
+      expect(await status('p1')).toMatchObject({ plan: 'custom', paid: false, credits: null });
+      expect(await dataOf(call('/usage.record', { person: 'p1' }))).toMatchObject({ paid: false });
+
+      await sellCredits('p1', 'solo', 20_000_000);
+      expect(await status('p1')).toMatchObject({ plan: 'solo', paid: true });
+      const metadata = { clientId: registration.client.id, personId: 'p1' };
+      await webhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { id: 'sub_p1', metadata } },
+      });
+      // Decision: A cancelled person keeps what's left of the month they paid for, so only paid changes.
+      expect(await status('p1')).toMatchObject({ plan: 'custom', paid: false });
+
+      // Decision: A default plan that shares an id with the app's list still leaves a cancelled person unpaid.
+      await writePlanCatalog(env.db, {
+        ...createDefaultPlanCatalog('custom'),
+        defaultPlanId: 'solo',
+      });
+      await sellCredits('p2', 'pro', 20_000_000);
+      expect(await status('p2')).toMatchObject({ plan: 'pro', paid: true });
+      await webhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { id: 'sub_p2', metadata: { ...metadata, personId: 'p2' } } },
+      });
+      expect(await status('p2')).toMatchObject({ plan: 'solo', paid: false });
+    } finally {
+      delete env.PLATFORM_INSTALLATION_ID;
+    }
+  });
+
+  it('grants a plan’s credits whatever tax or a promotion code did to the total', async () => {
+    await sellCredits('p0', 'solo', 20_000_000);
+    const totals = [
+      {
+        amount_subtotal: 2000,
+        amount_total: 2165,
+        total_details: { amount_discount: 0, amount_tax: 165 },
+      },
+      {
+        amount_subtotal: 2000,
+        amount_total: 1000,
+        total_details: { amount_discount: 1000, amount_tax: 0 },
+      },
+      {
+        amount_subtotal: 2000,
+        amount_total: 0,
+        total_details: { amount_discount: 2000, amount_tax: 0 },
+      },
+    ];
+    for (const [index, total] of totals.entries()) {
+      const person = `p${index + 1}`;
+      await webhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            ...total,
+            metadata: { clientId: registration.client.id, personId: person, plan: 'solo' },
+            customer: `cus_${person}`,
+            payment_status: total.amount_total > 0 ? 'paid' : 'no_payment_required',
+          },
+        },
+      });
+      const invoice = invoicePaid(person, 'price_app_solo');
+      await webhook({
+        ...invoice,
+        data: { object: { ...invoice.data.object, amount_paid: total.amount_total } },
+      });
+      expect((await dataOf(call('/usage.status', { person }))).credits).toMatchObject({
+        includedMicros: 20_000_000,
+        remainingMicros: 20_000_000,
+      });
+    }
+  });
+
   it('bills an old caller’s project to the person it was built for', async () => {
     const { project } = await preview('p1', { workspace: 'w1' });
     expect(project!.payer_person_id).toBeNull();
@@ -390,7 +487,7 @@ describe('app billing', () => {
       })),
     );
     const stored = (max: Record<string, number>, dimensions: Record<string, string>) => ({
-      data: { viewer: { accounts: [{ storage: [{ max, dimensions }] }] } },
+      data: { viewer: { accounts: [{ groups: [{ max, dimensions }] }] } },
     });
     const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const query = String(init?.body);
@@ -510,7 +607,7 @@ describe('app billing', () => {
         out: true,
       },
     });
-    expect(status.meters).toHaveLength(10);
+    expect(status.meters).toHaveLength(17);
     expect(status.daily.at(-1)).toMatchObject({
       costMicros: 1_050_000,
       meters: { aiNeurons: 50_000, sandboxSeconds: 18_000 },
@@ -527,6 +624,64 @@ describe('app billing', () => {
     await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
     expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBeNull();
     expect((await dataOf(call('/usage.status', { person: 'p1' }))).withinCaps).toBe(true);
+  });
+
+  it('counts a hosted app’s database rows and storage operations, and keeps the others when one read fails', async () => {
+    const { project } = await preview('p1', { workspace: 'w1' });
+    await env.db.insert(resources).values(
+      (['d1', 'kv', 'r2', 'queue'] as const).map((type) => ({
+        id: `res_${type}`,
+        project_id: project!.id,
+        type,
+        cf_id: `${type}-1`,
+        binding_name: type,
+      })),
+    );
+    const groups = (...rows: Array<Record<string, unknown>>) =>
+      Response.json({ data: { viewer: { accounts: [{ groups: rows }] } } });
+    const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const query = String(init?.body);
+      if (query.includes('d1AnalyticsAdaptiveGroups')) {
+        return groups({
+          sum: { rowsRead: 2e6, rowsWritten: 1e6 },
+          dimensions: { databaseId: 'd1-1' },
+        });
+      }
+      if (query.includes('r2OperationsAdaptiveGroups')) {
+        return groups(
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'r2-1', actionType: 'PutObject' } },
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'r2-1', actionType: 'GetObject' } },
+          { sum: { requests: 9 }, dimensions: { bucketName: 'r2-1', actionType: 'DeleteObject' } },
+          { sum: { requests: 1e6 }, dimensions: { bucketName: 'other', actionType: 'PutObject' } },
+        );
+      }
+      if (query.includes('queueMessageOperationsAdaptiveGroups')) {
+        return groups({ sum: { billableOperations: 1e6 }, dimensions: { queueId: 'queue-1' } });
+      }
+      return Response.json({ errors: [{ message: 'unavailable' }] }, { status: 500 });
+    });
+    const noon = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
+    await syncHostedUse(env as never, env.db, noon);
+    analytics.mockRestore();
+
+    const days = noon.getUTCDate() === 1 ? 1 : 2;
+    const { hosted, meters } = await dataOf(call('/usage.status', { person: 'p1', hosted: true }));
+    expect(hosted).toMatchObject({
+      d1RowsRead: 2e6 * days,
+      d1RowsWritten: 1e6 * days,
+      r2ClassAOps: 1e6 * days,
+      r2ClassBOps: 1e6 * days,
+      kvReads: 0,
+      kvWrites: 0,
+      queueOps: 1e6 * days,
+      requests: 0,
+      costMicros: (1_000_000 + 2_000 + 4_500_000 + 360_000 + 400_000) * days,
+    });
+    expect(meters).toContainEqual({
+      meter: 'hostedD1RowsWritten',
+      quantity: 1e6 * days,
+      costMicros: 1_000_000 * days,
+    });
   });
 
   it('sells an application its own plans at its own prices', async () => {
@@ -551,6 +706,7 @@ describe('app billing', () => {
     const own = await preview('p1', { workspace: 'w2' });
     expect(await billedPlanId(env.db, paid.owner!, paid.project!)).toBe('free');
 
+    await savePlans();
     const metadata = { clientId: registration.client.id, personId: 'boss', plan: 'solo' };
     await webhook({
       type: 'checkout.session.completed',
@@ -1001,6 +1157,12 @@ describe('app billing', () => {
   });
 
   describe('stripe events', () => {
+    beforeEach(async () => {
+      await env.db
+        .update(oauthClients)
+        .set({ plans: { solo: { stripePriceId: 'price_app_solo', creditMicros: 0 } } })
+        .where(eq(oauthClients.id, registration.client.id));
+    });
     const planOf = async (person: string) =>
       (await env.db.select().from(appPeople).where(eq(appPeople.person_id, person)))[0];
     const checkout = (person: string, extra: object = {}) => ({

@@ -75,39 +75,136 @@ async function readCpu(env: Bindings, hosted: Array<Hosted>, start: Date, end: D
   return read;
 }
 
-const STORAGE = {
-  d1: {
-    meter: 'hostedD1ByteDays',
+type Group = {
+  sum?: Record<string, number>;
+  max?: Record<string, number>;
+  dimensions?: Record<string, string>;
+};
+const byDate = (day: string) => `date_geq: "${day}", date_leq: "${day}"`;
+const byTime = (day: string) =>
+  `datetime_geq: "${day}T00:00:00Z", datetime_leq: "${day}T23:59:59Z"`;
+const num = (value: unknown) => Number(value) || 0;
+// Decision: R2 lists its Class B and free actions by name. Any other action is priced as Class A, so an action
+// Cloudflare adds later is never under-charged.
+const R2_CLASS_B = new Set([
+  'HeadBucket',
+  'HeadObject',
+  'GetObject',
+  'UsageSummary',
+  'GetBucketEncryption',
+  'GetBucketLocation',
+  'GetBucketCors',
+  'GetBucketLifecycleConfiguration',
+]);
+const R2_FREE = new Set(['DeleteObject', 'DeleteBucket', 'AbortMultipartUpload']);
+
+/**
+ * What each Cloudflare GraphQL dataset adds to a project for one day, by the resource id it names.
+ * Storage takes the day's largest size, and operations add up the day's counts.
+ */
+const SOURCES = [
+  {
+    type: 'd1',
+    meters: ['hostedD1ByteDays'],
     dataset: 'd1StorageAdaptiveGroups',
     id: 'databaseId',
-    fields: ['databaseSizeBytes'],
-    day: (day: string) => `date_geq: "${day}", date_leq: "${day}"`,
+    select: 'max { databaseSizeBytes }',
+    dims: '',
+    day: byDate,
+    reading: (group: Group): Reading => ({ hostedD1ByteDays: num(group.max?.databaseSizeBytes) }),
   },
-  kv: {
-    meter: 'hostedKvByteDays',
+  {
+    type: 'kv',
+    meters: ['hostedKvByteDays'],
     dataset: 'kvStorageAdaptiveGroups',
     id: 'namespaceId',
-    fields: ['byteCount'],
-    day: (day: string) => `date_geq: "${day}", date_leq: "${day}"`,
+    select: 'max { byteCount }',
+    dims: '',
+    day: byDate,
+    reading: (group: Group): Reading => ({ hostedKvByteDays: num(group.max?.byteCount) }),
   },
-  r2: {
-    meter: 'hostedR2ByteDays',
+  {
+    type: 'r2',
+    meters: ['hostedR2ByteDays'],
     dataset: 'r2StorageAdaptiveGroups',
     id: 'bucketName',
-    fields: ['payloadSize', 'metadataSize'],
-    day: (day: string) => `datetime_geq: "${day}T00:00:00Z", datetime_leq: "${day}T23:59:59Z"`,
+    select: 'max { payloadSize metadataSize }',
+    dims: '',
+    day: byTime,
+    reading: (group: Group): Reading => ({
+      hostedR2ByteDays: num(group.max?.payloadSize) + num(group.max?.metadataSize),
+    }),
   },
-} as const;
-type StorageType = keyof typeof STORAGE;
+  {
+    type: 'd1',
+    meters: ['hostedD1RowsRead', 'hostedD1RowsWritten'],
+    dataset: 'd1AnalyticsAdaptiveGroups',
+    id: 'databaseId',
+    select: 'sum { rowsRead rowsWritten }',
+    dims: '',
+    day: byDate,
+    reading: (group: Group): Reading => ({
+      hostedD1RowsRead: num(group.sum?.rowsRead),
+      hostedD1RowsWritten: num(group.sum?.rowsWritten),
+    }),
+  },
+  {
+    type: 'r2',
+    meters: ['hostedR2ClassAOps', 'hostedR2ClassBOps'],
+    dataset: 'r2OperationsAdaptiveGroups',
+    id: 'bucketName',
+    select: 'sum { requests }',
+    dims: 'actionType',
+    day: byTime,
+    reading: (group: Group): Reading => {
+      const action = group.dimensions?.actionType ?? '';
+      const requests = num(group.sum?.requests);
+      return R2_FREE.has(action)
+        ? {}
+        : R2_CLASS_B.has(action)
+          ? { hostedR2ClassBOps: requests }
+          : { hostedR2ClassAOps: requests };
+    },
+  },
+  {
+    type: 'kv',
+    meters: ['hostedKvReads', 'hostedKvWrites'],
+    dataset: 'kvOperationsAdaptiveGroups',
+    id: 'namespaceId',
+    select: 'sum { requests }',
+    dims: 'actionType',
+    day: byDate,
+    reading: (group: Group): Reading =>
+      group.dimensions?.actionType === 'read'
+        ? { hostedKvReads: num(group.sum?.requests) }
+        : { hostedKvWrites: num(group.sum?.requests) },
+  },
+  {
+    type: 'queue',
+    meters: ['hostedQueueOps'],
+    dataset: 'queueMessageOperationsAdaptiveGroups',
+    id: 'queueId',
+    select: 'sum { billableOperations }',
+    dims: '',
+    day: byTime,
+    reading: (group: Group): Reading => ({
+      hostedQueueOps: num(group.sum?.billableOperations),
+    }),
+  },
+] as const satisfies ReadonlyArray<{
+  type: 'd1' | 'kv' | 'r2' | 'queue';
+  meters: ReadonlyArray<Meter>;
+  dataset: string;
+  id: string;
+  select: string;
+  dims: string;
+  day: (day: string) => string;
+  reading: (group: Group) => Reading;
+}>;
+type Source = (typeof SOURCES)[number];
 
-/** The largest size each of a project's databases, buckets and namespaces of one kind had that day. */
-async function readStorage(
-  env: Bindings,
-  type: StorageType,
-  owned: Map<string, string>,
-  day: string,
-) {
-  const { meter, dataset, id, fields, day: filter } = STORAGE[type];
+/** Adds up what one dataset says each project's databases, buckets, namespaces or queues did that day. */
+async function readDataset(env: Bindings, source: Source, owned: Map<string, string>, day: string) {
   const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.CF_API_TOKEN}`, 'Content-Type': 'application/json' },
@@ -115,9 +212,9 @@ async function readStorage(
       query: `query {
   viewer {
     accounts(filter: { accountTag: "${env.CF_ACCOUNT_ID}" }) {
-      storage: ${dataset}(limit: 10000, filter: { ${filter(day)} }) {
-        max { ${fields.join(' ')} }
-        dimensions { ${id} }
+      groups: ${source.dataset}(limit: 10000, filter: { ${source.day(day)} }) {
+        ${source.select}
+        dimensions { ${source.id} ${source.dims} }
       }
     }
   }
@@ -126,24 +223,23 @@ async function readStorage(
   });
   const body = (await response.json().catch(() => null)) as {
     errors?: Array<unknown> | null;
-    data?: {
-      viewer?: {
-        accounts?: Array<{
-          storage?: Array<{ max?: Record<string, number>; dimensions?: Record<string, string> }>;
-        }>;
-      };
-    };
+    data?: { viewer?: { accounts?: Array<{ groups?: Array<Group> }> } };
   } | null;
-  const groups = body?.data?.viewer?.accounts?.[0]?.storage;
+  const groups = body?.data?.viewer?.accounts?.[0]?.groups;
   if (!response.ok || body?.errors?.length || !Array.isArray(groups)) {
-    throw new Error(`${dataset} query failed with HTTP ${response.status}`);
+    throw new Error(`${source.dataset} query failed with HTTP ${response.status}`);
   }
   const read = new Map<string, Reading>();
   for (const group of groups) {
-    const projectId = owned.get(group.dimensions?.[id] ?? '');
+    const projectId = owned.get(group.dimensions?.[source.id] ?? '');
     if (projectId) {
-      const bytes = fields.reduce((sum, field) => sum + (Number(group.max?.[field]) || 0), 0);
-      read.set(projectId, { [meter]: (read.get(projectId)?.[meter] ?? 0) + bytes });
+      const sum: Reading = read.get(projectId) ?? {};
+      for (const [meter, quantity] of Object.entries(source.reading(group)) as Array<
+        [Meter, number]
+      >) {
+        sum[meter] = (sum[meter] ?? 0) + quantity;
+      }
+      read.set(projectId, sum);
     }
   }
   return read;
@@ -158,7 +254,7 @@ async function readStorage(
  */
 export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Promise<void> {
   if (stripeLiveMode(env)) {
-    await dropTestPlans(db);
+    await dropTestPlans(db, env);
   }
   const rows = await db
     .select({
@@ -180,9 +276,12 @@ export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Pr
         .select()
         .from(resources)
         .where(
-          and(inArray(resources.project_id, ids), inArray(resources.type, ['d1', 'kv', 'r2'])),
+          and(
+            inArray(resources.project_id, ids),
+            inArray(resources.type, ['d1', 'kv', 'r2', 'queue']),
+          ),
         );
-  const owned = (type: StorageType) =>
+  const owned = (type: Source['type']) =>
     new Map(stored.filter((row) => row.type === type).map((row) => [row.cf_id, row.project_id]));
   const prices = await readMeterPrices(db);
   const today = new Date(`${dayOf(now)}T00:00:00.000Z`);
@@ -199,9 +298,9 @@ export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Pr
         ? []
         : ([
             [['hostedCpuMs'], () => readCpu(env, hosted, start, end)],
-            ...(Object.keys(STORAGE) as Array<StorageType>).map(
-              (type) =>
-                [[STORAGE[type].meter], () => readStorage(env, type, owned(type), day)] as [
+            ...SOURCES.map(
+              (source) =>
+                [source.meters, () => readDataset(env, source, owned(source.type), day)] as [
                   ReadonlyArray<Meter>,
                   () => Promise<Map<string, Reading>>,
                 ],

@@ -467,36 +467,43 @@
     {
       "idx": 73,
       "version": "7",
-      "when": 1795390144921,
-      "tag": "0073_stripe_events",
+      "when": 1795390153139,
+      "tag": "0073_project_suspension",
       "breakpoints": true
     },
     {
       "idx": 74,
       "version": "7",
-      "when": 1795390425124,
-      "tag": "0074_credit_ledger",
+      "when": 1795390154139,
+      "tag": "0074_stripe_events",
       "breakpoints": true
     },
     {
       "idx": 75,
       "version": "7",
-      "when": 1795390621080,
-      "tag": "0075_app_subscriptions",
+      "when": 1795390425124,
+      "tag": "0075_credit_ledger",
       "breakpoints": true
     },
     {
       "idx": 76,
       "version": "7",
-      "when": 1795390776303,
-      "tag": "0076_credit_take_back",
+      "when": 1795390621080,
+      "tag": "0076_app_subscriptions",
       "breakpoints": true
     },
     {
       "idx": 77,
       "version": "7",
+      "when": 1795390776303,
+      "tag": "0077_credit_take_back",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
       "when": 1795390838901,
-      "tag": "0077_starter_credit",
+      "tag": "0078_starter_credit",
       "breakpoints": true
     }
   ]

@@ -59,6 +59,7 @@ export async function publishStaticDeployment(input: {
     mutate: (
       txDb: Db,
       currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+      lockedProject: Project,
     ) => Promise<T>,
   ) => Promise<T>;
   readonly previousManifest: DeployManifest | null;
@@ -186,7 +187,7 @@ export async function publishStaticDeployment(input: {
   await snapshotCronState();
   await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
   markPhase('routing_switch');
-  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
+  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner, lockedProject) => {
     const existingRouting = await context.env.ROUTING.get(projectRouteKey(project));
     const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
     const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
@@ -198,6 +199,7 @@ export async function publishStaticDeployment(input: {
       assetConfig,
       manifest: manifest,
       suspended:
+        lockedProject.suspended_reason ??
         existingEntry?.suspended ??
         (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
           ? REASON_REQUESTS_EXCEEDED
