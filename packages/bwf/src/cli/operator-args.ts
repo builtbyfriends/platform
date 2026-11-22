@@ -118,6 +118,27 @@ export const operatorCommands: Array<OperatorCommand> = [
   },
   {
     group: 'project',
+    action: 'suspend',
+    description: 'Take one project offline and keep its data',
+    path: '/projects/:id/suspend',
+    positional: ['id'],
+    values: {
+      note: 'Note the owner sees',
+      'operator-note': 'Private note kept in the audit log',
+    },
+    method: 'POST',
+  },
+  {
+    group: 'project',
+    action: 'restore',
+    description: 'Bring a suspended project back online',
+    path: '/projects/:id/restore',
+    positional: ['id'],
+    values: { 'operator-note': 'Private note kept in the audit log' },
+    method: 'POST',
+  },
+  {
+    group: 'project',
     action: 'normalize',
     description: 'Verify and normalize legacy project deployment and queue identities',
     path: '/projects/:id/normalize',

@@ -449,6 +449,13 @@
       "when": 1795306366963,
       "tag": "0070_app_github_installations",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795388938571,
+      "tag": "0071_project_suspension",
+      "breakpoints": true
     }
   ]
 }

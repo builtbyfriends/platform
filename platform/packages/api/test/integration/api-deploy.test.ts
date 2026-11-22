@@ -654,6 +654,26 @@ describe('POST /projects/:id/deploy', () => {
     expect(routing.userId).toBe(owner.id);
   });
 
+  it("keeps an operator's project suspension through the owner's first and later deploys", async () => {
+    const owner = await createTestUser(env.db, 'taken-down-owner');
+    const project = await createTestProject(env.db, owner.id, 'taken-down-deploy');
+    await env.db
+      .update(projects)
+      .set({ suspended_reason: 'operator_takedown' })
+      .where(eq(projects.id, project.id));
+    mockCfApi();
+
+    for (let deploy = 0; deploy < 2; deploy++) {
+      const response = await app.fetch(await buildDeployRequest(env, project.id, owner.jwt), env);
+      expect(response.status).toBe(200);
+      requireEvent<DoneEvent>(await readAllEvents(response), 'done');
+      expect(await env.ROUTING.get(project.slug, 'json')).toMatchObject({
+        projectId: project.id,
+        suspended: 'operator_takedown',
+      });
+    }
+  });
+
   it("preserves the owner's request suspension on a collaborator's first deploy", async () => {
     const owner = await createTestUser(env.db, 'suspended-team-owner');
     const collaborator = await createTestUser(env.db, 'suspended-team-collaborator');

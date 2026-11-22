@@ -1145,6 +1145,28 @@ describe('proxy worker', () => {
   });
 
   describe('AI usage limit (KV block)', () => {
+    it('refuses AI calls for a suspended project', async () => {
+      const env = createEnv(
+        {},
+        {
+          'project-suspended:proj_000000000001': 'operator_takedown',
+          'ai-block:proj_000000000001': '1',
+        },
+      );
+      const res = await worker.fetch(
+        post('/ai/run', {
+          model: 'm',
+          inputs: {},
+          projectId: 'proj_000000000001',
+          aiToken: aiTokens['proj_000000000001'],
+        }),
+        env,
+      );
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'app unavailable' });
+    });
+
     it('returns 429 when ai-block key exists (service binding path)', async () => {
       const env = createEnv({}, { 'ai-block:proj_000000000001': '1' });
       const res = await worker.fetch(

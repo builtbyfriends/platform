@@ -120,7 +120,7 @@ export class SandboxControl extends WorkerEntrypoint<
     ) {
       return { ok: false, reason: 'runtime_budget' };
     }
-    if (owner.suspended_reason) {
+    if (owner.suspended_reason || project.suspended_reason) {
       return { ok: false, reason: 'unavailable' };
     }
     return {

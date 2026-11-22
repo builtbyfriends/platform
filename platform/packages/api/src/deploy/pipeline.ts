@@ -48,7 +48,7 @@ import {
 } from '../provisioning/cloudflare-api.ts';
 import { computeDispatchLimits, resolveRoutingUndo } from '../routing.ts';
 import { deployments } from '../schema.ts';
-import { routingSuspensionReason } from '../suspension.ts';
+import { projectRoutingSuspensionReason } from '../suspension.ts';
 import { isWithinLimit } from '../tiers.ts';
 import {
   type DeployManifest,
@@ -225,6 +225,7 @@ export async function runDeploymentPipeline(input: {
       mutate: (
         txDb: Db,
         currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+        lockedProject: Project,
       ) => Promise<T>,
     ): Promise<T> => {
       return await context.get('db').transaction(async (tx) => {
@@ -256,7 +257,7 @@ export async function runDeploymentPipeline(input: {
             throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
           }
         }
-        return await mutate(tx, currentAccess.owner);
+        return await mutate(tx, currentAccess.owner, lockedProject);
       });
     };
     // Decision: Compensation must serialize with each project cutover, not only teardown. Once a newer deploy or
@@ -475,7 +476,7 @@ export async function runDeploymentPipeline(input: {
                       projectId,
                       userId: currentOwner.id,
                       limits: currentLimits,
-                      suspended: routingSuspensionReason(currentOwner.suspended_reason),
+                      suspended: projectRoutingSuspensionReason(currentProject, currentOwner),
                       zeroTrust,
                     })
                   : withProjectZeroTrustRouting(value, zeroTrust, projectId);

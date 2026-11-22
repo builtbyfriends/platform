@@ -13,7 +13,7 @@ import { resolvePlanLimits } from '../plans.ts';
 import { computeDispatchLimits } from '../routing-limits.ts';
 import { projectRouteKey } from '../routing.ts';
 import { domains } from '../schema.ts';
-import { routingSuspensionReason } from '../suspension.ts';
+import { projectRoutingSuspensionReason } from '../suspension.ts';
 import type { DeployManifest, Project, ProjectZeroTrust } from '../types.ts';
 import {
   type ManagedAccessApplication,
@@ -268,7 +268,7 @@ function routingMatchesDeployment(
 export async function publishProjectZeroTrustRoutingLocked(
   env: Pick<ApiEnv['Bindings'], 'ROUTING'>,
   db: Db,
-  project: Pick<Project, 'id' | 'slug' | 'user_id' | 'active_deployment_id'>,
+  project: Pick<Project, 'id' | 'slug' | 'user_id' | 'active_deployment_id' | 'suspended_reason'>,
   protection: ProjectZeroTrustRouting | null,
   budget = { remaining: MAX_ROUTING_KEYS_PER_RUN },
 ): Promise<boolean> {
@@ -300,7 +300,7 @@ export async function publishProjectZeroTrustRoutingLocked(
     await resolvePlanLimits(db, owner.plan),
     manifest?.limits,
   );
-  const suspensionReason = routingSuspensionReason(owner.suspended_reason);
+  const suspensionReason = projectRoutingSuspensionReason(project, owner);
   // Decision: Protected destinations are capped separately. Clearing public routing has no domain cap and
   // checkpoints progress while holding the project lock.
   const cursor = protection ? null : (row?.routing_cursor ?? null);
