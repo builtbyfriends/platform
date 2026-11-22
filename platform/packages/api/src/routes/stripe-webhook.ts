@@ -1,10 +1,11 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { applyCredits, clientPlans, paidOwnerIds } from '../app-credits.ts';
 import { PAID_PLANS, verifyStripeSignature, type PaidPlan } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
 import { getDefaultPlan } from '../plans.ts';
-import { appPeople, projects, users } from '../schema.ts';
+import { appPeople } from '../schema.ts';
 
 type StripeEvent = {
   type: string;
@@ -23,21 +24,13 @@ const isPaidPlan = (value: unknown): value is PaidPlan =>
 
 /** Applies a person's new plan to the limits of the projects they pay for. */
 async function reconcilePaidProjects(context: Context<ApiEnv>, clientId: string, person: string) {
-  const owners = await context
-    .get('db')
-    .selectDistinct({ id: users.id })
-    .from(users)
-    .leftJoin(projects, eq(projects.user_id, users.id))
-    .where(
-      and(
-        eq(users.provider, `app:${clientId}`),
-        or(eq(users.provider_id, person), eq(projects.payer_person_id, person)),
-      ),
-    );
-  for (const owner of owners) {
+  const db = context.get('db');
+  // Decision: The new plan's credits decide the AI pause before the limits are stamped again.
+  await applyCredits(context.env, db, clientId, person);
+  for (const id of await paidOwnerIds(db, clientId, person)) {
     // Decision: The plan is already saved, and the scheduled reconciliation applies it later if this fails.
-    await reconcileOperatorUserPlan(context, owner.id).catch((error: unknown) => {
-      console.error('[billing] payer plan reconcile failed', { userId: owner.id, error });
+    await reconcileOperatorUserPlan(context, id).catch((error: unknown) => {
+      console.error('[billing] payer plan reconcile failed', { userId: id, error });
     });
   }
 }
@@ -65,7 +58,11 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
   // Decision: A person of a connected application: their plan lives in app_people, not on an account.
   if (metadata.clientId && metadata.personId) {
     const key = { client_id: metadata.clientId, person_id: metadata.personId };
-    if (event.type === 'checkout.session.completed' && isPaidPlan(metadata.plan)) {
+    if (
+      event.type === 'checkout.session.completed' &&
+      metadata.plan &&
+      Object.hasOwn(await clientPlans(context.env, db, key.client_id), metadata.plan)
+    ) {
       const row = {
         plan: metadata.plan,
         stripe_customer_id: object.customer ?? null,

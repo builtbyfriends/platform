@@ -456,6 +456,13 @@
       "when": 1795369244178,
       "tag": "0071_app_payer_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795370182955,
+      "tag": "0072_app_credits",
+      "breakpoints": true
     }
   ]
 }

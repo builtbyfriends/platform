@@ -34,8 +34,8 @@ export function stripeSecretKey(env: StripeEnv): string {
   return key;
 }
 
-function priceFor(env: StripeEnv, plan: PaidPlan): string {
-  const price = env[PAID_PLANS[plan]];
+function priceFor(env: StripeEnv, plan: string): string {
+  const price = Object.hasOwn(PAID_PLANS, plan) ? env[PAID_PLANS[plan as PaidPlan]] : undefined;
   if (!price) {
     throw new BillingUnavailableError(`No Stripe price is set for the ${plan} plan.`);
   }
@@ -52,14 +52,16 @@ export async function createCheckoutSession(
     reference: string;
     metadata: Record<string, string>;
     email: string | null;
-    plan: PaidPlan;
+    plan: string;
+    /** The Stripe price to charge. Without it, the plan's price from the environment. */
+    priceId?: string;
     returnUrl: string;
   },
   fetcher: typeof fetch = fetch,
 ): Promise<string> {
   const form = new URLSearchParams({
     mode: 'subscription',
-    'line_items[0][price]': priceFor(env, input.plan),
+    'line_items[0][price]': input.priceId || priceFor(env, input.plan),
     'line_items[0][quantity]': '1',
     client_reference_id: input.reference,
     success_url: input.returnUrl,

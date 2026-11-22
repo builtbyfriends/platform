@@ -4,7 +4,7 @@ import type { OAuthSession } from './auth/oauth-types.ts';
 import { OAuthError } from './auth/oauth.ts';
 import type { DbOrTx } from './db.ts';
 import { resolvePlanLimits } from './plans.ts';
-import { appPeople, appUsage, projects, users } from './schema.ts';
+import { appPeople, appUsage, oauthClients, projects, users } from './schema.ts';
 
 type Owner = { id: string; plan: string; provider: string; provider_id: string };
 type Paid = { payer_person_id: string | null };
@@ -69,8 +69,30 @@ export async function billedAccountPlanId(db: DbOrTx, owner: Owner): Promise<str
   return payerPlanId(db, owner, payers.length === 1 ? payers[0]!.person : null);
 }
 
+/**
+ * The limits for an owner's shared monthly meters. A plan with credits is held to its balance,
+ * so its monthly caps on requests, AI and sandbox time stop counting.
+ */
+export async function accountPlanLimits(
+  db: DbOrTx,
+  owner: Pick<Owner, 'provider'> | null | undefined,
+  planId: string,
+): Promise<PlanLimits> {
+  const limits = await resolvePlanLimits(db, planId);
+  if (!owner?.provider.startsWith(APP)) {
+    return limits;
+  }
+  const [client] = await db
+    .select({ plans: oauthClients.plans })
+    .from(oauthClients)
+    .where(eq(oauthClients.id, owner.provider.slice(APP.length)));
+  return (client?.plans?.[planId]?.creditMicros ?? 0) > 0
+    ? { ...limits, requestsPerMonth: 0, aiNeuronsPerMonth: 0, sandboxRuntimeSecondsPerMonth: 0 }
+    : limits;
+}
+
 export async function billedAccountPlanLimits(db: DbOrTx, owner: Owner): Promise<PlanLimits> {
-  return resolvePlanLimits(db, await billedAccountPlanId(db, owner));
+  return accountPlanLimits(db, owner, await billedAccountPlanId(db, owner));
 }
 
 /**

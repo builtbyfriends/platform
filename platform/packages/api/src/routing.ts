@@ -1,5 +1,6 @@
 import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import { sql as drizzleSql } from 'drizzle-orm';
+import { payerOutOfCredits } from './app-credits.ts';
 import { getDomainsByProjectIds, getProject, type Db } from './db.ts';
 import type { AssetConfig, DeployManifest } from './types.ts';
 import {
@@ -26,7 +27,7 @@ async function withLockedProjectOwner(
   db: Db,
   projectId: string,
   expectedOwnerUserId: string,
-  update: () => Promise<void>,
+  update: (tx: Db) => Promise<void>,
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
@@ -34,7 +35,7 @@ async function withLockedProjectOwner(
     if (!project || project.user_id !== expectedOwnerUserId || project.status === 'deleting') {
       return false;
     }
-    await update();
+    await update(tx);
     return true;
   });
 }
@@ -54,8 +55,10 @@ export async function setProjectAiBlock(
   expectedOwnerUserId: string,
   blocked: boolean,
 ): Promise<boolean> {
-  return withLockedProjectOwner(db, projectId, expectedOwnerUserId, async () => {
-    if (blocked) {
+  return withLockedProjectOwner(db, projectId, expectedOwnerUserId, async (tx) => {
+    // Decision: Each stamp of the AI pause passes through here, so a payer with no credits left keeps it on
+    // whatever the owner's own counter says.
+    if (blocked || (await payerOutOfCredits(tx, projectId))) {
       await routing.put(`ai-block:${projectId}`, '1');
     } else {
       await routing.delete(`ai-block:${projectId}`);

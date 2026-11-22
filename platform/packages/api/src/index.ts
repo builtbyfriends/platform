@@ -25,6 +25,7 @@ import adminUsers from './admin/routes/users.tsx';
 import adminZeroTrust from './admin/routes/zero-trust.tsx';
 import { sweepAiLogging } from './ai-logging-sweep.ts';
 import { billedAccountPlanId } from './app-payer.ts';
+import { syncHostedUse } from './app-usage-sync.ts';
 import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { purgeExpiredOAuthRequests } from './auth/oauth.ts';
@@ -796,6 +797,10 @@ async function runScheduledMaintenance(
 
   await reconcilePendingProjectZeroTrust(env, db).catch((error) =>
     console.error('[scheduled] Zero Trust reconciliation failed:', error),
+  );
+
+  await syncHostedUse(env, db).catch((error) =>
+    console.error('[scheduled] hosted use sync failed:', error),
   );
 
   await sweepAiLogging(db, env.ROUTING, initialPlanDefaultFor(env)).catch((error) =>

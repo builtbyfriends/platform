@@ -6,6 +6,7 @@ import type {
 } from '@builtbyfriends/platform';
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   check,
   index,
@@ -77,6 +78,8 @@ export const oauthClients = pgTable('oauth_clients', {
   scopes: jsonb('scopes').notNull().$type<Array<OAuthScope>>(),
   secret_hash: text('secret_hash').notNull(),
   enabled: boolean('enabled').notNull().default(true),
+  /** The plans this application's people can buy: each one's Stripe price and monthly credits. */
+  plans: jsonb('plans').$type<Record<string, { stripePriceId: string; creditMicros: number }>>(),
   created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -94,6 +97,8 @@ export const appPeople = pgTable(
     plan: text('plan').$type<PlanId>().notNull(),
     stripe_customer_id: text('stripe_customer_id'),
     stripe_subscription_id: text('stripe_subscription_id'),
+    /** The month (`YYYY-MM-01`) in which this person ran out of credits, while it lasts. */
+    out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -135,6 +140,31 @@ export const appUsageSources = pgTable(
     primaryKey({
       columns: [table.client_id, table.person_id, table.period, table.model, table.source],
     }),
+  ],
+);
+
+/**
+ * Use by day, meter and project for the person who pays for it. An empty project is use the
+ * application reported; the rest is what Platform read for a hosted project.
+ */
+export const appUsageDaily = pgTable(
+  'app_usage_daily',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    person_id: text('person_id').notNull(),
+    project_id: text('project_id').notNull().default(''),
+    /** `YYYY-MM-DD` in UTC. */
+    day: text('day').notNull(),
+    meter: text('meter').notNull(),
+    quantity: bigint('quantity', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.client_id, table.person_id, table.project_id, table.day, table.meter],
+    }),
+    index('idx_app_usage_daily_project').on(table.project_id, table.day),
   ],
 );
 

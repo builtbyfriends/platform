@@ -1,5 +1,12 @@
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import {
+  METERS,
+  parseClientPlans,
+  parseMeterPrices,
+  readMeterPrices,
+  writeMeterPrices,
+} from '../../app-credits.ts';
 import {
   registerOAuthClient,
   publicOAuthClient,
@@ -9,6 +16,7 @@ import {
 } from '../../auth/oauth.ts';
 import { isDevBypass, type ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
+import { readPlanCatalog } from '../../plans.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { oauthClients } from '../../schema.ts';
 import { renderAdminPage } from '../react/server.ts';
@@ -33,10 +41,56 @@ app.get('/', async (context) =>
     clients: (
       await context.get('db').select().from(oauthClients).orderBy(desc(oauthClients.created_at))
     ).map(publicOAuthClient),
+    meterPrices: await readMeterPrices(context.get('db')),
+    meterUnits: Object.fromEntries(
+      Object.entries(METERS).map(([meter, { unit }]) => [meter, unit]),
+    ),
     platformName: getPlatformDisplayName(context.env, context.req.url),
     username: context.get('user').login,
   }),
 );
+const json = (value: unknown) => {
+  try {
+    return JSON.parse(String(value ?? ''));
+  } catch {
+    return null;
+  }
+};
+app.post('/usage-prices', async (context) => {
+  const prices = parseMeterPrices(json((await context.req.parseBody()).prices));
+  if (!prices) {
+    throw new OAuthError('invalid_request', 'Give each meter a price in dollars, from 0 up.');
+  }
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('oauth/clients/usage-prices', prices),
+    async () => {
+      await writeMeterPrices(context.get('db'), prices);
+      return { succeeded: true, response: context.redirect('/admin/connected-apps') };
+    },
+  );
+});
+app.post('/:id/plans', async (context) => {
+  const db = context.get('db');
+  const text = String((await context.req.parseBody()).plans ?? '').trim();
+  const plans = text ? parseClientPlans(json(text)) : null;
+  const known = new Set((await readPlanCatalog(db)).plans.map((plan) => plan.id));
+  if ((text && !plans) || Object.keys(plans ?? {}).some((id) => !known.has(id))) {
+    throw new OAuthError(
+      'invalid_request',
+      'Give each plan from the plan catalog a stripePriceId and a creditMicros amount.',
+    );
+  }
+  const input = { id: context.req.param('id'), plans };
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('oauth/clients/plans', input),
+    async () => {
+      await db.update(oauthClients).set({ plans }).where(eq(oauthClients.id, input.id));
+      return { succeeded: true, response: context.redirect('/admin/connected-apps') };
+    },
+  );
+});
 app.post('/', async (context) => {
   const body = await context.req.parseBody();
   const input = {

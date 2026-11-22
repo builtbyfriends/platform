@@ -11,6 +11,8 @@ export function ConnectedAppsPage({
   platformName,
   username,
   clients,
+  meterPrices,
+  meterUnits,
   credentials,
   error,
 }: {
@@ -23,7 +25,10 @@ export function ConnectedAppsPage({
     enabled: boolean;
     redirect_uris: Array<string>;
     scopes: Array<string>;
+    plans?: Record<string, { stripePriceId: string; creditMicros: number }> | null;
   }>;
+  meterPrices?: Record<string, number>;
+  meterUnits?: Record<string, number>;
   credentials?: { clientId: string; clientSecret: string };
   error?: string;
 }) {
@@ -72,6 +77,25 @@ export function ConnectedAppsPage({
             <Button type="submit" label="Register" />
           </SectionStack>
         </AdminCard>
+        {meterPrices && (
+          <AdminCard
+            title="Usage prices"
+            description="What each meter costs a connected app’s people, in dollars. Each price buys the number of units listed."
+          >
+            <SectionStack as="form" method="post" action="/admin/connected-apps/usage-prices">
+              <p>
+                <code>{JSON.stringify(meterUnits)}</code>
+              </p>
+              <FormTextArea
+                label="Prices (JSON)"
+                name="prices"
+                required
+                initialValue={JSON.stringify(meterPrices, null, 2)}
+              />
+              <Button type="submit" label="Save prices" />
+            </SectionStack>
+          </AdminCard>
+        )}
         {clients.map((client) => (
           <AdminCard key={client.id} title={client.name} description={client.operator}>
             <p>
@@ -95,6 +119,21 @@ export function ConnectedAppsPage({
                   }
                 />
               </form>
+            )}
+            {client.enabled && (
+              <SectionStack
+                as="form"
+                method="post"
+                action={`/admin/connected-apps/${client.id}/plans`}
+              >
+                <FormTextArea
+                  label="Plans its people can buy (JSON). Empty uses the two prices from the environment, with no credits."
+                  name="plans"
+                  placeholder='{ "solo": { "stripePriceId": "price_…", "creditMicros": 12000000 } }'
+                  initialValue={client.plans ? JSON.stringify(client.plans, null, 2) : ''}
+                />
+                <Button type="submit" label="Save plans" />
+              </SectionStack>
             )}
             {client.enabled && (
               <form

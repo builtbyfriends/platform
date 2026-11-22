@@ -74,6 +74,15 @@ function auditTarget(
         ...(segments[2] === 'preview-permission' ? { enabled: body.enabled === true } : {}),
       });
     }
+    if (segments[2] === 'plans') {
+      return JSON.stringify({
+        clientId: boundedString(body.id, 128),
+        plans: boundedString(JSON.stringify(body.plans ?? null), 2048),
+      });
+    }
+    if (segments[2] === 'usage-prices') {
+      return boundedString(JSON.stringify(body), 2048) ?? '';
+    }
   }
   if (segments[0] === 'config' && segments[1] === 'auth') {
     return JSON.stringify({

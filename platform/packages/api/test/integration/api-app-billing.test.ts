@@ -1,11 +1,19 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vite-plus/test';
-import { billedAccountPlanId, billedPlanId, billedPlanLimits } from '../../src/app-payer.ts';
+import { payerOutOfCredits } from '../../src/app-credits.ts';
+import {
+  billedAccountPlanId,
+  billedAccountPlanLimits,
+  billedPlanId,
+  billedPlanLimits,
+} from '../../src/app-payer.ts';
+import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import rawApp from '../../src/index.ts';
 import { resolvePlanLimits } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
-import { projects, users } from '../../src/schema.ts';
+import { setProjectAiBlock } from '../../src/routing.ts';
+import { appPeople, oauthClients, projects, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -33,6 +41,19 @@ type Hosted = {
 };
 type Answer = {
   hosted?: Hosted | null;
+  hostedAsOf: string | null;
+  withinCaps: boolean;
+  outOfCredits: boolean;
+  creditsRemainingMicros: number | null;
+  credits: {
+    includedMicros: number;
+    usedMicros: number;
+    remainingMicros: number;
+    out: boolean;
+  } | null;
+  meters: Array<{ meter: string; quantity: number; costMicros: number }>;
+  daily: Array<{ day: string; costMicros: number; meters: Record<string, number> }>;
+  plans: Array<{ id: string; creditMicros: number }>;
   breakdown: Array<{ model: string; source: string; aiNeurons: number; sandboxSeconds: number }>;
   caps: { aiNeuronsPerMonth: number };
   aiNeuronsUsed: number;
@@ -86,14 +107,28 @@ async function preview(person: string, body: Record<string, unknown>) {
   return { status: 200, project: project!, owner: owner! };
 }
 
-// Decision: The dev bypass answers with zeros, which keeps the analytics backend out of the test.
-async function hosted(person: string) {
-  env.DEV_AUTH_BYPASS = 'true';
-  try {
-    return (await dataOf(call('/usage.status', { person, hosted: true }))).hosted;
-  } finally {
-    delete env.DEV_AUTH_BYPASS;
-  }
+const hosted = async (person: string) =>
+  (await dataOf(call('/usage.status', { person, hosted: true }))).hosted;
+
+async function sellCredits(person: string, plan: string, creditMicros: number) {
+  await env.db
+    .update(oauthClients)
+    .set({
+      plans: {
+        solo: { stripePriceId: 'price_app_solo', creditMicros },
+        pro: { stripePriceId: 'price_app_pro', creditMicros: creditMicros * 10 },
+      },
+    })
+    .where(eq(oauthClients.id, registration.client.id));
+  await webhook({
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        metadata: { clientId: registration.client.id, personId: person, plan },
+        customer: 'cus_1',
+      },
+    },
+  });
 }
 
 async function webhook(event: unknown, secret = 'whsec_test') {
@@ -260,12 +295,120 @@ describe('app billing', () => {
     expect((await hosted('p1'))!.projects).toEqual([]);
   });
 
-  it('leaves the hosted numbers out when the analytics backend is down', async () => {
-    await preview('p1', { workspace: 'w1' });
+  it('stores what hosted apps used under their payer, and keeps the old numbers when analytics is down', async () => {
+    const { project } = await preview('p1', { workspace: 'w1' });
+    expect((await dataOf(call('/usage.status', { person: 'p1' }))).hostedAsOf).toBeNull();
+    const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+      String(input).endsWith('/graphql')
+        ? Response.json({
+            data: { viewer: { accounts: [{ aiGatewayRequests: [{ sum: { cost: 0.011 } }] }] } },
+          })
+        : Response.json({
+            data: [{ blob1: project!.id, requests: 2_000_000, bandwidth_bytes: 500 }],
+          }),
+    );
+    const noon = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
+    await syncHostedUse(env as never, env.db, noon);
+    await syncHostedUse(env as never, env.db, noon);
+    analytics.mockRestore();
     const offline = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.error());
-    const answer = await dataOf(call('/usage.status', { person: 'p1', hosted: true }));
+    await syncHostedUse(env as never, env.db, noon);
     offline.mockRestore();
-    expect(answer).toMatchObject({ plan: 'free', hosted: null });
+
+    const answer = await dataOf(call('/usage.status', { person: 'p1', hosted: true, daily: true }));
+    expect(answer.hostedAsOf).toBe(noon.toISOString());
+    // Decision: The read covers today and yesterday, and reading twice doesn't count twice.
+    const days = noon.getUTCDate() === 1 ? 1 : 2;
+    expect(answer.hosted).toMatchObject({
+      requests: 2_000_000 * days,
+      bandwidthBytes: 500 * days,
+      aiNeurons: 1000 * days,
+      costMicros: (600_000 + 11_000) * days,
+      projects: [{ projectId: project!.id, person: 'p1', requests: 2_000_000 * days }],
+    });
+    expect(answer.meters).toContainEqual({
+      meter: 'hostedRequests',
+      quantity: 2_000_000 * days,
+      costMicros: 600_000 * days,
+    });
+    expect(answer.credits).toBeNull();
+    expect(answer.daily).toHaveLength(new Date().getUTCDate());
+    expect(answer.daily.at(-1)).toMatchObject({
+      costMicros: 611_000,
+      meters: { hostedRequests: 2_000_000, hostedAiNeurons: 1000 },
+    });
+  });
+
+  it('holds a plan with credits to one balance, and pauses hosted AI at zero', async () => {
+    await sellCredits('p1', 'solo', 1_000_000);
+    const { project, owner } = await preview('p1', { workspace: 'w1' });
+    expect((await dataOf(call('/plans.list', {}))).plans).toEqual([
+      { id: 'solo', creditMicros: 1_000_000 },
+      { id: 'pro', creditMicros: 10_000_000 },
+    ]);
+
+    const some = await dataOf(call('/usage.record', { person: 'p1', aiNeurons: 50_000 }));
+    expect(some).toMatchObject({
+      withinCaps: true,
+      outOfCredits: false,
+      creditsRemainingMicros: 450_000,
+    });
+    expect(await payerOutOfCredits(env.db, project!.id)).toBe(false);
+    expect(await billedAccountPlanLimits(env.db, owner!)).toMatchObject({
+      requestsPerMonth: 0,
+      aiNeuronsPerMonth: 0,
+      sandboxRuntimeSecondsPerMonth: 0,
+    });
+
+    // Decision: 18,000 seconds is five hours of sandbox at $0.10, which takes the balance past zero. The solo
+    // plan's own caps for AI and sandbox time are far above both numbers.
+    const spent = await dataOf(call('/usage.record', { person: 'p1', sandboxSeconds: 18_000 }));
+    expect(spent).toMatchObject({
+      withinCaps: false,
+      outOfCredits: true,
+      creditsRemainingMicros: 0,
+    });
+    const status = await dataOf(call('/usage.status', { person: 'p1', daily: true }));
+    expect(status).toMatchObject({
+      plan: 'solo',
+      withinCaps: false,
+      aiWithinCap: false,
+      sandboxWithinCap: false,
+      credits: { includedMicros: 1_000_000, usedMicros: 1_050_000, remainingMicros: 0, out: true },
+    });
+    expect(status.meters).toHaveLength(10);
+    expect(status.daily.at(-1)).toMatchObject({
+      costMicros: 1_050_000,
+      meters: { aiNeurons: 50_000, sandboxSeconds: 18_000 },
+    });
+
+    expect(await payerOutOfCredits(env.db, project!.id)).toBe(true);
+    await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
+    expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBe('1');
+
+    await sellCredits('p1', 'pro', 1_000_000);
+    expect(await payerOutOfCredits(env.db, project!.id)).toBe(false);
+    const [person] = await env.db.select().from(appPeople);
+    expect(person).toMatchObject({ plan: 'pro', out_of_credits_period: null });
+    await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
+    expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBeNull();
+    expect((await dataOf(call('/usage.status', { person: 'p1' }))).withinCaps).toBe(true);
+  });
+
+  it('sells an application its own plans at its own prices', async () => {
+    await sellCredits('p0', 'solo', 1_000_000);
+    await env.db
+      .update(oauthClients)
+      .set({ plans: { solo: { stripePriceId: 'price_app_solo', creditMicros: 5 } } })
+      .where(eq(oauthClients.id, registration.client.id));
+    const stripe = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ url: 'https://stripe.example/session' }));
+    const order = { person: 'p1', returnUrl: 'https://example.com/plan' };
+    expect((await call('/billing.checkout', { ...order, plan: 'pro' })).status).toBe(400);
+    expect((await call('/billing.checkout', { ...order, plan: 'solo' })).status).toBe(200);
+    expect(String(stripe.mock.calls[0]![1]!.body)).toContain('price_app_solo');
+    stripe.mockRestore();
   });
 
   it('raises a hosted app’s limits when its payer buys a plan', async () => {

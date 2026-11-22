@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { billedAccountPlanId } from './app-payer.ts';
+import { accountPlanLimits, billedAccountPlanId } from './app-payer.ts';
 import {
   createDb,
   getUser as getAccount,
@@ -10,7 +10,6 @@ import {
   type Db,
 } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { resolvePlanLimits } from './plans.ts';
 import { queryProjectAiUsage } from './routes/usage.ts';
 import {
   sandboxBlockKey,
@@ -392,7 +391,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     // PostgreSQL, not the producer hint.
     const owner = await getUser(getDb(), body.userId);
     state.plan = owner?.plan ?? state.plan;
-    const limits = await resolvePlanLimits(getDb(), state.plan);
+    const limits = await accountPlanLimits(getDb(), owner, state.plan);
 
     // Decision: Commit each suspension latch only after each enforcement write succeeds.
     const exceedsLimit = evaluateRequestLimit(state, 0, limits);
@@ -674,7 +673,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     }
     state.ownerUserId = userId;
     state.plan = owner.plan;
-    const limits = await resolvePlanLimits(db, owner.plan);
+    const limits = await accountPlanLimits(db, owner, owner.plan);
     const requestsSuspended = evaluateRequestLimit(state, 0, limits);
     const sandboxRuntimeSuspended = evaluateSandboxRuntimeLimit(state, 0, limits);
     const aiSuspended = evaluateAiLimit(state, limits);
@@ -831,7 +830,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (currentOwner) {
       state.plan = currentOwner.plan;
     }
-    const limits = await resolvePlanLimits(db, state.plan);
+    const limits = await accountPlanLimits(db, currentOwner, state.plan);
     const projectIds = [...ownedProjectIds];
     // Decision: Closed windows still need reconciliation on unlimited plans: detachment keeps their samples
     // without depending on the provider. Otherwise inactive accounts wake only while receipt pruning has

@@ -82,17 +82,17 @@ export async function getAccountUsage(
   return usageForWindows(env, projectWindows, since);
 }
 
-/** Usage of the given projects from `since` until now, whoever owns them. */
-export function getProjectsUsageSince(
+/** Usage of the given projects between two moments, whoever owns them. */
+export function getProjectsUsageBetween(
   env: Bindings,
   projects: ReadonlyArray<Project>,
-  since: Date,
+  start: Date,
+  end: Date,
 ) {
-  const end = new Date();
   return usageForWindows(
     env,
-    projects.map((project) => ({ project, intervals: [{ start: since, end }] })),
-    since,
+    projects.map((project) => ({ project, intervals: [{ start, end }] })),
+    start,
   );
 }
 

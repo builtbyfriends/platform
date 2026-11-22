@@ -9,8 +9,11 @@ const dbCalls = {
   suspend: [] as Array<{ id: string; reason: string }>,
   unsuspendIfReason: [] as Array<{ id: string; reason: string }>,
 };
+vi.mock('../../src/app-credits.ts', () => ({ payerOutOfCredits: async () => false }));
 vi.mock('../../src/app-payer.ts', () => ({
   billedAccountPlanId: async (_db: unknown, user: { plan: string }) => user.plan,
+  accountPlanLimits: async (db: unknown, _owner: unknown, plan: string) =>
+    (await import('../../src/plans.ts')).resolvePlanLimits(db as never, plan),
 }));
 vi.mock('../../src/db.ts', () => ({
   createDb: () => ({

@@ -1,35 +1,35 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import {
+  addUse,
+  applyCredits,
+  clientPlans,
+  currentPeriod,
+  hostedAsOf,
+  paidProjects,
+  paidProjectUse,
+  payerDaily,
+  readMeterPrices,
+  costMicros,
+  type Meter,
+  type MeterPrices,
+  type MeterUse,
+} from '../app-credits.ts';
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import {
   BillingUnavailableError,
-  PAID_PLANS,
   createCheckoutSession,
   createPortalSession,
   subscriptionRenewsAt,
-  type PaidPlan,
 } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
-import {
-  appPeople,
-  appUsage,
-  appUsageEvents,
-  appUsageSources,
-  projects,
-  users,
-} from '../schema.ts';
-import { getProjectsUsageSince, UsageUnavailableError } from './usage.ts';
+import { appPeople, appUsage, appUsageEvents, appUsageSources } from '../schema.ts';
 
-const isPaidPlan = (value: unknown): value is PaidPlan =>
-  typeof value === 'string' && Object.hasOwn(PAID_PLANS, value);
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
 const isReturnUrl = (value: unknown): value is string =>
   typeof value === 'string' && URL.canParse(value) && new URL(value).protocol === 'https:';
-
-/** First day of this calendar month in UTC, as `YYYY-MM-01`. */
-const currentPeriod = (now = new Date()) => `${now.toISOString().slice(0, 7)}-01`;
 
 type BillingContext = Context<ApiEnv>;
 
@@ -69,70 +69,59 @@ function shares(value: unknown): Array<Share> | null {
     : null;
 }
 
-/**
- * What the projects this person pays for used this month, from Platform's own request and AI
- * records. Null when those records can't be read right now.
- */
+const HOSTED_FIELDS = {
+  requests: 'hostedRequests',
+  bandwidthBytes: 'hostedBandwidthBytes',
+  aiNeurons: 'hostedAiNeurons',
+} as const satisfies Record<string, Meter>;
+
+function hostedLine(use: Partial<MeterUse>, prices: MeterPrices) {
+  return {
+    ...(Object.fromEntries(
+      Object.entries(HOSTED_FIELDS).map(([field, meter]) => [field, use[meter] ?? 0]),
+    ) as Record<keyof typeof HOSTED_FIELDS, number>),
+    costMicros: Object.entries(use).reduce(
+      (sum, [meter, quantity]) => sum + costMicros(meter as Meter, quantity, prices),
+      0,
+    ),
+  };
+}
+
+/** What the projects this person pays for used this month, as the hourly read stored it. */
 async function hostedUse(context: BillingContext, person: string) {
-  const rows = await context
-    .get('db')
-    .select({ project: projects, person: users.provider_id })
-    .from(projects)
-    .innerJoin(users, eq(users.id, projects.user_id))
-    .where(
-      and(
-        eq(users.provider, `app:${context.get('billingClient')}`),
-        ne(projects.status, 'deleting'),
-        sql`coalesce(${projects.payer_person_id}, ${users.provider_id}) = ${person}`,
-      ),
-    );
-  if (rows.length === 0) {
-    return { requests: 0, bandwidthBytes: 0, aiNeurons: 0, projects: [] };
-  }
-  try {
-    const { billingPeriodStart: _since, ...usage } = await getProjectsUsageSince(
-      context.env,
-      rows.map((row) => row.project),
-      new Date(`${currentPeriod()}T00:00:00.000Z`),
-    );
-    const builtFor = new Map(rows.map((row) => [row.project.id, row.person]));
-    return {
-      ...usage,
-      projects: usage.projects.map((project) => ({
-        ...project,
-        person: builtFor.get(project.projectId)!,
-      })),
-    };
-  } catch (error) {
-    if (error instanceof UsageUnavailableError) {
-      return null;
+  const db = context.get('db');
+  const clientId = context.get('billingClient');
+  const [rows, use, prices] = await Promise.all([
+    paidProjects(db, clientId, person),
+    paidProjectUse(db, clientId, person),
+    readMeterPrices(db),
+  ]);
+  const total: Partial<MeterUse> = {};
+  const listed = rows.map(({ project, person: builtFor }) => {
+    const projectUse = use.get(project.id) ?? {};
+    for (const [meter, quantity] of Object.entries(projectUse)) {
+      total[meter as Meter] = (total[meter as Meter] ?? 0) + quantity;
     }
-    throw error;
-  }
+    return {
+      projectId: project.id,
+      slug: project.slug,
+      person: builtFor,
+      ...hostedLine(projectUse, prices),
+    };
+  });
+  return { ...hostedLine(total, prices), projects: listed };
 }
 
 /** A person's plan, its caps, what they used this month, and whether they are still within the caps. */
 async function standing(context: BillingContext, person: string) {
   const db = context.get('db');
   const clientId = context.get('billingClient');
-  const [row] = await db
-    .select()
-    .from(appPeople)
-    .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person)));
+  const { row, meters, credits } = await applyCredits(context.env, db, clientId, person);
   const plan = row?.plan ?? (await getDefaultPlan(db)).id;
   const limits = await resolvePlanLimits(db, plan);
   const period = currentPeriod();
-  const [used] = await db
-    .select()
-    .from(appUsage)
-    .where(
-      and(
-        eq(appUsage.client_id, clientId),
-        eq(appUsage.person_id, person),
-        eq(appUsage.period, period),
-      ),
-    );
-  const usedNow = { aiNeurons: used?.ai_neurons ?? 0, sandboxSeconds: used?.sandbox_seconds ?? 0 };
+  const quantity = (meter: Meter) => meters.find((entry) => entry.meter === meter)!.quantity;
+  const usedNow = { aiNeurons: quantity('aiNeurons'), sandboxSeconds: quantity('sandboxSeconds') };
   const breakdown = await db
     .select({
       model: appUsageSources.model,
@@ -150,8 +139,11 @@ async function standing(context: BillingContext, person: string) {
     );
   // Decision: 0 means unlimited in a plan's limits.
   const within = (limit: number, value: number) => limit === 0 || value < limit;
-  const aiWithinCap = within(limits.aiNeuronsPerMonth, usedNow.aiNeurons);
-  const sandboxWithinCap = within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
+  // Decision: A plan with credits is held to its balance, and the two caps stop deciding.
+  const aiWithinCap = credits ? !credits.out : within(limits.aiNeuronsPerMonth, usedNow.aiNeurons);
+  const sandboxWithinCap = credits
+    ? !credits.out
+    : within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
   return {
     plan,
     billingPeriodStart: `${period}T00:00:00.000Z`,
@@ -161,6 +153,8 @@ async function standing(context: BillingContext, person: string) {
     },
     used: usedNow,
     breakdown,
+    credits,
+    meters,
     withinCaps: aiWithinCap && sandboxWithinCap,
     aiWithinCap,
     sandboxWithinCap,
@@ -200,9 +194,28 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     const renewsAt = subscriptionId
       ? await subscriptionRenewsAt(context.env, subscriptionId).catch(() => null)
       : null;
-    // Decision: The hosted numbers cost a call to the analytics backend, so a caller asks for them.
+    const db = context.get('db');
     const hosted = body.hosted === true ? { hosted: await hostedUse(context, body.person) } : {};
-    return context.json({ data: { ...now, ...hosted, ...(renewsAt ? { renewsAt } : {}) } });
+    const daily =
+      body.daily === true
+        ? {
+            daily: await payerDaily(
+              db,
+              context.get('billingClient'),
+              body.person,
+              await readMeterPrices(db),
+            ),
+          }
+        : {};
+    return context.json({
+      data: {
+        ...now,
+        hostedAsOf: await hostedAsOf(db),
+        ...hosted,
+        ...daily,
+        ...(renewsAt ? { renewsAt } : {}),
+      },
+    });
   })
   .post('/usage.record', async (context) => {
     const body = await context.req.json().catch(() => null);
@@ -252,6 +265,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
             sandbox_seconds: sql`${appUsage.sandbox_seconds} + ${seconds}`,
           },
         });
+      const payer = { clientId, person: body.person as string };
+      await addUse(tx, { ...payer, meter: 'aiNeurons', quantity: neurons });
+      await addUse(tx, { ...payer, meter: 'sandboxSeconds', quantity: seconds });
       for (const share of breakdown) {
         await tx
           .insert(appUsageSources)
@@ -285,6 +301,19 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         aiNeuronsUsed: now.used.aiNeurons,
         sandboxSecondsUsed: now.used.sandboxSeconds,
         withinCaps: now.withinCaps,
+        outOfCredits: now.credits?.out ?? false,
+        creditsRemainingMicros: now.credits?.remainingMicros ?? null,
+      },
+    });
+  })
+  .post('/plans.list', async (context) => {
+    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    return context.json({
+      data: {
+        // Decision: Stored JSON doesn't keep its order, so the list goes from the smallest plan up.
+        plans: Object.entries(plans)
+          .map(([id, plan]) => ({ id, creditMicros: plan.creditMicros }))
+          .sort((a, b) => a.creditMicros - b.creditMicros),
       },
     });
   })
@@ -293,7 +322,8 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
     }
-    if (!isPaidPlan(body?.plan)) {
+    const plans = await clientPlans(context.env, context.get('db'), context.get('billingClient'));
+    if (typeof body?.plan !== 'string' || !Object.hasOwn(plans, body.plan)) {
       return context.json({ error: 'bad_plan' }, 400);
     }
     if (!isReturnUrl(body?.returnUrl)) {
@@ -305,6 +335,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         metadata: { clientId: context.get('billingClient'), personId: body.person },
         email: typeof body.email === 'string' ? body.email : null,
         plan: body.plan,
+        priceId: plans[body.plan]!.stripePriceId,
         returnUrl: body.returnUrl,
       });
       return context.json({ data: { url } });
