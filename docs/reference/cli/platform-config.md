@@ -38,7 +38,20 @@ bwf platform config billing show
 bwf platform upgrade --yes
 ```
 
-The names are `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_PRO`, and `STRIPE_LIVE_ENABLED` (`true` to allow a live key). A save keeps values you saved before. Use `--installation <id>` when this machine has several installations.
+The names are `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_PRO`, `STRIPE_LIVE_ENABLED` (`true` to allow a live key), `STRIPE_AUTOMATIC_TAX` and `STRIPE_PROMOTION_CODES`. A save keeps values you saved before. Use `--installation <id>` when this machine has several installations.
+
+### Sales tax and promotion codes {#sales-tax-and-promotion-codes}
+
+Both are off until you set them to `true`. Credits come from the plan, so tax and discounts don't change how many credits a purchase gives.
+
+`STRIPE_AUTOMATIC_TAX=true` turns on Stripe Tax for Checkout. Stripe refuses the Checkout until its tax settings are filled in, so set these up in the Stripe Dashboard first:
+
+1. Under **Tax > Registrations**, add each country or state where you collect tax. Stripe only collects tax where you have a registration.
+2. Under **Settings > Tax**, set your head office address, a default product tax code, and whether your prices include tax. A price or product can set its own code and behavior instead.
+
+Checkout asks for the billing address that tax needs and keeps it on the Stripe customer, so renewals are taxed from the same place. Stripe Tax costs 0.5% of each sale in places where you're registered. For a subscription, that fee comes again on each renewal. See [Stripe Tax pricing](https://stripe.com/tax/pricing) for the current rate.
+
+`STRIPE_PROMOTION_CODES=true` shows a promotion code box on subscription Checkout. Make the codes in the Stripe Dashboard under **Product catalog > Coupons**. A 100% code still gives the plan's credits for the month, so limit each code, for example to first-time orders or a set number of redemptions.
 
 ## Authentication configuration {#authentication-configuration}
 

@@ -308,6 +308,43 @@ describe('app billing', () => {
     }
   });
 
+  it('grants a plan’s credits whatever tax or a promotion code did to the total', async () => {
+    await sellCredits('p0', 'solo', 20_000_000);
+    const totals = [
+      {
+        amount_subtotal: 2000,
+        amount_total: 2165,
+        total_details: { amount_discount: 0, amount_tax: 165 },
+      },
+      {
+        amount_subtotal: 2000,
+        amount_total: 1000,
+        total_details: { amount_discount: 1000, amount_tax: 0 },
+      },
+      {
+        amount_subtotal: 2000,
+        amount_total: 0,
+        total_details: { amount_discount: 2000, amount_tax: 0 },
+      },
+    ];
+    for (const [index, total] of totals.entries()) {
+      const person = `p${index + 1}`;
+      await webhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            ...total,
+            metadata: { clientId: registration.client.id, personId: person, plan: 'solo' },
+            customer: `cus_${person}`,
+          },
+        },
+      });
+      expect((await dataOf(call('/usage.status', { person }))).credits).toMatchObject({
+        includedMicros: 20_000_000,
+      });
+    }
+  });
+
   it('bills an old caller’s project to the person it was built for', async () => {
     const { project } = await preview('p1', { workspace: 'w1' });
     expect(project!.payer_person_id).toBeNull();

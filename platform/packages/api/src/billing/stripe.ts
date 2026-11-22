@@ -7,6 +7,8 @@ type StripeEnv = Pick<
   | 'STRIPE_PRICE_SOLO'
   | 'STRIPE_PRICE_PRO'
   | 'STRIPE_LIVE_ENABLED'
+  | 'STRIPE_AUTOMATIC_TAX'
+  | 'STRIPE_PROMOTION_CODES'
 >;
 
 /** The paid plans a person can buy, and the env value that holds each one's Stripe price id. */
@@ -52,6 +54,8 @@ export async function createCheckoutSession(
     reference: string;
     metadata: Record<string, string>;
     email: string | null;
+    /** The payer's Stripe customer, when they already have one. */
+    customerId?: string;
     plan: string;
     /** The Stripe price to charge. Without it, the plan's price from the environment. */
     priceId?: string;
@@ -71,8 +75,22 @@ export async function createCheckoutSession(
     form.set(`metadata[${key}]`, value);
     form.set(`subscription_data[metadata][${key}]`, value);
   }
-  if (input.email) {
+  if (input.customerId) {
+    form.set('customer', input.customerId);
+  } else if (input.email) {
     form.set('customer_email', input.email);
+  }
+  // Decision: Stripe refuses the session until the account's tax settings are filled in, so tax stays off by default.
+  if (env.STRIPE_AUTOMATIC_TAX === 'true') {
+    form.set('automatic_tax[enabled]', 'true');
+    // Decision: An existing customer keeps its saved address unless Checkout may replace it with the one it collects.
+    if (form.has('customer')) {
+      form.set('customer_update[address]', 'auto');
+    }
+  }
+  // Decision: Codes only show on subscription Checkout. Credits sell close to cost, so a discount on them is a loss.
+  if (env.STRIPE_PROMOTION_CODES === 'true' && form.get('mode') === 'subscription') {
+    form.set('allow_promotion_codes', 'true');
   }
   const body = await stripePost(env, 'checkout/sessions', form, fetcher);
   if (!body.url) {
