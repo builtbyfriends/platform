@@ -82,25 +82,13 @@ export function parseClientPlans(value: unknown): ClientPlans | null {
   return plans;
 }
 
-/**
- * The plans an application's people can buy. An application without its own list sells the two
- * plans priced in the environment, with no credits, as each application did before.
- */
-export async function clientPlans(
-  env: Pick<Bindings, 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO'>,
-  db: DbOrTx,
-  clientId: string,
-): Promise<ClientPlans> {
+/** The plans an application's people can buy. An application without its own list sells none. */
+export async function clientPlans(db: DbOrTx, clientId: string): Promise<ClientPlans> {
   const [client] = await db
     .select({ plans: oauthClients.plans })
     .from(oauthClients)
     .where(eq(oauthClients.id, clientId));
-  return (
-    client?.plans ?? {
-      solo: { stripePriceId: env.STRIPE_PRICE_SOLO ?? '', creditMicros: 0 },
-      pro: { stripePriceId: env.STRIPE_PRICE_PRO ?? '', creditMicros: 0 },
-    }
-  );
+  return client?.plans ?? {};
 }
 
 /** First day of this calendar month in UTC, as `YYYY-MM-01`. */
@@ -346,7 +334,7 @@ export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string)
  * the accounts they pay for stamp or lift the AI pause on their hosted projects.
  */
 export async function applyCredits(
-  env: Pick<Bindings, 'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO'>,
+  env: Pick<Bindings, 'USAGE_COUNTER'>,
   db: Db,
   clientId: string,
   person: string,
@@ -357,7 +345,7 @@ export async function applyCredits(
       .select()
       .from(appPeople)
       .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
-    clientPlans(env, db, clientId),
+    clientPlans(db, clientId),
     readMeterPrices(db),
     payerUse(db, clientId, person, period),
   ]);

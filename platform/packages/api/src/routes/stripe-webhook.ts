@@ -61,7 +61,7 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     if (
       event.type === 'checkout.session.completed' &&
       metadata.plan &&
-      Object.hasOwn(await clientPlans(context.env, db, key.client_id), metadata.plan)
+      Object.hasOwn(await clientPlans(db, key.client_id), metadata.plan)
     ) {
       const row = {
         plan: metadata.plan,

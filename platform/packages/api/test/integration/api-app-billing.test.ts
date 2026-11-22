@@ -30,7 +30,6 @@ const ctx = createMockExecutionContext();
 let env: TestEnv & {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
-  STRIPE_PRICE_SOLO?: string;
 };
 let registration: Awaited<ReturnType<typeof registerOAuthClient>>;
 
@@ -110,7 +109,7 @@ async function preview(person: string, body: Record<string, unknown>) {
 const hosted = async (person: string) =>
   (await dataOf(call('/usage.status', { person, hosted: true }))).hosted;
 
-async function sellCredits(person: string, plan: string, creditMicros: number) {
+async function savePlans(creditMicros = 0) {
   await env.db
     .update(oauthClients)
     .set({
@@ -120,6 +119,10 @@ async function sellCredits(person: string, plan: string, creditMicros: number) {
       },
     })
     .where(eq(oauthClients.id, registration.client.id));
+}
+
+async function sellCredits(person: string, plan: string, creditMicros: number) {
+  await savePlans(creditMicros);
   await webhook({
     type: 'checkout.session.completed',
     data: {
@@ -159,7 +162,6 @@ describe('app billing', () => {
     env = await setupEnv();
     env.STRIPE_SECRET_KEY = 'sk_test_x';
     env.STRIPE_WEBHOOK_SECRET = 'whsec_test';
-    env.STRIPE_PRICE_SOLO = 'price_solo';
   });
   afterAll(teardownEnv);
   beforeEach(async () => {
@@ -216,7 +218,20 @@ describe('app billing', () => {
     ).toBe(400);
   });
 
+  it('sells nothing when the application has no plan list', async () => {
+    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [] });
+    const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
+    const checkout = await call('/billing.checkout', order);
+    expect(checkout.status).toBe(400);
+    expect(await checkout.json()).toEqual({ error: 'no_plans' });
+
+    const metadata = { clientId: registration.client.id, personId: 'p1', plan: 'solo' };
+    await webhook({ type: 'checkout.session.completed', data: { object: { metadata } } });
+    expect(await env.db.select().from(appPeople)).toEqual([]);
+  });
+
   it('moves a person to the plan they bought and back when the subscription ends', async () => {
+    await savePlans();
     const periodEnd = Date.UTC(2026, 11, 19, 12) / 1000;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       if (String(input) === 'https://api.stripe.com/v1/subscriptions/sub_1') {
@@ -463,6 +478,7 @@ describe('app billing', () => {
     const own = await preview('p1', { workspace: 'w2' });
     expect(await billedPlanId(env.db, paid.owner!, paid.project!)).toBe('free');
 
+    await savePlans();
     const metadata = { clientId: registration.client.id, personId: 'boss', plan: 'solo' };
     await webhook({
       type: 'checkout.session.completed',
