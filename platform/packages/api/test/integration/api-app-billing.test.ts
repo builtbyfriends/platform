@@ -153,6 +153,19 @@ async function sellCredits(person: string, plan: string, creditMicros: number) {
 
 const DAY = 86_400;
 
+const subscription = (extra: object = {}) => ({
+  id: 'sub_1',
+  status: 'active',
+  customer: 'cus_1',
+  cancel_at_period_end: false,
+  items: {
+    data: [
+      { current_period_end: Math.floor(Date.now() / 1000) + 30 * DAY, price: { id: 'price_solo' } },
+    ],
+  },
+  ...extra,
+});
+
 function invoicePaid(
   person: string,
   price: string,
@@ -170,7 +183,15 @@ function invoicePaid(
         id,
         billing_reason: reason,
         payment_intent: `pi_${id}`,
-        lines: { data: [{ period: { start, end }, pricing: { price_details: { price } } }] },
+        lines: {
+          data: [
+            { period: { start, end }, pricing: { price_details: { price } } } as {
+              amount?: number;
+              period: { start: number; end: number };
+              pricing: { price_details: { price: string } };
+            },
+          ],
+        },
         parent: {
           subscription_details: {
             metadata: { clientId: registration.client.id, personId: person, plan: 'solo' },
@@ -272,7 +293,11 @@ describe('app billing', () => {
     const periodEnd = Date.UTC(2026, 11, 19, 12) / 1000;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       if (String(input) === 'https://api.stripe.com/v1/subscriptions/sub_1') {
-        return Response.json({ id: 'sub_1', items: { data: [{ current_period_end: periodEnd }] } });
+        return Response.json(
+          subscription({
+            items: { data: [{ current_period_end: periodEnd, price: { id: 'price_solo' } }] },
+          }),
+        );
       }
       if (String(input).startsWith('https://api.stripe.com/')) {
         return Response.json({ url: 'https://stripe.example/session' });
@@ -299,10 +324,18 @@ describe('app billing', () => {
         })
       ).status,
     ).toBe(200);
+    await webhook({
+      type: 'customer.subscription.created',
+      data: { object: { id: 'sub_1', metadata } },
+    });
+    fetchSpy.mockClear();
     const bought = await dataOf(call('/usage.status', { person: 'p1' }));
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(bought).toMatchObject({
       plan: 'solo',
       subscribed: true,
+      subscriptionStatus: 'active',
+      cancelAtPeriodEnd: false,
       renewsAt: '2026-12-19T12:00:00.000Z',
     });
     expect(bought).not.toHaveProperty('subscriptionId');
@@ -314,13 +347,10 @@ describe('app billing', () => {
     expect((await dataOf(portal)).url).toBe('https://stripe.example/session');
     fetchSpy.mockRestore();
 
-    const offline = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.error());
-    const unreachable = await dataOf(call('/usage.status', { person: 'p1' }));
-    expect(unreachable).toMatchObject({ plan: 'solo', subscribed: true });
-    expect(unreachable).not.toHaveProperty('renewsAt');
-    offline.mockRestore();
-
-    await webhook({ type: 'customer.subscription.deleted', data: { object: { metadata } } });
+    await webhook({
+      type: 'customer.subscription.deleted',
+      data: { object: { id: 'sub_1', metadata } },
+    });
     const ended = await dataOf(call('/usage.status', { person: 'p1' }));
     expect(ended).toMatchObject({ plan: 'free', subscribed: false });
     expect(ended).not.toHaveProperty('renewsAt');
@@ -702,6 +732,123 @@ describe('app billing', () => {
       analytics.mockRestore();
       quiet.mockRestore();
       expect((await credits('p1'))!.remainingMicros).toBe(10_000_000 - 600_000 * days);
+    });
+  });
+
+  describe('subscriptions', () => {
+    const metadata = () => ({ clientId: registration.client.id, personId: 'p1', plan: 'solo' });
+    const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
+    let stripe: ReturnType<typeof subscription>;
+    let calls: Array<[string, RequestInit | undefined]>;
+
+    beforeEach(async () => {
+      await env.db
+        .update(oauthClients)
+        .set({
+          plans: {
+            solo: { stripePriceId: 'price_app_solo', creditMicros: 1_000_000 },
+            pro: { stripePriceId: 'price_app_pro', creditMicros: 5_000_000 },
+          },
+        })
+        .where(eq(oauthClients.id, registration.client.id));
+      stripe = subscription({
+        items: { data: [{ current_period_end: 1_900_000_000, price: { id: 'price_app_solo' } }] },
+      });
+      calls = [];
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        calls.push([String(input), init]);
+        return String(input).includes('/subscriptions/')
+          ? Response.json(stripe)
+          : Response.json({ url: 'https://stripe.example/session' });
+      });
+      await webhook({
+        type: 'checkout.session.completed',
+        data: { object: { ...paidCheckout, metadata: metadata() } },
+      });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('refuses a second Checkout and reuses the Stripe customer', async () => {
+      expect(await (await call('/billing.checkout', order)).json()).toEqual({
+        error: 'already_subscribed',
+      });
+      expect(calls).toEqual([]);
+      await webhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { id: 'sub_1', metadata: metadata() } },
+      });
+      expect((await call('/billing.checkout', order)).status).toBe(200);
+      const form = new URLSearchParams(String(calls[0]![1]!.body));
+      expect(form.get('customer')).toBe('cus_1');
+      expect(form.has('customer_email')).toBe(false);
+    });
+
+    it('leaves the plan when another subscription is deleted', async () => {
+      const answer = await webhook({
+        type: 'customer.subscription.deleted',
+        data: { object: { id: 'sub_old', metadata: metadata() } },
+      });
+      expect(await answer.json()).toEqual({ ok: true, ignored: true });
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'solo',
+        subscribed: true,
+      });
+    });
+
+    it('follows a plan changed in the portal, and grants the difference Stripe charged', async () => {
+      await webhook(invoicePaid('p1', 'price_app_solo', { id: 'in_1' }));
+      stripe = subscription({
+        cancel_at_period_end: true,
+        items: { data: [{ current_period_end: 1_900_000_000, price: { id: 'price_app_pro' } }] },
+      });
+      await webhook({
+        type: 'customer.subscription.updated',
+        data: { object: { id: 'sub_1', metadata: metadata() } },
+      });
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'pro',
+        cancelAtPeriodEnd: true,
+        renewsAt: new Date(1_900_000_000_000).toISOString(),
+      });
+      const change = invoicePaid('p1', 'price_app_pro', {
+        id: 'in_2',
+        reason: 'subscription_update',
+      });
+      Object.assign(change.data.object.lines.data[0]!, { amount: 2000 });
+      change.data.object.lines.data.unshift({
+        amount: -500,
+        period: { start: 0, end: 1 },
+        pricing: { price_details: { price: 'price_app_solo' } },
+      });
+      await webhook({ ...change, data: { object: { ...change.data.object, amount_paid: 1500 } } });
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).credits).toMatchObject({
+        remainingMicros: 5_000_000,
+      });
+    });
+
+    it('keeps the plan while a failed renewal is retried, with no new credits', async () => {
+      await webhook(invoicePaid('p1', 'price_app_solo', { id: 'in_1' }));
+      stripe = subscription({
+        status: 'past_due',
+        items: { data: [{ current_period_end: 1_900_000_000, price: { id: 'price_app_solo' } }] },
+      });
+      await webhook({
+        type: 'invoice.payment_failed',
+        data: {
+          object: {
+            id: 'in_2',
+            parent: { subscription_details: { subscription: 'sub_1', metadata: metadata() } },
+          },
+        },
+      });
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'solo',
+        subscriptionStatus: 'past_due',
+        credits: { remainingMicros: 1_000_000 },
+      });
+      expect((await call('/billing.checkout', order)).status).toBe(409);
     });
   });
 

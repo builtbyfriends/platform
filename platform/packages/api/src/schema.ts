@@ -99,6 +99,10 @@ export const appPeople = pgTable(
     stripe_subscription_id: text('stripe_subscription_id'),
     /** Whether the plan and Stripe ids came from a live-mode payment. A live installation ignores test rows. */
     livemode: boolean('livemode').notNull().default(false),
+    /** The stored subscription's Stripe status, such as active or past_due, as last read from Stripe. */
+    subscription_status: text('subscription_status'),
+    current_period_end: timestamp('current_period_end', { mode: 'string', withTimezone: true }),
+    cancel_at_period_end: boolean('cancel_at_period_end').notNull().default(false),
     /** No longer read: app_payers.out_since took its place. Kept for the previous Worker during a rollout. */
     out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })

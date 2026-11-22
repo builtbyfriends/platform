@@ -134,6 +134,8 @@ export async function grantCredits(db: DbOrTx, grant: NewGrant, now = new Date()
   });
 }
 
+const iso = (value: string | null) => (value ? new Date(value).toISOString() : null);
+
 /**
  * A payer's balance: what's left on grants that haven't ended, less what they owe. Null for a
  * payer who has never had a grant, whose plan's caps decide instead.
@@ -158,14 +160,14 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
   return {
     balanceMicros: grants.reduce((sum, grant) => sum + grant.remaining_micros, 0) - owedMicros,
     owedMicros,
-    outSince: row?.out_since ?? null,
+    outSince: iso(row?.out_since ?? null),
     grants: grants.map((grant) => ({
       id: grant.id,
       source: grant.source,
       amountMicros: grant.amount_micros,
       remainingMicros: grant.remaining_micros,
-      startsAt: grant.starts_at,
-      expiresAt: grant.expires_at,
+      startsAt: iso(grant.starts_at),
+      expiresAt: iso(grant.expires_at),
     })),
   };
 }

@@ -61,6 +61,8 @@ export async function createCheckoutSession(
     plan: string;
     /** The Stripe price to charge. Without it, the plan's price from the environment. */
     priceId?: string;
+    /** The buyer's Stripe customer from an earlier Checkout, used in place of the email. */
+    customerId?: string | null;
     returnUrl: string;
   },
   fetcher: typeof fetch = fetch,
@@ -77,7 +79,9 @@ export async function createCheckoutSession(
     form.set(`metadata[${key}]`, value);
     form.set(`subscription_data[metadata][${key}]`, value);
   }
-  if (input.email) {
+  if (input.customerId) {
+    form.set('customer', input.customerId);
+  } else if (input.email) {
     form.set('customer_email', input.email);
   }
   const body = await stripePost(env, 'checkout/sessions', form, fetcher);
@@ -105,31 +109,53 @@ export async function createPortalSession(
   return body.url;
 }
 
+export type StripeSubscription = {
+  id: string;
+  status: string;
+  customerId: string | null;
+  priceId: string | null;
+  /** The end of the current billing period, as an ISO string, or null when Stripe doesn't give one. */
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+};
+
 /**
- * When a subscription renews: the end of its current billing period, as an ISO string, or null
- * when Stripe doesn't give one. Newer Stripe API versions keep the period on the subscription's
- * items and older ones on the subscription, so this reads both.
+ * Reads a subscription as Stripe has it now. Newer Stripe API versions keep the period on the
+ * subscription's items and older ones on the subscription, so this reads both.
  */
-export async function subscriptionRenewsAt(
+export async function fetchSubscription(
   env: StripeEnv,
   subscriptionId: string,
   fetcher: typeof fetch = fetch,
-): Promise<string | null> {
+): Promise<StripeSubscription> {
   const response = await fetcher(
     `https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
     { headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
   );
   const body = (await response.json().catch(() => null)) as {
+    id?: string;
+    status?: string;
+    customer?: string | { id?: string };
+    cancel_at_period_end?: boolean;
     current_period_end?: unknown;
-    items?: { data?: Array<{ current_period_end?: unknown }> };
+    items?: { data?: Array<{ current_period_end?: unknown; price?: { id?: string } }> };
   } | null;
-  if (!response.ok || !body) {
+  if (!response.ok || !body?.id || !body.status) {
     throw new BillingUnavailableError('Stripe refused the request.');
   }
-  const end = body.items?.data?.[0]?.current_period_end ?? body.current_period_end;
-  return typeof end === 'number' && Number.isFinite(end) && end > 0
-    ? new Date(end * 1000).toISOString()
-    : null;
+  const item = body.items?.data?.[0];
+  const end = item?.current_period_end ?? body.current_period_end;
+  return {
+    id: body.id,
+    status: body.status,
+    customerId: typeof body.customer === 'string' ? body.customer : (body.customer?.id ?? null),
+    priceId: item?.price?.id ?? null,
+    currentPeriodEnd:
+      typeof end === 'number' && Number.isFinite(end) && end > 0
+        ? new Date(end * 1000).toISOString()
+        : null,
+    cancelAtPeriodEnd: body.cancel_at_period_end === true,
+  };
 }
 
 async function stripePost(

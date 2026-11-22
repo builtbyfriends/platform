@@ -477,6 +477,13 @@
       "when": 1795390425124,
       "tag": "0074_credit_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795390621080,
+      "tag": "0075_app_subscriptions",
+      "breakpoints": true
     }
   ]
 }

@@ -20,7 +20,7 @@ import {
   BillingUnavailableError,
   createCheckoutSession,
   createPortalSession,
-  subscriptionRenewsAt,
+  stripeLiveMode,
 } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
@@ -173,7 +173,14 @@ async function standing(context: BillingContext, person: string) {
     aiWithinCap,
     sandboxWithinCap,
     subscribed: Boolean(row?.stripe_subscription_id),
-    subscriptionId: row?.stripe_subscription_id ?? null,
+    subscriptionStatus: row?.stripe_subscription_id ? row.subscription_status : null,
+    cancelAtPeriodEnd: row?.stripe_subscription_id ? row.cancel_at_period_end : false,
+    // Decision: A paid plan renews on its own Stripe date, not on the first of the month when the meters reset.
+    // The date is the one Stripe last sent, so this answer doesn't wait on Stripe.
+    renewsAt:
+      row?.stripe_subscription_id && row.current_period_end
+        ? new Date(row.current_period_end).toISOString()
+        : null,
   };
 }
 
@@ -202,12 +209,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
     }
-    const { subscriptionId, ...now } = await standing(context, body.person);
-    // Decision: A paid plan renews on its own Stripe date, not on the first of the month when the meters reset. If
-    // Stripe can't be reached, the answer leaves renewsAt out instead of failing.
-    const renewsAt = subscriptionId
-      ? await subscriptionRenewsAt(context.env, subscriptionId).catch(() => null)
-      : null;
+    const { renewsAt, ...now } = await standing(context, body.person);
     const db = context.get('db');
     const hosted = body.hosted === true ? { hosted: await hostedUse(context, body.person) } : {};
     const daily =
@@ -343,8 +345,29 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isReturnUrl(body?.returnUrl)) {
       return context.json({ error: 'bad_return_url' }, 400);
     }
+    const [stored] = await context
+      .get('db')
+      .select()
+      .from(appPeople)
+      .where(
+        and(
+          eq(appPeople.client_id, context.get('billingClient')),
+          eq(appPeople.person_id, body.person),
+        ),
+      );
+    const row = stored?.livemode === stripeLiveMode(context.env) ? stored : undefined;
+    // Decision: A payer holds one subscription. A stored one that Stripe hasn't ended sends them to the portal
+    // to change it, so a second Checkout can't start a second subscription.
+    if (
+      row?.stripe_subscription_id &&
+      row.subscription_status !== 'canceled' &&
+      row.subscription_status !== 'incomplete_expired'
+    ) {
+      return context.json({ error: 'already_subscribed' }, 409);
+    }
     try {
       const url = await createCheckoutSession(context.env, {
+        customerId: row?.stripe_customer_id ?? null,
         reference: `${context.get('billingClient')}:${body.person}`,
         metadata: { clientId: context.get('billingClient'), personId: body.person },
         email: typeof body.email === 'string' ? body.email : null,
