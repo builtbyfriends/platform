@@ -2,13 +2,16 @@ import { and, eq, inArray, like, ne, sql } from 'drizzle-orm';
 import {
   APP,
   applyCredits,
+  costMicros,
   dayOf,
   dropTestPlans,
   payerOf,
+  readMeterPrices,
   SYNCED_AT_SETTING,
   type Meter,
 } from './app-credits.ts';
 import { stripeLiveMode } from './billing/stripe.ts';
+import { spendCredits } from './credit-ledger.ts';
 import type { Db } from './db.ts';
 import { isDevBypass, type ApiEnv } from './env.ts';
 import { setPlatformSetting } from './platform-settings.ts';
@@ -181,6 +184,7 @@ export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Pr
         );
   const owned = (type: StorageType) =>
     new Map(stored.filter((row) => row.type === type).map((row) => [row.cf_id, row.project_id]));
+  const prices = await readMeterPrices(db);
   const today = new Date(`${dayOf(now)}T00:00:00.000Z`);
   let trafficRead = false;
   for (const start of [new Date(today.getTime() - DAY_MS), today]) {
@@ -223,11 +227,12 @@ export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Pr
             day,
             meter,
             quantity: read.get(row.project.id)![meter]!,
+            cost_micros: costMicros(meter, read.get(row.project.id)![meter]!, prices),
           })),
       );
       // Decision: A day belongs to whoever pays for the project when the day is last read, so replace, don't add.
       await db.transaction(async (tx) => {
-        await tx
+        const replaced = await tx
           .delete(appUsageDaily)
           .where(
             and(
@@ -235,9 +240,25 @@ export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Pr
               eq(appUsageDaily.day, day),
               inArray(appUsageDaily.meter, [...meters]),
             ),
-          );
+          )
+          .returning();
         if (values.length > 0) {
           await tx.insert(appUsageDaily).values(values);
+        }
+        // Decision: Each read charges what its rows cost now less what the rows it replaces cost then. A read
+        // that comes out lower charges nothing and gives nothing back.
+        const owed = new Map<string, number>();
+        for (const row of values) {
+          const key = `${row.client_id}\n${row.person_id}`;
+          owed.set(key, (owed.get(key) ?? 0) + row.cost_micros);
+        }
+        for (const row of replaced) {
+          const key = `${row.client_id}\n${row.person_id}`;
+          owed.set(key, (owed.get(key) ?? 0) - row.cost_micros);
+        }
+        for (const [key, micros] of owed) {
+          const [clientId, payer] = key.split('\n') as [string, string];
+          await spendCredits(tx, { clientId, payer }, micros, now);
         }
       });
     }

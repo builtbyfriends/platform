@@ -7,18 +7,32 @@ import {
   verifyStripeSignature,
   type PaidPlan,
 } from '../billing/stripe.ts';
+import { grantCredits } from '../credit-ledger.ts';
 import type { Tx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
 import { getDefaultPlan } from '../plans.ts';
 import { appPeople, stripeEvents } from '../schema.ts';
 
+type Metadata = Record<string, string>;
+
+type InvoiceLine = {
+  period?: { start?: number; end?: number };
+  price?: { id?: string };
+  pricing?: { price_details?: { price?: string } };
+};
+
 type StripeObject = {
-  metadata?: Record<string, string>;
+  metadata?: Metadata;
   customer?: string;
   subscription?: string;
   id?: string;
   payment_status?: string;
+  billing_reason?: string;
+  payment_intent?: string | null;
+  lines?: { data?: Array<InvoiceLine> };
+  parent?: { subscription_details?: { metadata?: Metadata } };
+  subscription_details?: { metadata?: Metadata };
 };
 
 type StripeEvent = {
@@ -42,6 +56,59 @@ const checkoutPaid = (event: StripeEvent) =>
   (event.data.object.payment_status === 'paid' ||
     event.data.object.payment_status === 'no_payment_required');
 
+/**
+ * Whose event it is. An invoice keeps the subscription's metadata under parent.subscription_details on newer
+ * Stripe API versions and under subscription_details on older ones.
+ */
+const eventMetadata = (object: StripeObject): Metadata =>
+  (object.metadata?.clientId || object.metadata?.userId ? object.metadata : undefined) ??
+  object.parent?.subscription_details?.metadata ??
+  object.subscription_details?.metadata ??
+  object.metadata ??
+  {};
+
+const PLAN_GRANT_REASONS = new Set(['subscription_create', 'subscription_cycle']);
+
+/**
+ * A paid subscription invoice grants the plan's monthly credits, which end with the paid period. The plan comes
+ * from the invoice's price, since a plan changed in Stripe's portal keeps the old plan in the metadata.
+ */
+async function grantPlanCredits(
+  context: Context<ApiEnv>,
+  tx: Tx,
+  event: StripeEvent,
+  key: { client_id: string; person_id: string },
+): Promise<boolean> {
+  const invoice = event.data.object;
+  if (!PLAN_GRANT_REASONS.has(invoice.billing_reason ?? '') || !invoice.id) {
+    return false;
+  }
+  const plans = await clientPlans(context.env, tx, key.client_id);
+  const line = invoice.lines?.data?.[0];
+  const price = line?.pricing?.price_details?.price ?? line?.price?.id;
+  const plan =
+    Object.keys(plans).find((id) => price && plans[id]!.stripePriceId === price) ??
+    eventMetadata(invoice).plan;
+  const credits = plan ? (plans[plan]?.creditMicros ?? 0) : 0;
+  const { start, end } = line?.period ?? {};
+  if (credits <= 0 || !start || !end) {
+    return false;
+  }
+  await grantCredits(tx, {
+    clientId: key.client_id,
+    payer: key.person_id,
+    source: 'plan',
+    amountMicros: credits,
+    livemode: event.livemode,
+    stripeInvoiceId: invoice.id,
+    stripePaymentIntentId:
+      typeof invoice.payment_intent === 'string' ? invoice.payment_intent : null,
+    startsAt: new Date(start * 1000),
+    expiresAt: new Date(end * 1000),
+  });
+  return true;
+}
+
 /** Applies a person's new plan to the limits of the projects they pay for. */
 async function reconcilePaidProjects(context: Context<ApiEnv>, clientId: string, person: string) {
   const db = context.get('db');
@@ -63,6 +130,9 @@ async function applyAppPersonEvent(
   key: { client_id: string; person_id: string },
 ): Promise<boolean> {
   const object = event.data.object;
+  if (event.type === 'invoice.paid') {
+    return grantPlanCredits(context, tx, event, key);
+  }
   const plan = object.metadata?.plan;
   if (
     checkoutPaid(event) &&
@@ -130,7 +200,7 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     await dropTestPlans(db);
   }
   const seen = { event_id: event.id, type: event.type, livemode: event.livemode };
-  const metadata = event.data.object.metadata ?? {};
+  const metadata = eventMetadata(event.data.object);
 
   if (metadata.clientId && metadata.personId) {
     const key = { client_id: metadata.clientId, person_id: metadata.personId };

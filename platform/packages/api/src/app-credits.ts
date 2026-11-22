@@ -1,10 +1,20 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
 import { stripeLiveMode } from './billing/stripe.ts';
+import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { getDefaultPlan } from './plans.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
-import { appPeople, appUsage, appUsageDaily, oauthClients, projects, users } from './schema.ts';
+import {
+  appCreditGrants,
+  appPayers,
+  appPeople,
+  appUsage,
+  appUsageDaily,
+  oauthClients,
+  projects,
+  users,
+} from './schema.ts';
 
 type Bindings = ApiEnv['Bindings'];
 
@@ -152,8 +162,13 @@ export async function payerUse(
   return use;
 }
 
-/** Each meter's quantity and cost, and the credit balance when the plan has one. */
-export function creditStanding(use: MeterUse, prices: MeterPrices, includedMicros: number) {
+/** Each meter's quantity and cost, and the credit balance when the payer has credits. */
+export function creditStanding(
+  use: MeterUse,
+  prices: MeterPrices,
+  includedMicros: number,
+  balance: Awaited<ReturnType<typeof creditBalance>>,
+) {
   const meters = METER_NAMES.map((meter) => ({
     meter,
     quantity: use[meter],
@@ -162,19 +177,24 @@ export function creditStanding(use: MeterUse, prices: MeterPrices, includedMicro
   const usedMicros = meters.reduce((sum, meter) => sum + meter.costMicros, 0);
   return {
     meters,
-    // Decision: The one place that says how much a payer may spend. Credits bought on top of a plan add here.
-    credits:
-      includedMicros > 0
-        ? {
-            includedMicros,
-            usedMicros,
-            remainingMicros: Math.max(0, includedMicros - usedMicros),
-            out: usedMicros >= includedMicros,
-          }
-        : null,
+    // Decision: The one place that says how much a payer may spend. remainingMicros stops at zero for the
+    // applications that read it, and balanceMicros shows a shortfall.
+    credits: balance
+      ? {
+          includedMicros,
+          usedMicros,
+          remainingMicros: Math.max(0, balance.balanceMicros),
+          balanceMicros: balance.balanceMicros,
+          owedMicros: balance.owedMicros,
+          out: balance.balanceMicros <= 0,
+          outSince: balance.outSince,
+          grants: balance.grants,
+        }
+      : null,
   };
 }
 
+/** Adds use to a payer's day and charges it to their credits at today's price. */
 export async function addUse(
   db: DbOrTx,
   row: { clientId: string; person: string; projectId?: string; meter: Meter; quantity: number },
@@ -183,6 +203,7 @@ export async function addUse(
   if (row.quantity <= 0) {
     return;
   }
+  const cost = costMicros(row.meter, row.quantity, await readMeterPrices(db));
   await db
     .insert(appUsageDaily)
     .values({
@@ -192,6 +213,7 @@ export async function addUse(
       day: dayOf(now),
       meter: row.meter,
       quantity: row.quantity,
+      cost_micros: cost,
     })
     .onConflictDoUpdate({
       target: [
@@ -201,8 +223,12 @@ export async function addUse(
         appUsageDaily.day,
         appUsageDaily.meter,
       ],
-      set: { quantity: sql`${appUsageDaily.quantity} + ${row.quantity}` },
+      set: {
+        quantity: sql`${appUsageDaily.quantity} + ${row.quantity}`,
+        cost_micros: sql`${appUsageDaily.cost_micros} + ${cost}`,
+      },
     });
+  await spendCredits(db, { clientId: row.clientId, payer: row.person }, cost, now);
 }
 
 /** Adds use that Platform counted for a hosted project, under whoever pays for it now. */
@@ -310,20 +336,20 @@ export async function paidProjectUse(db: DbOrTx, clientId: string, person: strin
   return byProject;
 }
 
-/** True while the person who pays for a project is out of credits this month. */
+/** True while the person who pays for a project is out of credits. */
 export async function payerOutOfCredits(db: DbOrTx, projectId: string): Promise<boolean> {
   const rows = await db
     .select({ one: sql<number>`1` })
     .from(projects)
     .innerJoin(users, eq(users.id, projects.user_id))
     .innerJoin(
-      appPeople,
+      appPayers,
       and(
-        sql`${users.provider} = ${APP} || ${appPeople.client_id}`,
-        sql`${appPeople.person_id} = ${payerOf}`,
+        sql`${users.provider} = ${APP} || ${appPayers.client_id}`,
+        sql`${appPayers.payer_id} = ${payerOf}`,
       ),
     )
-    .where(and(eq(projects.id, projectId), eq(appPeople.out_of_credits_period, currentPeriod())))
+    .where(and(eq(projects.id, projectId), sql`${appPayers.out_since} is not null`))
     .limit(1);
   return rows.length > 0;
 }
@@ -344,9 +370,9 @@ export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string)
 }
 
 /**
- * On a live installation, ends the plans people bought in Stripe test mode. Plan limits are read
- * in many places without the Stripe key, so the test rows are changed once instead of skipped on
- * each read.
+ * On a live installation, ends the plans and grants that came from Stripe test mode. Plan limits
+ * are read in many places without the Stripe key, so the test rows are changed once instead of
+ * skipped on each read.
  */
 export async function dropTestPlans(db: DbOrTx): Promise<void> {
   const free = (await getDefaultPlan(db)).id;
@@ -364,6 +390,10 @@ export async function dropTestPlans(db: DbOrTx): Promise<void> {
         or(ne(appPeople.plan, free), sql`${appPeople.stripe_customer_id} is not null`),
       ),
     );
+  await db
+    .update(appCreditGrants)
+    .set({ voided_at: new Date().toISOString(), void_reason: 'test mode' })
+    .where(and(eq(appCreditGrants.livemode, false), sql`${appCreditGrants.voided_at} is null`));
 }
 
 /**
@@ -380,7 +410,8 @@ export async function applyCredits(
   person: string,
 ) {
   const period = currentPeriod();
-  const [[stored], plans, prices, use] = await Promise.all([
+  const payer = { clientId, payer: person };
+  const [[stored], plans, prices, use, balance] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -388,16 +419,17 @@ export async function applyCredits(
     clientPlans(env, db, clientId),
     readMeterPrices(db),
     payerUse(db, clientId, person, period),
+    creditBalance(db, payer),
   ]);
   const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
-  const standing = creditStanding(use, prices, row ? (plans[row.plan]?.creditMicros ?? 0) : 0);
-  const out = standing.credits?.out ? period : null;
-  // Decision: Credits belong to a plan a person holds, so a person with no plan row has no balance to run out.
-  if (row && row.out_of_credits_period !== out) {
-    await db
-      .update(appPeople)
-      .set({ out_of_credits_period: out })
-      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person)));
+  const standing = creditStanding(
+    use,
+    prices,
+    row ? (plans[row.plan]?.creditMicros ?? 0) : 0,
+    balance,
+  );
+  // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide.
+  if (balance && (await markOut(db, payer, standing.credits!.out))) {
     for (const id of await paidOwnerIds(db, clientId, person)) {
       await env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(id))
         .fetch(

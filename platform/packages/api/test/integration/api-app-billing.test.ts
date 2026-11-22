@@ -1,5 +1,14 @@
 import { eq } from 'drizzle-orm';
-import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vite-plus/test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { addProjectUse, payerOutOfCredits } from '../../src/app-credits.ts';
 import {
   billedAccountPlanId,
@@ -9,11 +18,19 @@ import {
 } from '../../src/app-payer.ts';
 import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
+import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
 import { resolvePlanLimits } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { setProjectAiBlock } from '../../src/routing.ts';
-import { appPeople, oauthClients, projects, resources, users } from '../../src/schema.ts';
+import {
+  appPayers,
+  appPeople,
+  oauthClients,
+  projects,
+  resources,
+  users,
+} from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -131,6 +148,37 @@ async function sellCredits(person: string, plan: string, creditMicros: number) {
       },
     },
   });
+  await webhook(invoicePaid(person, `price_app_${plan}`));
+}
+
+const DAY = 86_400;
+
+function invoicePaid(
+  person: string,
+  price: string,
+  {
+    id = 'in_' + crypto.randomUUID(),
+    start = Math.floor(Date.now() / 1000) - DAY,
+    end = start + 30 * DAY,
+    reason = 'subscription_create',
+  }: { id?: string; start?: number; end?: number; reason?: string } = {},
+) {
+  return {
+    type: 'invoice.paid',
+    data: {
+      object: {
+        id,
+        billing_reason: reason,
+        payment_intent: `pi_${id}`,
+        lines: { data: [{ period: { start, end }, pricing: { price_details: { price } } }] },
+        parent: {
+          subscription_details: {
+            metadata: { clientId: registration.client.id, personId: person, plan: 'solo' },
+          },
+        },
+      },
+    },
+  };
 }
 
 const paidCheckout = { customer: 'cus_1', subscription: 'sub_1', payment_status: 'paid' };
@@ -424,7 +472,13 @@ describe('app billing', () => {
       withinCaps: false,
       aiWithinCap: false,
       sandboxWithinCap: false,
-      credits: { includedMicros: 1_000_000, usedMicros: 1_050_000, remainingMicros: 0, out: true },
+      credits: {
+        includedMicros: 1_000_000,
+        usedMicros: 1_050_000,
+        remainingMicros: 0,
+        balanceMicros: -50_000,
+        out: true,
+      },
     });
     expect(status.meters).toHaveLength(10);
     expect(status.daily.at(-1)).toMatchObject({
@@ -516,6 +570,139 @@ describe('app billing', () => {
     expect((await call('/usage.record', { person: 'p1', breakdown: [{ model: 1 }] })).status).toBe(
       400,
     );
+  });
+
+  describe('credit ledger', () => {
+    const setPlans = () =>
+      env.db
+        .update(oauthClients)
+        .set({ plans: { solo: { stripePriceId: 'price_app_solo', creditMicros: 1_000_000 } } })
+        .where(eq(oauthClients.id, registration.client.id));
+    const credits = async (person: string) =>
+      (await dataOf(call('/usage.status', { person }))).credits as unknown as {
+        remainingMicros: number;
+        balanceMicros: number;
+        out: boolean;
+        grants: Array<{ source: string; remainingMicros: number; expiresAt: string | null }>;
+      } | null;
+    // Decision: 100,000 neurons cost $1.10 at the default price, past a $1 grant.
+    const spend = (person: string, aiNeurons: number) =>
+      call('/usage.record', { person, aiNeurons });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('gives a plan bought on the 30th one month of credits, with no refill on the 1st', async () => {
+      await setPlans();
+      vi.useFakeTimers({ toFake: ['Date'], now: Date.UTC(2026, 10, 30, 12) });
+      const start = Date.UTC(2026, 10, 30, 12) / 1000;
+      await webhook(invoicePaid('p1', 'price_app_solo', { start, end: start + 30 * DAY }));
+      await spend('p1', 10_000);
+      expect(await credits('p1')).toMatchObject({ remainingMicros: 890_000, out: false });
+      vi.setSystemTime(Date.UTC(2026, 11, 1, 12));
+      expect(await credits('p1')).toMatchObject({ remainingMicros: 890_000, out: false });
+      vi.setSystemTime(Date.UTC(2026, 11, 30, 13));
+      expect(await credits('p1')).toMatchObject({ remainingMicros: 0, out: true, grants: [] });
+    });
+
+    it('adds a grant for each paid invoice, once per invoice', async () => {
+      await setPlans();
+      const first = invoicePaid('p1', 'price_app_solo', { id: 'in_1' });
+      await webhook({ id: 'evt_in_1', ...first });
+      expect(await (await webhook({ id: 'evt_in_1', ...first })).json()).toEqual({
+        ok: true,
+        duplicate: true,
+      });
+      await webhook(first);
+      expect((await credits('p1'))!.grants).toHaveLength(1);
+      await webhook(
+        invoicePaid('p1', 'price_app_solo', { id: 'in_2', reason: 'subscription_cycle' }),
+      );
+      expect(await credits('p1')).toMatchObject({ remainingMicros: 2_000_000 });
+      await webhook(invoicePaid('p1', 'price_app_solo', { id: 'in_3', reason: 'manual' }));
+      expect((await credits('p1'))!.grants).toHaveLength(2);
+    });
+
+    it('spends the grant that ends soonest first', async () => {
+      const now = Date.now();
+      const payer = { clientId: registration.client.id, payer: 'p1', livemode: false };
+      await grantCredits(env.db, {
+        ...payer,
+        source: 'given',
+        amountMicros: 1_000_000,
+        expiresAt: new Date(now + 300 * DAY * 1000),
+      });
+      await grantCredits(env.db, {
+        ...payer,
+        source: 'plan',
+        amountMicros: 500_000,
+        expiresAt: new Date(now + 10 * DAY * 1000),
+      });
+      await spend('p1', 20_000);
+      expect((await credits('p1'))!.grants).toMatchObject([
+        { source: 'plan', remainingMicros: 280_000 },
+        { source: 'given', remainingMicros: 1_000_000 },
+      ]);
+      await spend('p1', 40_000);
+      expect((await credits('p1'))!.grants).toMatchObject([
+        { source: 'given', remainingMicros: 840_000 },
+      ]);
+    });
+
+    it('runs out a payer who holds a grant and no plan', async () => {
+      await grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'p1',
+        livemode: false,
+        source: 'given',
+        amountMicros: 1_000_000,
+      });
+      const answer = await dataOf(spend('p1', 100_000));
+      expect(answer).toMatchObject({ outOfCredits: true, creditsRemainingMicros: 0 });
+      const status = await dataOf(call('/usage.status', { person: 'p1' }));
+      expect(status).toMatchObject({ plan: 'free', withinCaps: false });
+      expect(await credits('p1')).toMatchObject({ balanceMicros: -100_000, out: true });
+      const [payer] = await env.db.select().from(appPayers);
+      expect(payer).toMatchObject({ owed_micros: 100_000 });
+      expect(payer!.out_since).not.toBeNull();
+    });
+
+    it('charges a hosted read once, and only what it adds', async () => {
+      const { project } = await preview('p1', { workspace: 'w1' });
+      await grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'p1',
+        livemode: false,
+        source: 'given',
+        amountMicros: 10_000_000,
+      });
+      let requests = 1_000_000;
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) =>
+        !String(input).endsWith('/graphql')
+          ? Response.json({
+              data: String(init?.body).includes('double3')
+                ? []
+                : [{ blob1: project!.id, requests, bandwidth_bytes: 0 }],
+            })
+          : String(init?.body).includes('StorageAdaptiveGroups')
+            ? Response.error()
+            : Response.json({
+                data: { viewer: { accounts: [{ aiGatewayRequests: [{ sum: { cost: 0 } }] }] } },
+              }),
+      );
+      const noon = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
+      const days = noon.getUTCDate() === 1 ? 1 : 2;
+      await syncHostedUse(env as never, env.db, noon);
+      await syncHostedUse(env as never, env.db, noon);
+      expect((await credits('p1'))!.remainingMicros).toBe(10_000_000 - 300_000 * days);
+      requests = 2_000_000;
+      await syncHostedUse(env as never, env.db, noon);
+      analytics.mockRestore();
+      quiet.mockRestore();
+      expect((await credits('p1'))!.remainingMicros).toBe(10_000_000 - 600_000 * days);
+    });
   });
 
   describe('stripe events', () => {

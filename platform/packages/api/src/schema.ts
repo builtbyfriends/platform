@@ -99,7 +99,7 @@ export const appPeople = pgTable(
     stripe_subscription_id: text('stripe_subscription_id'),
     /** Whether the plan and Stripe ids came from a live-mode payment. A live installation ignores test rows. */
     livemode: boolean('livemode').notNull().default(false),
-    /** The month (`YYYY-MM-01`) in which this person ran out of credits, while it lasts. */
+    /** No longer read: app_payers.out_since took its place. Kept for the previous Worker during a rollout. */
     out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
       .notNull()
@@ -171,6 +171,8 @@ export const appUsageDaily = pgTable(
     day: text('day').notNull(),
     meter: text('meter').notNull(),
     quantity: bigint('quantity', { mode: 'number' }).notNull().default(0),
+    /** What this row was charged to the payer's credits, at the prices of the moment. */
+    cost_micros: bigint('cost_micros', { mode: 'number' }).notNull().default(0),
   },
   (table) => [
     primaryKey({
@@ -193,6 +195,61 @@ export const appUsageEvents = pgTable(
       .defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.event_id] })],
+);
+
+export type CreditSource = 'plan' | 'bought' | 'given' | 'starter';
+
+/**
+ * One grant of credits to a payer of a connected application. The balance is what's left on
+ * grants that haven't ended, less what the payer owes.
+ */
+export const appCreditGrants = pgTable(
+  'app_credit_grants',
+  {
+    id: text('id').primaryKey(),
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    /** The application's own id for whoever pays, in the same space as person ids. */
+    payer_id: text('payer_id').notNull(),
+    source: text('source').$type<CreditSource>().notNull(),
+    amount_micros: bigint('amount_micros', { mode: 'number' }).notNull(),
+    remaining_micros: bigint('remaining_micros', { mode: 'number' }).notNull(),
+    giver_id: text('giver_id'),
+    stripe_invoice_id: text('stripe_invoice_id'),
+    stripe_payment_intent_id: text('stripe_payment_intent_id'),
+    livemode: boolean('livemode').notNull().default(false),
+    starts_at: timestamp('starts_at', { mode: 'string', withTimezone: true }).notNull(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }),
+    voided_at: timestamp('voided_at', { mode: 'string', withTimezone: true }),
+    void_reason: text('void_reason'),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('idx_app_credit_grants_payer').on(table.client_id, table.payer_id),
+    uniqueIndex('idx_app_credit_grants_invoice')
+      .on(table.client_id, table.stripe_invoice_id)
+      .where(sql`${table.stripe_invoice_id} IS NOT NULL`),
+    uniqueIndex('idx_app_credit_grants_payment')
+      .on(table.client_id, table.stripe_payment_intent_id)
+      .where(sql`${table.stripe_payment_intent_id} IS NOT NULL`),
+  ],
+);
+
+/** What a payer owes past their grants, and since when their balance has been at or below zero. */
+export const appPayers = pgTable(
+  'app_payers',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    payer_id: text('payer_id').notNull(),
+    owed_micros: bigint('owed_micros', { mode: 'number' }).notNull().default(0),
+    out_since: timestamp('out_since', { mode: 'string', withTimezone: true }),
+  },
+  (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
 );
 
 export const oauthGrants = pgTable(
