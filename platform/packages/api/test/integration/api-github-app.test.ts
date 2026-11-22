@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import { getProjectGitHubInstallation, upsertProjectGitHubInstallation } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { deriveProxyInternalAuth, type ProxyInternalRoute } from '../../src/proxy-token.ts';
@@ -219,5 +220,87 @@ describe('GitHub App installations for an app’s own spaces', () => {
         })
       ).status,
     ).toBe(400);
+  });
+});
+
+describe('GitHub App installations for a connected application', () => {
+  async function client() {
+    const registration = await registerOAuthClient(env.db, {
+      name: 'Chat',
+      operator: 'Chat Co',
+      redirectUris: ['https://app.test/back'],
+      scopes: ['profile'],
+    });
+    const basic = `Basic ${btoa(`${registration.client.id}:${registration.clientSecret}`)}`;
+    return { id: registration.client.id, basic };
+  }
+  function call(path: 'app' | 'request', authorization: string, body: unknown) {
+    return app.fetch(
+      new Request(`http://localhost/app-github/${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization },
+        body: JSON.stringify(body),
+      }),
+      env,
+    );
+  }
+
+  it('connects, describes and calls GitHub with the installation token', async () => {
+    const a = await client();
+    const b = await client();
+    Object.assign(env, { PLATFORM_APP_PERSON_CLIENTS: `${a.id},${b.id}` });
+    const started = await call('app', a.basic, {
+      op: 'install-url',
+      scope: 'server_1',
+      returnUrl: 'https://app.test/github/callback',
+    });
+    const { state } = (await started.json()) as { state: string };
+    const res = await callback({ state, installation_id: '77', code: 'good' });
+    expect(new URL(res.headers.get('location')!).searchParams.get('bound')).toBe('1');
+
+    const described = await call('app', a.basic, { op: 'describe', scope: 'server_1', state });
+    expect(await described.json()).toMatchObject({ installationId: '77', matched: true });
+    expect((await call('app', b.basic, { op: 'describe', scope: 'server_1' })).status).toBe(404);
+    const theirs = await installUrl((await project()).id);
+    const mixed = await call('app', a.basic, {
+      op: 'describe',
+      scope: 'server_1',
+      state: theirs.state,
+    });
+    expect(((await mixed.json()) as { matched: boolean }).matched).toBe(false);
+
+    const sent = await call('request', a.basic, {
+      scope: 'server_1',
+      method: 'post',
+      path: '/repos/acme/site/pulls',
+      body: { title: 't' },
+    });
+    expect(sent.status).toBe(404);
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls.at(-1)! as [string, RequestInit];
+    expect(url).toBe('https://api.github.com/repos/acme/site/pulls');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer ghs_for_77');
+    expect(init.body).toBe('{"title":"t"}');
+
+    for (const path of ['/user', '/repos/acme/site/../../user', '/repos/acme//x', '/repos/acme']) {
+      expect((await call('request', a.basic, { scope: 'server_1', path })).status).toBe(400);
+    }
+    expect(
+      (await call('request', b.basic, { scope: 'server_1', path: '/repos/acme/site' })).status,
+    ).toBe(404);
+
+    await call('app', a.basic, { op: 'disconnect', scope: 'server_1' });
+    expect((await call('app', a.basic, { op: 'describe', scope: 'server_1' })).status).toBe(404);
+  });
+
+  it('refuses a client that is not listed, and wrong credentials', async () => {
+    const a = await client();
+    Object.assign(env, { PLATFORM_APP_PERSON_CLIENTS: '' });
+    expect((await call('app', a.basic, { op: 'describe', scope: 's' })).status).toBe(403);
+    Object.assign(env, { PLATFORM_APP_PERSON_CLIENTS: a.id });
+    expect(
+      (await call('app', `Basic ${btoa(`${a.id}:wrong`)}`, { op: 'describe', scope: 's' })).status,
+    ).toBe(401);
+    expect((await call('request', '', { scope: 's', path: '/repos/a/b' })).status).toBe(401);
   });
 });

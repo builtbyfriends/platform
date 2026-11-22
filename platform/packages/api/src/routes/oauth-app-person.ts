@@ -40,7 +40,7 @@ export type PublishApproval = {
   ) => Promise<object>;
 };
 
-function appPersonClients(env: ApiEnv['Bindings']): Set<string> {
+export function appPersonClients(env: ApiEnv['Bindings']): Set<string> {
   return new Set(
     (env.PLATFORM_APP_PERSON_CLIENTS ?? '')
       .split(',')

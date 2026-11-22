@@ -105,6 +105,7 @@ import { reconcileEmailDestinationCleanups } from './provisioning/email-destinat
 import { retrySandboxControllerCleanup } from './provisioning/sandbox-controller.ts';
 import { reconcileProxyTokenRotations } from './proxy-token-rotation.ts';
 import { appBillingRoutes } from './routes/app-billing.ts';
+import { appGitHubRoutes } from './routes/app-github.ts';
 import { oidcRoutes } from './routes/auth-oidc.ts';
 import auth from './routes/auth.ts';
 import deleteRoute from './routes/delete.ts';
@@ -569,6 +570,7 @@ const app = new Hono<ApiEnv>()
   .use('/webhooks/*', capabilityMiddleware('managedBuilds'))
   .route('/webhooks', webhookRoutes)
   .route('/github-app', githubAppRoutes)
+  .route('/app-github', appGitHubRoutes)
   .use('/github/*', capabilityMiddleware('managedBuilds'))
   .route('/github', githubRoutes)
   // Decision: The gateway relays this exact route through its API service binding. The HMAC-signed token is the

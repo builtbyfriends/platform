@@ -38,6 +38,20 @@ call. The app never holds the key or a long-lived token.
 - `POST /github/request` with `scope` uses that installation's token and skips the stored
   repo list: GitHub limits the token to the installation's repos.
 
+## Connected applications
+
+An application that Platform doesn't host has no proxy binding. It can be a connected
+application instead (an OAuth client listed in `PLATFORM_APP_PERSON_CLIENTS`), and it calls the
+API with its client credentials:
+
+- `POST /app-github/app` takes the same `op` and `scope` as the proxy's `/github/app`.
+- `POST /app-github/request` takes `scope`, `method`, `path` and `body`, and calls GitHub with
+  that scope's installation token. A `scope` is needed, since there's no stored project token.
+
+`app_github_installations` holds `(client_id, scope) → installation_id`. The signed state
+carries a `clientId` in place of a `projectId`, and the callback stores the row for that owner.
+A state made for a project doesn't match an application's installation, and the other way round.
+
 ## Decisions
 
 - A state from another GitHub flow goes on to `/github/callback` unchanged. GitHub sends
