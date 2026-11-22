@@ -495,6 +495,11 @@ export const projects = pgTable(
     // Decision: A second mailbox name on the shared mail domain, set once by the owner. It shares one namespace
     // with slugs; a database trigger keeps them apart.
     email_alias: text('email_alias'),
+    // Decision: Set by an operator to take one app offline, or by a billing pause. Reconcile, deploy and
+    // sandbox control read it, so it outlives a new deploy, an owner change and the owner's own restore.
+    suspended_reason: text('suspended_reason'),
+    suspended_at: timestamp('suspended_at', { mode: 'string', withTimezone: true }),
+    suspended_note: text('suspended_note'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (table) => [

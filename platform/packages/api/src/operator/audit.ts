@@ -170,6 +170,19 @@ function auditTarget(
     if (segments[2] === 'delete' || segments[2] === 'normalize') {
       return JSON.stringify({ projectId: id });
     }
+    if (segments[2] === 'suspend') {
+      return JSON.stringify({
+        projectId: id,
+        note: boundedString(body.note, 1000),
+        operatorNote: boundedString(body.operatorNote ?? body['operator-note'], 1000),
+      });
+    }
+    if (segments[2] === 'restore') {
+      return JSON.stringify({
+        projectId: id,
+        operatorNote: boundedString(body.operatorNote ?? body['operator-note'], 1000),
+      });
+    }
   }
   if (segments[0] === 'email' && segments[1] === 'operations' && segments[3] === 'resolve') {
     return JSON.stringify({
