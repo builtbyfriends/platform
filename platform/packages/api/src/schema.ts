@@ -97,6 +97,8 @@ export const appPeople = pgTable(
     plan: text('plan').$type<PlanId>().notNull(),
     stripe_customer_id: text('stripe_customer_id'),
     stripe_subscription_id: text('stripe_subscription_id'),
+    /** Whether the plan and Stripe ids came from a live-mode payment. A live installation ignores test rows. */
+    livemode: boolean('livemode').notNull().default(false),
     /** The month (`YYYY-MM-01`) in which this person ran out of credits, while it lasts. */
     out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
@@ -105,6 +107,16 @@ export const appPeople = pgTable(
   },
   (table) => [primaryKey({ columns: [table.client_id, table.person_id] })],
 );
+
+/** Stripe events already handled, so a resent event changes nothing. */
+export const stripeEvents = pgTable('stripe_events', {
+  event_id: text('event_id').primaryKey(),
+  type: text('type').notNull(),
+  livemode: boolean('livemode').notNull(),
+  created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 /** What one person of a connected application used in one calendar month (UTC), as the application reports it. */
 export const appUsage = pgTable(

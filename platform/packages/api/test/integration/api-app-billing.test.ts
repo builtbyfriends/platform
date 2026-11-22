@@ -40,6 +40,7 @@ type Hosted = {
   projects: Array<{ projectId: string; slug: string; person: string }>;
 };
 type Answer = {
+  plan: string;
   hosted?: Hosted | null;
   hostedAsOf: string | null;
   withinCaps: boolean;
@@ -126,13 +127,16 @@ async function sellCredits(person: string, plan: string, creditMicros: number) {
       object: {
         metadata: { clientId: registration.client.id, personId: person, plan },
         customer: 'cus_1',
+        payment_status: 'paid',
       },
     },
   });
 }
 
-async function webhook(event: unknown, secret = 'whsec_test') {
-  const body = JSON.stringify(event);
+const paidCheckout = { customer: 'cus_1', subscription: 'sub_1', payment_status: 'paid' };
+
+async function webhook(event: object, secret = 'whsec_test') {
+  const body = JSON.stringify({ id: 'evt_' + crypto.randomUUID(), livemode: false, ...event });
   const t = Math.floor(Date.now() / 1000);
   const key = await crypto.subtle.importKey(
     'raw',
@@ -243,7 +247,7 @@ describe('app billing', () => {
       (
         await webhook({
           type: 'checkout.session.completed',
-          data: { object: { metadata, customer: 'cus_1', subscription: 'sub_1' } },
+          data: { object: { ...paidCheckout, metadata } },
         })
       ).status,
     ).toBe(200);
@@ -466,7 +470,7 @@ describe('app billing', () => {
     const metadata = { clientId: registration.client.id, personId: 'boss', plan: 'solo' };
     await webhook({
       type: 'checkout.session.completed',
-      data: { object: { metadata, customer: 'cus_1', subscription: 'sub_1' } },
+      data: { object: { ...paidCheckout, metadata } },
     });
     const solo = await resolvePlanLimits(env.db, 'solo');
     expect(await billedPlanLimits(env.db, paid.owner!, paid.project!)).toEqual(solo);
@@ -512,6 +516,91 @@ describe('app billing', () => {
     expect((await call('/usage.record', { person: 'p1', breakdown: [{ model: 1 }] })).status).toBe(
       400,
     );
+  });
+
+  describe('stripe events', () => {
+    const planOf = async (person: string) =>
+      (await env.db.select().from(appPeople).where(eq(appPeople.person_id, person)))[0];
+    const checkout = (person: string, extra: object = {}) => ({
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          ...paidCheckout,
+          metadata: { clientId: registration.client.id, personId: person, plan: 'solo' },
+          ...extra,
+        },
+      },
+    });
+
+    it('handles the same event once', async () => {
+      const event = { id: 'evt_once', ...checkout('p1') };
+      expect(await (await webhook(event)).json()).toEqual({ ok: true });
+      await env.db.update(appPeople).set({ plan: 'free' });
+      expect(await (await webhook(event)).json()).toEqual({ ok: true, duplicate: true });
+      expect((await planOf('p1'))!.plan).toBe('free');
+    });
+
+    it('sets a plan only when the Checkout is paid', async () => {
+      const unpaid = checkout('p1', { payment_status: 'unpaid' });
+      expect(await (await webhook(unpaid)).json()).toEqual({ ok: true, ignored: true });
+      expect(await planOf('p1')).toBeUndefined();
+      await webhook({ ...checkout('p1'), type: 'checkout.session.async_payment_succeeded' });
+      expect((await planOf('p1'))!.plan).toBe('solo');
+    });
+
+    it('ignores an event from the other Stripe mode', async () => {
+      expect(await (await webhook({ ...checkout('p1'), livemode: true })).json()).toEqual({
+        ok: true,
+        ignored: true,
+      });
+      expect(await planOf('p1')).toBeUndefined();
+      env.STRIPE_SECRET_KEY = 'sk_live_x';
+      try {
+        await webhook(checkout('p2'));
+        expect(await planOf('p2')).toBeUndefined();
+        await webhook({ ...checkout('p3'), livemode: true });
+        expect(await planOf('p3')).toMatchObject({ plan: 'solo', livemode: true });
+      } finally {
+        env.STRIPE_SECRET_KEY = 'sk_test_x';
+      }
+    });
+
+    it('ends test-mode plans when the installation goes live', async () => {
+      await webhook(checkout('p1'));
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).plan).toBe('solo');
+      env.STRIPE_SECRET_KEY = 'sk_live_x';
+      try {
+        expect((await dataOf(call('/usage.status', { person: 'p1' }))).plan).toBe('free');
+        await syncHostedUse(env as never, env.db);
+        expect(await planOf('p1')).toMatchObject({
+          plan: 'free',
+          stripe_subscription_id: null,
+          livemode: false,
+        });
+      } finally {
+        env.STRIPE_SECRET_KEY = 'sk_test_x';
+      }
+    });
+
+    it('lets Stripe retry an event whose handler failed', async () => {
+      await env.db
+        .update(oauthClients)
+        .set({ plans: { solo: { stripePriceId: 'price_app_solo', creditMicros: 1 } } })
+        .where(eq(oauthClients.id, registration.client.id));
+      const event = { id: 'evt_retry', ...checkout('p1') };
+      const original = env.db.transaction.bind(env.db);
+      const once = vi.spyOn(env.db, 'transaction').mockImplementationOnce((run) =>
+        original(async (tx) => {
+          await run(tx);
+          throw new Error('boom');
+        }),
+      );
+      expect((await webhook(event)).status).toBe(500);
+      once.mockRestore();
+      expect(await planOf('p1')).toBeUndefined();
+      expect(await (await webhook(event)).json()).toEqual({ ok: true });
+      expect((await planOf('p1'))!.plan).toBe('solo');
+    });
   });
 
   it('refuses an unsigned webhook', async () => {

@@ -1,5 +1,14 @@
 import { and, eq, inArray, like, ne, sql } from 'drizzle-orm';
-import { APP, applyCredits, dayOf, payerOf, SYNCED_AT_SETTING, type Meter } from './app-credits.ts';
+import {
+  APP,
+  applyCredits,
+  dayOf,
+  dropTestPlans,
+  payerOf,
+  SYNCED_AT_SETTING,
+  type Meter,
+} from './app-credits.ts';
+import { stripeLiveMode } from './billing/stripe.ts';
 import type { Db } from './db.ts';
 import { isDevBypass, type ApiEnv } from './env.ts';
 import { setPlatformSetting } from './platform-settings.ts';
@@ -145,6 +154,9 @@ async function readStorage(
  * invocation.
  */
 export async function syncHostedUse(env: Bindings, db: Db, now = new Date()): Promise<void> {
+  if (stripeLiveMode(env)) {
+    await dropTestPlans(db);
+  }
   const rows = await db
     .select({
       project: projects,

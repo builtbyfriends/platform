@@ -1,6 +1,8 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
+import { stripeLiveMode } from './billing/stripe.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
+import { getDefaultPlan } from './plans.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
 import { appPeople, appUsage, appUsageDaily, oauthClients, projects, users } from './schema.ts';
 
@@ -342,17 +344,43 @@ export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string)
 }
 
 /**
+ * On a live installation, ends the plans people bought in Stripe test mode. Plan limits are read
+ * in many places without the Stripe key, so the test rows are changed once instead of skipped on
+ * each read.
+ */
+export async function dropTestPlans(db: DbOrTx): Promise<void> {
+  const free = (await getDefaultPlan(db)).id;
+  await db
+    .update(appPeople)
+    .set({
+      plan: free,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(appPeople.livemode, false),
+        or(ne(appPeople.plan, free), sql`${appPeople.stripe_customer_id} is not null`),
+      ),
+    );
+}
+
+/**
  * Works out whether a payer is out of credits and, when that changed, has the usage counters of
  * the accounts they pay for stamp or lift the AI pause on their hosted projects.
  */
 export async function applyCredits(
-  env: Pick<Bindings, 'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO'>,
+  env: Pick<
+    Bindings,
+    'USAGE_COUNTER' | 'STRIPE_PRICE_SOLO' | 'STRIPE_PRICE_PRO' | 'STRIPE_SECRET_KEY'
+  >,
   db: Db,
   clientId: string,
   person: string,
 ) {
   const period = currentPeriod();
-  const [[row], plans, prices, use] = await Promise.all([
+  const [[stored], plans, prices, use] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -361,6 +389,7 @@ export async function applyCredits(
     readMeterPrices(db),
     payerUse(db, clientId, person, period),
   ]);
+  const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
   const standing = creditStanding(use, prices, row ? (plans[row.plan]?.creditMicros ?? 0) : 0);
   const out = standing.credits?.out ? period : null;
   // Decision: Credits belong to a plan a person holds, so a person with no plan row has no balance to run out.

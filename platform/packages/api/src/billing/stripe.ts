@@ -34,6 +34,12 @@ export function stripeSecretKey(env: StripeEnv): string {
   return key;
 }
 
+/** True when the installation's Stripe key is a live key. Without a key it counts as test mode. */
+export function stripeLiveMode(env: Pick<StripeEnv, 'STRIPE_SECRET_KEY'>): boolean {
+  const key = env.STRIPE_SECRET_KEY;
+  return Boolean(key) && !key!.startsWith('sk_test_') && !key!.startsWith('rk_test_');
+}
+
 function priceFor(env: StripeEnv, plan: string): string {
   const price = Object.hasOwn(PAID_PLANS, plan) ? env[PAID_PLANS[plan as PaidPlan]] : undefined;
   if (!price) {
