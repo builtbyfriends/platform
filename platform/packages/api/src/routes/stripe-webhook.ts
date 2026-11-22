@@ -2,14 +2,22 @@ import { and, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { applyCredits, clientPlans, dropTestPlans, paidOwnerIds } from '../app-credits.ts';
 import {
+  cancelSubscription,
   fetchSubscription,
+  invoicePaymentIntent,
   PAID_PLANS,
   stripeLiveMode,
   type StripeSubscription,
   verifyStripeSignature,
   type PaidPlan,
 } from '../billing/stripe.ts';
-import { grantCredits } from '../credit-ledger.ts';
+import {
+  disputeGrant,
+  grantCredits,
+  payerBlocked,
+  refundGrant,
+  restoreDisputedGrant,
+} from '../credit-ledger.ts';
 import type { Tx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
@@ -31,9 +39,12 @@ type StripeObject = {
   subscription?: string;
   id?: string;
   payment_status?: string;
+  status?: string;
+  amount?: number;
+  amount_refunded?: number;
   billing_reason?: string;
   amount_paid?: number;
-  payment_intent?: string | null;
+  payment_intent?: string | { id?: string } | null;
   lines?: { data?: Array<InvoiceLine> };
   parent?: { subscription_details?: { metadata?: Metadata; subscription?: string } };
   subscription_details?: { metadata?: Metadata };
@@ -105,9 +116,14 @@ async function grantPlanCredits(
   tx: Tx,
   event: StripeEvent,
   key: { client_id: string; person_id: string },
+  paymentIntentId: string | null,
 ): Promise<boolean> {
   const invoice = event.data.object;
   if (!PLAN_GRANT_REASONS.has(invoice.billing_reason ?? '') || !invoice.id) {
+    return false;
+  }
+  if (await payerBlocked(tx, { clientId: key.client_id, payer: key.person_id })) {
+    console.warn('[billing] no credits for a payer blocked by a dispute', { id: event.id });
     return false;
   }
   const plans = await clientPlans(context.env, tx, key.client_id);
@@ -148,12 +164,68 @@ async function grantPlanCredits(
     amountMicros: credits,
     livemode: event.livemode,
     stripeInvoiceId: invoice.id,
-    stripePaymentIntentId:
-      typeof invoice.payment_intent === 'string' ? invoice.payment_intent : null,
+    stripePaymentIntentId: paymentIntentId,
     startsAt: new Date(start * 1000),
     expiresAt: new Date(end * 1000),
   });
   return true;
+}
+
+const TAKE_BACK_EVENTS = new Set([
+  'charge.refunded',
+  'charge.dispute.created',
+  'charge.dispute.closed',
+]);
+
+const idOf = (value: string | { id?: string } | null | undefined) =>
+  (typeof value === 'string' ? value : value?.id) ?? null;
+
+/** The payment intent that paid an invoice, read from Stripe when the invoice doesn't carry it. A $0 invoice has none. */
+async function paidBy(context: Context<ApiEnv>, invoice: StripeObject): Promise<string | null> {
+  const carried = idOf(invoice.payment_intent);
+  if (carried || !invoice.id || !invoice.amount_paid) {
+    return carried;
+  }
+  return invoicePaymentIntent(context.env, invoice.id);
+}
+
+/** Refunds and disputes find the grant by the payment it came from. Answers the payer, or null when nothing changed. */
+function takeBack(tx: Tx, event: StripeEvent) {
+  const object = event.data.object;
+  const paymentIntentId = idOf(object.payment_intent);
+  if (!paymentIntentId) {
+    return null;
+  }
+  if (event.type === 'charge.refunded') {
+    return refundGrant(tx, paymentIntentId, {
+      amount: object.amount_refunded ?? 0,
+      charged: object.amount ?? 0,
+    });
+  }
+  if (event.type === 'charge.dispute.created') {
+    return disputeGrant(tx, paymentIntentId);
+  }
+  return object.status === 'won' ? restoreDisputedGrant(tx, paymentIntentId) : null;
+}
+
+/** A dispute ends the payer's subscription, so no more invoices are charged to the disputed card. */
+async function cancelDisputed(
+  context: Context<ApiEnv>,
+  payer: { clientId: string; payer: string },
+) {
+  const [row] = await context
+    .get('db')
+    .select({ subscription: appPeople.stripe_subscription_id })
+    .from(appPeople)
+    .where(and(eq(appPeople.client_id, payer.clientId), eq(appPeople.person_id, payer.payer)));
+  if (!row?.subscription) {
+    return;
+  }
+  // Decision: The block already stops new grants and Checkouts, so a failed cancel is logged for an operator
+  // instead of failing the event.
+  await cancelSubscription(context.env, row.subscription).catch((error: unknown) => {
+    console.error('[billing] could not cancel a disputed subscription', { ...payer, error });
+  });
 }
 
 /** Applies a person's new plan to the limits of the projects they pay for. */
@@ -229,10 +301,11 @@ async function applyAppPersonEvent(
   event: StripeEvent,
   key: { client_id: string; person_id: string },
   subscription: StripeSubscription | null,
+  paymentIntentId: string | null,
 ): Promise<boolean> {
   const object = event.data.object;
   if (event.type === 'invoice.paid') {
-    return grantPlanCredits(context, tx, event, key);
+    return grantPlanCredits(context, tx, event, key, paymentIntentId);
   }
   if (subscription) {
     return saveSubscription(context, tx, event, key, subscription);
@@ -325,19 +398,39 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
   const seen = { event_id: event.id, type: event.type, livemode: event.livemode };
   const metadata = eventMetadata(event.data.object);
 
+  if (TAKE_BACK_EVENTS.has(event.type)) {
+    const outcome = await db.transaction(async (tx) => {
+      const fresh = await tx.insert(stripeEvents).values(seen).onConflictDoNothing().returning();
+      return fresh.length === 0 ? ('duplicate' as const) : takeBack(tx, event);
+    });
+    if (typeof outcome === 'string') {
+      return context.json({ ok: true, duplicate: true });
+    }
+    if (!outcome) {
+      return context.json({ ok: true, ignored: true });
+    }
+    if (event.type === 'charge.dispute.created') {
+      await cancelDisputed(context, outcome);
+    }
+    await applyCredits(context.env, db, outcome.clientId, outcome.payer);
+    return context.json({ ok: true });
+  }
+
   if (metadata.clientId && metadata.personId) {
     const key = { client_id: metadata.clientId, person_id: metadata.personId };
     const subscriptionId = SUBSCRIPTION_EVENTS.has(event.type) ? subscriptionOf(event) : undefined;
     const subscription = subscriptionId
       ? await fetchSubscription(context.env, subscriptionId)
       : null;
+    const paymentIntentId =
+      event.type === 'invoice.paid' ? await paidBy(context, event.data.object) : null;
     // Decision: The event id is saved in the transaction that applies it, so a handler that throws lets Stripe retry.
     const outcome = await db.transaction(async (tx) => {
       const fresh = await tx.insert(stripeEvents).values(seen).onConflictDoNothing().returning();
       if (fresh.length === 0) {
         return 'duplicate';
       }
-      return (await applyAppPersonEvent(context, tx, event, key, subscription))
+      return (await applyAppPersonEvent(context, tx, event, key, subscription, paymentIntentId))
         ? 'applied'
         : 'ignored';
     });

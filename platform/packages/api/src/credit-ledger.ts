@@ -189,3 +189,116 @@ export async function markOut(db: DbOrTx, payer: Payer, out: boolean, now = new 
     .returning({ id: appPayers.payer_id });
   return changed.length > 0;
 }
+
+async function grantByPayment(tx: Tx, paymentIntentId: string) {
+  const [grant] = await tx
+    .select()
+    .from(appCreditGrants)
+    .where(eq(appCreditGrants.stripe_payment_intent_id, paymentIntentId))
+    .for('update');
+  return grant;
+}
+
+/**
+ * Takes back the refunded share of a grant from what's left of it. Stripe sends the running total
+ * refunded, so a second partial refund or a resent event works from the total and takes no more.
+ */
+export async function refundGrant(
+  tx: Tx,
+  paymentIntentId: string,
+  refunded: { amount: number; charged: number },
+): Promise<Payer | null> {
+  const grant = await grantByPayment(tx, paymentIntentId);
+  if (!grant || grant.voided_at || refunded.charged <= 0) {
+    return null;
+  }
+  const share = Math.floor((grant.amount_micros * refunded.amount) / refunded.charged);
+  const taken = Math.min(share, grant.taken_micros + grant.remaining_micros);
+  if (taken <= grant.taken_micros) {
+    return null;
+  }
+  await tx
+    .update(appCreditGrants)
+    .set({
+      remaining_micros: grant.remaining_micros - (taken - grant.taken_micros),
+      taken_micros: taken,
+    })
+    .where(eq(appCreditGrants.id, grant.id));
+  return { clientId: grant.client_id, payer: grant.payer_id };
+}
+
+/**
+ * A card dispute takes back the whole grant. What was already spent becomes owed, so the balance
+ * can go below zero, and the payer is blocked from buying until an operator clears it.
+ */
+export async function disputeGrant(
+  tx: Tx,
+  paymentIntentId: string,
+  now = new Date(),
+): Promise<Payer | null> {
+  const grant = await grantByPayment(tx, paymentIntentId);
+  if (!grant || grant.voided_at) {
+    return null;
+  }
+  const payer = { clientId: grant.client_id, payer: grant.payer_id };
+  const row = await lockPayer(tx, payer);
+  const spent = grant.amount_micros - grant.taken_micros - grant.remaining_micros;
+  await tx
+    .update(appCreditGrants)
+    .set({
+      remaining_micros: 0,
+      voided_at: now.toISOString(),
+      void_reason: 'dispute',
+      voided_remaining_micros: grant.remaining_micros,
+      voided_owed_micros: spent,
+    })
+    .where(eq(appCreditGrants.id, grant.id));
+  await tx
+    .update(appPayers)
+    .set({
+      owed_micros: row.owed_micros + spent,
+      blocked_at: row.blocked_at ?? now.toISOString(),
+      blocked_reason: row.blocked_reason ?? 'dispute',
+    })
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return payer;
+}
+
+/**
+ * A won dispute gives back exactly what the dispute took, with the grant's old end date. Owed
+ * that a later grant already settled comes back on this grant instead. The block stays for an
+ * operator to clear.
+ */
+export async function restoreDisputedGrant(tx: Tx, paymentIntentId: string): Promise<Payer | null> {
+  const grant = await grantByPayment(tx, paymentIntentId);
+  if (!grant || grant.void_reason !== 'dispute') {
+    return null;
+  }
+  const payer = { clientId: grant.client_id, payer: grant.payer_id };
+  const row = await lockPayer(tx, payer);
+  const fromOwed = Math.min(row.owed_micros, grant.voided_owed_micros);
+  await tx
+    .update(appCreditGrants)
+    .set({
+      remaining_micros: grant.voided_remaining_micros + grant.voided_owed_micros - fromOwed,
+      voided_at: null,
+      void_reason: null,
+      voided_remaining_micros: 0,
+      voided_owed_micros: 0,
+    })
+    .where(eq(appCreditGrants.id, grant.id));
+  await tx
+    .update(appPayers)
+    .set({ owed_micros: row.owed_micros - fromOwed })
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return payer;
+}
+
+/** True when a dispute has blocked the payer from buying. */
+export async function payerBlocked(db: DbOrTx, payer: Payer): Promise<boolean> {
+  const [row] = await db
+    .select({ blocked: appPayers.blocked_at })
+    .from(appPayers)
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return Boolean(row?.blocked);
+}

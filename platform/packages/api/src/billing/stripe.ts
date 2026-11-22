@@ -158,6 +158,50 @@ export async function fetchSubscription(
   };
 }
 
+/** Ends a subscription now. Used after a card dispute. */
+export async function cancelSubscription(
+  env: StripeEnv,
+  subscriptionId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(
+    `https://api.stripe.com/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { method: 'DELETE', headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
+  );
+  if (!response.ok) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+}
+
+/**
+ * The payment intent that paid an invoice. Newer Stripe API versions leave it off the invoice and
+ * list it under the invoice's payments, which have to be asked for.
+ */
+export async function invoicePaymentIntent(
+  env: StripeEnv,
+  invoiceId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string | null> {
+  const response = await fetcher(
+    `https://api.stripe.com/v1/invoices/${encodeURIComponent(invoiceId)}?expand[]=payments`,
+    { headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    payments?: { data?: Array<{ payment?: { payment_intent?: string | { id?: string } } }> };
+  } | null;
+  if (!response.ok || !body) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+  for (const entry of body.payments?.data ?? []) {
+    const intent = entry.payment?.payment_intent;
+    const id = typeof intent === 'string' ? intent : intent?.id;
+    if (id) {
+      return id;
+    }
+  }
+  return null;
+}
+
 async function stripePost(
   env: StripeEnv,
   path: string,

@@ -22,6 +22,7 @@ import {
   createPortalSession,
   stripeLiveMode,
 } from '../billing/stripe.ts';
+import { payerBlocked } from '../credit-ledger.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
 import { appPeople, appUsage, appUsageEvents, appUsageSources } from '../schema.ts';
@@ -356,6 +357,14 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         ),
       );
     const row = stored?.livemode === stripeLiveMode(context.env) ? stored : undefined;
+    if (
+      await payerBlocked(context.get('db'), {
+        clientId: context.get('billingClient'),
+        payer: body.person,
+      })
+    ) {
+      return context.json({ error: 'blocked' }, 403);
+    }
     // Decision: A payer holds one subscription. A stored one that Stripe hasn't ended sends them to the portal
     // to change it, so a second Checkout can't start a second subscription.
     if (

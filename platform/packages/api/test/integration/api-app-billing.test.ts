@@ -852,6 +852,107 @@ describe('app billing', () => {
     });
   });
 
+  describe('refunds and disputes', () => {
+    const charge = (type: string, object: object) => ({
+      type,
+      data: { object: { payment_intent: 'pi_in_r', amount: 2000, ...object } },
+    });
+    const balance = async () =>
+      (await dataOf(call('/usage.status', { person: 'p1' }))).credits as unknown as {
+        balanceMicros: number;
+        out: boolean;
+      };
+    let stripeCalls: Array<string>;
+
+    beforeEach(async () => {
+      await env.db
+        .update(oauthClients)
+        .set({ plans: { solo: { stripePriceId: 'price_app_solo', creditMicros: 20_000_000 } } })
+        .where(eq(oauthClients.id, registration.client.id));
+      stripeCalls = [];
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        stripeCalls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+        return Response.json({ url: 'https://stripe.example/session' });
+      });
+      await webhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            ...paidCheckout,
+            metadata: { clientId: registration.client.id, personId: 'p1', plan: 'solo' },
+          },
+        },
+      });
+      await webhook(invoicePaid('p1', 'price_app_solo', { id: 'in_r' }));
+      // Decision: 288,000 seconds is 80 hours of sandbox at $0.10, so $8 of the $20 grant is spent.
+      await call('/usage.record', { person: 'p1', sandboxSeconds: 288_000 });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('takes back what is left of a fully refunded grant', async () => {
+      await webhook(charge('charge.refunded', { amount_refunded: 2000 }));
+      expect(await balance()).toMatchObject({ balanceMicros: 0, out: true });
+    });
+
+    it('takes back a refund once, working from the total refunded', async () => {
+      const half = { id: 'evt_half', ...charge('charge.refunded', { amount_refunded: 1000 }) };
+      await webhook(half);
+      await webhook(half);
+      await webhook({ ...half, id: 'evt_half_again' });
+      expect((await balance()).balanceMicros).toBe(2_000_000);
+      await webhook(charge('charge.refunded', { amount_refunded: 2000 }));
+      expect((await balance()).balanceMicros).toBe(0);
+    });
+
+    it('takes back a disputed grant, blocks the buyer, and gives it back when won', async () => {
+      await webhook(charge('charge.dispute.created', { status: 'needs_response' }));
+      expect(await balance()).toMatchObject({ balanceMicros: -8_000_000, out: true });
+      expect(stripeCalls).toContain('DELETE https://api.stripe.com/v1/subscriptions/sub_1');
+      await webhook({
+        type: 'customer.subscription.deleted',
+        data: {
+          object: {
+            id: 'sub_1',
+            metadata: { clientId: registration.client.id, personId: 'p1', plan: 'solo' },
+          },
+        },
+      });
+      const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
+      expect(await (await call('/billing.checkout', order)).json()).toEqual({ error: 'blocked' });
+      await webhook(
+        invoicePaid('p1', 'price_app_solo', { id: 'in_after', reason: 'subscription_cycle' }),
+      );
+      expect((await balance()).balanceMicros).toBe(-8_000_000);
+
+      await webhook(charge('charge.dispute.closed', { status: 'won' }));
+      expect(await balance()).toMatchObject({ balanceMicros: 12_000_000, out: false });
+    });
+
+    it('leaves a spent grant below zero after a dispute', async () => {
+      await call('/usage.record', { person: 'p1', sandboxSeconds: 432_000 });
+      await webhook(charge('charge.dispute.created', { status: 'needs_response' }));
+      expect(await balance()).toMatchObject({ balanceMicros: -20_000_000, out: true });
+      await webhook(charge('charge.dispute.closed', { status: 'lost' }));
+      expect((await balance()).balanceMicros).toBe(-20_000_000);
+    });
+
+    it('reads the payment from Stripe when the invoice leaves it out', async () => {
+      vi.restoreAllMocks();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+        Response.json({ payments: { data: [{ payment: { payment_intent: 'pi_new' } }] } }),
+      );
+      const invoice = invoicePaid('p2', 'price_app_solo', { id: 'in_new' });
+      const { payment_intent: _, ...object } = invoice.data.object;
+      await webhook({ ...invoice, data: { object: { ...object, amount_paid: 2000 } } });
+      await webhook(charge('charge.refunded', { payment_intent: 'pi_new', amount_refunded: 2000 }));
+      expect((await dataOf(call('/usage.status', { person: 'p2' }))).credits).toMatchObject({
+        balanceMicros: 0,
+      });
+    });
+  });
+
   describe('stripe events', () => {
     const planOf = async (person: string) =>
       (await env.db.select().from(appPeople).where(eq(appPeople.person_id, person)))[0];

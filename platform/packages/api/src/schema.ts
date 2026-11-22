@@ -219,6 +219,13 @@ export const appCreditGrants = pgTable(
     source: text('source').$type<CreditSource>().notNull(),
     amount_micros: bigint('amount_micros', { mode: 'number' }).notNull(),
     remaining_micros: bigint('remaining_micros', { mode: 'number' }).notNull(),
+    /** What refunds took back so far. */
+    taken_micros: bigint('taken_micros', { mode: 'number' }).notNull().default(0),
+    /** What a dispute took from what was left, and what it added to the owed amount, so a won dispute gives both back. */
+    voided_remaining_micros: bigint('voided_remaining_micros', { mode: 'number' })
+      .notNull()
+      .default(0),
+    voided_owed_micros: bigint('voided_owed_micros', { mode: 'number' }).notNull().default(0),
     giver_id: text('giver_id'),
     stripe_invoice_id: text('stripe_invoice_id'),
     stripe_payment_intent_id: text('stripe_payment_intent_id'),
@@ -252,6 +259,9 @@ export const appPayers = pgTable(
     payer_id: text('payer_id').notNull(),
     owed_micros: bigint('owed_micros', { mode: 'number' }).notNull().default(0),
     out_since: timestamp('out_since', { mode: 'string', withTimezone: true }),
+    /** Set by a card dispute. A blocked payer can't buy until an operator clears it. */
+    blocked_at: timestamp('blocked_at', { mode: 'string', withTimezone: true }),
+    blocked_reason: text('blocked_reason'),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
 );
