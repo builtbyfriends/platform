@@ -73,13 +73,25 @@ const HOSTED_FIELDS = {
   requests: 'hostedRequests',
   bandwidthBytes: 'hostedBandwidthBytes',
   aiNeurons: 'hostedAiNeurons',
+  sandboxSeconds: 'hostedSandboxSeconds',
+  cpuMs: 'hostedCpuMs',
+} as const satisfies Record<string, Meter>;
+// Decision: Storage is shown as what's stored now. The month's byte-days only decide its cost.
+const STORED_FIELDS = {
+  d1Bytes: 'hostedD1ByteDays',
+  r2Bytes: 'hostedR2ByteDays',
+  kvBytes: 'hostedKvByteDays',
 } as const satisfies Record<string, Meter>;
 
-function hostedLine(use: Partial<MeterUse>, prices: MeterPrices) {
+const fields = <Fields extends Record<string, Meter>>(names: Fields, use: Partial<MeterUse>) =>
+  Object.fromEntries(
+    Object.entries(names).map(([field, meter]) => [field, use[meter] ?? 0]),
+  ) as Record<keyof Fields, number>;
+
+function hostedLine(use: Partial<MeterUse>, latest: Partial<MeterUse>, prices: MeterPrices) {
   return {
-    ...(Object.fromEntries(
-      Object.entries(HOSTED_FIELDS).map(([field, meter]) => [field, use[meter] ?? 0]),
-    ) as Record<keyof typeof HOSTED_FIELDS, number>),
+    ...fields(HOSTED_FIELDS, use),
+    ...fields(STORED_FIELDS, latest),
     costMicros: Object.entries(use).reduce(
       (sum, [meter, quantity]) => sum + costMicros(meter as Meter, quantity, prices),
       0,
@@ -96,20 +108,22 @@ async function hostedUse(context: BillingContext, person: string) {
     paidProjectUse(db, clientId, person),
     readMeterPrices(db),
   ]);
-  const total: Partial<MeterUse> = {};
+  const total = { use: {} as Partial<MeterUse>, latest: {} as Partial<MeterUse> };
   const listed = rows.map(({ project, person: builtFor }) => {
-    const projectUse = use.get(project.id) ?? {};
-    for (const [meter, quantity] of Object.entries(projectUse)) {
-      total[meter as Meter] = (total[meter as Meter] ?? 0) + quantity;
+    const read = use.get(project.id) ?? { use: {}, latest: {} };
+    for (const part of ['use', 'latest'] as const) {
+      for (const [meter, quantity] of Object.entries(read[part])) {
+        total[part][meter as Meter] = (total[part][meter as Meter] ?? 0) + quantity;
+      }
     }
     return {
       projectId: project.id,
       slug: project.slug,
       person: builtFor,
-      ...hostedLine(projectUse, prices),
+      ...hostedLine(read.use, read.latest, prices),
     };
   });
-  return { ...hostedLine(total, prices), projects: listed };
+  return { ...hostedLine(total.use, total.latest, prices), projects: listed };
 }
 
 /** A person's plan, its caps, what they used this month, and whether they are still within the caps. */

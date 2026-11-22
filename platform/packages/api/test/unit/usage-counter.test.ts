@@ -9,7 +9,11 @@ const dbCalls = {
   suspend: [] as Array<{ id: string; reason: string }>,
   unsuspendIfReason: [] as Array<{ id: string; reason: string }>,
 };
-vi.mock('../../src/app-credits.ts', () => ({ payerOutOfCredits: async () => false }));
+const addProjectUse = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../src/app-credits.ts', () => ({
+  payerOutOfCredits: async () => false,
+  addProjectUse,
+}));
 vi.mock('../../src/app-payer.ts', () => ({
   billedAccountPlanId: async (_db: unknown, user: { plan: string }) => user.plan,
   accountPlanLimits: async (db: unknown, _owner: unknown, plan: string) =>
@@ -475,6 +479,7 @@ describe('UsageCounter.handleRecord — sandbox', () => {
     }>();
     expect(body.totalSandboxSeconds).toBe(42);
     expect(body.sandboxRuntimeSuspended).toBe(false);
+    expect(addProjectUse).toHaveBeenCalledWith(expect.anything(), 'p1', 'hostedSandboxSeconds', 42);
 
     const persisted = storage.data.get('state') as CounterState;
     expect(persisted.totalSandboxSeconds).toBe(42);

@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { addProjectUse } from './app-credits.ts';
 import { accountPlanLimits, billedAccountPlanId } from './app-payer.ts';
 import {
   createDb,
@@ -322,6 +323,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const watermarkCutoff = Date.now() - SANDBOX_USAGE_RETENTION_MS;
     const watermarks = new Map<string, number>();
     let incomingSandboxSeconds = 0;
+    const sandboxSecondsByProject = new Map<string, number>();
     for (const event of body.events) {
       const leaseId = event.sandboxInstanceId;
       const from = event.sandboxMeteredFrom;
@@ -346,7 +348,12 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
         watermarkCutoff,
       );
       if (through! > billFrom) {
-        incomingSandboxSeconds += (through! - billFrom) / 1000;
+        const seconds = (through! - billFrom) / 1000;
+        incomingSandboxSeconds += seconds;
+        sandboxSecondsByProject.set(
+          event.projectId,
+          (sandboxSecondsByProject.get(event.projectId) ?? 0) + seconds,
+        );
       }
       watermarks.set(key, Math.max(previous, through!));
     }
@@ -424,6 +431,15 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     await this.ensureAiAlarm();
 
     await this.saveState(state, { watermarks });
+    // Decision: After the save, so a retried batch can't count sandbox time twice. If this write fails the
+    // time is missing from the payer's daily numbers, which is better than charging it twice.
+    for (const [projectId, seconds] of sandboxSecondsByProject) {
+      await addProjectUse(getDb(), projectId, 'hostedSandboxSeconds', Math.round(seconds)).catch(
+        (error: unknown) => {
+          console.error('[usage] hosted sandbox time was not stored', { projectId, error });
+        },
+      );
+    }
 
     return Response.json({
       totalRequests: state.totalRequests,

@@ -203,6 +203,26 @@ export async function addUse(
     });
 }
 
+/** Adds use that Platform counted for a hosted project, under whoever pays for it now. */
+export async function addProjectUse(
+  db: DbOrTx,
+  projectId: string,
+  meter: Meter,
+  quantity: number,
+): Promise<void> {
+  if (quantity <= 0) {
+    return;
+  }
+  const [payer] = await db
+    .select({ clientId: sql<string>`substr(${users.provider}, 5)`, person: payerOf })
+    .from(projects)
+    .innerJoin(users, eq(users.id, projects.user_id))
+    .where(and(eq(projects.id, projectId), like(users.provider, `${APP}%`)));
+  if (payer) {
+    await addUse(db, { ...payer, projectId, meter, quantity });
+  }
+}
+
 /** A payer's use for each day of the month so far, days with none included. */
 export async function payerDaily(
   db: DbOrTx,
@@ -264,24 +284,26 @@ export function paidProjects(db: DbOrTx, clientId: string, person: string) {
     );
 }
 
-/** This month's hosted use of one payer, by project and meter. */
+/** This month's hosted use of one payer, by project and meter: the month's sum and the latest day's number. */
 export async function paidProjectUse(db: DbOrTx, clientId: string, person: string) {
   const rows = await db
     .select({
       projectId: appUsageDaily.project_id,
       meter: appUsageDaily.meter,
       quantity: sql<number>`sum(${appUsageDaily.quantity})`,
+      latest: sql<number>`(array_agg(${appUsageDaily.quantity} order by ${appUsageDaily.day} desc))[1]`,
     })
     .from(appUsageDaily)
     .where(
       and(payerRows(clientId, person), inPeriod(currentPeriod()), ne(appUsageDaily.project_id, '')),
     )
     .groupBy(appUsageDaily.project_id, appUsageDaily.meter);
-  const byProject = new Map<string, Partial<MeterUse>>();
+  const byProject = new Map<string, { use: Partial<MeterUse>; latest: Partial<MeterUse> }>();
   for (const row of rows) {
-    const use = byProject.get(row.projectId) ?? {};
-    use[row.meter as Meter] = Number(row.quantity);
-    byProject.set(row.projectId, use);
+    const project = byProject.get(row.projectId) ?? { use: {}, latest: {} };
+    project.use[row.meter as Meter] = Number(row.quantity);
+    project.latest[row.meter as Meter] = Number(row.latest);
+    byProject.set(row.projectId, project);
   }
   return byProject;
 }

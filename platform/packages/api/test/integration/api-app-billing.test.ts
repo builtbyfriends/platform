@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, afterAll, describe, expect, it, vi } from 'vite-plus/test';
-import { payerOutOfCredits } from '../../src/app-credits.ts';
+import { addProjectUse, payerOutOfCredits } from '../../src/app-credits.ts';
 import {
   billedAccountPlanId,
   billedAccountPlanLimits,
@@ -13,7 +13,7 @@ import rawApp from '../../src/index.ts';
 import { resolvePlanLimits } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { setProjectAiBlock } from '../../src/routing.ts';
-import { appPeople, oauthClients, projects, users } from '../../src/schema.ts';
+import { appPeople, oauthClients, projects, resources, users } from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -298,15 +298,42 @@ describe('app billing', () => {
   it('stores what hosted apps used under their payer, and keeps the old numbers when analytics is down', async () => {
     const { project } = await preview('p1', { workspace: 'w1' });
     expect((await dataOf(call('/usage.status', { person: 'p1' }))).hostedAsOf).toBeNull();
-    const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
-      String(input).endsWith('/graphql')
-        ? Response.json({
-            data: { viewer: { accounts: [{ aiGatewayRequests: [{ sum: { cost: 0.011 } }] }] } },
-          })
-        : Response.json({
-            data: [{ blob1: project!.id, requests: 2_000_000, bandwidth_bytes: 500 }],
-          }),
+    await env.db.insert(resources).values(
+      (['d1', 'kv', 'r2'] as const).map((type) => ({
+        id: `res_${type}`,
+        project_id: project!.id,
+        type,
+        cf_id: `${type}-1`,
+        binding_name: type,
+      })),
     );
+    const stored = (max: Record<string, number>, dimensions: Record<string, string>) => ({
+      data: { viewer: { accounts: [{ storage: [{ max, dimensions }] }] } },
+    });
+    const analytics = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const query = String(init?.body);
+      if (!String(input).endsWith('/graphql')) {
+        return Response.json({
+          data: query.includes('double3')
+            ? [{ index1: `user-${project!.slug}`, cpu_ms: 2_000_000 }]
+            : [{ blob1: project!.id, requests: 2_000_000, bandwidth_bytes: 500 }],
+        });
+      }
+      if (query.includes('d1StorageAdaptiveGroups')) {
+        return Response.json(stored({ databaseSizeBytes: 3e9 }, { databaseId: 'd1-1' }));
+      }
+      if (query.includes('kvStorageAdaptiveGroups')) {
+        return Response.json(stored({ byteCount: 6e8 }, { namespaceId: 'kv-1' }));
+      }
+      if (query.includes('r2StorageAdaptiveGroups')) {
+        return Response.json(
+          stored({ payloadSize: 2.9e9, metadataSize: 1e8 }, { bucketName: 'r2-1' }),
+        );
+      }
+      return Response.json({
+        data: { viewer: { accounts: [{ aiGatewayRequests: [{ sum: { cost: 0.011 } }] }] } },
+      });
+    });
     const noon = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00.000Z`);
     await syncHostedUse(env as never, env.db, noon);
     await syncHostedUse(env as never, env.db, noon);
@@ -314,6 +341,7 @@ describe('app billing', () => {
     const offline = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.error());
     await syncHostedUse(env as never, env.db, noon);
     offline.mockRestore();
+    await addProjectUse(env.db, project!.id, 'hostedSandboxSeconds', 7200);
 
     const answer = await dataOf(call('/usage.status', { person: 'p1', hosted: true, daily: true }));
     expect(answer.hostedAsOf).toBe(noon.toISOString());
@@ -323,8 +351,20 @@ describe('app billing', () => {
       requests: 2_000_000 * days,
       bandwidthBytes: 500 * days,
       aiNeurons: 1000 * days,
-      costMicros: (600_000 + 11_000) * days,
-      projects: [{ projectId: project!.id, person: 'p1', requests: 2_000_000 * days }],
+      cpuMs: 2_000_000 * days,
+      sandboxSeconds: 7200,
+      d1Bytes: 3e9,
+      kvBytes: 6e8,
+      r2Bytes: 3e9,
+      costMicros: 737_500 * days + 200_000,
+      projects: [
+        { projectId: project!.id, person: 'p1', requests: 2_000_000 * days, d1Bytes: 3e9 },
+      ],
+    });
+    expect(answer.meters).toContainEqual({
+      meter: 'hostedD1ByteDays',
+      quantity: 3e9 * days,
+      costMicros: 75_000 * days,
     });
     expect(answer.meters).toContainEqual({
       meter: 'hostedRequests',
@@ -334,8 +374,14 @@ describe('app billing', () => {
     expect(answer.credits).toBeNull();
     expect(answer.daily).toHaveLength(new Date().getUTCDate());
     expect(answer.daily.at(-1)).toMatchObject({
-      costMicros: 611_000,
-      meters: { hostedRequests: 2_000_000, hostedAiNeurons: 1000 },
+      costMicros: 937_500,
+      meters: {
+        hostedRequests: 2_000_000,
+        hostedAiNeurons: 1000,
+        hostedCpuMs: 2_000_000,
+        hostedSandboxSeconds: 7200,
+        hostedKvByteDays: 6e8,
+      },
     });
   });
 
