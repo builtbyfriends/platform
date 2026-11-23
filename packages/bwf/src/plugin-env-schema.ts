@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { join, resolve } from 'pathslash';
 import { loadEnv, normalizePath, resolveEnvPrefix, type Plugin, type ResolvedConfig } from 'vite';
@@ -8,6 +8,7 @@ import { loadUserEnvFile } from './host/load-user-env.ts';
 import { bwfLog, bwfWarn } from './log.ts';
 import { afterServerReady } from './plugin-dev-config.ts';
 import { loadEnvPublic } from './plugin-env-client-guard.ts';
+import { readProjectPaths } from './project-paths.ts';
 import { scanWranglerDotenvKeys } from './shared/dotenv.ts';
 import {
   findLegacyEnvFiles,
@@ -201,6 +202,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
 
   function regenerateTypes() {
     if (!envFile) {
+      rmSync(join(outDir, 'env.d.ts'), { force: true });
       return;
     }
     mkdirSync(outDir, { recursive: true });
@@ -394,24 +396,32 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
       }
     },
     async configureServer(server) {
-      if (!envFile) {
-        return;
+      if (envFile) {
+        afterServerReady(server, () => {
+          void validateAndWarn();
+        });
       }
-      afterServerReady(server, () => {
-        void validateAndWarn();
-      });
-      server.watcher.add(envFile);
-      server.watcher.on('change', async (file) => {
-        if (file === envFile) {
-          bwfLog('env.ts changed — regenerating types');
-          regenerateTypes();
+      const candidates = readProjectPaths(root).envFileCandidates;
+      server.watcher.add(candidates);
+      const onEnvFileEvent = async (file: string) => {
+        if (!candidates.some((candidate) => normalizePath(candidate) === normalizePath(file))) {
+          return;
+        }
+        envFile = findEnvFile(root);
+        envFileIds = envFileIdsFor(envFile);
+        bwfLog(envFile ? 'env.ts changed — regenerating types' : 'env.ts removed — clearing types');
+        regenerateTypes();
+        if (envFile) {
           await importUserEnv();
           await emitSchemaFacts();
           await applyClientValuesToViteEnv(server.config);
           await validateAndWarn();
-          server.ws.send({ type: 'full-reload' });
         }
-      });
+        server.ws.send({ type: 'full-reload' });
+      };
+      server.watcher.on('add', onEnvFileEvent);
+      server.watcher.on('change', onEnvFileEvent);
+      server.watcher.on('unlink', onEnvFileEvent);
     },
     async buildStart() {
       // Decision: `config` runs once per `vite build --watch` session; re-import so
