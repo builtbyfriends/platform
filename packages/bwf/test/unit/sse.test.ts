@@ -192,7 +192,7 @@ describe('connectEventStream', () => {
     const stream = connectEventStream<{ ready: { ok: boolean } }>('/events', {
       withCredentials: true,
     });
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
     const handler = vi.fn();
     const off = stream.on('ready', handler);
 
@@ -214,7 +214,7 @@ describe('connectEventStream', () => {
 
   it('supports text parsing, error listeners, and close', () => {
     const stream = connectEventStream('/events', { parse: 'text' });
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
     const messageHandler = vi.fn();
     const errorHandler = vi.fn();
 

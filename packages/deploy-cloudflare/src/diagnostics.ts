@@ -57,7 +57,7 @@ export function cloudflareCommandDiagnostic(result: CloudflareCommandResult): st
   // Decision: Don't echo stdout, or cf's log lines on stderr, when no error block was found, even when
   // the process failed without stderr.
   message = stripVTControlCharacters(message)
-    .split(/\n\s*(?:🪵|Logs (?:were )?written|If you think this is a bug)/)[0]!
+    .split(/\n\s*(?:🪵|Logs (?:were )?written|If you think this is a bug)/)[0]
     .trim();
   if (!message) {
     return undefined;

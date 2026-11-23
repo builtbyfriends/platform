@@ -166,7 +166,7 @@ export async function computeDesiredCloudflareResources(
   const reasons = new Map<string, string>();
 
   // Decision: needsDatabase covers source use, auth and checked-in migrations, like the managed manifest.
-  const databaseReason = analysis.reasons.database[0]!;
+  const databaseReason = analysis.reasons.database[0];
   if (needsDatabase && dialect === 'sqlite') {
     const binding = bindingNames?.d1 ?? 'DB';
     // Decision: An explicitly authored name is the intended remote identity even before bwf has pinned its ID.
@@ -197,7 +197,7 @@ export async function computeDesiredCloudflareResources(
   if (bindings.needsKV) {
     const binding = bindingNames?.kv ?? 'KV';
     desired.kvNamespaces.push({ binding, title: suffixedResourceName(workerName, 'kv') });
-    reasons.set(binding, analysis.reasons.kv[0]!);
+    reasons.set(binding, analysis.reasons.kv[0]);
   }
 
   if (bindings.needsR2) {
@@ -219,7 +219,7 @@ export async function computeDesiredCloudflareResources(
       bucketName,
       ...(bwfConfig.storage?.locationHint ? { locationHint: bwfConfig.storage.locationHint } : {}),
     };
-    reasons.set(binding, analysis.reasons.r2[0]!);
+    reasons.set(binding, analysis.reasons.r2[0]);
   }
 
   // Decision: Queue names are account-unique, so each is named after the Worker. Preflight keeps a queue this

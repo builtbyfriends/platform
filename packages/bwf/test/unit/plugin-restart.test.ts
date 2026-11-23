@@ -77,7 +77,7 @@ function tokenOf(clientModule: string): string {
   if (!match) {
     throw new Error('no token in client module');
   }
-  return JSON.parse(match[1]!) as string;
+  return JSON.parse(match[1]) as string;
 }
 
 function pageTokenOf(html: string): string {
@@ -85,7 +85,7 @@ function pageTokenOf(html: string): string {
   if (!match) {
     throw new Error('no token in restarting page');
   }
-  return JSON.parse(match[1]!) as string;
+  return JSON.parse(match[1]) as string;
 }
 
 function targetOf(html: string): string {
@@ -93,7 +93,7 @@ function targetOf(html: string): string {
   if (!match) {
     throw new Error('no target in restarting page');
   }
-  return JSON.parse(match[1]!) as string;
+  return JSON.parse(match[1]) as string;
 }
 
 describe('sanitizeReturnPath', () => {

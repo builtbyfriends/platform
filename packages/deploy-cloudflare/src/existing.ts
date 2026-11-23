@@ -515,7 +515,7 @@ export function assertExistingCloudflareConfig(
   const metadata = isRecord(config.version_metadata) ? config.version_metadata : undefined;
   if (
     metadataBindings.length > 1 ||
-    (metadataBindings.length === 1 && metadata?.binding !== metadataBindings[0]!.name) ||
+    (metadataBindings.length === 1 && metadata?.binding !== metadataBindings[0].name) ||
     (metadataBindings.length === 0 && config.version_metadata !== undefined)
   ) {
     throw new Error(

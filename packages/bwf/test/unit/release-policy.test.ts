@@ -84,7 +84,7 @@ describe('public package release policy', () => {
     'rejects retrying an unavailable version: %s',
     (tag) => {
       expect(() =>
-        releasePolicy(tag, [{ name: '@builtbyfriends/bwf', version: tag.slice(1).split('+')[0]! }]),
+        releasePolicy(tag, [{ name: '@builtbyfriends/bwf', version: tag.slice(1).split('+')[0] }]),
       ).toThrow('cannot be reused');
     },
   );

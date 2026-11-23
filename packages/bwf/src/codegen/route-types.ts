@@ -87,8 +87,8 @@ export function generateRouteTypes(
     '    Schema["~standard"]["types"]',
     '  >["output"];',
     '}',
+    '',
   );
-  lines.push('');
   // Decision: JSON keeps invalid array positions as null, but omits the same values in objects.
   // Find optional object keys before Serialize removes their omitted-value union members.
   lines.push(
@@ -114,8 +114,6 @@ export function generateRouteTypes(
     'type Serialize<T> =',
     '  T extends Response ? never :',
     '  T extends Date ? string :',
-  );
-  lines.push(
     '  T extends bigint ? never :',
     '  T extends JsonOmitted ? never :',
     '  T extends readonly unknown[] ? SerializeArray<T> :',
@@ -132,8 +130,6 @@ export function generateRouteTypes(
     '',
     'type RouteParams<P extends readonly string[]> =',
     '  P extends readonly [] ? Record<string, never> : { [K in P[number]]: string };',
-  );
-  lines.push(
     '',
     'declare module "@builtbyfriends/bwf/routes" {',
     '  export interface RouteMap {}',
@@ -160,8 +156,6 @@ export function generateRouteTypes(
     '  type CheckedRoutePath<P extends string> = P extends `/${infer Segment}/${infer Rest}`',
     '    ? Rest extends ""',
     '      ? string extends RouteUrlSegment<Segment> ? never : P',
-  );
-  lines.push(
     '      : P',
     '    : P extends `/${infer Segment}`',
     '      ? string extends RouteUrlSegment<Segment> ? never : P',
@@ -178,8 +172,6 @@ export function generateRouteTypes(
     '  type RoutePathUrl = RoutePatternUrl<CheckedRoutePath<RoutePath | EncodedRoutePath>>;',
     '  type BuiltRouteUrl = string & { readonly __platformRouteUrl: true };',
     '  type TypedRoutes = RouteTypesConfig extends { typedRoutes: true } ? true : false;',
-  );
-  lines.push(
     '  export type RouteUrl = TypedRoutes extends true',
     '    ? BuiltRouteUrl | RoutePathUrl | `${RoutePathUrl}${"?" | "#"}${string}`',
     '    : string;',
@@ -250,8 +242,8 @@ export function generateRouteTypes(
     '   */',
     '  export type RewriteDestination = RouteName | (string & {});',
     '',
+    '  interface RouteMap {',
   );
-  lines.push('  interface RouteMap {');
 
   const routesByPattern = new Map<string, Map<string, Array<RouteDefinition>>>();
   for (const route of scan.routes) {
@@ -306,7 +298,7 @@ export function generateRouteTypes(
     });
     lines.push(
       `    ${JSON.stringify(publicRoutePattern(pattern))}: {`,
-      `      params: RouteParams<${JSON.stringify(sources[0]!.params)}>;`,
+      `      params: RouteParams<${JSON.stringify(sources[0].params)}>;`,
       `      client: ${imports.map((source) => `ExtractInput<${source}["client"]>`).join(' & ')};`,
       `      server: ${imports.map((source) => `ExtractOutput<${source}["server"]>`).join(' | ')};`,
     );

@@ -266,7 +266,7 @@ describe('resolveCloudflareStaticPreset — configured app type', () => {
 
   it('still refuses the unconfigured SSG plus backend case', () => {
     const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
-    expect(() => resolveCloudflareStaticPreset(root, {} as BwfConfig, {})).toThrow('vitepress');
+    expect(() => resolveCloudflareStaticPreset(root, {}, {})).toThrow('vitepress');
   });
 
   it('keeps resolving a configured static app that also has backend sources', () => {

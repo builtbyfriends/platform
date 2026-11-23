@@ -168,7 +168,7 @@ function createPrinter(ts: TypeScriptApi, checker: Checker, problems: Array<stri
     }
     const args = type.isTypeReference() ? checker.getTypeArguments(type) : [];
     if ((name === 'Array' || name === 'ReadonlyArray') && args.length === 1) {
-      const element = print(args[0]!, stack, depth + 1, true);
+      const element = print(args[0], stack, depth + 1, true);
       return `${name === 'Array' ? '' : 'readonly '}${element}[]`;
     }
     return args.length === 0 ? name : `${name}<${joinTypes(args, ', ', stack, depth)}>`;

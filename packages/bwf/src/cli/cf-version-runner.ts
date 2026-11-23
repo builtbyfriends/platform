@@ -116,7 +116,7 @@ export async function pinActiveWorkerSecrets(options: {
   if (!record(worker) || (worker.env !== undefined && !record(worker.env))) {
     return false;
   }
-  const env = (worker.env ?? {}) as Record<string, unknown>;
+  const env = worker.env ?? {};
   for (const [name, value] of Object.entries(env)) {
     if (
       record(value) &&

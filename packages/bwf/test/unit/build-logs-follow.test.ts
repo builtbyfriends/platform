@@ -126,7 +126,7 @@ describe('followBuildLogs', () => {
     const result = await followBuildLogs({
       fetchPage: (since) => {
         sinceCalls.push(since);
-        return Promise.resolve(pages[i++]!);
+        return Promise.resolve(pages[i++]);
       },
       write: (line) => written.push(line),
       sleep: () => Promise.resolve(),

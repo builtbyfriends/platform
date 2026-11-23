@@ -248,7 +248,7 @@ describe('PlatformClient.finalizeDeploy', () => {
       done,
     ]);
 
-    const [url, init] = finalizeCalls()[0]!;
+    const [url, init] = finalizeCalls()[0];
     expect(url).toBe(`${apiUrl}/rpc/deploy.finalize`);
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
@@ -387,7 +387,7 @@ describe('PlatformClient.finalizeDeploy', () => {
     for await (const event of makeClient().finalizeDeploy(projectId, payload)) {
       events.push(event);
     }
-    const body = JSON.parse(finalizeCalls()[0]![1].body as string).body;
+    const body = JSON.parse(finalizeCalls()[0][1].body as string).body;
     expect(body.workerFiles).toEqual({
       'index.mjs': Buffer.from('export default {};').toString('base64'),
     });

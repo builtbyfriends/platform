@@ -180,7 +180,7 @@ export interface DerivedEmailAddresses {
  */
 export function emailFromDomain(from: string): string | null {
   const bracketed = /<([^<>]*)>\s*$/.exec(from.trim());
-  const address = bracketed ? (bracketed[1] as string) : from;
+  const address = bracketed ? bracketed[1] : from;
   const at = address.lastIndexOf('@');
   if (at <= 0 || at === address.length - 1) {
     return null;

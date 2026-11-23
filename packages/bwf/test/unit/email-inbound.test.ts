@@ -304,7 +304,7 @@ function compile(email: any): string {
     '/j',
     '/q',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    COMPILE_OPTIONS as any,
+    COMPILE_OPTIONS,
   );
 }
 

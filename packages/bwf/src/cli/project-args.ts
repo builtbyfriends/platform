@@ -146,7 +146,7 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
     let expiresInDays: number | undefined;
     let json = false;
     for (let index = 0; index < rest.length; index++) {
-      const value = rest[index]!;
+      const value = rest[index];
       if (value === '--project' && rest[index + 1]) {
         projectSlug = rest[++index]!;
       } else if (value === '--name' && rest[index + 1]) {
@@ -200,7 +200,7 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
     }
     let projectSlug = '';
     for (let index = 0; index < args.length; index++) {
-      const arg = args[index]!;
+      const arg = args[index];
       if (arg === '--project') {
         const value = args[++index];
         if (!value || value.startsWith('-')) {
@@ -342,7 +342,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
   let projectSlug = '';
   let role = '';
   for (let index = 0; index < args.length; index++) {
-    const arg = args[index]!;
+    const arg = args[index];
     if (arg === '--project' || arg === '--role') {
       const value = args[++index];
       if (!value || value.startsWith('-')) {
@@ -385,7 +385,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
         'project: Usage: bwf project team invite <registered-email> --role <reader|collaborator|admin> [--project <slug>].',
       );
     }
-    const email = positionals[0]!;
+    const email = positionals[0];
     if (email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) {
       throw new Error('project: Invitee must be a registered email address.');
     }
@@ -397,14 +397,14 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
         'project: Usage: bwf project team role <user-id> <reader|collaborator|admin> [--project <slug>].',
       );
     }
-    const nextRole = positionals[1]!;
+    const nextRole = positionals[1];
     if (!TEAM_ROLES.has(nextRole)) {
       throw new Error(`project: Invalid role '${nextRole}'. Use one of reader|collaborator|admin.`);
     }
     return {
       subcommand: 'team',
       action,
-      userId: positionals[0]!,
+      userId: positionals[0],
       role: nextRole as TeamRole,
       projectSlug,
     };
@@ -413,7 +413,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     if (positionals.length !== 1 || role) {
       throw new Error('project: Usage: bwf project team remove <user-id> [--project <slug>].');
     }
-    return { subcommand: 'team', action, userId: positionals[0]!, projectSlug };
+    return { subcommand: 'team', action, userId: positionals[0], projectSlug };
   }
   if (action === 'revoke') {
     if (positionals.length !== 1 || role) {
@@ -421,7 +421,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
         'project: Usage: bwf project team revoke <invitation-id> [--project <slug>].',
       );
     }
-    return { subcommand: 'team', action, invitationId: positionals[0]!, projectSlug };
+    return { subcommand: 'team', action, invitationId: positionals[0], projectSlug };
   }
   if (action === 'pending') {
     if (positionals.length || role) {
@@ -433,7 +433,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     if (positionals.length !== 1 || role) {
       throw new Error(`project: Usage: bwf project team ${action} <invitation-id>.`);
     }
-    return { subcommand: 'team', action, invitationId: positionals[0]! };
+    return { subcommand: 'team', action, invitationId: positionals[0] };
   }
   throw new Error(usage);
 }

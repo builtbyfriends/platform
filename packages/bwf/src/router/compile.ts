@@ -224,7 +224,7 @@ export function compileRouteTable(
   for (const p of routePatterns) {
     const m = /\.([A-Za-z0-9]+)$/.exec(p);
     if (m) {
-      usedExts.add(m[1]!.toLowerCase());
+      usedExts.add(m[1].toLowerCase());
     }
   }
   const blockedExts = ASSET_EXTENSIONS.filter((e) => !usedExts.has(e));
@@ -531,8 +531,6 @@ export function compileRouteTable(
       '      ack() { if (!decided) { decided = true; __decisions.set(m.id, { action: "ack" }); } },',
       '      retry(opts) { if (!decided) { decided = true; __decisions.set(m.id, { action: "retry", ...(opts?.delaySeconds != null ? { delaySeconds: opts.delaySeconds } : {}) }); } },',
       '    };',
-    );
-    lines.push(
       '  }',
       '  const __msgs = payload.messages.map(__wrapMsg);',
       '  const batch = {',
@@ -703,8 +701,8 @@ export function compileRouteTable(
       '  }',
       '  if (request.method === "GET" && url.pathname.startsWith("/__platform/migrate/app/attempt/")) {',
       '    return __platformCreateMigrationRequestHandler(false, true)(request);',
+      '  }',
     );
-    lines.push('  }');
     if (auth) {
       lines.push(
         '  if (request.method === "POST" && url.pathname === "/__platform/migrate/auth") {',

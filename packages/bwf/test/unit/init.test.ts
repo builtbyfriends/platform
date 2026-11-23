@@ -289,7 +289,7 @@ describe('init question order', () => {
       expect(infoIndex).not.toBe(-1);
       expect(gitIndex).not.toBe(-1);
       expect(mockLogInfo.mock.invocationCallOrder[infoIndex]).toBeLessThan(
-        mockConfirm.mock.invocationCallOrder[gitIndex]!,
+        mockConfirm.mock.invocationCallOrder[gitIndex],
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -562,7 +562,7 @@ function installCalls() {
 
 function installerOf(call: Array<unknown>): unknown {
   const args = call[1] as Array<string>;
-  return call[0] === process.execPath && /[\\/]vp$/.test(args[0]!) ? 'vp' : call[0];
+  return call[0] === process.execPath && /[\\/]vp$/.test(args[0]) ? 'vp' : call[0];
 }
 
 function expectVpInstall(cwd: string) {
@@ -1563,7 +1563,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.packageManager).toBeUndefined();
       expectPnpmAllowBuilds(root);
       expect(detectProjectState(root).packageManager).toBe('pnpm');
-      expect(installerOf(installCalls()[0]!)).toBe('vp');
+      expect(installerOf(installCalls()[0])).toBe('vp');
       expect(pkg.scripts.dev).toBe('vp dev');
 
       const page = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
@@ -1612,7 +1612,7 @@ describe('isScaffoldableEmptyProject', () => {
         expect(existsSync(join(root, 'pnpm-workspace.yaml'))).toBe(
           packageManager.startsWith('pnpm@'),
         );
-        expect(installerOf(installCalls()[0]!)).toBe('vp');
+        expect(installerOf(installCalls()[0])).toBe('vp');
         const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
         expect(pkg.devDependencies.vite).toBe(SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES.vite);
         if (packageManager.startsWith('npm@')) {
@@ -1643,7 +1643,7 @@ describe('isScaffoldableEmptyProject', () => {
           JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).packageManager,
         ).toBeUndefined();
         expect(existsSync(join(root, 'pnpm-workspace.yaml'))).toBe(false);
-        expect(installerOf(installCalls()[0]!)).toBe('vp');
+        expect(installerOf(installCalls()[0])).toBe('vp');
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -1744,7 +1744,7 @@ describe('isScaffoldableEmptyProject', () => {
           defaultValue: 'my-platform-app',
         }),
       );
-      const folderPrompt = mockText.mock.calls[0]![0];
+      const folderPrompt = mockText.mock.calls[0][0];
       expect(folderPrompt).not.toHaveProperty('initialValue');
       expect(folderPrompt.validate('')).toBeUndefined();
       expect(folderPrompt.validate(' ')).toBe('Enter a folder name.');
@@ -3472,7 +3472,7 @@ export default config;
 
       const installs = installCalls();
       expect(installs.length).toBeGreaterThan(0);
-      expect(installerOf(installs[0]!)).toBe('vp');
+      expect(installerOf(installs[0])).toBe('vp');
       expect(
         JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf8')).packageManager,
       ).toBe('bun@1.1.42');

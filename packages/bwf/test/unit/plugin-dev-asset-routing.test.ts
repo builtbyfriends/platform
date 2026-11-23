@@ -601,7 +601,7 @@ describe('bwfPlugin dev asset routing', () => {
     const { bwfPlugin } = await import('../../src/index.ts');
     const schemaPlugins = bwfPlugin().filter((plugin) => plugin.name === 'platform:env-schema');
     expect(schemaPlugins).toHaveLength(1);
-    const schemaConfig = getHookHandler(schemaPlugins[0]!.config) as (
+    const schemaConfig = getHookHandler(schemaPlugins[0].config) as (
       config: import('vite').UserConfig,
       env: import('vite').ConfigEnv,
     ) => Promise<void>;

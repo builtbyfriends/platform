@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { join } from 'pathslash';
+import { fileURLToPath } from 'node:url';
 
-const root = join(import.meta.dirname, '..');
-const cli = join(root, 'packages/bwf/dist/cli/cli.mjs');
+const root = new URL('../', import.meta.url);
+const cli = fileURLToPath(new URL('packages/bwf/dist/cli/cli.mjs', root));
 const apps = [
   'platform/packages/dashboard',
   'playground/kitchen-sink',
@@ -15,5 +15,8 @@ const apps = [
 ];
 
 for (const app of apps) {
-  execFileSync(process.execPath, [cli, 'prepare'], { cwd: join(root, app), stdio: 'inherit' });
+  execFileSync(process.execPath, [cli, 'prepare'], {
+    cwd: new URL(`${app}/`, root),
+    stdio: 'inherit',
+  });
 }

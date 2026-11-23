@@ -99,7 +99,7 @@ function parseCapture(source: string): { tokens: Array<Token>; paramNames: Array
   let splatTaken = false;
   let index = 0;
   while (index < source.length) {
-    const character = source[index]!;
+    const character = source[index];
     if (character === ':') {
       let end = index + 1;
       while (end < source.length && isNameChar(source.charCodeAt(end))) {
@@ -139,10 +139,10 @@ function parseCapture(source: string): { tokens: Array<Token>; paramNames: Array
 /** Text in which only `*` is special. */
 function parseStars(tokens: Array<Token>, text: string): void {
   const parts = text.split('*');
-  pushText(tokens, parts[0]!);
+  pushText(tokens, parts[0]);
   for (let k = 1; k < parts.length; k++) {
     tokens.push({ kind: 'any' });
-    pushText(tokens, parts[k]!);
+    pushText(tokens, parts[k]);
   }
 }
 
@@ -163,9 +163,9 @@ function prepare(tokens: ReadonlyArray<Token>): Prepared {
   const starts = new Int32Array(steps.length + 1);
   steps.forEach((step, i) => {
     const shortest = step.kind === 'text' ? step.text.length : step.kind === 'any' ? 0 : 1;
-    starts[i + 1] = starts[i]! + shortest;
+    starts[i + 1] = starts[i] + shortest;
   });
-  return { steps, starts, minLength: starts[steps.length]! };
+  return { steps, starts, minLength: starts[steps.length] };
 }
 
 // Decision: Rows. Step i can only begin at a position p in [starts[i], starts[i] + slack], where
@@ -243,7 +243,7 @@ function matches(prepared: Prepared, path: string): boolean {
   // Decision: quickReject proved a leading text step, and only position 0 matters for it.
   const first = steps[0]?.kind === 'text' ? 1 : 0;
   for (let i = steps.length - 1; i >= first; i--) {
-    if (!stepBack(steps[i]!, path, starts[i]!, next, row)) {
+    if (!stepBack(steps[i], path, starts[i], next, row)) {
       return false;
     }
     const done = next;
@@ -296,7 +296,7 @@ function greedyEnds(prepared: Prepared, path: string, upTo: number): Int32Array 
   let row: Uint8Array = new Uint8Array(width);
   const first = steps[0]?.kind === 'text' ? 1 : 0;
   for (let i = n - 1; i >= first; i--) {
-    if (!stepBack(steps[i]!, path, starts[i]!, next, row)) {
+    if (!stepBack(steps[i], path, starts[i], next, row)) {
       return null;
     }
     if (i % size === 0) {
@@ -311,7 +311,7 @@ function greedyEnds(prepared: Prepared, path: string, upTo: number): Int32Array 
   }
   const pool = Array.from({ length: size }, () => new Uint8Array(width));
   let top = 0;
-  const rowAt = (r: number) => (r === top ? saved.get(r)! : pool[r % size]!);
+  const rowAt = (r: number) => (r === top ? saved.get(r)! : pool[r % size]);
   const ends = new Int32Array(upTo + 1);
   let p = 0;
   for (let i = 0; i <= upTo; i++) {
@@ -319,10 +319,10 @@ function greedyEnds(prepared: Prepared, path: string, upTo: number): Int32Array 
       // Decision: Blocks are entered in order at their first row, so each is rebuilt once.
       top = Math.min(n, Math.ceil((i + 1) / size) * size);
       for (let r = top - 1; r > i; r--) {
-        stepBack(steps[r]!, path, starts[r]!, rowAt(r + 1), pool[r % size]!);
+        stepBack(steps[r], path, starts[r], rowAt(r + 1), pool[r % size]);
       }
     }
-    p = greedyEnd(steps[i]!, path, p, p - starts[i]!, rowAt(i + 1));
+    p = greedyEnd(steps[i], path, p, p - starts[i], rowAt(i + 1));
     ends[i] = p;
   }
   return ends;
@@ -419,7 +419,7 @@ export function matchPatternCaptures(
     params[name] = '';
   }
   for (let i = 0; ends && i <= lastNamed; i++) {
-    const step = steps[i]!;
+    const step = steps[i];
     if (step.kind !== 'text' && step.name) {
       params[step.name] = pathname.slice(i === 0 ? 0 : ends[i - 1], ends[i]);
     }

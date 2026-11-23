@@ -20,7 +20,7 @@ export function parseAuthArgs(args: Array<string>): AuthArgs {
   }
   let platform: AuthArgs['platform'];
   for (let index = 0; index < rest.length; index++) {
-    const value = rest[index]!;
+    const value = rest[index];
     if (value === '--platform') {
       const target = rest[++index];
       if (target !== 'cloudflare' && target !== 'platform') {

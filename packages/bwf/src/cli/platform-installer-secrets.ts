@@ -780,7 +780,7 @@ export function readPlatformBillingInput(
         `platform: ${match[1]} is not a billing value. Use ${PLATFORM_BILLING_SECRET_NAMES.join(', ')}.`,
       );
     }
-    const value = match[2]!.replace(/^(['"])(.*)\1$/, '$2');
+    const value = match[2].replace(/^(['"])(.*)\1$/, '$2');
     if (value) {
       billing[name] = value;
     }

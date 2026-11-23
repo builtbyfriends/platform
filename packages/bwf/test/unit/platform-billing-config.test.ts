@@ -149,7 +149,7 @@ describe('bwf platform config billing', () => {
     const recovery = readInstallationRecoverySecrets(manifest, directory)!;
     expect(recovery.databaseUrl).toBe('postgres://db');
     expect(recovery.billingPending).toBe('true');
-    expect(JSON.parse(recovery.billingJson!)).toEqual({
+    expect(JSON.parse(recovery.billingJson)).toEqual({
       STRIPE_PRICE_SOLO: 'price_solo',
       STRIPE_SECRET_KEY: SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
@@ -168,7 +168,7 @@ describe('bwf platform config billing', () => {
     });
     expect(
       Object.keys(
-        JSON.parse(readInstallationRecoverySecrets(manifest, directory)!.billingJson!),
+        JSON.parse(readInstallationRecoverySecrets(manifest, directory)!.billingJson),
       ).sort(),
     ).toEqual([
       'STRIPE_PRICE_PRO',

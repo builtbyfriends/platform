@@ -30,7 +30,7 @@ describe('connectLiveStream', () => {
     const pending = live.subscribe({ id: 'post-card', topic: 'post:12' });
     await Promise.resolve();
     expect(fetchMock).not.toHaveBeenCalled();
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
     expect(source.url).toContain('/live?connectionId=');
     expect(source.options?.withCredentials).toBe(true);
 
@@ -51,7 +51,7 @@ describe('connectLiveStream', () => {
 
     const pending = live.subscribe({ id: 'post-card', topic: 'post:12' });
     await Promise.resolve();
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
 
     live.close();
 
@@ -92,7 +92,7 @@ describe('connectLiveStream', () => {
   it('routes events that arrive before the subscribe control ack resolves', async () => {
     const handler = vi.fn();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      MockEventSource.instances[0]!.emit(
+      MockEventSource.instances[0].emit(
         'message',
         JSON.stringify({
           subscriptionId: 'comments',
@@ -120,7 +120,7 @@ describe('connectLiveStream', () => {
     const newHandler = vi.fn();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (controlBody(init).operations[0]?.topic === 'post:13') {
-        MockEventSource.instances[0]!.emit(
+        MockEventSource.instances[0].emit(
           'message',
           JSON.stringify({ subscriptionId: 'card', topic: 'post:13', data: { early: true } }),
         );
@@ -191,7 +191,7 @@ describe('connectLiveStream', () => {
   it('keeps the previous subscription handler when replacement fails', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = controlBody(init);
-      const operation = body.operations[0]!;
+      const operation = body.operations[0];
       if (operation.topic !== 'post:blocked') {
         return ackAll(init);
       }
@@ -357,8 +357,8 @@ describe('connectLiveStream', () => {
     await newest;
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[1]![1]?.body)).toContain('"topic":"post:13"');
-    expect(String(fetchMock.mock.calls[2]![1]?.body)).toContain('"topic":"post:14"');
+    expect(String(fetchMock.mock.calls[1][1]?.body)).toContain('"topic":"post:13"');
+    expect(String(fetchMock.mock.calls[2][1]?.body)).toContain('"topic":"post:14"');
   });
 
   it('reconnects and resubscribes active subscriptions with lastEventId', async () => {
@@ -377,7 +377,7 @@ describe('connectLiveStream', () => {
     expect(firstSource.closed).toBe(true);
 
     await vi.advanceTimersByTimeAsync(25);
-    const secondSource = MockEventSource.instances[1]!;
+    const secondSource = MockEventSource.instances[1];
     secondSource.emit('open', new Event('open'));
     await Promise.resolve();
     await Promise.resolve();
@@ -407,7 +407,7 @@ describe('connectLiveStream', () => {
 
     const second = live.subscribe({ id: 'comments', topic: 'comment:2323' });
     await flushMicrotasks();
-    const secondSource = MockEventSource.instances[1]!;
+    const secondSource = MockEventSource.instances[1];
     secondSource.emit('open', new Event('open'));
     await second;
 
@@ -444,16 +444,16 @@ describe('connectLiveStream', () => {
       });
 
       await flushMicrotasks();
-      MockEventSource.instances[0]!.emit('error', new Event('error'));
+      MockEventSource.instances[0].emit('error', new Event('error'));
       await flushMicrotasks();
-      expect(MockEventSource.instances[0]!.closed).toBe(true);
+      expect(MockEventSource.instances[0].closed).toBe(true);
       expect(onError).toHaveBeenCalledWith(
         expect.objectContaining({ message: 'live: stream failed to open.' }),
       );
 
       await vi.advanceTimersByTimeAsync(100);
       expect(MockEventSource.instances).toHaveLength(2);
-      MockEventSource.instances[1]!.emit('error', new Event('error'));
+      MockEventSource.instances[1].emit('error', new Event('error'));
       await flushMicrotasks();
 
       await vi.advanceTimersByTimeAsync(100);
@@ -462,10 +462,10 @@ describe('connectLiveStream', () => {
       expect(MockEventSource.instances).toHaveLength(3);
       expect(settled).toBe(false);
 
-      MockEventSource.instances[2]!.emit('open', new Event('open'));
+      MockEventSource.instances[2].emit('open', new Event('open'));
       await expect(pending).resolves.toEqual(expect.any(Function));
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(String(fetchMock.mock.calls[0]![1]?.body)).toContain('"id":"post-card"');
+      expect(String(fetchMock.mock.calls[0][1]?.body)).toContain('"id":"post-card"');
     });
 
     it('tries a subscribe again at once when the network comes back or the page gets focus', async () => {
@@ -539,7 +539,7 @@ describe('connectLiveStream', () => {
       const second = live.subscribe({ id: 'comments', topic: 'comment:2323' });
       await flushMicrotasks(10);
       expect(firstSource.closed).toBe(true);
-      const secondSource = MockEventSource.instances[1]!;
+      const secondSource = MockEventSource.instances[1];
       expect(secondSource.url).toBe(firstSource.url);
 
       known = true;
@@ -577,14 +577,14 @@ describe('connectLiveStream', () => {
       known = false;
       wakeTarget.dispatchEvent(new Event('focus'));
       await flushMicrotasks(10);
-      const probe = controlBody(fetchMock.mock.calls[1]![1]);
+      const probe = controlBody(fetchMock.mock.calls[1][1]);
       expect(probe.operations).toEqual([
         { kind: 'unsubscribe', id: expect.stringContaining('bwf-probe:') },
       ]);
       expect(firstSource.closed).toBe(true);
 
       known = true;
-      MockEventSource.instances[1]!.emit('open', new Event('open'));
+      MockEventSource.instances[1].emit('open', new Event('open'));
       await flushMicrotasks(10);
       expect(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).toContain('"id":"post-card"');
     });
@@ -608,7 +608,7 @@ describe('connectLiveStream', () => {
       const pending = live.subscribe({ id: 'post-card', topic: 'post:12' });
       const rejected = expect(pending).rejects.toThrow('live: stream is closed.');
       await flushMicrotasks();
-      MockEventSource.instances[0]!.emit('error', new Event('error'));
+      MockEventSource.instances[0].emit('error', new Event('error'));
       await flushMicrotasks();
 
       live.close();
@@ -629,13 +629,13 @@ describe('connectLiveStream', () => {
 
       await vi.advanceTimersByTimeAsync(25);
       expect(MockEventSource.instances).toHaveLength(2);
-      MockEventSource.instances[1]!.emit('error', new Event('error'));
+      MockEventSource.instances[1].emit('error', new Event('error'));
       await vi.advanceTimersByTimeAsync(25);
       expect(MockEventSource.instances).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(25);
       expect(MockEventSource.instances).toHaveLength(3);
 
-      MockEventSource.instances[2]!.emit('error', new Event('error'));
+      MockEventSource.instances[2].emit('error', new Event('error'));
       wakeTarget.dispatchEvent(new Event('focus'));
       expect(MockEventSource.instances).toHaveLength(4);
     });
@@ -675,7 +675,7 @@ function openLive(fetchMock: unknown, options: ConnectLiveStreamOptions = {}) {
 
 async function emitOpen(): Promise<MockEventSource> {
   await Promise.resolve();
-  const source = MockEventSource.instances[0]!;
+  const source = MockEventSource.instances[0];
   source.emit('open', new Event('open'));
   return source;
 }

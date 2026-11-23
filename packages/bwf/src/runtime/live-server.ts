@@ -459,7 +459,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             throw outcome.reason;
           }
           const response = outcome.value;
-          const items = batch[index]![1];
+          const items = batch[index][1];
           // Decision: A missed delivery does not prove the still-open SSE connection is gone.
           if (!response) {
             continue;
@@ -511,7 +511,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
         const responses = await Promise.allSettled(
           batch.map(([connectionId, items]) =>
             fetchWithTimeout(
-              this.connectionStub(items[0]!.row.streamId, connectionId),
+              this.connectionStub(items[0].row.streamId, connectionId),
               internalUrl('/check'),
               {
                 method: 'POST',
@@ -528,7 +528,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             throw outcome.reason;
           }
           const response = outcome.value;
-          const items = batch[index]![1];
+          const items = batch[index][1];
           if (!response) {
             continue;
           }

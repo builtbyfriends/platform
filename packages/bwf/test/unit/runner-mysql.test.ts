@@ -114,7 +114,7 @@ class FakeMySqlDatabase {
     }
     const name = String(params[0]);
     if (sql === 'SELECT DATABASE() AS db') {
-      return [{ db: this.sessions[session - 1]!.database ?? 'app' }];
+      return [{ db: this.sessions[session - 1].database ?? 'app' }];
     }
     if (sql.startsWith('SELECT GET_LOCK')) {
       const holder = this.locks.get(name);
@@ -152,7 +152,7 @@ class FakeMySqlDatabase {
     const now = Date.now();
     const clock = /UTC_TIMESTAMP\(6\)/.test(sql)
       ? now
-      : now + (this.sessions[session - 1]!.utcOffsetMs ?? 0);
+      : now + (this.sessions[session - 1].utcOffsetMs ?? 0);
     const filter = /`expires_at` ([<>]) (?:NOW|UTC_TIMESTAMP)\(6\)/.exec(sql)?.[1];
     const matches = (lease: Lease) =>
       filter === undefined || (filter === '<' ? lease.expiresAt < clock : lease.expiresAt > clock);
@@ -884,7 +884,7 @@ describe('MySQL Better Auth migrations under the lock', () => {
 
     expect(bodies.map((body) => body.ok)).toEqual([true, true]);
     expect(runs).toHaveLength(2);
-    expect(runs[1]!.start).toBeGreaterThanOrEqual(runs[0]!.end);
+    expect(runs[1].start).toBeGreaterThanOrEqual(runs[0].end);
   });
 
   it('keeps the lease while Better Auth migrations outlast it', async () => {

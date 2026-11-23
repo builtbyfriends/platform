@@ -369,7 +369,7 @@ describe('inferProjectBindings', () => {
       ) => import('vite').UserConfig | void;
 
       expect(externalPlugin).toBeTruthy();
-      const result = config.call({} as never, {}, { command: 'build', mode: 'production' });
+      const result = config.call({}, {}, { command: 'build', mode: 'production' });
       const rootExternal = result?.build?.rollupOptions?.external as Array<unknown>;
       expect(rootExternal).toBeTruthy();
       expect(

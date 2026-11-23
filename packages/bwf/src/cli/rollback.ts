@@ -71,7 +71,7 @@ export async function runRollbackCommand(
       cancel('Rollback cancelled.');
       process.exit(0);
     }
-    targetId = result as string;
+    targetId = result;
   }
 
   const active = deployments.find((d) => d.id === activeDeploymentId);

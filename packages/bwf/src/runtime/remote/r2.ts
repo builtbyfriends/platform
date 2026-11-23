@@ -276,7 +276,7 @@ function makeR2Object(data: RemoteR2Object): R2Object {
     size: data.size,
     etag,
     httpEtag: etag ? `"${etag}"` : '',
-    checksums: { toJSON: () => ({}) } as R2Checksums,
+    checksums: { toJSON: () => ({}) },
     uploaded: new Date(data.lastModified || Date.now()),
     httpMetadata,
     customMetadata: data.customMetadata ?? {},
@@ -298,7 +298,7 @@ function makeR2Object(data: RemoteR2Object): R2Object {
         }
       }
     },
-  } as R2Object;
+  };
 }
 
 function makeR2ObjectBody(key: string, res: Response): R2ObjectBody {

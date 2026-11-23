@@ -280,21 +280,21 @@ describe('createMigrationHandler D1 execution', () => {
               attempts.set(attemptId, {
                 attempt_id: attemptId,
                 completed_at: null,
-                deployment_id: bound[1] as string | null,
+                deployment_id: bound[1],
                 error: null,
-                migration_list_hash: bound[2] as string,
-                plan_hashes_json: bound[4] as string,
-                planned_names_json: bound[3] as string,
-                started_at: bound[5] as string,
+                migration_list_hash: bound[2],
+                plan_hashes_json: bound[4],
+                planned_names_json: bound[3],
+                started_at: bound[5],
                 status: 'running',
               });
             }
             if (sql.includes('UPDATE _void_migration_attempts')) {
               const attempt = attempts.get(bound[3] as string);
               if (attempt) {
-                attempt.status = bound[0] as string;
-                attempt.completed_at = bound[1] as string;
-                attempt.error = bound[2] as string | null;
+                attempt.status = bound[0];
+                attempt.completed_at = bound[1];
+                attempt.error = bound[2];
               }
             }
             if (

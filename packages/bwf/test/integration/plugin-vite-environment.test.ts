@@ -230,7 +230,7 @@ describe('deploy-build preview', () => {
     vi.stubEnv('BWF_CLOUDFLARE_DEPLOY_BUILD', '1');
     const once = vi.spyOn(process, 'once').mockReturnValue(process);
     const argv = process.argv;
-    process.argv = [argv[0]!, 'vite', 'build'];
+    process.argv = [argv[0], 'vite', 'build'];
     try {
       const guard = bwfPlugin().find(
         (plugin) => plugin.name === 'platform:remove-implicit-cloudflare-deploy-pointer',

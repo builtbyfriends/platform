@@ -31,7 +31,7 @@ export function mergeCloudflareConfig(patch: object, fallback: object): Record<s
     if (value === undefined) {
       continue;
     }
-    const previous = (result as Record<string, unknown>)[key];
+    const previous = result[key];
     result[key] =
       Array.isArray(value) && Array.isArray(previous)
         ? [...value, ...previous]
@@ -41,10 +41,7 @@ export function mergeCloudflareConfig(patch: object, fallback: object): Record<s
             typeof previous === 'object' &&
             !Array.isArray(value) &&
             !Array.isArray(previous)
-          ? mergeCloudflareConfig(
-              value as Record<string, unknown>,
-              previous as Record<string, unknown>,
-            )
+          ? mergeCloudflareConfig(value as Record<string, unknown>, previous)
           : value;
   }
   return result;
@@ -154,7 +151,7 @@ export function nativeAuxiliaryWorkers(
         mergeCloudflareConfig(patch ?? {}, base),
         path ? dirname(path) : root,
       );
-      return native.worker!;
+      return native.worker;
     },
   }));
 }

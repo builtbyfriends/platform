@@ -47,7 +47,7 @@ export function isBwfEnvScriptCandidate(id: string, code: string): boolean {
     return false;
   }
   const langMatch = SCRIPT_LANG_RE.exec(id);
-  const isScriptQuery = langMatch !== null && /^(?:m?[jt]sx?|cjs)$/i.test(langMatch[1]!);
+  const isScriptQuery = langMatch !== null && /^(?:m?[jt]sx?|cjs)$/i.test(langMatch[1]);
   const isPlainScript = /\.(?:[mc]?[jt]sx?)(?:\?|$)/.test(id);
   if (!isScriptQuery && !isPlainScript) {
     return false;
@@ -118,13 +118,13 @@ function offsetToLineCol(index: OffsetIndex, offset: number): { line: number; co
   let upperBound = lineStarts.length - 1;
   while (lowerBound < upperBound) {
     const midpoint = (lowerBound + upperBound + 1) >>> 1;
-    if (lineStarts[midpoint]! <= offset) {
+    if (lineStarts[midpoint] <= offset) {
       lowerBound = midpoint;
     } else {
       upperBound = midpoint - 1;
     }
   }
-  return { line: lowerBound + 1, column: offset - lineStarts[lowerBound]! + 1 };
+  return { line: lowerBound + 1, column: offset - lineStarts[lowerBound] + 1 };
 }
 
 /**
@@ -272,7 +272,7 @@ export function envClientGuardPlugin(root: string): Plugin {
       }
 
       const offsets = buildOffsetIndex(code);
-      const relPath = relative(root, id.split('?')[0]!) || id;
+      const relPath = relative(root, id.split('?')[0]) || id;
 
       for (const hit of hits) {
         const { line, column } = offsetToLineCol(offsets, hit.start);

@@ -240,7 +240,7 @@ describe('D1 migration ownership', () => {
     const resume = deferred();
     const { sqlite, handler } = createDatabase({
       beforeBatch: async (sql) => {
-        if (sql.includes(migrations[0]!.sql)) {
+        if (sql.includes(migrations[0].sql)) {
           paused.resolve();
           await resume.promise;
         }
@@ -265,7 +265,7 @@ describe('D1 migration ownership', () => {
     const resume = deferred();
     const { sqlite, handler } = createDatabase({
       beforeBatch: async (sql) => {
-        if (sql.includes(migrations[0]!.sql)) {
+        if (sql.includes(migrations[0].sql)) {
           paused.resolve();
           await resume.promise;
         }

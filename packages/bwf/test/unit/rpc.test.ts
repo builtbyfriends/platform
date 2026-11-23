@@ -15,7 +15,7 @@ describe('createRpc', () => {
 
     await expect(call.billing.invoices.list({ limit: 5 })).resolves.toEqual(['inv_1']);
 
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://app.test/rpc/billing.invoices.list');
     expect(init?.method).toBe('POST');
     expect(init?.body).toBe(JSON.stringify({ limit: 5 }));
@@ -25,9 +25,9 @@ describe('createRpc', () => {
     const fetchMock = respond({ data: null });
     const rpc = createRpc({ token: () => 'secret', fetch: fetchMock as typeof fetch });
     await (rpc as unknown as { me: { get(): Promise<unknown> } }).me.get();
-    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    const headers = fetchMock.mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers.authorization).toBe('Bearer secret');
-    expect(fetchMock.mock.calls[0]![0]).toBe('/rpc/me.get');
+    expect(fetchMock.mock.calls[0][0]).toBe('/rpc/me.get');
   });
 
   it('throws an RpcError that keeps the declared code and status', async () => {

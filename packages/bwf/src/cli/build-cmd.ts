@@ -151,7 +151,7 @@ async function runBuildLogsCommand(
       outro('No builds found. Push to your connected branch to trigger one.');
       return;
     }
-    buildId = builds[0]!.id;
+    buildId = builds[0].id;
   }
 
   const write = args.output
@@ -211,7 +211,7 @@ async function runBuildLogsCommand(
 
   if (args.follow && !isBuildLogComplete(first)) {
     ({ status, terminal } = await followBuildLogs({
-      fetchPage: (since) => client.getBuildLogs(projectId, buildId!, since),
+      fetchPage: (since) => client.getBuildLogs(projectId, buildId, since),
       write,
       sleep,
       since: first.lastSeq,

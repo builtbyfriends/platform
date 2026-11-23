@@ -281,7 +281,7 @@ describe('existing Worker preservation', () => {
         configPath: '/app/wrangler.jsonc',
       }),
     ).rejects.toThrow('production changed');
-    expect(runWrangler.mock.calls[1]![0]).toContain('original');
+    expect(runWrangler.mock.calls[1][0]).toContain('original');
   });
 
   it('does not infer an active migration tag from an explicitly requested candidate', async () => {
@@ -308,7 +308,7 @@ describe('existing Worker preservation', () => {
     });
     expect(candidate.script).toEqual({ handlers: ['fetch'] });
     expect(runWrangler).toHaveBeenCalledTimes(1);
-    expect(runWrangler.mock.calls[0]![0].slice(0, 3)).toEqual(['versions', 'view', 'candidate']);
+    expect(runWrangler.mock.calls[0][0].slice(0, 3)).toEqual(['versions', 'view', 'candidate']);
   });
   it.each([403, 404, 1])('never turns a failed read (%s) into Worker creation', async (status) => {
     const inspect = readExistingCloudflareWorker({
@@ -402,7 +402,7 @@ describe('existing Worker preservation', () => {
       const source =
         scenario === 'api-placeholder' ? apiSecretDraftVersion() : bwfSecretDraftVersion();
       if (scenario === 'real-code') {
-        source.modules[0]!.content_base64 = Buffer.from(
+        source.modules[0].content_base64 = Buffer.from(
           'export default { fetch() { return new Response("app"); } };',
         ).toString('base64');
       }

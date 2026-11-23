@@ -308,7 +308,7 @@ async function runConnect(
   let connectionString = args.url;
   if (args.provider) {
     const adapter = await loadDatabaseProvider(root, args.provider);
-    if (!adapter.dialects.includes(dialect as DatabaseProviderDialect)) {
+    if (!adapter.dialects.includes(dialect)) {
       throw new Error(`${adapter.label} does not support the configured ${dialect} dialect.`);
     }
     log.info(`Provisioning ${adapter.label} database...`);
@@ -335,7 +335,7 @@ async function runConnect(
     if (isCancel(answer)) {
       process.exit(0);
     }
-    connectionString = answer as string;
+    connectionString = answer;
   }
 
   const parsed = new URL(connectionString);
@@ -2376,7 +2376,7 @@ async function runSetUrl(root: string, dialect: DatabaseDialect): Promise<void> 
   }
 
   const client = new PlatformClient(token, { root });
-  await client.setDatabaseUrl(projectConfig.projectId, connectionString as string);
+  await client.setDatabaseUrl(projectConfig.projectId, connectionString);
 
   printSuccess('Database URL updated.');
 }

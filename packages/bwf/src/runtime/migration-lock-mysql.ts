@@ -34,7 +34,7 @@ export type MySqlMigrationLease = {
  * `app:-80@replica`) in DATABASE(), and the lock belongs to the keyspace.
  */
 export function mySqlMigrationLockName(database: string): string {
-  return `platform_migrations:${createHash('sha1').update(database.split(/[:@]/)[0]!).digest('hex')}`;
+  return `platform_migrations:${createHash('sha1').update(database.split(/[:@]/)[0]).digest('hex')}`;
 }
 
 export function mySqlMigrationLockError(database: string, retry: string): Error {

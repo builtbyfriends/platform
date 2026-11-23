@@ -36,7 +36,7 @@ it.each([false, true])(
     const prepared = await output();
     const draft = bwfSecretDraftVersion();
     if (large) {
-      draft.modules[0]!.content_base64 = Buffer.from(
+      draft.modules[0].content_base64 = Buffer.from(
         `/* ${'x'.repeat(1024 * 1024)} */\nexport default { fetch() { return new Response("ok"); } };`,
       ).toString('base64');
     }
@@ -84,7 +84,7 @@ it.each([false, true])(
       ]);
       expect(commands).toHaveLength(1);
       expect(userAgents).toEqual([cfUserAgent]);
-      expect(commands[0]!.bounds).toMatchObject({
+      expect(commands[0].bounds).toMatchObject({
         timeoutMs: 30_000,
         maxOutputBytes: 128 * 1024 * 1024,
       });
@@ -274,7 +274,7 @@ it(
     const prepared = await output({ vars: { LOCAL_VALUE: 'local-value-do-not-echo' } });
     const apiBaseUrl = await listen(
       createServer((request, response) => {
-        const path = request.url!.split('?')[0]!;
+        const path = request.url!.split('?')[0];
         request.resume();
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(
@@ -325,7 +325,7 @@ it.each([false, true])(
     const prepared = await output({ vars: { LOCAL_VALUE: 'local-value-do-not-echo' } });
     const apiBaseUrl = await listen(
       createServer((request, response) => {
-        const path = request.url!.split('?')[0]!;
+        const path = request.url!.split('?')[0];
         const upload =
           request.method === 'POST' && path.endsWith('/scripts/platform-test/versions');
         request.resume();
@@ -512,7 +512,7 @@ it.each([
         // Decision: These mutation acknowledgements retain the activation protocol's state;
         // all discovery reads and the actual version POST use the real transports.
         if (args.slice(0, 3).join(' ') === 'workers deployments create') {
-          traffic = JSON.parse(args[args.indexOf('--versions') + 1]!);
+          traffic = JSON.parse(args[args.indexOf('--versions') + 1]);
           events.push('activate');
           return { status: 0, stdout: '{}', stderr: '' };
         }
@@ -576,21 +576,21 @@ it.each([
       });
       const posts = requests.filter((row) => row.method === 'POST');
       expect(posts).toHaveLength(1);
-      expect(posts[0]!.path).toBe(
+      expect(posts[0].path).toBe(
         '/client/v4/accounts/account-id/workers/workers/platform-test/versions',
       );
-      expect(posts[0]!.body.bindings).toContainEqual({
+      expect(posts[0].body.bindings).toContainEqual({
         name: 'AUTH_SECRET',
         type: 'inherit',
         version_id: current,
       });
-      expect(posts[0]!.body.bindings).toContainEqual({
+      expect(posts[0].body.bindings).toContainEqual({
         name: 'SEND_EMAIL',
         type: 'send_email',
         allowed_sender_addresses: ['sender@example.test'],
         allowed_destination_addresses: ['receiver@example.test'],
       });
-      expect(posts[0]!.body.bindings).toContainEqual({
+      expect(posts[0].body.bindings).toContainEqual({
         name: 'APP_VERSION',
         type: 'version_metadata',
       });
@@ -653,7 +653,7 @@ it.runIf(process.platform !== 'win32')(
     const originalSpawn = childProcess.spawn;
     let group: number | undefined;
     const spawn = vi.spyOn(childProcess, 'spawn').mockImplementation((_file, args, options) => {
-      expect(args!.slice(1)).toEqual(['containers', 'push', '--tag', 'fixture:local']);
+      expect(args.slice(1)).toEqual(['containers', 'push', '--tag', 'fixture:local']);
       expect(options).toMatchObject({ detached: true });
       const child = originalSpawn(
         process.execPath,

@@ -270,7 +270,7 @@ function assertUniqueCaptureNames(source: string, kind: string): void {
   const captureNameRe = /:([A-Za-z0-9_]+)\*?/g;
   let captureMatch: RegExpExecArray | null;
   while ((captureMatch = captureNameRe.exec(source)) !== null) {
-    const name = captureMatch[1]!;
+    const name = captureMatch[1];
     if (seen.has(name)) {
       dups.add(name);
     }
@@ -649,7 +649,7 @@ function validateConfigObject(obj: unknown): BwfConfig {
           `config: "inference.scanDirs" in ${CONFIG_FILE} must be an array of strings.`,
         );
       }
-      for (const d of inf.scanDirs as Array<string>) {
+      for (const d of inf.scanDirs) {
         if (d.startsWith('/') || d.startsWith('..')) {
           throw new Error(
             `config: "inference.scanDirs" path '${d}' in ${CONFIG_FILE} must be a relative directory.`,
@@ -901,9 +901,9 @@ function validateConfigObject(obj: unknown): BwfConfig {
   if ('$schema' in obj) {
     const resolved = { ...obj };
     delete resolved.$schema;
-    return resolved as BwfConfig;
+    return resolved;
   }
-  return obj as BwfConfig;
+  return obj;
 }
 
 /**

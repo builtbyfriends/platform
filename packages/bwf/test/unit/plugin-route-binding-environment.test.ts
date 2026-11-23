@@ -57,9 +57,7 @@ async function generatedBindings(
   const plugins = bwfPlugin();
   const envPlugin = plugins.find((plugin) => plugin.name === 'platform:env');
   const envHook = envPlugin?.config;
-  const configure = (typeof envHook === 'function' ? envHook : envHook?.handler) as
-    | ((config: UserConfig, environment: ConfigEnv) => void)
-    | undefined;
+  const configure = typeof envHook === 'function' ? envHook : envHook?.handler;
   if (!configure) {
     throw new Error('Expected bwf environment plugin.');
   }

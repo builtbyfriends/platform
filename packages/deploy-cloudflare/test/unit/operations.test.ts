@@ -194,9 +194,9 @@ it.each(recoveries)(
       expect.not.objectContaining({ bypassDeploymentChecks: true }),
       expect.objectContaining({ bypassDeploymentChecks: true }),
     ]);
-    const refused = calls.indexOf(rollbacks[0]!);
+    const refused = calls.indexOf(rollbacks[0]);
     expect(
-      calls.slice(refused, calls.indexOf(rollbacks[1]!)).map((operation) => operation.type),
+      calls.slice(refused, calls.indexOf(rollbacks[1])).map((operation) => operation.type),
     ).toContain('deployments.status');
     expect(
       calls.filter(

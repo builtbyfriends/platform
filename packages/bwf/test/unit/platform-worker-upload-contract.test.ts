@@ -119,7 +119,7 @@ it.each(['none', 'batch', 'single-file'] as const)(
         async (apiBase) => {
           await new Promise<void>((resolve) => {
             const child = execFile(
-              command!,
+              command,
               [
                 ...prefix,
                 ...encodeCloudflareOperation({ type: 'worker.deploy', configPath: config }),

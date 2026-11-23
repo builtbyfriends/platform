@@ -372,7 +372,7 @@ export function defineMiddleware(handler: MiddlewareFn): MiddlewareHandler<Cloud
   // Decision: The callback's context accepts destination objects. Hono's handler type
   // does not, so the same function is not assignable without a cast. The
   // routing runtime replaces `redirect` before this runs.
-  return handler as MiddlewareHandler<CloudEnv>;
+  return handler;
 }
 
 const basicAuthEncoder = new TextEncoder();

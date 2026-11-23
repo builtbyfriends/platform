@@ -636,7 +636,7 @@ async function fetchSelfHostSecretNames(
     // Decision: Only a completed provider failure may identify a missing Worker.
     if (
       Number.isSafeInteger(result.status) &&
-      result.status! > 0 &&
+      result.status > 0 &&
       ([10_007, 10_090].includes(result.errorCode ?? 0) || result.failure === 'not-found')
     ) {
       throw new SelfHostFirstDeployError(firstDeployMessage(missingKeys));
@@ -703,7 +703,7 @@ export function createDefaultSecretListRunner(
   const [command, ...prefix] = launcher;
   return (args) =>
     new Promise<SecretListRunResult>((resolvePromise) => {
-      const child = spawn(command as string, [...prefix, ...encodeCloudflareOperation(args)], {
+      const child = spawn(command, [...prefix, ...encodeCloudflareOperation(args)], {
         cwd: root,
         shell: false,
         env: secretListEnv(options?.accountId),

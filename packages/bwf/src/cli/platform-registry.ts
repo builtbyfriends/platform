@@ -72,7 +72,7 @@ export function platformRegistryDirectory(): string {
     join(homedir(), name, 'platforms'),
   );
   return (
-    candidates.find((directory) => existsSync(join(directory, 'registry.json'))) ?? candidates[0]!
+    candidates.find((directory) => existsSync(join(directory, 'registry.json'))) ?? candidates[0]
   );
 }
 
@@ -297,7 +297,7 @@ export function getActivePlatformConnection(
   const registry = readRegistry(directory);
   return (
     registry.connections.find((connection) => connection.id === registry.activeConnectionId) ??
-    (registry.connections.length === 1 ? registry.connections[0]! : null)
+    (registry.connections.length === 1 ? registry.connections[0] : null)
   );
 }
 
@@ -311,7 +311,7 @@ export function platformConnectionSlug(
       manifest.id === connection.installationId &&
       (connection.accountId === null || connection.accountId === manifest.account.id),
   );
-  return matches.length === 1 ? matches[0]!.deployment.installationSlug : null;
+  return matches.length === 1 ? matches[0].deployment.installationSlug : null;
 }
 
 /** Resolve saved platforms without selecting one or changing its credentials. */
@@ -373,7 +373,7 @@ export function selectPlatformConnection(
           : `platform: More than one platform matches ${JSON.stringify(selector)}. Use its id or URL.`,
       );
     }
-    const selected = { ...matches[0]!, lastUsedAt: new Date().toISOString() };
+    const selected = { ...matches[0], lastUsedAt: new Date().toISOString() };
     const connections = current.connections.map((entry) =>
       entry.id === selected.id ? selected : entry,
     );
@@ -468,7 +468,7 @@ export function resolveInstallationManifest(
         : 'platform: Multiple local installations match; specify an installation id.',
     );
   }
-  return manifests[0]!;
+  return manifests[0];
 }
 
 export function writePendingInstallationSecrets(

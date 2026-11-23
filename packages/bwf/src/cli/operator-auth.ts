@@ -19,7 +19,7 @@ export function resolveOperatorOrigin(connection = ''): string {
         'invalid_connection',
       );
     }
-    return matches[0]!.apiUrl;
+    return matches[0].apiUrl;
   }
   if (process.env.BWF_API_URL) {
     return normalizePlatformApiUrl(process.env.BWF_API_URL);

@@ -999,7 +999,7 @@ it.skipIf(process.platform === 'win32')(
       prepareCfBuildOutput(output, { accountId: 'account-id' }),
       async (prepared) => {
         const built = await readBuildOutput(prepared.directory);
-        const container = built.containers[0]!.config;
+        const container = built.containers[0].config;
         expect(container.schedulingPolicy).toBe('durable-object');
         if (container.schedulingPolicy !== 'durable-object') {
           throw new Error('Expected a managed container');

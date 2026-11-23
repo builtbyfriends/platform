@@ -214,7 +214,7 @@ if (helpPath) {
     process.exit(1);
   });
 } else if (command && Object.hasOwn(subcommandGroups, command)) {
-  subcommandGroups[command]!();
+  subcommandGroups[command]();
 } else if (command === 'info') {
   import('./info.ts').then(async ({ runInfoCommand }) => {
     try {
@@ -378,7 +378,7 @@ if (helpPath) {
     const root = process.cwd();
 
     if (Object.hasOwn(subcommandGroups, cmd)) {
-      return subcommandGroups[cmd]!();
+      return subcommandGroups[cmd]();
     }
 
     switch (cmd) {

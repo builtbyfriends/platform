@@ -45,10 +45,10 @@ function nextTile(
     bag = frameworks.map((_, index) => index);
     for (let index = bag.length - 1; index > 0; index--) {
       const other = Math.floor(random() * (index + 1));
-      [bag[index], bag[other]] = [bag[other]!, bag[index]!];
+      [bag[index], bag[other]] = [bag[other], bag[index]];
     }
     if (bag[0] === top.framework) {
-      [bag[0], bag[1]] = [bag[1]!, bag[0]!];
+      [bag[0], bag[1]] = [bag[1], bag[0]];
     }
   }
   const [framework, ...remaining] = bag;
@@ -60,7 +60,7 @@ function nextTile(
       ...top,
       [axis]: top[axis] - RANGE * direction,
       level: top.level + 1,
-      framework: framework!,
+      framework,
     },
   };
 }

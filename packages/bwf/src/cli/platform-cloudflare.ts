@@ -625,7 +625,7 @@ export class PlatformCloudflareClient {
     const after = await this.listWorkerRoutes(zoneId);
     for (const pattern of patterns) {
       const matches = after.filter((route) => route.pattern === pattern);
-      if (matches.length !== 1 || matches[0]!.script !== workerName) {
+      if (matches.length !== 1 || matches[0].script !== workerName) {
         throw new PlatformWorkerRoutesChangedError(
           `platform: Worker route ${JSON.stringify(pattern)} changed concurrently after publication; retaining live routes for safe reconciliation.`,
         );

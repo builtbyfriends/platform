@@ -359,7 +359,7 @@ describe('server fetch documented options', () => {
       cause: { name: 'AbortError' },
     });
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect((dispatch.mock.calls[0]![0] as Request).signal.aborted).toBe(true);
+    expect((dispatch.mock.calls[0][0] as Request).signal.aborted).toBe(true);
   });
 
   it.each([
@@ -444,7 +444,7 @@ describe('server fetch documented options', () => {
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(networkFetch).toHaveBeenCalledTimes(1);
-    const external = networkFetch.mock.calls[0]![0] as Request;
+    const external = networkFetch.mock.calls[0][0] as Request;
     expect(external.url).toBe('https://external.example/prefix/api/hello');
     expect(external.headers.get('cookie')).toBeNull();
     expect(external.headers.get('authorization')).toBeNull();
@@ -477,6 +477,6 @@ it('expands catch-all routes in generated clients', async () => {
   await client.fetch('/files/:id2/:id/:path{.+}', {
     params: { id: 'one', id2: 'two', path: 'docs/start here' },
   });
-  const req = fetch.mock.calls[0]![0] as Request;
+  const req = fetch.mock.calls[0][0] as Request;
   expect(new URL(req.url).pathname).toBe('/files/two/one/docs/start%20here');
 });

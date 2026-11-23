@@ -635,7 +635,7 @@ export function syncWranglerBindings(
       )
     ) {
       parsed.durable_objects = {
-        ...((parsed.durable_objects as Record<string, unknown> | undefined) ?? {}),
+        ...(parsed.durable_objects ?? {}),
         bindings: nextBindings,
       };
       modified = true;
@@ -2534,14 +2534,14 @@ function strictBindingEntries(
     if (
       !isRecord(member) ||
       typeof member[keyField] !== 'string' ||
-      (member[keyField] as string).length === 0
+      member[keyField].length === 0
     ) {
       throw bindingSetError(
         `"${field}" contains a malformed entry at index ${index} (missing a non-empty string "${keyField}")`,
         'dropped entry',
       );
     }
-    return { name: member[keyField] as string, entry: member };
+    return { name: member[keyField], entry: member };
   });
 }
 

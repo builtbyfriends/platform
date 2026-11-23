@@ -469,7 +469,7 @@ function createBwfTsconfigPatch(root: string, outputBaseDir: string): TsconfigIn
   const hasSchema = hasDrizzleSchema(root);
   const bwfConfig = createProjectTsconfig(root, undefined, hasSchema, hasSchema);
   return collectTsconfigPatchFromConfig(
-    bwfConfig as JsonObject,
+    bwfConfig,
     join(root, '.bwf', 'tsconfig.json'),
     root,
     outputBaseDir,
@@ -1497,7 +1497,7 @@ async function promptStarterMode(starter?: ScaffoldStarterMode): Promise<Scaffol
     process.exit(0);
   }
 
-  return choice as ScaffoldStarterMode;
+  return choice;
 }
 
 async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<ScaffoldToolchain> {
@@ -1558,7 +1558,7 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
     process.exit(0);
   }
 
-  return choice as DatabaseSetupChoice;
+  return choice;
 }
 
 /** Ask where the project deploys, unless `deploy` answers it. The caller saves the answer. */
@@ -1598,7 +1598,7 @@ async function askDeploymentPlatform(
     process.exit(0);
   }
 
-  return choice as DeploymentPlatform;
+  return choice;
 }
 
 export async function ensureBwfPlatformConnection(

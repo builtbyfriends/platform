@@ -44,10 +44,7 @@ async function generate(resolved: Record<string, unknown>, command: 'build' | 's
   if (!configure) {
     throw new Error('bwf environment hook missing');
   }
-  (configure as (config: UserConfig, environment: ConfigEnv) => void)(
-    {},
-    { command, mode: command === 'build' ? 'production' : 'development' },
-  );
+  configure({}, { command, mode: command === 'build' ? 'production' : 'development' });
   const cloudflare = plugins.find((plugin) => plugin.name === 'mock:cloudflare');
   if (!cloudflare) {
     throw new Error('Cloudflare configuration callback missing');

@@ -98,7 +98,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function fakeFetch(table: Record<string, () => Response>, calls: Array<FetchCall>): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
@@ -117,7 +117,7 @@ function fakeFetch(table: Record<string, () => Response>, calls: Array<FetchCall
       throw new Error(`unexpected fetch: ${key}`);
     }
     return hit();
-  }) as typeof fetch;
+  };
 }
 
 function fakeDns(mx: Record<string, Array<string>>): EmailDns {
@@ -139,9 +139,9 @@ function fakeDns(mx: Record<string, Array<string>>): EmailDns {
 function captureLog(): { lines: Array<string>; restore: () => void } {
   const lines: Array<string> = [];
   const spies = (['message', 'info', 'warn', 'error', 'success', 'step'] as const).map((level) =>
-    vi.spyOn(log, level).mockImplementation(((...args: Array<unknown>) => {
+    vi.spyOn(log, level).mockImplementation((...args: Array<unknown>) => {
       lines.push(args.map(String).join(' '));
-    }) as never),
+    }),
   );
   const success = vi.spyOn(terminalOutput, 'printSuccess').mockImplementation((message) => {
     lines.push(message);
@@ -901,7 +901,7 @@ describe('bwf email status --platform cloudflare', () => {
       },
     });
     const { getSessionBearer: _injectedBearer, ...defaultBearerDeps } = deps;
-    const runWrangler = defaultBearerDeps.runWrangler!;
+    const runWrangler = defaultBearerDeps.runWrangler;
     const temporaryConfigPaths: Array<string> = [];
     defaultBearerDeps.runWrangler = (operation, options) => {
       const temporaryConfigPath = operation.configPath as string;
@@ -923,7 +923,7 @@ describe('bwf email status --platform cloudflare', () => {
       expect(fetchCalls.every((call) => call.method === 'GET')).toBe(true);
       expect(temporaryConfigPaths.length).toBeGreaterThan(0);
       expect(new Set(temporaryConfigPaths).size).toBe(1);
-      expect(existsSync(temporaryConfigPaths[0] as string)).toBe(false);
+      expect(existsSync(temporaryConfigPaths[0])).toBe(false);
       expect(calls.every((call) => call.operation.configPath === temporaryConfigPaths[0])).toBe(
         true,
       );

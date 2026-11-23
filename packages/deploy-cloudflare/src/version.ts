@@ -671,7 +671,7 @@ function desiredTriggerConfigFor(
 /** A well-formed `addresses` array, or `undefined` when the field is absent or malformed. */
 function readEmailAddresses(value: unknown): ReadonlyArray<string> | undefined {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-    ? (value as ReadonlyArray<string>)
+    ? value
     : undefined;
 }
 
@@ -988,7 +988,7 @@ async function activateCloudflareVersionWithSecretsFile(
         inheritedChain.length > 0 &&
         inheritedChain.every(
           (version, index) =>
-            index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
+            index === 0 || version.number === inheritedChain[index - 1].number + 1,
         ) &&
         (arraysEqual(inheritedCandidates, trustedInheritanceVersionIds ?? []) ||
           options.pinActiveSecrets !== undefined);
@@ -1318,7 +1318,7 @@ async function activateCloudflareVersionWithSecretsFile(
         recent?.length === baseline.length &&
         recent.every(
           (version, index) =>
-            version.id === baseline[index]!.id && version.number === baseline[index]!.number,
+            version.id === baseline[index].id && version.number === baseline[index].number,
         );
       return unchanged ? null : recent;
     };
@@ -2537,7 +2537,7 @@ function versionPercentages(
 ): Array<{ versionId: string; percentage: number }> {
   return values.map((value) => {
     const [versionId, percentage] = value.split('@');
-    return { versionId: versionId!, percentage: Number(percentage) };
+    return { versionId, percentage: Number(percentage) };
   });
 }
 

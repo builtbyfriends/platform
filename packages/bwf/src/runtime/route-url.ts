@@ -168,7 +168,7 @@ export function routeUrl<P extends RoutePath>(
     ? [options?: RouteOptions<P>]
     : [options: RouteOptions<P>]
 ): RouteUrl {
-  return buildRouteUrl(path, args[0]) as RouteUrl;
+  return buildRouteUrl(path, args[0]);
 }
 
 /** @internal Convert navigation inputs to URL strings without requiring an origin. */

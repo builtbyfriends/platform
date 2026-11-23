@@ -146,10 +146,7 @@ export function migrateLegacyBwfConfig(root: string): boolean {
         `migrate: ${TYPED_CONFIG_FILE} already exists. Move the legacy settings into it before deleting the old files.`,
       );
     }
-    current = validateConfig(loadTypedBwfConfigFile(typedPath), TYPED_CONFIG_FILE) as Record<
-      string,
-      unknown
-    >;
+    current = validateConfig(loadTypedBwfConfigFile(typedPath), TYPED_CONFIG_FILE);
     const currentBwf = { ...current };
     delete currentBwf.cloudflare;
     if (
@@ -179,7 +176,7 @@ export function migrateLegacyBwfConfig(root: string): boolean {
   const needsTypedWrite = !hadTyped || !isDeepStrictEqual(current, next);
   const temporaryPath = join(root, `.bwf.config.${randomUUID()}.ts`);
   if (needsTypedWrite) {
-    writeFileSync(temporaryPath, renderBwfConfig(next as BwfConfig), { flag: 'wx' });
+    writeFileSync(temporaryPath, renderBwfConfig(next), { flag: 'wx' });
   }
   try {
     if (needsTypedWrite) {

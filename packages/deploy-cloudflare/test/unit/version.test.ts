@@ -57,7 +57,7 @@ function preservedTriggerMessage(): string {
 }
 
 function readConfigArg(args: Array<string>): Record<string, unknown> {
-  return JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8')) as Record<string, unknown>;
+  return JSON.parse(readFileSync(args[args.indexOf('-c') + 1], 'utf8')) as Record<string, unknown>;
 }
 
 function sdkDraftActivation(
@@ -265,7 +265,7 @@ function runner(overrides?: {
       if (result.status === 0) {
         deploymentVersions = args.flatMap((argument) => {
           const matched = argument.match(/^([^@]+)@(\d+(?:\.\d+)?)$/);
-          return matched ? [{ version_id: matched[1]!, percentage: Number(matched[2]) }] : [];
+          return matched ? [{ version_id: matched[1], percentage: Number(matched[2]) }] : [];
         });
         activeVersionId =
           deploymentVersions.find((version) => version.percentage === 100)?.version_id ?? null;
@@ -1356,9 +1356,7 @@ describe('Cloudflare version activation', () => {
       expect(result).toMatchObject({ ok: true, previousVersionId: CURRENT, versionId: NEXT });
       expect(validateUploadedVersion).toHaveBeenCalledWith(NEXT);
       expect(
-        runWrangler.mock.calls.some(([args]) =>
-          ['triggers', 'deploy', 'secret'].includes(args[0]!),
-        ),
+        runWrangler.mock.calls.some(([args]) => ['triggers', 'deploy', 'secret'].includes(args[0])),
       ).toBe(false);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1515,7 +1513,7 @@ describe('Cloudflare version activation', () => {
       });
       const runWrangler = operationFixture((args: Array<string>) => {
         if (args[0] === 'versions' && args[1] === 'view') {
-          const versionId = args[2]!;
+          const versionId = args[2];
           return ok(
             JSON.stringify({
               id: versionId,
@@ -2462,10 +2460,10 @@ describe('Cloudflare version activation', () => {
       ['triggers', 'deploy'],
       ['deployments', 'status'],
     ]);
-    expect(runWrangler.mock.calls[1]![0]).toContain('--assets');
-    expect(runWrangler.mock.calls[1]![0]).toContain('/app/.bwf/deploy/cloudflare/assets');
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
-    expect(runWrangler.mock.calls[5]![0]).toEqual([
+    expect(runWrangler.mock.calls[1][0]).toContain('--assets');
+    expect(runWrangler.mock.calls[1][0]).toContain('/app/.bwf/deploy/cloudflare/assets');
+    expect(runWrangler.mock.calls[3][0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[5][0]).toEqual([
       'triggers',
       'deploy',
       '-c',
@@ -2790,9 +2788,9 @@ describe('Cloudflare version activation', () => {
     const runWrangler = operationFixture((args: Array<string>) => {
       if (args[0] === 'versions' && args[1] === 'upload') {
         secretsPath = args[args.indexOf('--secrets-file') + 1];
-        uploadedSecrets = JSON.parse(readFileSync(secretsPath!, 'utf8'));
+        uploadedSecrets = JSON.parse(readFileSync(secretsPath, 'utf8'));
         if (process.platform !== 'win32') {
-          expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+          expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
         }
       }
       return base(args);
@@ -2915,8 +2913,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${NEXT}@100`);
   });
 
   it('never sends Access headers to an unverified cached workers.dev subdomain', async () => {
@@ -2991,8 +2989,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
@@ -3099,8 +3097,8 @@ describe('Cloudflare version activation', () => {
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
     expect(deployCalls).toHaveLength(1);
-    expect(deployCalls[0]![0]).toContain(`${NEXT}@100`);
-    expect(deployCalls[0]![0].join(' ')).not.toContain(`${NEXT}@0`);
+    expect(deployCalls[0][0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0].join(' ')).not.toContain(`${NEXT}@0`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(true);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
@@ -3282,8 +3280,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${NEXT}@100`);
     expect(fetcher).toHaveBeenCalledWith(
       'https://my-worker.developer-platform-experience.workers.dev/__platform/ready',
       expect.objectContaining({
@@ -3392,8 +3390,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
@@ -4146,7 +4144,7 @@ describe('Cloudflare version activation', () => {
           customRouteReadinessOrigin: 'https://app.example.com',
         });
         expect(fetcher).toHaveBeenCalledTimes(1);
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://app.example.com/__platform/ready');
         expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
       },
@@ -4168,7 +4166,7 @@ describe('Cloudflare version activation', () => {
       });
       expect(result).toMatchObject({ ok: false, reason: 'readiness-access-denied' });
       expect(result).not.toHaveProperty('customRouteReadinessOrigin');
-      expect(probeCalls(fetcher)[0]![1].headers).toMatchObject(accessHeaders);
+      expect(probeCalls(fetcher)[0][1].headers).toMatchObject(accessHeaders);
     });
 
     it('sends Access headers when a denied preview alias falls back to the opted-in custom route', async () => {
@@ -4236,7 +4234,7 @@ describe('Cloudflare version activation', () => {
             fetch: fetcher,
           }),
         ).resolves.toMatchObject({ ok: true, previewUrl: 'https://bootstrap.example.com' });
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://bootstrap.example.com/__platform/ready');
         expect(init.headers).toMatchObject(accessHeaders);
       },
@@ -4274,7 +4272,7 @@ describe('Cloudflare version activation', () => {
           reason: `${kind}-readiness-access-denied`,
           customRouteReadinessOrigin: 'https://bootstrap.example.com',
         });
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://bootstrap.example.com/__platform/ready');
         expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
       },
@@ -4459,7 +4457,7 @@ describe('Cloudflare version activation', () => {
         (args[0] === 'deploy' || (args[0] === 'versions' && args[1] === 'upload')) &&
         args.includes('--secrets-file')
       ) {
-        const path = args[args.indexOf('--secrets-file') + 1]!;
+        const path = args[args.indexOf('--secrets-file') + 1];
         secretPaths.push(path);
         secretPayloads.push(JSON.parse(readFileSync(path, 'utf8')));
       }
