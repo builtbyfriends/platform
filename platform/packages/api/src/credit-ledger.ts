@@ -91,6 +91,7 @@ export type NewGrant = Payer & {
   amountMicros: number;
   livemode: boolean;
   giverId?: string | null;
+  note?: string | null;
   stripeInvoiceId?: string | null;
   stripePaymentIntentId?: string | null;
   startsAt?: Date;
@@ -115,6 +116,7 @@ export async function grantCredits(db: DbOrTx, grant: NewGrant, now = new Date()
         amount_micros: grant.amountMicros,
         remaining_micros: grant.amountMicros - settled,
         giver_id: grant.giverId ?? null,
+        note: grant.note ?? null,
         stripe_invoice_id: grant.stripeInvoiceId ?? null,
         stripe_payment_intent_id: grant.stripePaymentIntentId ?? null,
         livemode: grant.livemode,

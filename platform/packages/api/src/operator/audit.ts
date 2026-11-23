@@ -80,6 +80,17 @@ function auditTarget(
         plans: boundedString(JSON.stringify(body.plans ?? null), 2048),
       });
     }
+    if (segments[3] === 'people' && segments[5]) {
+      return JSON.stringify({
+        clientId: pathIdentifier(segments[2]),
+        person: pathIdentifier(segments[4]),
+        action: pathIdentifier(segments[5]),
+        dollars: boundedString(String(body.dollars ?? ''), 32),
+        expires: boundedString(body.expires, 64),
+        note: boundedString(body.note, 1000),
+        grant: boundedString(body.grant, 128),
+      });
+    }
     if (segments[2] === 'usage-prices') {
       return boundedString(JSON.stringify(body), 2048) ?? '';
     }

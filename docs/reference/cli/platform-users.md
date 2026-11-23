@@ -1,5 +1,5 @@
 ---
-description: 'Manage platform users, their projects, and the plans assigned to their accounts.'
+description: "Manage platform users, their projects, the plans assigned to their accounts, and connected apps' people."
 outline: deep
 ---
 
@@ -120,6 +120,27 @@ Not covered: requests already running, logs stored earlier, separately configure
 If the command fails with `ai_logging_publish_failed`, this change was not saved; the message names the project setting that is still saved. With `ai_logging_publish_pending`, the setting was saved but not published, and the project keeps its previous behavior until it is. In both cases, run the same command again. A saved setting that is not published yet goes live at the next hourly repair even if you do not retry, so to cancel a pending change, set the previous value again.
 
 Project settings need platform 1.8.0 or later. On an older platform, the CLI stops with "This platform does not support AI logging policies. Run `bwf platform upgrade`."
+
+## Connected App People {#operator-app-people}
+
+A connected app bills its people through the platform. Look up one of them by the id the app uses for them, without a database query:
+
+```sh
+bwf platform person list <client-id> [--search <text>] [--page <n>] [--limit <n>]
+bwf platform person show <client-id> <person-id>
+```
+
+`list` shows each person's plan, subscription status, credit balance and this month's use. It includes people who never bought a plan but have use or credits. `show` adds their grants, their use for each day this month, and the hosted apps they pay for. The admin UI has the same view under **Connected apps → People**.
+
+Give credits, refund a payment, or clear a dispute block:
+
+```sh
+bwf platform person grant <client-id> <person-id> --dollars <amount> [--expires <date>] [--note <text>]
+bwf platform person refund <client-id> <person-id> <grant-id> [--dollars <amount>]
+bwf platform person unblock <client-id> <person-id>
+```
+
+Each one shows a preview first. A grant is added to the person's balance at once, with you recorded as the giver. Credits without `--expires` don't end. A refund goes to the payment behind the grant you name, and by default it's the share of that payment the person hasn't spent. Stripe sends the refund, and the credits come off the balance when Stripe's refund event reaches the platform, usually within a few seconds. A card dispute blocks a person from buying until you clear it with `unblock`. Grants, refunds and unblocks are kept in the audit log.
 
 ## Signup Access {#operator-signup}
 

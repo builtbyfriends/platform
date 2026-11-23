@@ -229,6 +229,8 @@ export const appCreditGrants = pgTable(
       .default(0),
     voided_owed_micros: bigint('voided_owed_micros', { mode: 'number' }).notNull().default(0),
     giver_id: text('giver_id'),
+    /** Why an operator gave the grant. */
+    note: text('note'),
     stripe_invoice_id: text('stripe_invoice_id'),
     stripe_payment_intent_id: text('stripe_payment_intent_id'),
     livemode: boolean('livemode').notNull().default(false),

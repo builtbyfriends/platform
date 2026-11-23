@@ -1,5 +1,5 @@
 import { desc, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   METERS,
   parseClientPlans,
@@ -15,11 +15,20 @@ import {
   OAuthError,
 } from '../../auth/oauth.ts';
 import { isDevBypass, type ApiEnv } from '../../env.ts';
+import {
+  getAppPerson,
+  grantAppPerson,
+  listAppPeople,
+  refundAppPerson,
+  unblockAppPerson,
+} from '../../operator/app-people.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
+import { OperatorError, pagination } from '../../operator/common.ts';
 import { readPlanCatalog } from '../../plans.ts';
 import { getPlatformDisplayName } from '../../platform-identity.ts';
 import { oauthClients } from '../../schema.ts';
 import { renderAdminPage } from '../react/server.ts';
+import type { PersonPreview } from '../react/views/AppPeoplePage.tsx';
 
 const app = new Hono<ApiEnv>();
 app.onError((error, context) =>
@@ -161,4 +170,139 @@ app.post('/:id/preview-permission', async (context) => {
     },
   );
 });
+const page = (context: Context<ApiEnv>) => ({
+  platformName: getPlatformDisplayName(context.env, context.req.url),
+  username: context.get('user').login,
+});
+app.get('/:id/people', async (context) => {
+  const search = context.req.query('search')?.trim() ?? '';
+  const result = await listAppPeople(
+    context,
+    context.req.param('id'),
+    pagination(context),
+    search || undefined,
+  );
+  return renderAdminPage(context, 'appPeople', `${result.client.name} people`, {
+    result,
+    search,
+    ...page(context),
+  });
+});
+
+type Kind = PersonPreview['kind'];
+const money = (micros: number) => `${(micros / 1e6).toFixed(2)}`;
+
+async function personPage(
+  context: Context<ApiEnv>,
+  extra: { previewed?: PersonPreview; notice?: string; error?: string } = {},
+  status?: number,
+) {
+  const result = await getAppPerson(
+    context,
+    context.req.param('id')!,
+    context.req.param('person')!,
+  );
+  return renderAdminPage(
+    context,
+    'appPerson',
+    result.person,
+    { result, ...extra, ...page(context) },
+    status ? { status } : {},
+  );
+}
+
+/** Runs one person change as a preview or for real, so both read the same form. */
+async function personChange(context: Context<ApiEnv>, kind: Kind, isDryRun: boolean) {
+  const clientId = context.req.param('id')!;
+  const person = context.req.param('person')!;
+  const form = await context.req.parseBody();
+  const fields = Object.fromEntries(
+    ['dollars', 'expires', 'note', 'grant']
+      .filter((name) => typeof form[name] === 'string' && form[name] !== '')
+      .map((name) => [name, String(form[name])]),
+  );
+  if (kind === 'grants') {
+    return { fields, result: await grantAppPerson(context, clientId, person, fields, isDryRun) };
+  }
+  if (kind === 'refunds') {
+    return { fields, result: await refundAppPerson(context, clientId, person, fields, isDryRun) };
+  }
+  return { fields, result: await unblockAppPerson(context, clientId, person, isDryRun) };
+}
+
+function previewLines(kind: Kind, result: Record<string, unknown>): Array<[string, string]> {
+  if (kind === 'grants') {
+    return [
+      ['Give', money(Number(result.amountMicros))],
+      ['Ends', String(result.expiresAt ?? 'never')],
+      ['Note', String(result.note ?? '-')],
+      ['Balance now', money(Number(result.balanceMicros))],
+      ['Balance after', money(Number(result.balanceAfterMicros))],
+    ];
+  }
+  if (kind === 'refunds') {
+    const cents = (value: unknown) =>
+      `${(Number(value) / 100).toFixed(2)} ${String(result.currency)}`;
+    return [
+      ['Payment', String(result.paymentIntent)],
+      ['Paid', cents(result.receivedCents)],
+      ['Refunded before', cents(result.refundedCents)],
+      ['Unspent share', cents(result.unspentCents)],
+      ['Refund', cents(result.amountCents)],
+      ['Then', String(result.effect)],
+    ];
+  }
+  return [
+    ['Clear the block from', `${String(result.blockedReason)} on ${String(result.blockedAt)}`],
+  ];
+}
+
+const NOTICES: Record<Kind, string> = {
+  grants: 'Credits given.',
+  refunds: "Refund sent. It's pending here until Stripe's refund event takes the credits off.",
+  unblock: 'Block cleared.',
+};
+
+for (const kind of ['grants', 'refunds', 'unblock'] as const) {
+  app.post(`/:id/people/:person/${kind}/preview`, async (context) => {
+    try {
+      const { fields, result } = await personChange(context, kind, true);
+      return personPage(context, {
+        previewed: { kind, fields, lines: previewLines(kind, result as Record<string, unknown>) },
+      });
+    } catch (error) {
+      if (error instanceof OperatorError) {
+        return personPage(context, { error: error.message }, error.status);
+      }
+      throw error;
+    }
+  });
+  app.post(`/:id/people/:person/${kind}`, async (context) => {
+    const clientId = context.req.param('id');
+    const person = context.req.param('person');
+    const form = await context.req.parseBody();
+    try {
+      return await executeAuditedMutation(
+        context,
+        operatorAuditIntent(
+          `oauth/clients/${clientId}/people/${encodeURIComponent(person)}/${kind}`,
+          form as Record<string, unknown>,
+        ),
+        async () => {
+          await personChange(context, kind, false);
+          return {
+            succeeded: true,
+            response: await personPage(context, { notice: NOTICES[kind] }),
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof OperatorError) {
+        return personPage(context, { error: error.message }, error.status);
+      }
+      throw error;
+    }
+  });
+}
+app.get('/:id/people/:person', async (context) => personPage(context));
 export default app;

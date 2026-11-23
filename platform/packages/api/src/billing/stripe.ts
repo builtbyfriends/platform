@@ -202,6 +202,65 @@ export async function deleteCustomer(
   }
 }
 
+/** What a payment took and what refunds gave back so far, in the currency's smallest unit. */
+export async function paymentRefundable(
+  env: StripeEnv,
+  paymentIntentId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{ receivedCents: number; refundedCents: number; currency: string }> {
+  const response = await fetcher(
+    `https://api.stripe.com/v1/payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge`,
+    { headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    amount_received?: number;
+    currency?: string;
+    latest_charge?: { amount_refunded?: number } | string | null;
+  } | null;
+  if (!response.ok || !body) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+  const charge = typeof body.latest_charge === 'object' ? body.latest_charge : null;
+  return {
+    receivedCents: body.amount_received ?? 0,
+    refundedCents: charge?.amount_refunded ?? 0,
+    currency: body.currency ?? 'usd',
+  };
+}
+
+/**
+ * Refunds part of a payment. The key makes a second click before Stripe's event arrives return the
+ * same refund instead of a new one.
+ */
+export async function createRefund(
+  env: StripeEnv,
+  refund: { paymentIntentId: string; amountCents: number; metadata: Record<string, string> },
+  idempotencyKey: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{ id: string; status: string }> {
+  const form = new URLSearchParams({
+    payment_intent: refund.paymentIntentId,
+    amount: String(refund.amountCents),
+  });
+  for (const [key, value] of Object.entries(refund.metadata)) {
+    form.set(`metadata[${key}]`, value);
+  }
+  const response = await fetcher('https://api.stripe.com/v1/refunds', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${stripeSecretKey(env)}`,
+      'content-type': 'application/x-www-form-urlencoded',
+      'idempotency-key': idempotencyKey,
+    },
+    body: form,
+  });
+  const body = (await response.json().catch(() => null)) as { id?: string; status?: string } | null;
+  if (!response.ok || !body?.id) {
+    throw new BillingUnavailableError('Stripe refused the refund.');
+  }
+  return { id: body.id, status: body.status ?? 'pending' };
+}
+
 /**
  * The payment intent that paid an invoice. Newer Stripe API versions leave it off the invoice and
  * list it under the invoice's payments, which have to be asked for.

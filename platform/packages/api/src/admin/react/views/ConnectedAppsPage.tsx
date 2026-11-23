@@ -104,6 +104,9 @@ export function ConnectedAppsPage({
             </p>
             <p>{client.redirect_uris.join(', ')}</p>
             <p>{client.enabled ? 'Enabled' : 'Disabled'}</p>
+            <p>
+              <a href={`/admin/connected-apps/${encodeURIComponent(client.id)}/people`}>People</a>
+            </p>
             {client.enabled && (
               <form method="post" action={`/admin/connected-apps/${client.id}/preview-permission`}>
                 <input
