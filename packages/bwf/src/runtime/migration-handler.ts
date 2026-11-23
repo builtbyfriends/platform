@@ -676,12 +676,10 @@ async function runD1LegacyMigrations(
           await runUnsplitMigration(db, migration, new Date().toISOString());
         }
       } else {
-        await db.batch([
-          ...statements.map((statement) => db.prepare(statement)),
-          db
-            .prepare('INSERT OR IGNORE INTO _void_migrations (name, applied_at) VALUES (?, ?)')
-            .bind(migration.name, new Date().toISOString()),
-        ]);
+        for (const statement of statements) {
+          await db.prepare(statement).run();
+        }
+        await recordLegacyMigration(db, migration.name);
       }
       migrationResults.push({
         name: migration.name,
