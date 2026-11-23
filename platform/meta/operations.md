@@ -36,12 +36,15 @@ The `deploy` and `deploy:staging` scripts in `platform/package.json` target thes
 | `platform-deploy.yml`         | Production deployment from `prod`                            |
 | `platform-deploy-staging.yml` | Staging deployment from `main`                               |
 | `platform-smoke-test.yml`     | Deploy and exercise a disposable kitchen-sink app in staging |
+| `platform-backup.yml`         | Nightly production database dump to the backup bucket        |
 
 These deployment and smoke-test workflows target Platform, from `prod` for production or `main` for staging, with `PLATFORM_DEPLOY_ENABLED=true`. They use the `Prod` and `Staging` GitHub environments. Restrict those environments to the same refs and appropriate reviewers, and keep deployment credentials in environment secrets. Forks use their own source-runtime release workflow.
 
 Both deploy workflows serialize deployments without cancelling an active rollout. Advancing `prod` requests a production deployment. A failed or interrupted deployment needs inspection before another rollout, particularly when database migrations already ran.
 
 Hosted API and email gateway deploys report the release version from `packages/platform/package.json` as `PLATFORM_VERSION`. The `platform` CLI refuses platforms older than its minimum platform version, so release in this order: advance `prod` and wait for the production deployment to succeed, then push the release tag that publishes the npm packages.
+
+`platform-backup.yml` runs only with `PLATFORM_BACKUP_ENABLED=true`. Scheduled runs start from `main`, which the `Prod` environment refuses, so it uses its own `Backup` environment. Give that environment a `DATABASE_URL` for a read-only database role and the `BACKUP_R2_*` secrets for a token that can only write to the bucket, along with the `BACKUP_R2_ACCOUNT_ID`, `BACKUP_R2_BUCKET` and `BACKUP_POSTGRES_VERSION` variables. Keep the bucket in a separate Cloudflare account with a lifecycle rule for retention. See [Back up and restore](../../docs/guide/platform/installation/maintenance.md#back-up-and-restore) for the restore drill.
 
 Consult the workflow files for their current inputs. Store credentials in the
 selected GitHub environment and the deployment owner's secret manager. Keep
