@@ -148,6 +148,14 @@ describe('expandDotenv — ${VAR} form', () => {
     expect(expandDotenv({ URL: '${MISSING}/path' })).toEqual({ URL: '/path' });
   });
 
+  it('treats a name every object has as a missing reference', () => {
+    expect(expandDotenv({ A: 'x$constructor', B: 'y${valueOf}', C: 'z$toString' })).toEqual({
+      A: 'x',
+      B: 'y',
+      C: 'z',
+    });
+  });
+
   it('leaves unterminated ${... literally', () => {
     expect(expandDotenv({ A: '${UNCLOSED' })).toEqual({ A: '${UNCLOSED' });
   });

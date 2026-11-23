@@ -9,6 +9,7 @@
     "./routing": "./src/routing.ts",
     "./usage-auth": "./src/usage-auth.ts",
     "./proxy-token": "./src/proxy-token.ts",
+    "./github-repo-path": "./src/github/repo-path.ts",
     "./rpc": "./src/rpc/registry.ts"
   },
   "scripts": {

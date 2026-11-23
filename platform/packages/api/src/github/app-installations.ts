@@ -36,7 +36,8 @@ export const SCOPE_PATTERN = /^[A-Za-z0-9_:.-]{1,128}$/;
 export function isReturnUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    if (url.username || url.password || value.length > 1000) {
+    // Decision: The state that carries this URL is base64 of its JSON, and btoa takes Latin-1 only.
+    if (url.username || url.password || value.length > 1000 || !/^[\x21-\x7e]+$/.test(value)) {
       return false;
     }
     return (

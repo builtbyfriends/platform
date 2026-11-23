@@ -298,6 +298,18 @@ describe('init question order', () => {
 });
 
 describe('GitHub Actions deployment workflows', () => {
+  it("leaves a linked slug that isn't a slug out of the workflow", () => {
+    const yaml = getWorkflowYaml(
+      '/project',
+      'npm',
+      'my-app\n      - run: echo injected',
+      'platform',
+      'https://api.company.example',
+    );
+    expect(yaml).not.toContain('echo injected');
+    expect(yaml).toContain('BWF_PROJECT: ${{ vars.BWF_PROJECT }}');
+  });
+
   it('requires a selected URL for a bwf deployment workflow', () => {
     expect(() => getWorkflowYaml('/project', 'npm', 'my-app', 'platform')).toThrow('bwf connect');
   });

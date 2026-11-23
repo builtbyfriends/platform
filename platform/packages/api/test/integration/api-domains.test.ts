@@ -575,6 +575,20 @@ describe('POST /projects/:id/domains', () => {
     expect(rpcError(await res.json())).toBe('cannot use buildwf.dev subdomains');
   });
 
+  it('rejects the platform domain itself', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reject-apex');
+    mockCfApi();
+
+    const res = await app.fetch(
+      rpcRequest('domains.add', user.jwt, { projectId: project.id, hostname: 'buildwf.dev' }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(rpcError(await res.json())).toBe('cannot use buildwf.dev subdomains');
+  });
+
   it('uses the installation domain for the CNAME target and reserved suffix', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'self-hosted-domain');
