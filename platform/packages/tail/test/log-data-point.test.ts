@@ -8,6 +8,7 @@ function fetchTrace(): TraceItem {
     scriptName: 'user-my-app-dpl_abc123',
     outcome: 'exception',
     eventTimestamp: 1_700_000_000_000,
+    cpuTime: 7,
     event: {
       request: {
         url: 'https://my-app.void.app/account?token=secret',
@@ -40,7 +41,7 @@ describe('buildLogDataPoint', () => {
         '500',
         'dpl_abc123',
       ],
-      doubles: [1_700_000_000_000, 500],
+      doubles: [1_700_000_000_000, 500, 7],
     });
   });
 
@@ -52,7 +53,7 @@ describe('buildLogDataPoint', () => {
     expect(blobs[0]).toBe('exception');
     expect(blobs[3]).toBe('');
     expect(blobs.slice(4)).toEqual(['POST', '500', 'dpl_abc123', '8f1d2c3b4a5e6f70-SJC']);
-    expect(dp.doubles).toEqual([1_700_000_000_000, 500]);
+    expect(dp.doubles).toEqual([1_700_000_000_000, 500, 7]);
     expect(JSON.parse(blobs[1])).toEqual([
       { level: 'log', timestamp: 1, message: [] },
       { level: 'error', timestamp: 2, message: [] },

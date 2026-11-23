@@ -72,7 +72,7 @@ With `--json`, results go to standard output and command errors go to standard e
 
 - [Installation and maintenance](./platform-installation.md)
 - [Plans and authentication configuration](./platform-config.md)
-- [Users, projects, and signup access](./platform-users.md)
+- [Users, projects, connected app people, and signup access](./platform-users.md)
 - [Project Zero Trust](./platform-zero-trust.md)
 - [Deployments, builds, and system operations](./platform-operations.md)
 - [Email administration](./platform-email.md)

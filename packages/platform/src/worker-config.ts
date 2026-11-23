@@ -14,6 +14,15 @@ export type PlatformWorkerConfigSet = Readonly<
   Record<'api' | 'dispatch' | 'proxy' | 'tail' | 'emailGateway', Record<string, unknown>>
 >;
 
+// Decision: The lower request rate for apps whose payer is at zero. A rate limit binding fixes its limit in
+// the Worker config, so it is one value for the installation. Counters are keyed by project id, so two
+// installations in one account can share the namespace.
+export const CREDITS_GRACE_LIMITER = {
+  name: 'CREDITS_GRACE_LIMITER',
+  namespace_id: '1350',
+  simple: { limit: 120, period: 60 },
+} as const;
+
 export function createPlatformWorkerConfigs(input: {
   authenticationDatabaseUncached?: boolean;
   accountId: string;
@@ -321,6 +330,7 @@ export function createPlatformWorkerConfigs(input: {
         { binding: 'LOGS', dataset: names.logsDataset },
       ],
       queues: { producers: [{ binding: 'USAGE_QUEUE', queue: names.usageQueue }] },
+      ratelimits: [CREDITS_GRACE_LIMITER],
       tail_consumers: [{ service: names.tailWorker }],
       vars: {
         BASE_HOSTNAME: deployment.application.baseDomain,

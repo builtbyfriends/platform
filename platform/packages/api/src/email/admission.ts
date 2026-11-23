@@ -490,7 +490,12 @@ export async function admitEmailAction(
       const allowed =
         consent || (!sharedDestination && !verifiedOnlyTransport && (!shared || allowedByMode));
       let errorCode: string | null = null;
-      if (project.status !== 'active' || owner?.suspended_reason || controls.suspended_at) {
+      if (
+        project.status !== 'active' ||
+        project.suspended_reason ||
+        owner?.suspended_reason ||
+        controls.suspended_at
+      ) {
         errorCode = 'SUSPENDED';
       } else if (!senderAllowed) {
         errorCode = 'INVALID_FROM';
@@ -582,11 +587,15 @@ export async function transitionEmailRecipients(
         .where(eq(users.id, projectIdentity.ownerId))
         .for('share');
       const [project] = await tx
-        .select({ status: projects.status, ownerId: projects.user_id })
+        .select({
+          status: projects.status,
+          ownerId: projects.user_id,
+          suspendedReason: projects.suspended_reason,
+        })
         .from(projects)
         .where(eq(projects.id, actionIdentity.projectId))
         .for('update');
-      if (!owner || owner.suspendedReason) {
+      if (!owner || owner.suspendedReason || project?.suspendedReason) {
         throw new EmailAdmissionError('INVALID_STATE', 'email sending is suspended');
       }
       if (project?.status !== 'active' || project.ownerId !== projectIdentity.ownerId) {
@@ -826,7 +835,12 @@ async function lockReceiptAdmissionProject(tx: Tx, projectId: string) {
     .where(eq(users.id, identity.ownerId))
     .for('share');
   const [project] = await tx
-    .select({ status: projects.status, ownerId: projects.user_id, slug: projects.slug })
+    .select({
+      status: projects.status,
+      ownerId: projects.user_id,
+      slug: projects.slug,
+      suspendedReason: projects.suspended_reason,
+    })
     .from(projects)
     .where(eq(projects.id, projectId))
     .for('update');
@@ -840,7 +854,8 @@ async function lockReceiptAdmissionProject(tx: Tx, projectId: string) {
   return {
     status: project.status,
     slug: project.slug,
-    suspended: !owner || !!owner.suspendedReason || !!controls?.suspendedAt,
+    suspended:
+      !owner || !!owner.suspendedReason || !!project.suspendedReason || !!controls?.suspendedAt,
   };
 }
 

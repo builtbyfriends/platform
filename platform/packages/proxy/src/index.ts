@@ -244,7 +244,15 @@ app.post('/ai/*', async (context, next) => {
       501,
     );
   }
-  if (await context.env.ROUTING.get(`ai-block:${context.get('projectId')}`, { cacheTtl: 60 })) {
+  const projectId = context.get('projectId');
+  const [suspended, aiBlocked] = await Promise.all([
+    context.env.ROUTING.get(`project-suspended:${projectId}`, { cacheTtl: 60 }),
+    context.env.ROUTING.get(`ai-block:${projectId}`, { cacheTtl: 60 }),
+  ]);
+  if (suspended) {
+    return context.json({ error: 'app unavailable', message: "This app isn't available." }, 403);
+  }
+  if (aiBlocked) {
     return usageLimitResponse({
       code: 'usage_limit',
       resource: 'ai',

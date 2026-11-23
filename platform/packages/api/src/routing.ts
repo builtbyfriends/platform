@@ -1,7 +1,7 @@
 import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import { sql as drizzleSql } from 'drizzle-orm';
-import { getDomainsByProjectIds, getProject } from './db.ts';
-import type { Db } from './db.ts';
+import { payerOutOfCredits } from './app-credits.ts';
+import { getDomainsByProjectIds, getProject, type Db } from './db.ts';
 import type { AssetConfig, DeployManifest } from './types.ts';
 import {
   assertRouteBelongsToProject,
@@ -27,7 +27,7 @@ async function withLockedProjectOwner(
   db: Db,
   projectId: string,
   expectedOwnerUserId: string,
-  update: () => Promise<void>,
+  update: (tx: Db) => Promise<void>,
 ): Promise<boolean> {
   return db.transaction(async (tx) => {
     await tx.execute(drizzleSql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
@@ -35,7 +35,7 @@ async function withLockedProjectOwner(
     if (!project || project.user_id !== expectedOwnerUserId || project.status === 'deleting') {
       return false;
     }
-    await update();
+    await update(tx);
     return true;
   });
 }
@@ -55,8 +55,10 @@ export async function setProjectAiBlock(
   expectedOwnerUserId: string,
   blocked: boolean,
 ): Promise<boolean> {
-  return withLockedProjectOwner(db, projectId, expectedOwnerUserId, async () => {
-    if (blocked) {
+  return withLockedProjectOwner(db, projectId, expectedOwnerUserId, async (tx) => {
+    // Decision: Each stamp of the AI pause passes through here, so a payer with no credits left keeps it on
+    // whatever the owner's own counter says.
+    if (blocked || (await payerOutOfCredits(tx, projectId))) {
       await routing.put(`ai-block:${projectId}`, '1');
     } else {
       await routing.delete(`ai-block:${projectId}`);
@@ -76,12 +78,13 @@ export async function setProjectAiBlock(
  *  - `{ op: 'suspend', reason, force }` — set `suspended = reason`. `force`
  *    (admin) overwrites a different existing reason; non-`force` (usage) only
  *    stamps when no marker exists, so it can't downgrade an admin suspension.
+ *    `over` lists the reasons a non-`force` stamp may still replace.
  *  - `{ op: 'unsuspend', matchReason }` — clear the marker. `matchReason: null`
  *    (admin) clears any reason; a string (usage) clears ONLY when the existing
  *    marker equals it, so a usage clear can't lift an admin suspension.
  */
 export type RoutingSuspensionUpdate =
-  | { op: 'suspend'; reason: string; force: boolean }
+  | { op: 'suspend'; reason: string; force: boolean; over?: ReadonlyArray<string> }
   | { op: 'unsuspend'; matchReason: string | null };
 
 /**
@@ -178,7 +181,7 @@ export async function applyRoutingSuspension(
       if (entry.suspended === update.reason) {
         continue;
       }
-      if (!update.force && entry.suspended) {
+      if (!update.force && entry.suspended && !update.over?.includes(String(entry.suspended))) {
         continue;
       }
       entry.suspended = update.reason;

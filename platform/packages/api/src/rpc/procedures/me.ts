@@ -1,5 +1,5 @@
 import { type } from 'arktype';
-import { resolvePlanLimits } from '../../plans.ts';
+import { billedAccountPlanLimits } from '../../app-payer.ts';
 import { member, procedure } from '../procedure.ts';
 
 export const get = procedure('me.get')
@@ -30,5 +30,5 @@ export const get = procedure('me.get')
     plan: user.plan,
     role: user.role,
     billing_cycle_start: user.billing_cycle_start,
-    limits: await resolvePlanLimits(db, user.plan),
+    limits: await billedAccountPlanLimits(db, user),
   }));

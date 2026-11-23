@@ -109,6 +109,14 @@ export async function getDefaultPlan(
   return catalog.plans.find((plan) => plan.id === catalog.defaultPlanId)!;
 }
 
+/** The default plan as the admin screens show it, including before an operator saves a catalog. */
+export function installationDefaultPlan(
+  db: DbOrTx,
+  env: { PLATFORM_INSTALLATION_ID?: string | undefined },
+): Promise<PlatformPlanDefinition> {
+  return getDefaultPlan(db, initialPlanDefaultFor(env));
+}
+
 export async function requireAssignablePlan(
   db: DbOrTx,
   id: string,

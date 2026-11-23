@@ -8,6 +8,7 @@ import {
   lockNewProjectAiLoggingInputs,
   publishProjectAiLogging,
 } from '../ai-logging.ts';
+import { billedPlanLimits } from '../app-payer.ts';
 import { hmacSignState } from '../auth/hmac.ts';
 import { buildManagerNamespace } from '../build-namespace.ts';
 import { isTerminalBuildStatus } from '../build-status.ts';
@@ -58,7 +59,7 @@ import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
 import { LOG_ROW_GROUP_BY, runtimeLogsField } from '../observability/log-rows.ts';
 import { hasSqlState } from '../pg-errors.ts';
-import { initialPlanDefaultFor, resolvePlan, resolvePlanLimits } from '../plans.ts';
+import { initialPlanDefaultFor, resolvePlan } from '../plans.ts';
 import { PROJECT_PERMISSION_MESSAGES } from '../project-access.ts';
 import { projectNameError } from '../project-names.ts';
 import {} from '../project-secrets.ts';
@@ -769,7 +770,7 @@ const app = new Hono<ApiEnv>()
             ? JSON.parse(target.manifest)
             : null;
           const dispatchLimits = computeDispatchLimits(
-            await resolvePlanLimits(tx, lockedAccess.owner.plan),
+            await billedPlanLimits(tx, lockedAccess.owner, lockedProject),
             manifest?.limits,
           );
           // Decision: The external writes depend only on authoritative sources (the pg deployments table for queue

@@ -20,6 +20,7 @@ export const request = appProcedure('publish.request')
       slug: 'string',
       checkpoint: 'string',
       artifact: 'object',
+      'payer?': 'string',
     }),
   )
   .output(type({ authorization_url: 'string', request_id: 'string', expires_in: 'number' }))

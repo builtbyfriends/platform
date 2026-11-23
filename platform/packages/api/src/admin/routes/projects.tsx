@@ -15,6 +15,8 @@ import { OperatorError } from '../../operator/common.ts';
 import {
   deleteOperatorProject,
   previewOperatorProjectOwner,
+  restoreOperatorProject,
+  suspendOperatorProject,
   transferOperatorProjectOwner,
 } from '../../operator/tenant-service.ts';
 import { zeroTrustOperatorError } from '../../operator/zero-trust-routes.ts';
@@ -302,6 +304,44 @@ app.post('/:id/owner', async (context) => {
     operatorAuditIntent(`projects/${projectId}/owner`, { userId }),
     async () => {
       await transferOperatorProjectOwner(context, projectId, userId);
+      return { response: context.redirect(`/admin/projects/${projectId}`), succeeded: true };
+    },
+  );
+});
+
+app.post('/:id/suspend', async (context) => {
+  const projectId = context.req.param('id');
+  const body = await context.req.parseBody();
+  const note =
+    String(body.note ?? '')
+      .trim()
+      .slice(0, 1000) || undefined;
+  const operatorNote =
+    String(body.operatorNote ?? '')
+      .trim()
+      .slice(0, 1000) || undefined;
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent(`projects/${projectId}/suspend`, { note, operatorNote }),
+    async () => {
+      await suspendOperatorProject(context, projectId, note);
+      return { response: context.redirect(`/admin/projects/${projectId}`), succeeded: true };
+    },
+  );
+});
+
+app.post('/:id/restore', async (context) => {
+  const projectId = context.req.param('id');
+  const body = await context.req.parseBody();
+  const operatorNote =
+    String(body.operatorNote ?? '')
+      .trim()
+      .slice(0, 1000) || undefined;
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent(`projects/${projectId}/restore`, { operatorNote }),
+    async () => {
+      await restoreOperatorProject(context, projectId);
       return { response: context.redirect(`/admin/projects/${projectId}`), succeeded: true };
     },
   );

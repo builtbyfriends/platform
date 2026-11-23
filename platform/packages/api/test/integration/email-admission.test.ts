@@ -1228,6 +1228,21 @@ describe('authoritative email admission', () => {
     },
   );
 
+  it('stops email for a project an operator suspended', async () => {
+    const project = await fixture();
+    const action = await admitEmailAction(env.db, input(project.id, 'project-takedown'));
+    await env.db
+      .update(projects)
+      .set({ suspended_reason: 'operator_takedown' })
+      .where(eq(projects.id, project.id));
+
+    await expect(
+      transitionEmailRecipients(env.db, action.operationId, ['one@example.com'], 'attempt_started'),
+    ).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    const blocked = await admitEmailAction(env.db, input(project.id, 'project-takedown-new'));
+    expect(blocked.recipients[0]).toMatchObject({ errorCode: 'SUSPENDED' });
+  });
+
   it('does not start an admitted reservation after its owner is suspended', async () => {
     const project = await fixture();
     const action = await admitEmailAction(env.db, input(project.id, 'owner-suspended'));

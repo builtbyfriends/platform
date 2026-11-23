@@ -75,6 +75,26 @@ function auditTarget(
         ...(segments[2] === 'preview-permission' ? { enabled: body.enabled === true } : {}),
       });
     }
+    if (segments[2] === 'plans') {
+      return JSON.stringify({
+        clientId: boundedString(body.id, 128),
+        plans: boundedString(JSON.stringify(body.plans ?? null), 2048),
+      });
+    }
+    if (segments[3] === 'people' && segments[5]) {
+      return JSON.stringify({
+        clientId: pathIdentifier(segments[2]),
+        person: pathIdentifier(segments[4]),
+        action: pathIdentifier(segments[5]),
+        dollars: boundedString(String(body.dollars ?? ''), 32),
+        expires: boundedString(body.expires, 64),
+        note: boundedString(body.note, 1000),
+        grant: boundedString(body.grant, 128),
+      });
+    }
+    if (segments[2] === 'usage-prices') {
+      return boundedString(JSON.stringify(body), 2048) ?? '';
+    }
   }
   if (segments[0] === 'config' && segments[1] === 'auth') {
     return JSON.stringify({
@@ -161,6 +181,19 @@ function auditTarget(
     }
     if (segments[2] === 'delete' || segments[2] === 'normalize') {
       return JSON.stringify({ projectId: id });
+    }
+    if (segments[2] === 'suspend') {
+      return JSON.stringify({
+        projectId: id,
+        note: boundedString(body.note, 1000),
+        operatorNote: boundedString(body.operatorNote ?? body['operator-note'], 1000),
+      });
+    }
+    if (segments[2] === 'restore') {
+      return JSON.stringify({
+        projectId: id,
+        operatorNote: boundedString(body.operatorNote ?? body['operator-note'], 1000),
+      });
     }
   }
   if (segments[0] === 'email' && segments[1] === 'operations' && segments[3] === 'resolve') {

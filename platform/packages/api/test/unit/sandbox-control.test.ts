@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({
   authority: vi.fn(),
   checkpoint: vi.fn(),
   capability: vi.fn(),
+  payerStopped: vi.fn(),
 }));
+vi.mock('../../src/app-credits.ts', () => ({ payerOutOfCredits: mocks.payerStopped }));
 vi.mock('../../src/plans.ts', async () => {
   const { getPlanLimits } = await import('../../src/tiers.ts');
   return { resolvePlanLimits: vi.fn(async (_db: unknown, plan: string) => getPlanLimits(plan)) };
@@ -49,7 +51,13 @@ function authority() {
       admission_protocol: 3,
       manifest: JSON.stringify({ sandbox: { runtime: { protocol: 1 } } }),
     },
-    owner: { id: identity.userId, plan: 'solo', suspended_reason: null as string | null },
+    owner: {
+      id: identity.userId,
+      plan: 'solo',
+      provider: 'github',
+      provider_id: '1',
+      suspended_reason: null as string | null,
+    },
     candidateFresh: false,
   };
 }
@@ -79,6 +87,7 @@ beforeEach(() => {
   mocks.authority.mockResolvedValue([authority()]);
   mocks.checkpoint.mockResolvedValue({ state: 'complete', admission_protocol: 3 });
   mocks.capability.mockReturnValue({ sandbox: true });
+  mocks.payerStopped.mockResolvedValue(false);
 });
 
 describe('private SandboxControl authority', () => {
@@ -216,6 +225,13 @@ describe('private SandboxControl authority', () => {
       ok: false,
       reason: 'runtime_budget',
     });
+    routing.get.mockResolvedValue(null);
+    mocks.payerStopped.mockResolvedValue(true);
+    expect(await control.reserve('instance', 'run')).toEqual({
+      ok: false,
+      reason: 'runtime_budget',
+    });
+    expect(mocks.payerStopped).toHaveBeenCalledWith(expect.anything(), 'project', 'sandbox');
     expect(counter.reserve).not.toHaveBeenCalled();
   });
 

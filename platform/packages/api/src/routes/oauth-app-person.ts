@@ -1,14 +1,12 @@
 import { and, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import type { Context } from 'hono';
 import type { OAuthScope, OAuthSession } from '../auth/oauth-types.ts';
-import type { authenticateOAuthClient } from '../auth/oauth.ts';
-import { activeOAuthClient, OAuthError } from '../auth/oauth.ts';
+import { activeOAuthClient, authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
-import { createUser, getProject } from '../db.ts';
-import type { Db } from '../db.ts';
+import { createUser, getProject, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { projectUrl } from '../project-url.ts';
-import { oauthGrants, oauthRequests, users } from '../schema.ts';
+import { oauthGrants, oauthRequests, projects, users } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
 import { runScheduledAfterCommit } from './projects.ts';
 
@@ -52,7 +50,9 @@ export function appPersonClients(env: ApiEnv['Bindings']): Set<string> {
   );
 }
 
-async function appPersonUser(
+export const GROUP = 'group:';
+
+export async function appPersonUser(
   db: Db,
   clientId: string,
   person: string,
@@ -71,7 +71,7 @@ async function appPersonUser(
     return found;
   }
   try {
-    return await createUser(db, provider, person, profile.login, profile.email);
+    return (await createUser(db, provider, person, profile.login, profile.email)) as User;
   } catch (error) {
     // Decision: Two first calls for one person race on the unique (provider, provider_id) index, so re-read
     // after a conflict.
@@ -111,8 +111,25 @@ export async function appPersonToken(
       403,
     );
   }
-  const person = form.person;
-  if (typeof person !== 'string' || !person || person.length > 200) {
+  const named = (value: unknown) =>
+    typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : null;
+  // Decision: A group, such as a team, owns apps no one person holds. Its user is the application's id with a
+  // group: prefix, so no person's id can reach it, and the person acting for it is named on each token.
+  const group = named(form.group);
+  const actingPerson = named(form.acting_person);
+  if (form.group !== undefined && (!group || !actingPerson || form.person !== undefined)) {
+    throw new OAuthError(
+      'invalid_request',
+      'Name the group with `group` and the person acting for it with `acting_person`.',
+    );
+  }
+  const person = group ? GROUP + group : form.person;
+  if (
+    typeof person !== 'string' ||
+    !person ||
+    person.length > 206 ||
+    (!group && person.startsWith(GROUP))
+  ) {
     throw new OAuthError('invalid_request', 'Name the person with `person`.');
   }
   const scopes = requestedScopes(client, form.scope);
@@ -139,6 +156,7 @@ export async function appPersonToken(
     aud: 'api',
     exp: Math.floor(Date.parse(expiresAt) / 1000),
     appPerson: true,
+    ...(actingPerson && group ? { actingPerson } : {}),
   };
   const result = await db.transaction(async (tx) => {
     await activeOAuthClient(tx, client.id, true);
@@ -194,8 +212,15 @@ export async function appPersonToken(
         ...request.data,
         // Decision: The deploy runs on this token's grant, which outlives the approval.
         grantId,
-        projectId: await approval.project(context, tx, request.data.slug!, user),
+        ...(session.actingPerson ? { actingPerson: session.actingPerson } : {}),
+        projectId: await approval.project(context, tx as Db, request.data.slug!, user),
       };
+      if (data.payer !== undefined) {
+        await tx
+          .update(projects)
+          .set({ payer_person_id: data.payer })
+          .where(eq(projects.id, data.projectId));
+      }
       const [approved] = await tx
         .update(oauthRequests)
         .set({
@@ -207,8 +232,8 @@ export async function appPersonToken(
         })
         .where(eq(oauthRequests.id, request.id))
         .returning();
-      const credential = await approval.token(context.env, approved, user.id);
-      const project = await getProject(tx, data.projectId);
+      const credential = await approval.token(context.env, approved!, user.id);
+      const project = await getProject(tx as Db, data.projectId);
       return project && context.env.PLATFORM_APPLICATION
         ? { ...credential, url: projectUrl(project, context.env) }
         : credential;

@@ -1,10 +1,11 @@
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@builtbyfriends/platform';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { and, eq, sql } from 'drizzle-orm';
+import { payerOutOfCredits } from './app-credits.ts';
+import { billedPlanLimits } from './app-payer.ts';
 import { getPlatformCapabilities } from './capabilities.ts';
 import { createDb } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { resolvePlanLimits } from './plans.ts';
 import { sandboxBlockKey } from './routing.ts';
 import type { SandboxControlResult } from './sandbox-concurrency-counter.ts';
 import { readSandboxDrainCheckpoint } from './sandbox-drain.ts';
@@ -116,16 +117,17 @@ export class SandboxControl extends WorkerEntrypoint<
     }
     if (
       owner.suspended_reason === REASON_SANDBOX_RUNTIME_EXCEEDED ||
-      (await this.env.ROUTING.get(sandboxBlockKey(owner.id))) !== null
+      (await this.env.ROUTING.get(sandboxBlockKey(owner.id))) !== null ||
+      (await payerOutOfCredits(db, project.id, 'sandbox'))
     ) {
       return { ok: false, reason: 'runtime_budget' };
     }
-    if (owner.suspended_reason) {
+    if (owner.suspended_reason || project.suspended_reason) {
       return { ok: false, reason: 'unavailable' };
     }
     return {
       ok: true,
-      limit: (await resolvePlanLimits(db, owner.plan)).sandboxMaxConcurrentInstances,
+      limit: (await billedPlanLimits(db, owner, project)).sandboxMaxConcurrentInstances,
       slug: project.slug,
     };
   }

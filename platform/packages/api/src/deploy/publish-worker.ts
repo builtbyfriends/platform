@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from 'drizzle-orm';
-import type { Context } from 'hono';
-import type { AssetManifestEntry } from '../assets.ts';
+import { type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
+import { type AssetManifestEntry } from '../assets.ts';
 import { deleteDispatchScript } from '../cf-api.ts';
 import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
 import {
@@ -10,12 +11,11 @@ import {
   markDeploymentRetained,
   getRetainedDeploymentsExcluding,
   getProjectResources,
+  type Db,
 } from '../db.ts';
-import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { getProjectQueueName } from '../naming.ts';
-import type { DeployLogger } from '../observability/logger.ts';
-import { resolvePlanLimits } from '../plans.ts';
+import { type DeployLogger } from '../observability/logger.ts';
 import { addQueueConsumer, removeQueueConsumer } from '../provisioning/cloudflare-api.ts';
 import {
   deleteContainerApplicationIdempotent,
@@ -23,25 +23,29 @@ import {
   perDeployContainerApplicationName,
 } from '../provisioning/containers.ts';
 import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
-import type { provisionBindings } from '../provisioning/provision.ts';
+import { provisionBindings } from '../provisioning/provision.ts';
 import { deleteSandboxController, isManagedSandbox } from '../provisioning/sandbox-controller.ts';
 import { projectRouteKey } from '../routing.ts';
 import { buildRoutingJson, computeDispatchLimits } from '../routing.ts';
 import { REASON_REQUESTS_EXCEEDED } from '../suspension.ts';
 import type { PlanLimits } from '../tiers.ts';
-import type {
-  DeployManifest,
-  DeployEvent,
-  Deployment,
-  Project,
-  DeploymentStatus,
+import {
+  type DeployManifest,
+  type DeployEvent,
+  type Deployment,
+  type Project,
+  type DeploymentStatus,
 } from '../types.ts';
 import type { WorkerModule } from '../worker-upload.ts';
 import { resolveProjectZeroTrustRouting } from '../zero-trust/routing.ts';
 import { assertDeploymentCanProceed } from './guards.ts';
-import type { requireActiveDeployAccess } from './recovery.ts';
-import { commitCutoverLive, cutoverIntentKey, cutoverReadyKey } from './recovery.ts';
-import type { CutoverMarker } from './recovery.ts';
+import {
+  commitCutoverLive,
+  requireActiveDeployAccess,
+  cutoverIntentKey,
+  cutoverReadyKey,
+  type CutoverMarker,
+} from './recovery.ts';
 import { projectPublicUrls } from './shared.ts';
 
 export async function publishWorkerDeployment(input: {
@@ -62,6 +66,7 @@ export async function publishWorkerDeployment(input: {
     mutate: (
       txDb: Db,
       currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+      lockedProject: Project,
     ) => Promise<T>,
   ) => Promise<T>;
   readonly snapshotTrackedQueueConsumer: (queueId: string, scriptName: string) => Promise<void>;
@@ -134,7 +139,7 @@ export async function publishWorkerDeployment(input: {
 
   input.currentStep = 'cutover_intent';
   const cutoverMarker: CutoverMarker = {
-    projectId,
+    projectId: projectId,
     ownerId: cutoverOwnerId,
     buildId: deployBuild ?? null,
   };
@@ -224,8 +229,8 @@ export async function publishWorkerDeployment(input: {
       await putTrackedRouting(
         queueKey,
         JSON.stringify({
-          workerName,
-          projectId,
+          workerName: workerName,
+          projectId: projectId,
           queueName: outcome.q.name,
           proxyToken,
         }),
@@ -257,9 +262,9 @@ export async function publishWorkerDeployment(input: {
   await snapshotCronState();
   await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
   markPhase('routing_switch');
-  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
+  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner, lockedProject) => {
     const dispatchLimits = computeDispatchLimits(
-      await resolvePlanLimits(txDb, currentOwner.plan),
+      await billedPlanLimits(txDb, currentOwner, project),
       manifest.limits,
     );
     const existingRouting = await context.env.ROUTING.get(projectRouteKey(project));
@@ -267,13 +272,14 @@ export async function publishWorkerDeployment(input: {
     const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
     const routingJson = buildRoutingJson({
       privatePreview: Boolean(project.preview_client_id),
-      workerName,
-      projectId,
+      workerName: workerName,
+      projectId: projectId,
       userId: project.user_id,
-      manifest,
+      manifest: manifest,
       deploymentId: deployment.id,
       dispatchLimits,
       suspended:
+        lockedProject.suspended_reason ??
         existingEntry?.suspended ??
         (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
           ? REASON_REQUESTS_EXCEEDED
@@ -310,7 +316,7 @@ export async function publishWorkerDeployment(input: {
     input.cronSchedulerWriteAttempted = true;
     if (hasCrons) {
       await syncCronScheduler(context.env, projectId, {
-        workerName,
+        workerName: workerName,
         schedules: manifest.schedules!,
         proxyToken,
       });
@@ -369,11 +375,11 @@ export async function publishWorkerDeployment(input: {
           for (const entry of Object.values(keptManifest)) {
             retainedHashes.add(entry.hash);
           }
-        } catch (error) {
+        } catch (e) {
           // Decision: One corrupt asset_hashes blob must not spoil the sweep: skip the bad row and keep going.
           input.logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
             retainedDeploymentId: kept.id,
-            err: error instanceof Error ? error.message : String(error),
+            err: e instanceof Error ? e.message : String(e),
           });
         }
       }
@@ -408,11 +414,11 @@ export async function publishWorkerDeployment(input: {
           for (const entry of Object.values(activeManifest)) {
             retainedHashes.add(entry.hash);
           }
-        } catch (error) {
+        } catch (e) {
           assetCleanupSafe = false;
           input.logger.warn('retention_cleanup', 'active_asset_hashes_parse_failed', {
             retainedDeploymentId: activeToKeep.id,
-            err: error instanceof Error ? error.message : String(error),
+            err: e instanceof Error ? e.message : String(e),
           });
         }
       }
@@ -426,10 +432,10 @@ export async function publishWorkerDeployment(input: {
           context.env.CF_API_TOKEN,
           dispatchNamespace,
           oldWorkerName,
-        ).catch((error) => {
+        ).catch((e) => {
           input.logger.warn('retention_cleanup', 'evicted_dispatch_script_delete_failed', {
             evictedDeploymentId: old.id,
-            err: error instanceof Error ? error.message : String(error),
+            err: e instanceof Error ? e.message : String(e),
           });
         });
         if (assetCleanupSafe && old.asset_hashes) {
@@ -439,28 +445,22 @@ export async function publishWorkerDeployment(input: {
               { hash: string }
             >;
             const evictedHashes = Object.values(evictedManifest).map((e) => e.hash);
-            await deleteAssetHashesWithProjectFence(retainedHashes, evictedHashes).catch(
-              (error) => {
-                input.logger.warn(
-                  'retention_cleanup',
-                  'evicted_unreferenced_assets_delete_failed',
-                  {
-                    evictedDeploymentId: old.id,
-                    err: error instanceof Error ? error.message : String(error),
-                  },
-                );
-              },
-            );
-            await context.env.ROUTING.delete(`manifest:${old.id}`).catch((error) => {
-              input.logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
+            await deleteAssetHashesWithProjectFence(retainedHashes, evictedHashes).catch((e) => {
+              input.logger.warn('retention_cleanup', 'evicted_unreferenced_assets_delete_failed', {
                 evictedDeploymentId: old.id,
-                err: error instanceof Error ? error.message : String(error),
+                err: e instanceof Error ? e.message : String(e),
               });
             });
-          } catch (error) {
+            await context.env.ROUTING.delete(`manifest:${old.id}`).catch((e) => {
+              input.logger.warn('retention_cleanup', 'evicted_routing_manifest_delete_failed', {
+                evictedDeploymentId: old.id,
+                err: e instanceof Error ? e.message : String(e),
+              });
+            });
+          } catch (e) {
             input.logger.warn('retention_cleanup', 'evicted_asset_hashes_parse_failed', {
               evictedDeploymentId: old.id,
-              err: error instanceof Error ? error.message : String(error),
+              err: e instanceof Error ? e.message : String(e),
             });
           }
         }
@@ -498,30 +498,25 @@ export async function publishWorkerDeployment(input: {
                 }
               }
             }
-          } catch (error) {
-            input.logger.error(
-              'retention_cleanup',
-              'evicted_sandbox_container_delete_failed',
-              error,
-              {
-                evictedDeploymentId: old.id,
-              },
-            );
+          } catch (e) {
+            input.logger.error('retention_cleanup', 'evicted_sandbox_container_delete_failed', e, {
+              evictedDeploymentId: old.id,
+            });
           }
         }
         if (old.bundle_stored) {
           try {
             await evictStoredWorkerBundle(old.id);
-          } catch (error) {
-            input.logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', error, {
+          } catch (e) {
+            input.logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
               evictedDeploymentId: old.id,
             });
           }
         }
-      } catch (error) {
+      } catch (e) {
         input.logger.warn('retention_cleanup', 'eviction_partial_failure', {
           evictedDeploymentId: old.id,
-          err: error instanceof Error ? error.message : String(error),
+          err: e instanceof Error ? e.message : String(e),
         });
         continue;
       }
@@ -536,9 +531,9 @@ export async function publishWorkerDeployment(input: {
           if (orphans > 0) {
             input.logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
           }
-        } catch (error) {
+        } catch (e) {
           input.logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-            err: error instanceof Error ? error.message : String(error),
+            err: e instanceof Error ? e.message : String(e),
           });
         }
       };
@@ -549,7 +544,7 @@ export async function publishWorkerDeployment(input: {
   emit({
     event: 'done',
     deployment: deployment.id,
-    url: urls[0],
+    url: urls[0]!,
     urls,
     assets: deployedAssetCount,
     workers: workerFiles.length,

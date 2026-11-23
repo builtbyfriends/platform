@@ -4,19 +4,25 @@ import type { ApiEnv } from '../env.ts';
 import { requireProjectCapability } from '../project-access.ts';
 import type { projectZeroTrust } from '../schema.ts';
 import type { Project, ProjectZeroTrust } from '../types.ts';
-import type { ZeroTrustCloudflareClient } from './cloudflare.ts';
-import { bypassPolicy, reusablePolicyReferences } from './cloudflare.ts';
-import { readZeroTrustConfigurationStrict } from './configuration.ts';
-import type { ManagedAccessApplication, ZeroTrustConfiguration } from './configuration.ts';
+import {
+  bypassPolicy,
+  emailDomainPolicy,
+  reusablePolicyReferences,
+  ZeroTrustCloudflareClient,
+} from './cloudflare.ts';
+import {
+  type ManagedAccessApplication,
+  type ZeroTrustConfiguration,
+  readZeroTrustConfigurationStrict,
+} from './configuration.ts';
 import { ZeroTrustUnavailableError } from './errors.ts';
-import { withProjectZeroTrustLock } from './lock.ts';
-import type { RecordProjectErrors } from './lock.ts';
+import { withProjectZeroTrustLock, type RecordProjectErrors } from './lock.ts';
 import {
   publishProjectZeroTrustRoutingLocked,
   requiredRoutingBudget,
   routingProtection,
+  type RoutingBudget,
 } from './routing.ts';
-import type { RoutingBudget } from './routing.ts';
 import {
   applicationName,
   clientForConfiguration,
@@ -129,11 +135,12 @@ async function checkpointProjectReconciliation(
       values.bypass_application_name = await applicationName(env, `public-${project.id}`);
     }
     if (
-      (desired || configuration.managePublicCustomDomains) &&
-      destinations.custom.length > 0 &&
-      !existing?.protected_application_name
+      ((desired || configuration.managePublicCustomDomains) && destinations.custom.length > 0) ||
+      (desired && existing?.access_email_domains?.length)
     ) {
-      values.protected_application_name = await applicationName(env, `protected-${project.id}`);
+      if (!existing?.protected_application_name) {
+        values.protected_application_name = await applicationName(env, `protected-${project.id}`);
+      }
     }
     return putProjectState(lockedDb, projectId, values);
   });
@@ -203,6 +210,7 @@ async function reconcilePublicProjectLocked(
     protected_application_id: publicCustom?.id ?? null,
     protected_application_name: publicCustom?.name ?? null,
     protected_application_audience: publicCustom?.audience ?? null,
+    protected_application_platform_hosts: null,
     last_error: null,
   });
 }
@@ -261,16 +269,24 @@ async function reconcileProjectZeroTrustLocked(
     }
 
     let protectedApplication: ManagedAccessApplication | null = null;
-    if (destinations.custom.length > 0) {
+    // Decision: A project limited to some email domains gets its own application at its platform address too,
+    // since the wildcard application holds the installation's policies. The exact hostname wins over the wildcard.
+    const emailDomains = row.access_email_domains?.length ? row.access_email_domains : null;
+    const applicationDestinations = emailDomains
+      ? [...destinations.platform, ...destinations.custom]
+      : destinations.custom;
+    if (applicationDestinations.length > 0) {
       if (!row.protected_application_name) {
         throw new Error('The project protected application checkpoint is missing.');
       }
       protectedApplication = await client.ensureApplication(
         {
           name: row.protected_application_name,
-          destinations: destinations.custom,
+          destinations: applicationDestinations,
           allowedIdentityProviderIds: configuration.identityProviderIds,
-          policies: reusablePolicyReferences(configuration.policyIds),
+          policies: emailDomains
+            ? emailDomainPolicy('Platform project email domains', emailDomains)
+            : reusablePolicyReferences(configuration.policyIds),
         },
         projectApplicationReference(row, 'protected'),
       );
@@ -278,6 +294,7 @@ async function reconcileProjectZeroTrustLocked(
         protected_application_id: protectedApplication.id,
         protected_application_name: protectedApplication.name,
         protected_application_audience: protectedApplication.audience,
+        protected_application_platform_hosts: emailDomains ? [...destinations.platform] : null,
       });
     } else if (row.protected_application_id || row.protected_application_name) {
       await client.deleteApplication(row.protected_application_id, row.protected_application_name);
@@ -285,6 +302,7 @@ async function reconcileProjectZeroTrustLocked(
         protected_application_id: null,
         protected_application_name: null,
         protected_application_audience: null,
+        protected_application_platform_hosts: null,
       });
     }
     if (

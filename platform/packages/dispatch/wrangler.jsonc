@@ -53,6 +53,13 @@
       },
     ],
   },
+  "ratelimits": [
+    {
+      "name": "CREDITS_GRACE_LIMITER",
+      "namespace_id": "1350",
+      "simple": { "limit": 120, "period": 60 },
+    },
+  ],
   "tail_consumers": [{ "service": "platform-tail" }],
   "env": {
     "production": {
@@ -63,6 +70,13 @@
         { "pattern": "*.void.app", "zone_name": "void.app" },
         { "pattern": "*/*", "zone_name": "void.app" },
         { "pattern": "*", "zone_name": "void.app" },
+      ],
+      "ratelimits": [
+        {
+          "name": "CREDITS_GRACE_LIMITER",
+          "namespace_id": "1350",
+          "simple": { "limit": 120, "period": 60 },
+        },
       ],
       "tail_consumers": [{ "service": "platform-tail" }],
       "dispatch_namespaces": [

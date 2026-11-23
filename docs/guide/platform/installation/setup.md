@@ -271,6 +271,8 @@ The installer collects your runtime token, PostgreSQL URL, login-provider creden
 
 Once installation finishes, open the printed admin dashboard link. For GitHub-only setup, sign in as the administrator selected during installation. For configurable login, use the one-time `/setup` code to confirm the administrator’s identity. Use the printed API URL to [connect and deploy an app](/guide/platform/installation/first-deployment).
 
+Before your apps use AI, choose how the installation's AI Gateway pays for it. See [Paying for AI](/guide/platform/administration/ai-billing).
+
 If you supplied a management token through the shell, remove it when finished:
 
 ```sh

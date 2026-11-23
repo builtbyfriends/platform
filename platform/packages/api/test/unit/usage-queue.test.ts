@@ -3,6 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vite-plus/test';
 const getUserMock = vi.fn();
 const getProjectsByIdsMock = vi.fn();
 const getProjectOwnershipPeriodsByProjectIdsMock = vi.fn();
+const addProjectUse = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../src/app-credits.ts', () => ({
+  payerOutOfCredits: async () => false,
+  addProjectUse,
+}));
+vi.mock('../../src/app-payer.ts', () => ({
+  billedAccountPlanId: async (_db: unknown, user: { plan: string }) => user.plan,
+}));
 vi.mock('../../src/db.ts', () => ({
   createDb: () => ({ __mock: 'db' }),
   getUser: async (...args: Array<unknown>) => {

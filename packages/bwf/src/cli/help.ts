@@ -339,7 +339,7 @@ const HELP_TREE = {
               {
                 command: 'set',
                 description:
-                  'Save STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_SOLO, STRIPE_PRICE_PRO, or STRIPE_LIVE_ENABLED from the environment',
+                  'Save STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_SOLO, STRIPE_PRICE_PRO, STRIPE_LIVE_ENABLED, STRIPE_AUTOMATIC_TAX, or STRIPE_PROMOTION_CODES from the environment',
               },
               { command: 'show', description: 'Show which values are saved, without the values' },
             ],

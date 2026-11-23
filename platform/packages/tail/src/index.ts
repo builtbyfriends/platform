@@ -79,7 +79,13 @@ export function buildLogDataPoint(
       parsed.deployId,
       ...(minimal ? [fetchEvent?.request.headers['cf-ray'] ?? ''] : []),
     ],
-    doubles: [event.eventTimestamp ?? Date.now(), fetchEvent?.response?.status ?? 0],
+    // Decision: The third number is the invocation's CPU time in milliseconds. The API adds it up per project
+    // for usage, so it's written for each invocation, also in minimal mode.
+    doubles: [
+      event.eventTimestamp ?? Date.now(),
+      fetchEvent?.response?.status ?? 0,
+      event.cpuTime ?? 0,
+    ],
   };
 }
 

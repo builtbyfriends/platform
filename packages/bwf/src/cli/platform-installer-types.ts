@@ -103,6 +103,8 @@ export const PLATFORM_BILLING_SECRET_NAMES = [
   'STRIPE_PRICE_SOLO',
   'STRIPE_PRICE_PRO',
   'STRIPE_LIVE_ENABLED',
+  'STRIPE_AUTOMATIC_TAX',
+  'STRIPE_PROMOTION_CODES',
 ] as const;
 
 export type PlatformBillingSecretName = (typeof PLATFORM_BILLING_SECRET_NAMES)[number];

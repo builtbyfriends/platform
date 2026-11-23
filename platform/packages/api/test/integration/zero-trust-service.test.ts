@@ -655,6 +655,56 @@ describe('project Zero Trust reconciliation', () => {
     ).toEqual([{ id: 'policy-2', precedence: 1 }]);
   });
 
+  it('limits a project to the email domains it names, at its platform address', async () => {
+    const owner = await createTestUser(env.db, 'zero-trust-email-owner');
+    const project = await createTestProject(env.db, owner.id, 'company-app');
+    const cloudflare = accessApi();
+    vi.stubGlobal('fetch', cloudflare.fetcher);
+    const bindings = platformBindings();
+    await configurePlatformZeroTrust(bindings, env.db, PROTECTED_CONFIGURATION);
+    await env.db
+      .update(projectZeroTrust)
+      .set({ access_email_domains: ['example.com'] })
+      .where(eq(projectZeroTrust.project_id, project.id));
+
+    const state = await setProjectZeroTrustProtection(bindings, env.db, project.id, true);
+    expect(state).toMatchObject({ effective_protected: true, status: 'ready' });
+    const application = cloudflare.applications.get(state.protected_application_id!)!;
+    expect(application.policies).toEqual([
+      expect.objectContaining({
+        decision: 'allow',
+        include: [{ email_domain: { domain: 'example.com' } }],
+      }),
+    ]);
+    const hosts = state.protected_application_platform_hosts!;
+    expect(hosts).toContain('company-app.apps.example.com');
+    const covered = [
+      application.domain,
+      ...((application.self_hosted_domains as Array<string>) ?? []),
+    ];
+    expect(covered).toEqual(expect.arrayContaining([...hosts]));
+    const routing = await resolveProjectZeroTrustRouting(env.db, project.id);
+    expect(routing!.audiences).toEqual(
+      expect.arrayContaining([
+        { hostname: 'company-app.apps.example.com', audience: application.aud },
+      ]),
+    );
+
+    await env.db
+      .update(projectZeroTrust)
+      .set({ access_email_domains: null })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    const plain = await setProjectZeroTrustProtection(bindings, env.db, project.id, true);
+    expect(plain.protected_application_platform_hosts).toBeNull();
+    expect(plain.protected_application_id).toBeNull();
+    expect(cloudflare.applications.has(state.protected_application_id!)).toBe(false);
+    expect(await resolveProjectZeroTrustRouting(env.db, project.id)).not.toMatchObject({
+      audiences: expect.arrayContaining([
+        { hostname: 'company-app.apps.example.com', audience: application.aud },
+      ]),
+    });
+  });
+
   it('serializes a newer protected intent behind an in-flight public transition', async () => {
     const owner = await createTestUser(env.db, 'zero-trust-race-owner');
     const project = await createTestProject(env.db, owner.id, 'zero-trust-race-app');
