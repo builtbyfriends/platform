@@ -37,6 +37,7 @@
     "@cloudflare/sandbox": "catalog:",
     "@modelcontextprotocol/server": "^2.4.0",
     "@nkzw/fate": "catalog:",
+    "@sentry/cloudflare": "11.16.0",
     "@stylexjs/stylex": "catalog:",
     "@xterm/headless": "^6.0.0",
     "agents": "^0.34.0",

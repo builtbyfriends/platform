@@ -140,6 +140,7 @@ import {
   platformLoginTests,
   platformHumanSessions,
 } from './schema.ts';
+import { withOptionalSentry } from './sentry.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart } from './tiers.ts';
 import type { Domain } from './types.ts';
@@ -1288,7 +1289,7 @@ export {
 };
 export { app, scheduled };
 
-export default {
+export default withOptionalSentry('api', {
   fetch: ((request, ...rest) =>
     app.fetch(withCurrentRequestNames(request), ...rest)) as typeof app.fetch,
   scheduled,
@@ -1296,4 +1297,4 @@ export default {
     env = await resolvePlatformApplicationEnvironment(env);
     await processPlatformQueue(batch, env);
   },
-} satisfies ExportedHandler<ApiEnv['Bindings']>;
+} satisfies ExportedHandler<ApiEnv['Bindings']>);
