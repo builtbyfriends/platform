@@ -102,7 +102,9 @@ describe('CLI help resolver', () => {
     (command) => {
       printHelpPage(['platform', command]);
 
-      expect(vi.mocked(note).mock.calls[0]?.[0]).toContain(`bwf platform ${command} [id] [--plan]`);
+      expect(vi.mocked(note).mock.calls[0]?.[0]).toContain(
+        `bwf platform ${command} ${command === 'upgrade' ? '[id...]' : '[id]'} [--plan]`,
+      );
     },
   );
 });

@@ -163,6 +163,7 @@ const platformSidebar = [
       { text: 'Domains and Resources', link: '/guide/platform/installation/domains' },
       { text: 'Maintenance and Recovery', link: '/guide/platform/installation/maintenance' },
       { text: 'Install from CI', link: '/guide/platform/installation/ci' },
+      { text: 'Run Several Installations', link: '/guide/platform/installation/several' },
       { text: 'Disable and Uninstall', link: '/guide/platform/installation/uninstall' },
     ],
   },

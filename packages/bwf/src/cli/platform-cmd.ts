@@ -171,6 +171,11 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
     await runOperatorCommand(args);
     return;
   }
+  if (args.subcommand === 'list' && args.health) {
+    const { listPlatformHealth } = await import('./platform-fleet.ts');
+    await listPlatformHealth();
+    return;
+  }
   if (args.subcommand === 'list') {
     const connections = listPlatformConnections();
     if (connections.length === 0) {
@@ -271,6 +276,14 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
   }
 
   const { runPlatformLifecycleCommand } = await import('./platform-lifecycle.ts');
+  if (args.subcommand === 'upgrade' && args.selectors) {
+    const { upgradeInstallations } = await import('./platform-fleet.ts');
+    await upgradeInstallations({ ...args, selectors: args.selectors }, (one) => {
+      const { selectors: _selectors, ...single } = one;
+      return runPlatformLifecycleCommand(single);
+    });
+    return;
+  }
   await runPlatformLifecycleCommand(args);
 }
 
