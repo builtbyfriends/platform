@@ -45,17 +45,10 @@ function freshAuthApp() {
   };
   write(
     'vite.config.ts',
-    "import { bwfPlugin } from '@builtbyfriends/bwf'; export default { plugins: [bwfPlugin()], resolve: { tsconfigPaths: true } };",
+    "import { bwfPlugin } from '@builtbyfriends/bwf'; export default { plugins: [bwfPlugin()] };",
   );
   write('bwf.config.ts', "export default { auth: { providers: ['email'] } };");
-  write(
-    'tsconfig.json',
-    JSON.stringify({
-      extends: './.bwf/tsconfig.json',
-      compilerOptions: { paths: { '@auth-schema': ['./.bwf/better-auth-schema.ts'] } },
-      include: ['**/*.ts'],
-    }),
-  );
+  write('tsconfig.json', JSON.stringify({ extends: './.bwf/tsconfig.json', include: ['**/*.ts'] }));
   write(
     'auth.ts',
     `import { defineAuth } from '@builtbyfriends/bwf/auth';

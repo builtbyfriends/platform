@@ -803,6 +803,7 @@ export async function deployPlatformWorker(
     await options.onStaged(previousVersionId, uploadedVersionId, previousTriggers);
     await options.onReadyForActivation?.();
     await options.waitForPriorWorker?.();
+    const knownDeploymentIds = new Set<string>();
     if (options.workerExisted) {
       const deploymentsBeforeActivation = await readPlatformWorkerDeployments(
         configPath,
@@ -817,6 +818,9 @@ export async function deployPlatformWorker(
         throw new Error(
           `platform: Worker ${workerName} changed concurrently before activation; refusing to overwrite it.`,
         );
+      }
+      for (const deployment of deploymentsBeforeActivation) {
+        knownDeploymentIds.add(deployment.id);
       }
       activatedVersionId = uploadedVersionId;
       const activated = await options.runner(
@@ -835,10 +839,14 @@ export async function deployPlatformWorker(
     const readDeploymentHistory = () =>
       readPlatformWorkerDeployments(configPath, accountId, workerName, readRunner);
     let deploymentsAfterActivation = await readDeploymentHistory();
+    const headIsStale = () => {
+      const head = deploymentsAfterActivation[0];
+      return head === undefined || knownDeploymentIds.has(head.id);
+    };
     // Decision: Cloudflare can list the previous deployment for a minute or more after
-    // activation. Only wait while the deployment we replaced is still at the head.
+    // activation. Only wait while a deployment we already knew about is still at the head.
     for (const wait of options.deploymentSettleDelaysMs ?? PLATFORM_DEPLOYMENT_SETTLE_DELAYS_MS) {
-      if (deploymentsAfterActivation[0]?.id !== previousDeploymentId) {
+      if (!headIsStale()) {
         break;
       }
       await delay(wait);
@@ -852,12 +860,19 @@ export async function deployPlatformWorker(
         );
       }
     }
-    if (deploymentsAfterActivation[0]?.id === previousDeploymentId) {
+    if (headIsStale()) {
       // Decision: Neither the new deployment nor a competitor has been confirmed.
       // Leave the staged cutover for recovery rather than trying to roll it back.
+      const head = deploymentsAfterActivation[0];
       activatedVersionId = null;
       throw new PlatformWorkerRecoveryIncompleteError(
-        `platform: could not confirm activation of ${workerName} because Cloudflare still reports the previous deployment.`,
+        `platform: could not confirm activation of ${workerName} because Cloudflare ${
+          head === undefined
+            ? 'lists no deployments for it yet'
+            : head.id === previousDeploymentId
+              ? 'still reports the previous deployment'
+              : `still reports older deployment ${head.id}`
+        }.`,
       );
     }
     const lineage = classifyPlatformWorkerDeploymentLineage(

@@ -29,6 +29,7 @@ const pathRenames: Array<[RegExp, string]> = [
 // Decision: Applied to upstream contents before merging. Order matters: specific names come before general
 // ones. Bare `void` is left alone because it's a TypeScript keyword.
 const textRenames: Array<[RegExp, string]> = [
+  [/\.well-known\/void(?:-platform)?\b/g, '.well-known/platform'],
   [/@voidcloud\//g, '@platform-service/'],
   [/@void\//g, '@builtbyfriends/'],
   [/(['"])void(\/[\w./-]+)\1/g, '$1@builtbyfriends/bwf$2$1'],
@@ -56,6 +57,7 @@ const textRenames: Array<[RegExp, string]> = [
   [/\b__void/g, '__platform'],
   [/\bvoid\.config\b/g, 'bwf.config'],
   [/(^|[^\w.])\.void\//g, '$1.bwf/'],
+  [/'\.void'/g, "'.bwf'"],
   [/\bvoid([A-Z])/g, 'bwf$1'],
   [/\bVoid(?!Zero)([A-Z])/g, 'Bwf$1'],
   [/([a-z])Void([A-Z])/g, '$1Bwf$2'],

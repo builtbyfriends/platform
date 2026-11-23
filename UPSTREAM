@@ -1,4 +1,4 @@
 # Last upstream Void commit this fork has reviewed. scripts/upstream-sync.ts reads it.
 upstream https://github.com/voidzero-dev/void main
-commit 822c7a31441a8e1bc20ff7cbf24c8c5355d3375d
-subject Report missing email transport when no sender is configured, closes #899.
+commit cf8c2dfb641a31ab316c4ac05fd7d73a1b44d174
+subject fix(platform): name the failing credential in deploy, repair and upgrade errors (#887)
