@@ -2224,7 +2224,29 @@ function tryParse(json: string): ReadonlyArray<unknown> {
  * real bug inside `waitUntil` is not swallowed. `work` must handle its own
  * failures: on the fallback path a rejection would surface as a 5xx.
  */
-export async function scheduleAfterResponse(
+const committedWork = new WeakMap<Context<ApiEnv>, Array<(db: Db) => Promise<unknown>>>();
+
+/**
+ * Holds `work` for a request that creates a project inside a larger transaction. The work must not
+ * start before that transaction commits, and must not use its handle afterwards.
+ */
+export function scheduleAfterCommit(
+  context: Context<ApiEnv>,
+  work: (db: Db) => Promise<unknown>,
+): void {
+  committedWork.set(context, [...(committedWork.get(context) ?? []), work]);
+}
+
+/** Starts the work held by `scheduleAfterCommit`, once the request's transaction has committed. */
+export async function runScheduledAfterCommit(context: Context<ApiEnv>): Promise<void> {
+  const held = committedWork.get(context) ?? [];
+  committedWork.delete(context);
+  for (const work of held) {
+    await scheduleAfterResponse(context, work(context.get('db')));
+  }
+}
+
+async function scheduleAfterResponse(
   context: Context<ApiEnv>,
   work: Promise<unknown>,
 ): Promise<void> {
@@ -2363,8 +2385,11 @@ type CreateProjectContext = {
   env: ApiEnv['Bindings'];
   db: Db;
   user: User;
-  /** Runs `work` after the response; awaits it inline where there is no execution context. */
-  schedule(work: Promise<unknown>): Promise<void>;
+  /**
+   * Runs `work` after the response; awaits it inline where there is no execution context. `work`
+   * gets the database to use, which isn't `db` when `db` is a transaction that has ended by then.
+   */
+  schedule(work: (db: Db) => Promise<unknown>): Promise<void>;
 };
 
 /** Creates a project for `user`; throws `ProjectCreateError` for every refusal. */
@@ -2439,11 +2464,11 @@ export async function createProjectForUser(context: CreateProjectContext, slug: 
       const address = ownerEmail.toLowerCase();
       // Decision: Run this off the response path: CF Email Routing has no timeout in `cfFetch`, and project
       // creation mustn't wait on it. Nothing depends on the row yet; a pending row adds no allowlist entry.
-      await context.schedule(
+      await context.schedule((db) =>
         autoAddOwnerDestination(
           context.env.CF_ACCOUNT_ID,
           context.env.CF_API_TOKEN,
-          context.db,
+          db,
           project.id,
           address,
           userId,
