@@ -104,13 +104,15 @@ Use these commands to recover, update, pause, or remove an installation:
 
 ```sh
 bwf platform discover [--account <id>] [--installation <id-or-name>]
-bwf platform upgrade [id] [--runtime <path>] [--dashboard-url <origin>] [--custom-domains] [--accept-outside-changes] [--runtime-logs <full|minimal>] [--storage-location <hint|automatic>] [--plan] [--yes]
+bwf platform upgrade [id...] [--runtime <path>] [--dashboard-url <origin>] [--custom-domains] [--accept-outside-changes] [--runtime-logs <full|minimal>] [--storage-location <hint|automatic>] [--plan] [--yes]
 bwf platform rollback [id] --runtime <earlier-path> [--from-runtime <current-path>] [--plan] [--yes]
 bwf platform repair [id] [--runtime <path>] [--dashboard-url <origin>] [--custom-domains] [--accept-outside-changes] [--auth-config <path>] [--plan] [--yes]
 bwf platform disable [id] [--plan] [--yes]
 bwf platform enable [id] [--runtime <path>] [--plan] [--yes]
 bwf platform uninstall [id] [--plan] [--purge-data | --purge-resources] [--yes]
 ```
+
+`upgrade` takes several installations, such as `bwf platform upgrade acme-test acme`. It upgrades them one at a time in that order, checks each one's `/health` address afterward, and stops at the first failure. The error names the installations it upgraded and the ones it didn't start. Each installation uses the credentials saved for it, so the command stops if `CLOUDFLARE_API_TOKEN` or an installation's `PLATFORM_*` value is set in the environment. See [Run Several Installations](../../guide/platform/installation/several.md).
 
 When a platform Worker was changed in the Cloudflare dashboard or API, `upgrade` and `repair` ask for approval in a terminal. Without a terminal they stop and list the Workers. After a person has reviewed the list, add `--accept-outside-changes` to replace the changes from a script. Worker secrets stay in place. Plain-text variables that bwf doesn't set are removed, except Stripe billing values, which bwf saves and sets again as secrets. To give the platform its Stripe values, see [Billing values](./platform-config.md#billing-values).
 

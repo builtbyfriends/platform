@@ -14,12 +14,14 @@ import {
   BillingUnavailableError,
   createRefund,
   paymentRefundable,
+  sendCreditBlockInvoice,
   stripeLiveMode,
 } from '../billing/stripe.ts';
 import { creditBalance, grantCredits } from '../credit-ledger.ts';
-import { autoTopUpStatus } from '../credit-purchase.ts';
+import { autoTopUpStatus, buyerOf, saveBuyer } from '../credit-purchase.ts';
 import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { generateId } from '../id.ts';
 import { installationDefaultPlan } from '../plans.ts';
 import { appCreditGrants, appPayers, appPeople, appUsage, oauthClients, users } from '../schema.ts';
 import { CREDITS_REASONS } from '../suspension.ts';
@@ -187,6 +189,8 @@ export async function getAppPerson(context: Context<ApiEnv>, clientId: string, p
       refundedMicros: grant.taken_micros,
       giver: grant.giver_id,
       note: grant.note,
+      invoice: grant.stripe_invoice_id,
+      unpaid: grant.unpaid,
       paymentIntent: grant.stripe_payment_intent_id,
       livemode: grant.livemode,
       startsAt: grant.starts_at,
@@ -266,6 +270,133 @@ export async function grantAppPerson(
   });
   await applyCredits(context.env, db, clientId, person);
   return { ...details, action: 'app-person.grant', target, dryRun: false, grantId: grant?.id };
+}
+
+export type InvoiceInput = GrantInput & { email?: unknown; days?: unknown; early?: unknown };
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Sends a Stripe invoice for a block of credits. The credits come to the payer when it's paid, or now
+ * with `early`, marked unpaid until then and taken back if the invoice is voided. The block lasts until
+ * `expires`, which is the contract's end date.
+ */
+export async function invoiceAppPerson(
+  context: Context<ApiEnv>,
+  clientId: string,
+  person: string,
+  input: InvoiceInput,
+  isDryRun = false,
+) {
+  const db = context.get('db');
+  const client = await requireClient(db, clientId);
+  const amountMicros = dollarsToMicros(input.dollars);
+  if (!amountMicros || amountMicros % 10_000 !== 0) {
+    throw new OperatorError(400, 'dollars must be whole cents above 0.', 'invalid_argument');
+  }
+  const expiresAt = new Date(String(input.expires ?? '').trim() || NaN);
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+    throw new OperatorError(
+      400,
+      "expires must be a future date, such as the contract's end.",
+      'invalid_argument',
+    );
+  }
+  const email = String(input.email ?? '').trim();
+  if (!EMAIL.test(email)) {
+    throw new OperatorError(400, 'email must be the billing contact.', 'invalid_argument');
+  }
+  const daysText = String(input.days ?? '').trim();
+  const days = daysText ? Number(daysText) : 30;
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    throw new OperatorError(400, 'days must be a whole number from 1 to 365.', 'invalid_argument');
+  }
+  const note = String(input.note ?? '').trim();
+  if (note.length > MAX_NOTE) {
+    throw new OperatorError(
+      400,
+      `note must be at most ${MAX_NOTE} characters.`,
+      'invalid_argument',
+    );
+  }
+  const early = input.early === true || ['true', 'yes', 'on', '1'].includes(String(input.early));
+  const target = { clientId, person };
+  const before = await creditBalance(db, { clientId, payer: person });
+  const details = {
+    amountMicros,
+    expiresAt: expiresAt.toISOString(),
+    email,
+    daysUntilDue: days,
+    early,
+    note: note || null,
+    balanceMicros: before?.balanceMicros ?? 0,
+    balanceAfterMicros: (before?.balanceMicros ?? 0) + (early ? amountMicros : 0),
+  };
+  if (isDryRun) {
+    return preview('app-person.invoice', target, details);
+  }
+  const livemode = stripeLiveMode(context.env);
+  const giverId = `operator:${context.get('user').login}`;
+  const block = generateId('block');
+  let sent;
+  try {
+    sent = await sendCreditBlockInvoice(context.env, {
+      key: block,
+      customerId: (await buyerOf(db, clientId, person, livemode))?.stripe_customer_id ?? null,
+      email,
+      amountMicros,
+      label: `${client.name} credits until ${expiresAt.toISOString().slice(0, 10)}`,
+      daysUntilDue: days,
+      metadata: {
+        kind: 'credit_block',
+        block,
+        clientId,
+        payerId: person,
+        amountMicros: String(amountMicros),
+        expiresAt: expiresAt.toISOString(),
+        giverId,
+        ...(note ? { note: note.slice(0, 500) } : {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof BillingUnavailableError) {
+      throw new OperatorError(503, error.message, 'billing_unavailable');
+    }
+    throw error;
+  }
+  await saveBuyer(db, {
+    clientId,
+    buyer: person,
+    livemode,
+    customerId: sent.customerId,
+    paymentMethodId: null,
+  });
+  const grant = early
+    ? await grantCredits(db, {
+        clientId,
+        payer: person,
+        source: 'invoice',
+        amountMicros,
+        livemode,
+        giverId,
+        note: note || null,
+        stripeInvoiceId: sent.invoiceId,
+        unpaid: true,
+        expiresAt,
+      })
+    : null;
+  if (grant) {
+    await applyCredits(context.env, db, clientId, person);
+  }
+  return {
+    ...details,
+    action: 'app-person.invoice',
+    target,
+    dryRun: false,
+    invoice: sent.invoiceId,
+    invoiceUrl: sent.url,
+    grantId: grant?.id ?? null,
+  };
 }
 
 export type RefundInput = { grant?: unknown; dollars?: unknown };
@@ -429,6 +560,18 @@ export const appPeopleRoutes = new Hono<ApiEnv>()
     const body = await readBody(context);
     return context.json(
       await grantAppPerson(
+        context,
+        context.req.param('client'),
+        context.req.param('person'),
+        body,
+        dryRun(body),
+      ),
+    );
+  })
+  .post(`${PEOPLE}/:person/invoices`, async (context) => {
+    const body = await readBody(context);
+    return context.json(
+      await invoiceAppPerson(
         context,
         context.req.param('client'),
         context.req.param('person'),

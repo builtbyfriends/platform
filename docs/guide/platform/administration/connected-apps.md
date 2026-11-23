@@ -192,6 +192,23 @@ Send it to `POST /app-billing/credits.autoTopUp`, or send `{ payer, enabled: fal
 
 In Stripe, send `payment_intent.succeeded` and `payment_intent.payment_failed` to the webhook as well as the Checkout events.
 
+### Sell a block of credits by invoice {#credit-block-invoice}
+
+A larger customer often buys credits up front under a contract and pays by bank transfer weeks later. Send them a Stripe invoice for the block from the person's page in the operator view (**Invoice a block of credits**), or from the CLI:
+
+```sh
+bwf platform person invoice <client-id> <payer-id> --dollars 10000 --expires 2027-11-30 --email ap@example.com --plan
+bwf platform person invoice <client-id> <payer-id> --dollars 10000 --expires 2027-11-30 --email ap@example.com --yes
+```
+
+The payer can be a person or a wallet, such as the wallet of the team the contract is for. `--expires` is when the credits end. Set it to the contract's end date. The invoice goes to `--email` and can be paid by US bank transfer or card within `--days` (30 by default), in US dollars.
+
+When the whole invoice is paid, the credits go on the payer's balance, once. A part payment by bank transfer waits in the customer's Stripe balance until the rest arrives. The grant's source is `invoice` and it names the invoice.
+
+For a customer you trust, add `--early yes` to grant the credits when the invoice is sent. The grant shows as unpaid until the invoice is paid. If you void the invoice in Stripe, or mark it uncollectible, Platform takes back what's left of the grant, and what was already spent becomes owed, as with a card dispute.
+
+In Stripe, send `invoice.paid`, `invoice.voided` and `invoice.marked_uncollectible` to the webhook. Turn on bank transfers under **Settings → Payments → Payment methods**.
+
 ### Wallets
 
 A payer doesn't have to be a person. An application can keep credits for something people share, such as a team or a bot, by opening a wallet for it with `POST /app-billing/wallets.open` and `{ payer }`. The id is the application's own. A wallet has no plan, caps or starter credit, only its balance, so a new wallet reads as zero and out. `credits.starter`, `billing.checkout` and `billing.portal` answer `payer_is_wallet` for one.

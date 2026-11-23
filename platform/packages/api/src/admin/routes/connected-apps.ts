@@ -21,6 +21,7 @@ import { isDevBypass, type ApiEnv } from '../../env.ts';
 import {
   getAppPerson,
   grantAppPerson,
+  invoiceAppPerson,
   listAppPeople,
   refundAppPerson,
   unblockAppPerson,
@@ -308,12 +309,15 @@ async function personChange(context: Context<ApiEnv>, kind: Kind, isDryRun: bool
   const person = context.req.param('person')!;
   const form = await context.req.parseBody();
   const fields = Object.fromEntries(
-    ['dollars', 'expires', 'note', 'grant']
+    ['dollars', 'expires', 'note', 'grant', 'email', 'days', 'early']
       .filter((name) => typeof form[name] === 'string' && form[name] !== '')
       .map((name) => [name, String(form[name])]),
   );
   if (kind === 'grants') {
     return { fields, result: await grantAppPerson(context, clientId, person, fields, isDryRun) };
+  }
+  if (kind === 'invoices') {
+    return { fields, result: await invoiceAppPerson(context, clientId, person, fields, isDryRun) };
   }
   if (kind === 'refunds') {
     return { fields, result: await refundAppPerson(context, clientId, person, fields, isDryRun) };
@@ -328,6 +332,16 @@ function previewLines(kind: Kind, result: Record<string, unknown>): Array<[strin
       ['Ends', String(result.expiresAt ?? 'never')],
       ['Note', String(result.note ?? '-')],
       ['Balance now', money(Number(result.balanceMicros))],
+      ['Balance after', money(Number(result.balanceAfterMicros))],
+    ];
+  }
+  if (kind === 'invoices') {
+    return [
+      ['Invoice', `${money(Number(result.amountMicros))} to ${String(result.email)}`],
+      ['Due in', `${String(result.daysUntilDue)} days`],
+      ['Credits end', String(result.expiresAt)],
+      ['Granted', result.early ? 'now, marked unpaid' : 'when the invoice is paid'],
+      ['Note', String(result.note ?? '-')],
       ['Balance after', money(Number(result.balanceAfterMicros))],
     ];
   }
@@ -350,11 +364,13 @@ function previewLines(kind: Kind, result: Record<string, unknown>): Array<[strin
 
 const NOTICES: Record<Kind, string> = {
   grants: 'Credits given.',
+  invoices:
+    'Invoice sent. Its credits show in the grants once it is paid, or now if you granted early.',
   refunds: "Refund sent. It's pending here until Stripe's refund event takes the credits off.",
   unblock: 'Block cleared.',
 };
 
-for (const kind of ['grants', 'refunds', 'unblock'] as const) {
+for (const kind of ['grants', 'invoices', 'refunds', 'unblock'] as const) {
   app.post(`/:id/people/:person/${kind}/preview`, async (context) => {
     try {
       const { fields, result } = await personChange(context, kind, true);
