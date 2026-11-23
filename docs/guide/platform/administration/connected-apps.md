@@ -140,6 +140,37 @@ Send it to `POST /app-billing/credits.autoTopUp`, or send `{ payer, enabled: fal
 
 In Stripe, send `payment_intent.succeeded` and `payment_intent.payment_failed` to the webhook as well as the Checkout events.
 
+### Wallets
+
+A payer doesn't have to be a person. An application can keep credits for something people share, such as a team or a bot, by opening a wallet for it with `POST /app-billing/wallets.open` and `{ payer }`. The id is the application's own. A wallet has no plan, caps or starter credit, only its balance, so a new wallet reads as zero and out. `credits.starter`, `billing.checkout` and `billing.portal` answer `payer_is_wallet` for one.
+
+These calls help an application run a shared wallet:
+
+| Call             | Body                                                    | What it does                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `payer.pick`     | `{ wallets: [{ payer, person, monthlyLimitMicros? }] }` | Answers the first of up to five wallets that has credits and where the person is under their limit, and why each other one was skipped. It doesn't call Stripe. |
+| `usage.record`   | `by` added to a report                                  | Counts the cost against `by` on that wallet for the month. `usage.status` with `byPerson: true` lists the totals.                                               |
+| `credits.move`   | `{ from, to, amountMicros, id }`                        | Moves a person's bought credits into a wallet, keeping their end date. Credits don't move out of a wallet.                                                      |
+| `credits.close`  | `{ payer }`                                             | Closes a wallet. Unspent bought credits go back to the people who paid for them, and the rest lapse.                                                            |
+| `projects.payer` | `{ project, payer }`                                    | Points one of the application's hosted projects at another payer without a new publish.                                                                         |
+
+Buying for, topping up or moving credits into a payer other than yourself is off until you add `"buyForOthers": true` to the application's credit sales. A card dispute blocks the person who paid, and the wallet keeps working once a later purchase settles what it owes.
+
+You can also limit what one buyer pays for, and what one payer takes in from purchases and moves, in a UTC day:
+
+```json
+{
+  "minMicros": 20000000,
+  "stepMicros": 20000000,
+  "lifeDays": 365,
+  "buyForOthers": true,
+  "buyerDailyMicros": 500000000,
+  "walletDailyMicros": 1000000000
+}
+```
+
+Past a limit, Checkout and moves answer `daily_cap` with what's left today, and auto top-up turns off with `daily_cap`. A Checkout that was already paid is still added. An application can also send `holdHours` with a Checkout. The credits then show as `pendingMicros` and can't be spent until the hold ends.
+
 ## Billing events
 
 Platform can tell an application when something changes for a person who pays, so the application doesn't have to ask at the right moment. Under **Admin → Connected apps**, fill in the application's **Address for billing events** with an HTTPS URL. The first time you save an address, Platform shows a signing secret once. Save it on the application's server. Tick **Make a new signing secret** to replace it.
@@ -164,6 +195,8 @@ Platform sends each event as a `POST` with a JSON body:
 | `apps.paused`          | Hosted apps the payer pays for were paused             | `projects` (project ids)                                                                 |
 | `apps.resumed`         | Paused hosted apps answer again                        | `projects` (project ids)                                                                 |
 | `credits.bought`       | Credits were bought at Checkout or by auto top-up      | `amountMicros`, `buyer`, `expiresAt`, `autoTopUp`                                        |
+| `credits.moved`        | Credits were moved into the wallet                     | `from`, `amountMicros`, `id`                                                             |
+| `app.payer_changed`    | A hosted project got a new payer                       | `projectId`, `from`                                                                      |
 | `payment.failed`       | A subscription renewal or an auto top-up charge failed | `for` (`subscription` or `auto_top_up`), and for auto top-up `amountMicros` and `reason` |
 | `subscription.started` | A plan was bought                                      | `plan`                                                                                   |
 | `subscription.ended`   | The subscription ended                                 | none                                                                                     |
