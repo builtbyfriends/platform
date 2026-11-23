@@ -31,6 +31,7 @@ import {
   appCreditGrants,
   appPayers,
   appPeople,
+  appUsageDaily,
   oauthClients,
   projects,
   resources,
@@ -696,6 +697,53 @@ describe('app billing', () => {
     await call('/usage.status', { person: 'boss' });
     expect(await state(mine)).toEqual(clear);
     expect(await state(taken)).toEqual({ row: takedown, route: takedown, background: takedown });
+  });
+
+  it('moves a paused project to a payer with credits, and charges them from then on', async () => {
+    const client = registration.client.id;
+    await call('/wallets.open', { payer: 'server:1' });
+    const project = (await preview('p1', { workspace: 'w1', payer: 'server:1' })).project!;
+    await env.ROUTING.put(
+      projectRouteKey(project),
+      JSON.stringify({ workerName: 'w', projectId: project.id }),
+    );
+    await env.db
+      .update(appPayers)
+      .set({ out_since: new Date(Date.now() - 5 * 86_400_000).toISOString() })
+      .where(eq(appPayers.payer_id, 'server:1'));
+    await call('/usage.status', { person: 'server:1' });
+    const reason = async () =>
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+        .suspended_reason;
+    expect(await reason()).toBe('credits_paused');
+
+    const unknown = await call('/projects.payer', { project: project.id, payer: 'nobody' });
+    expect(await unknown.json()).toEqual({ error: 'unknown_payer' });
+    expect((await call('/projects.payer', { project: 'nope', payer: 'p1' })).status).toBe(404);
+
+    await grantCredits(env.db, {
+      clientId: client,
+      payer: 'ana',
+      livemode: false,
+      source: 'given',
+      amountMicros: 1_000_000,
+    });
+    await call('/usage.record', { person: 'ana', aiNeurons: 1 });
+    const moved = await call('/projects.payer', { project: project.slug, payer: 'ana' });
+    expect(await moved.json()).toEqual({
+      data: { projectId: project.id, payer: 'ana', changed: true },
+    });
+    expect(await reason()).toBeNull();
+    expect(
+      JSON.parse((await env.ROUTING.get(projectRouteKey(project)))!).suspended,
+    ).toBeUndefined();
+
+    await addProjectUse(env.db, project.id, 'hostedRequests', 1_000_000);
+    const hosted = await env.db
+      .select()
+      .from(appUsageDaily)
+      .where(eq(appUsageDaily.project_id, project.id));
+    expect(hosted.map((row) => [row.person_id, row.meter])).toEqual([['ana', 'hostedRequests']]);
   });
 
   it('holds each payer to their own plan’s monthly caps, across owners, and leaves the others running', async () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
   APP,
@@ -9,6 +9,7 @@ import {
   hostedAsOf,
   paidProjects,
   paidProjectUse,
+  payerOf,
   payerDaily,
   readMeterPrices,
   costMicros,
@@ -16,6 +17,7 @@ import {
   type MeterPrices,
   type MeterUse,
 } from '../app-credits.ts';
+import { knownPayer } from '../app-payer.ts';
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import { queueBillingEvent } from '../billing-events.ts';
 import {
@@ -759,6 +761,51 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       await applyCredits(context.env, db, clientId, body.to);
     }
     return context.json({ data: { moved: !moved.replayed, grants: moved.grants } });
+  })
+  .post('/projects.payer', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.project)) {
+      return context.json({ error: 'bad_project' }, 400);
+    }
+    if (!isPersonId(body.payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const [found] = await db
+      .select({ id: projects.id, owner: users.id, from: payerOf })
+      .from(projects)
+      .innerJoin(users, eq(users.id, projects.user_id))
+      .where(
+        and(
+          eq(users.provider, APP + clientId),
+          ne(projects.status, 'deleting'),
+          or(eq(projects.id, body.project), eq(projects.slug, body.project)),
+        ),
+      );
+    if (!found) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (!(await knownPayer(db, clientId, body.payer))) {
+      return context.json({ error: 'unknown_payer' }, 400);
+    }
+    if (found.from === body.payer) {
+      return context.json({ data: { projectId: found.id, payer: body.payer, changed: false } });
+    }
+    await db.update(projects).set({ payer_person_id: body.payer }).where(eq(projects.id, found.id));
+    await queueBillingEvent(db, context.env, {
+      clientId,
+      type: 'app.payer_changed',
+      person: body.payer,
+      data: { projectId: found.id, from: found.from },
+    });
+    // Decision: The new payer's standing decides the project's pause now, not at the next hourly pass. This
+    // month's use so far stays with the old payer.
+    await applyCredits(context.env, db, clientId, body.payer);
+    await reconcileOperatorUserPlan(context, found.owner).catch((error: unknown) => {
+      console.error('[billing] payer plan reconcile failed', { userId: found.owner, error });
+    });
+    return context.json({ data: { projectId: found.id, payer: body.payer, changed: true } });
   })
   .post('/wallets.open', async (context) => {
     const body = await context.req.json().catch(() => null);

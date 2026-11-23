@@ -104,6 +104,15 @@ export async function namedPayer(
   if (!grant.session.appPerson || typeof payer !== 'string' || !payer || payer.length > 200) {
     throw new OAuthError('invalid_request', 'Name the payer with one of your own person IDs.');
   }
+  if (!(await knownPayer(db, grant.client_id, payer))) {
+    throw new OAuthError('invalid_request', 'The payer is not one of your people.');
+  }
+  return payer;
+}
+
+/** True when the application already told Platform about this payer. */
+export async function knownPayer(db: DbOrTx, clientId: string, payer: string): Promise<boolean> {
+  const grant = { client_id: clientId };
   const one = { one: sql<number>`1` };
   const known = await Promise.all([
     db
@@ -127,8 +136,5 @@ export async function namedPayer(
       .where(and(eq(appPayers.client_id, grant.client_id), eq(appPayers.payer_id, payer)))
       .limit(1),
   ]);
-  if (!known.some((rows) => rows.length > 0)) {
-    throw new OAuthError('invalid_request', 'The payer is not one of your people.');
-  }
-  return payer;
+  return known.some((rows) => rows.length > 0);
 }

@@ -13,6 +13,7 @@ export type BillingEventType =
   | 'credits.moved'
   | 'apps.paused'
   | 'apps.resumed'
+  | 'app.payer_changed'
   | 'payment.failed'
   | 'subscription.started'
   | 'subscription.ended';
