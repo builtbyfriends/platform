@@ -56,7 +56,7 @@ function projectConfigEntryPath(start: string): string | undefined {
     const packageDirectory = join(directory, 'node_modules', '@builtbyfriends', 'bwf');
     const manifestPath = join(packageDirectory, 'package.json');
     if (existsSync(manifestPath)) {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
         exports?: Record<string, { import?: string; default?: string } | string>;
       };
       const target = manifest.exports?.['./config'];
@@ -121,7 +121,7 @@ export function loadBwfConfig(root: string): LoadedBwfConfig | null {
   }
 
   try {
-    return { source: LEGACY_CONFIG_FILE, value: JSON.parse(readFileSync(jsonPath, 'utf-8')) };
+    return { source: LEGACY_CONFIG_FILE, value: JSON.parse(readFileSync(jsonPath, 'utf8')) };
   } catch (error) {
     throw new Error(`config: Invalid JSON in ${LEGACY_CONFIG_FILE}.`, { cause: error });
   }

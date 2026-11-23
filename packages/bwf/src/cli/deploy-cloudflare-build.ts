@@ -6,7 +6,7 @@ import {
   assertCloudflareDurableObjectLifecycleSupported,
 } from '@builtbyfriends/deploy-cloudflare';
 import { dirname, relative } from 'pathslash';
-import { type BwfConfig } from '../config.ts';
+import type { BwfConfig } from '../config.ts';
 import { collectMigrations } from '../migrations/collect.ts';
 import { SqliteMigrationError } from '../migrations/sqlite-validation.ts';
 import { CLOUDFLARE_DEPLOY_BUILD_ENV, CLOUDFLARE_QUEUE_NAMES_BUILD_ENV } from '../shared/env.ts';
@@ -31,7 +31,7 @@ import {
   scrubWranglerAuthCredentials,
   deployChildEnv,
 } from './deploy-transport.ts';
-import { type CloudflareDeployDeps } from './deploy-types.ts';
+import type { CloudflareDeployDeps } from './deploy-types.ts';
 import { getErrorMessage } from './output.ts';
 import { deleteEnvVarCaseAware } from './provision.ts';
 
@@ -97,9 +97,9 @@ export async function buildCloudflareWorker(input: {
   // uploader. The uploader is checked again after it and before each credentialed run.
   try {
     runBuild(buildChildEnv);
-  } catch (err) {
-    log.error(`deploy: build failed — ${getErrorMessage(err)}`);
-    return exit(getExitCode(err));
+  } catch (error) {
+    log.error(`deploy: build failed — ${getErrorMessage(error)}`);
+    return exit(getExitCode(error));
   }
   log.step('Preparing deployment...');
   if (!assertUploaderStillPinned()) {
@@ -179,7 +179,7 @@ export async function buildCloudflareWorker(input: {
   if (authEnabled && dialect === 'sqlite') {
     try {
       await (deps.validateAuthMigrations ?? validateAuthMigrationSchema)(root, migrations);
-    } catch (err) {
+    } catch (error) {
       log.error(
         [
           'deploy: --platform cloudflare cannot verify the Platform-managed Better Auth schema.',
@@ -187,8 +187,8 @@ export async function buildCloudflareWorker(input: {
           'after deploy; this self-host backend only applies checked-in db/migrations/*.sql, so',
           'they must already produce the Better Auth schema — tables, columns, and the primary',
           'keys, unique constraints and foreign keys it declares:',
-          `  ${getErrorMessage(err)}`,
-          ...(err instanceof SqliteMigrationError
+          `  ${getErrorMessage(error)}`,
+          ...(error instanceof SqliteMigrationError
             ? [
                 'Repair the unapplied migration named above, then rerun deploy.',
                 '`bwf db generate` diffs snapshots and cannot repair existing invalid SQL.',
@@ -215,8 +215,8 @@ export async function buildCloudflareWorker(input: {
         migrationsDir,
         migrations,
       );
-    } catch (err) {
-      log.error(getErrorMessage(err));
+    } catch (error) {
+      log.error(getErrorMessage(error));
       return exit(1);
     }
 

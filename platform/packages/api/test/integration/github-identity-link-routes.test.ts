@@ -22,14 +22,8 @@ import {
 import type { ApiEnv } from '../../src/env.ts';
 import { githubRoutes } from '../../src/routes/github.ts';
 import { githubInstallations, oauthAccounts } from '../../src/schema.ts';
-import {
-  JWT_SECRET,
-  clearTables,
-  createTestUser,
-  setupEnv,
-  teardownEnv,
-  type TestEnv,
-} from './helpers.ts';
+import { JWT_SECRET, clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -149,7 +143,7 @@ async function mintState(payload: {
 // The target carries the signed `link_code`.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runCallback(opts: {

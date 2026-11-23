@@ -1,12 +1,12 @@
 import { type } from 'arktype';
 import { sql } from 'drizzle-orm';
 import {
-  type Db,
   createResource,
   getProjectDatabaseUrl,
   getProjectResources,
   upsertProjectDatabaseUrl,
 } from '../../db.ts';
+import type { Db } from '../../db.ts';
 import type { ApiEnv } from '../../env.ts';
 import {
   ProjectAccessDeniedError,
@@ -23,7 +23,8 @@ import {
   updateHyperdrive,
 } from '../../provisioning/cloudflare-api.ts';
 import { canOnProject, grantedAccess } from '../access.ts';
-import { member, procedure, type Caller } from '../procedure.ts';
+import { member, procedure } from '../procedure.ts';
+import type { Caller } from '../procedure.ts';
 
 class DatabaseUrlPersistenceError extends Error {
   constructor(cause: unknown) {

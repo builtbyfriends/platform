@@ -18,8 +18,6 @@ export function BuildLogs({ build }: { build: Build }) {
     let cursor = 0;
     let polling = false;
     let terminalSince: number | null = null;
-    setLines(null);
-    setError(null);
 
     const pollLogs = async () => {
       if (polling) {
@@ -76,7 +74,7 @@ export function BuildLogs({ build }: { build: Build }) {
       }
     };
 
-    const timer = setInterval(() => void poll(), 2_000);
+    const timer = setInterval(() => void poll(), 2000);
     void poll();
     return () => {
       active = false;

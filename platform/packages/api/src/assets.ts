@@ -271,11 +271,11 @@ export async function uploadAssetBuckets(
           completionJwt = result;
         }
         return;
-      } catch (err) {
-        if (err instanceof AssetHashMissError) {
-          throw err;
+      } catch (error) {
+        if (error instanceof AssetHashMissError) {
+          throw error;
         }
-        lastErr = err;
+        lastErr = error;
         if (attempts >= MAX_UPLOAD_RETRIES) {
           break;
         }
@@ -383,7 +383,7 @@ async function postAssetUpload(
 function isJwtExpired(jwt: string): boolean {
   try {
     // Decision: CF JWTs use base64url encoding: normalize to standard base64 before decoding.
-    const raw = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const raw = jwt.split('.')[1].replaceAll('-', '+').replaceAll('_', '/');
     const payload = JSON.parse(atob(raw));
     return typeof payload.exp === 'number' && payload.exp < Date.now() / 1000;
   } catch {
@@ -393,7 +393,7 @@ function isJwtExpired(jwt: string): boolean {
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
-  const chunkSize = 0x8000;
+  const chunkSize = 0x80_00;
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
@@ -448,8 +448,8 @@ function createBase64MultipartBody(parts: ReadonlyArray<AssetUploadPart>): {
       }
       await writer.write(textEncoder.encode(`--${boundary}--\r\n`));
       await writer.close();
-    } catch (err) {
-      await writer.abort(err);
+    } catch (error) {
+      await writer.abort(error);
     }
   })();
 
@@ -494,7 +494,7 @@ export function computeAssetHash(content: ArrayBuffer, filePath: string): string
   for (const chunk of base64Chunks(bytes)) {
     hasher.update(chunk);
   }
-  hasher.update(textEncoder.encode(extname(filePath).substring(1)));
+  hasher.update(textEncoder.encode(extname(filePath).slice(1)));
   return digestToAssetHash(hasher.finalize());
 }
 
@@ -505,7 +505,7 @@ export async function computeAssetStreamHashes(
   maxBytes: number,
 ): Promise<{ size: number; hashes: ReadonlyArray<string> }> {
   const hashers = new Map(
-    [...new Set(paths.map((path) => extname(path).substring(1)))].map((extension) => [
+    [...new Set(paths.map((path) => extname(path).slice(1)))].map((extension) => [
       extension,
       createHasher(),
     ]),

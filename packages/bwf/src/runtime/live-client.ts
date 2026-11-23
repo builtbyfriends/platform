@@ -118,7 +118,7 @@ export function connectLiveStream(
   const retryWaiters = new Set<() => void>();
   // Decision: An unsubscribe of an id nothing uses: it only asks whether the server still knows this connection.
   const probeId = `bwf-probe:${connectionId}`;
-  const retryDelay = options.retryDelay ?? 1_000;
+  const retryDelay = options.retryDelay ?? 1000;
   if (!Number.isFinite(retryDelay) || retryDelay < 0) {
     throw new Error('live: retryDelay must be a non-negative finite number.');
   }

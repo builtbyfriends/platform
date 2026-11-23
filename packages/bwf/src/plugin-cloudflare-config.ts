@@ -24,13 +24,14 @@ export type AuxiliaryWorkerConfig = (
 };
 
 /** Match the old plugin's patch semantics, including its array concatenation. */
+// oxlint-disable-next-line quality/no-object-parameters
 export function mergeCloudflareConfig(patch: object, fallback: object): Record<string, unknown> {
   const result: Record<string, unknown> = { ...fallback };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) {
       continue;
     }
-    const previous = (result as Record<string, unknown>)[key];
+    const previous = result[key];
     result[key] =
       Array.isArray(value) && Array.isArray(previous)
         ? [...value, ...previous]
@@ -40,10 +41,7 @@ export function mergeCloudflareConfig(patch: object, fallback: object): Record<s
             typeof previous === 'object' &&
             !Array.isArray(value) &&
             !Array.isArray(previous)
-          ? mergeCloudflareConfig(
-              value as Record<string, unknown>,
-              previous as Record<string, unknown>,
-            )
+          ? mergeCloudflareConfig(value as Record<string, unknown>, previous)
           : value;
   }
   return result;
@@ -58,8 +56,8 @@ export function toNativeCloudflareConfig(raw: WorkerConfig, root: string): Cloud
   const name =
     String(packageName ?? basename(root))
       .replaceAll('_', '-')
-      .replace(/[^a-z0-9- ]/g, '-')
-      .replace(/^(-+)|(-+)$/g, '')
+      .replaceAll(/[^a-z0-9- ]/g, '-')
+      .replaceAll(/^(-+)|(-+)$/g, '')
       .slice(0, 63) || 'my-worker';
   const { env, vars, ...base } = raw;
   const selected = process.env.CLOUDFLARE_ENV ? env?.[process.env.CLOUDFLARE_ENV] : undefined;
@@ -153,7 +151,7 @@ export function nativeAuxiliaryWorkers(
         mergeCloudflareConfig(patch ?? {}, base),
         path ? dirname(path) : root,
       );
-      return native.worker!;
+      return native.worker;
     },
   }));
 }

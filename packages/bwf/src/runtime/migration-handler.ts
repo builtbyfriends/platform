@@ -128,23 +128,23 @@ export function createMigrationHandler(
       if (result.ok && runAuthMigrations) {
         try {
           await runAuthMigrations();
-        } catch (err) {
+        } catch (error) {
           return Response.json(
             {
               ...result,
               ok: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: error instanceof Error ? error.message : String(error),
             } satisfies MigrationResponse,
             { status: 500 },
           );
         }
       }
       return Response.json(result);
-    } catch (err) {
+    } catch (error) {
       return Response.json(
         {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
           migrations: [],
         } satisfies MigrationResponse,
         { status: 500 },
@@ -276,12 +276,12 @@ async function runD1AppMigrations(
     const applied = await readAppliedSet(db);
     // Decision: A migration applied earlier never runs again, so its warning cannot be acted on.
     warnings = verified.plans.flatMap((plan, index) =>
-      applied.has(migrations[index]!.name) ? [] : (plan.warnings ?? []),
+      applied.has(migrations[index].name) ? [] : (plan.warnings ?? []),
     );
 
     for (let index = 0; index < migrations.length; index++) {
-      const migration = migrations[index]!;
-      const plan = verified.plans[index]!;
+      const migration = migrations[index];
+      const plan = verified.plans[index];
       if (plan.stability === 'legacy') {
         stability = 'legacy';
       }
@@ -310,8 +310,8 @@ async function runD1AppMigrations(
           stability: plan.stability,
           status: 'applied',
         });
-      } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+      } catch (error_) {
+        const error = error_ instanceof Error ? error_.message : String(error_);
         migrationResults.push({
           applied: false,
           durationMs: Date.now() - start,
@@ -348,8 +348,8 @@ async function runD1AppMigrations(
       stability,
       warnings,
     };
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+  } catch (error_) {
+    const error = error_ instanceof Error ? error_.message : String(error_);
     await markAttempt(db, attempt.attemptId, 'failed', error).catch(() => {});
     await releaseAttemptLock(db, attempt.attemptId).catch(() => {});
     return {
@@ -612,8 +612,8 @@ async function verifyPlanBundle(
     throw new Error('migration execution plan count does not match bundled migrations');
   }
   for (let index = 0; index < migrations.length; index++) {
-    const migration = migrations[index]!;
-    const plan = planBundle.plans[index]!;
+    const migration = migrations[index];
+    const plan = planBundle.plans[index];
     if (
       plan.name !== migration.name ||
       plan.dialect !== 'sqlite' ||
@@ -686,12 +686,12 @@ async function runD1LegacyMigrations(
         applied: true,
         durationMs: Date.now() - start,
       });
-    } catch (err) {
+    } catch (error) {
       migrationResults.push({
         name: migration.name,
         applied: false,
         durationMs: Date.now() - start,
-        error: err instanceof Error ? err.message : String(err),
+        error: error instanceof Error ? error.message : String(error),
       });
       return {
         ok: false,

@@ -9,8 +9,10 @@ import {
   PLAN_AI_LOGGING_SETTING,
   planAiLogging,
   resolveAiLogging,
-  type AiLoggingPlanCatalog,
-  type PlanAiLoggingSettings,
+} from '@builtbyfriends/platform/ai-logging';
+import type {
+  AiLoggingPlanCatalog,
+  PlanAiLoggingSettings,
 } from '@builtbyfriends/platform/ai-logging';
 import { createDefaultPlanCatalog, parsePlatformPlanCatalog } from '@builtbyfriends/platform/plans';
 import type {
@@ -64,6 +66,7 @@ async function readInputs(client: QueryConnection): Promise<Inputs> {
   } catch (error) {
     throw new Error(
       `platform: The saved plan settings are not valid for this platform version, so AI logging settings cannot be published. If a newer platform release saved them, upgrade to that release again. (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
     );
   }
   return { catalog, settings };

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 function quote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
+  return `'${String(value).replaceAll("'", String.raw`'\''`)}'`;
 }
 
 // Decision: Drives a real terminal with the OS PTY utility, so we don't need a native npm dependency.
@@ -85,7 +85,7 @@ export function runPty(
     for (const stream of [child.stdout, child.stderr]) {
       stream.on('data', (data) => {
         onOutput(data);
-        buffer = (buffer + data.toString()).slice(-131072);
+        buffer = (buffer + data.toString()).slice(-131_072);
         const plain = stripVTControlCharacters(buffer);
         for (const prompt of prompts) {
           if (!seen.has(prompt.text) && plain.includes(prompt.text)) {
@@ -147,20 +147,20 @@ export async function initializePackedProject(
       { text: 'Initialize a git repository?', response: '\r' },
       {
         text: 'Choose a scaffold toolchain:',
-        response: toolchain === 'vite-plus' ? '\r' : '\x1b[B\r',
+        response: toolchain === 'vite-plus' ? '\r' : '\u001b[B\r',
       },
       { text: 'Choose a starter:', response: '\r' },
       {
         text: 'Could not detect your coding agent. Which one are you using?',
-        response: '\x1b[B'.repeat(4) + '\r',
+        response: '\u001b[B'.repeat(4) + '\r',
         required: false,
       },
-      { text: 'Where should this project deploy?', response: '\x1b[B\x1b[B\r' },
+      { text: 'Where should this project deploy?', response: '\u001b[B\u001b[B\r' },
     ],
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   initializePackedProject(...process.argv.slice(2)).catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

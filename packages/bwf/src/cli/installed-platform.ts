@@ -2,6 +2,13 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'pathslash';
 import { getPackageDir } from './agents.ts';
+import { isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
+
+function readManifest(path: string): JsonObject {
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  return isJsonObject(parsed) ? parsed : {};
+}
 
 /** A global CLI still builds with the project's installed Vite plugin. */
 export function assertInstalledBwfMatchesCli(root: string): void {
@@ -9,23 +16,18 @@ export function assertInstalledBwfMatchesCli(root: string): void {
   if (!existsSync(projectManifest)) {
     return;
   }
-  const project = JSON.parse(readFileSync(projectManifest, 'utf8')) as Record<string, unknown>;
+  const project = readManifest(projectManifest);
   const declaresBwf = ['dependencies', 'devDependencies', 'optionalDependencies'].some((key) => {
     const dependencies = project[key];
-    return (
-      typeof dependencies === 'object' &&
-      dependencies !== null &&
-      '@builtbyfriends/bwf' in dependencies
-    );
+    return isJsonObject(dependencies) && '@builtbyfriends/bwf' in dependencies;
   });
   if (!declaresBwf) {
     return;
   }
 
   const cliPackageDir = getPackageDir();
-  const cli = JSON.parse(readFileSync(join(cliPackageDir, 'package.json'), 'utf8')) as {
-    version: string;
-  };
+  const cli = readManifest(join(cliPackageDir, 'package.json'));
+  const cliVersion = typeof cli.version === 'string' ? cli.version : undefined;
   let installedVersion: string | undefined;
   let installedPackageDir: string | undefined;
   try {
@@ -34,12 +36,9 @@ export function assertInstalledBwfMatchesCli(root: string): void {
     for (let depth = 0; depth < 8; depth++) {
       const manifest = join(directory, 'package.json');
       if (existsSync(manifest)) {
-        const installed = JSON.parse(readFileSync(manifest, 'utf8')) as {
-          name?: string;
-          version?: string;
-        };
+        const installed = readManifest(manifest);
         if (installed.name === '@builtbyfriends/bwf') {
-          installedVersion = installed.version;
+          installedVersion = typeof installed.version === 'string' ? installed.version : undefined;
           installedPackageDir = directory;
           break;
         }
@@ -49,9 +48,9 @@ export function assertInstalledBwfMatchesCli(root: string): void {
   } catch {
     // Decision: The error below also covers a declared package that hasn't been installed.
   }
-  if (installedVersion !== cli.version) {
+  if (installedVersion !== cliVersion) {
     throw new Error(
-      `deploy: this CLI is platform@${cli.version}, but the project's installed Vite plugin is ` +
+      `deploy: this CLI is platform@${cliVersion}, but the project's installed Vite plugin is ` +
         `${installedVersion ? `platform@${installedVersion}` : 'missing'}. ` +
         'Install the same bwf version in the project (or link this development checkout) ' +
         'before deploying. The build imports the project package; mixing versions can ' +

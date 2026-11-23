@@ -1,7 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { isRecord } from '@builtbyfriends/deploy-core';
 import { parseRootWranglerConfig } from './config.ts';
-import { isCleanCommandExit, isWorkerNotFound, type CloudflareCommandRunner } from './execute.ts';
+import { isCleanCommandExit, isWorkerNotFound } from './execute.ts';
+import type { CloudflareCommandRunner } from './execute.ts';
 import type { CloudflareOperation } from './operations.ts';
 import {
   isBwfSecretDraftHeader,
@@ -514,7 +515,7 @@ export function assertExistingCloudflareConfig(
   const metadata = isRecord(config.version_metadata) ? config.version_metadata : undefined;
   if (
     metadataBindings.length > 1 ||
-    (metadataBindings.length === 1 && metadata?.binding !== metadataBindings[0]!.name) ||
+    (metadataBindings.length === 1 && metadata?.binding !== metadataBindings[0].name) ||
     (metadataBindings.length === 0 && config.version_metadata !== undefined)
   ) {
     throw new Error(

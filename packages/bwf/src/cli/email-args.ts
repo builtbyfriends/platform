@@ -67,18 +67,16 @@ export interface EmailArgs {
   yes?: boolean;
 }
 
+type FlagRead = { value: string | undefined; next: number };
+
 /**
  * Read a value-taking flag in its `--flag value` or `--flag=value` form. Returns the
  * raw value, or `undefined` when the flag is the last token or is followed by another
  * option — the same rule `parseArgs` applies for `bwf deploy`, so `--platform --limit 3`
  * is a missing value, not a value of `--limit`.
  */
-function readFlagValue(
-  rest: ReadonlyArray<string>,
-  i: number,
-  flag: string,
-): { value: string | undefined; next: number } {
-  const token = rest[i]!;
+function readFlagValue(rest: ReadonlyArray<string>, i: number, flag: string): FlagRead {
+  const token = rest[i];
   if (token.startsWith(`${flag}=`)) {
     return { value: token.slice(flag.length + 1), next: i };
   }
@@ -90,8 +88,8 @@ function readFlagValue(
 }
 
 export function parseEmailArgs(args: Array<string>): EmailArgs {
-  const subcommand = args[0] as EmailArgs['subcommand'];
-  if (!subcommand || !(EMAIL_SUBCOMMANDS as ReadonlyArray<string>).includes(subcommand)) {
+  const subcommand = EMAIL_SUBCOMMANDS.find((candidate) => candidate === args[0]);
+  if (!subcommand) {
     throw new Error(
       'email: Usage: bwf email <usage|logs|destinations|allow|disallow|alias|domain|status|setup> [args] [--project <name>] [--limit <n>] [--platform cloudflare].',
     );
@@ -122,7 +120,7 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
       if (raw === undefined) {
         throw new Error('email: --limit requires a value (a positive integer).');
       }
-      const n = parseInt(raw, 10);
+      const n = Number.parseInt(raw, 10);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(`email: --limit must be a positive integer (got '${raw}').`);
       }
@@ -207,7 +205,11 @@ export function parseEmailArgs(args: Array<string>): EmailArgs {
     }
   }
 
-  return { subcommand, projectSlug, limit, address, platform, ...(yes ? { yes } : {}) };
+  const parsed: EmailArgs = { subcommand, projectSlug, limit, address, platform };
+  if (yes) {
+    parsed.yes = yes;
+  }
+  return parsed;
 }
 
 /**
@@ -222,8 +224,8 @@ function parseEmailDomainArgs(
     platform?: EmailArgs['platform'];
   },
 ): EmailArgs {
-  const verb = positional[0];
-  if (!verb || !(EMAIL_DOMAIN_VERBS as ReadonlyArray<string>).includes(verb)) {
+  const verb = EMAIL_DOMAIN_VERBS.find((candidate) => candidate === positional[0]);
+  if (!verb) {
     throw new Error(
       'email: Usage: bwf email domain <add|status|list|sync|rotate-secret|remove> [<domain>] [--project <name>].',
     );
@@ -246,7 +248,7 @@ function parseEmailDomainArgs(
   }
   return {
     subcommand: 'domain',
-    domainVerb: verb as EmailDomainVerb,
+    domainVerb: verb,
     domain,
     projectSlug: flags.projectSlug,
     limit: flags.limit,

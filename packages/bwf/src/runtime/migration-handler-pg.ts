@@ -23,23 +23,23 @@ export function createMigrationHandler(
         // Decision: The files are already committed, so a Better Auth failure still reports them.
         try {
           await runAuthMigrations();
-        } catch (err) {
+        } catch (error) {
           return Response.json(
             {
               ...result,
               ok: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: error instanceof Error ? error.message : String(error),
             } satisfies MigrationResponse,
             { status: 500 },
           );
         }
       }
       return Response.json(result);
-    } catch (err) {
+    } catch (error) {
       return Response.json(
         {
           ok: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
           migrations: [],
         } satisfies MigrationResponse,
         { status: 500 },
@@ -91,13 +91,13 @@ async function runPgMigrations(
         ]);
         await client.query('COMMIT');
         migrationResults.push({ name: m.name, applied: true, durationMs: Date.now() - start });
-      } catch (err) {
+      } catch (error) {
         await client.query('ROLLBACK');
         migrationResults.push({
           name: m.name,
           applied: false,
           durationMs: Date.now() - start,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         return { ok: false, migrations: migrationResults, error: `migration ${m.name} failed` };
       }

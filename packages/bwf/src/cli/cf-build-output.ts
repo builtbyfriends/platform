@@ -25,7 +25,8 @@ import {
   writeRootConfig,
   writeWorkerConfig,
 } from '@cloudflare/build-output-utils';
-import { type ModuleType, BuildOutputContainerConfigSchema } from '@cloudflare/config';
+import { BuildOutputContainerConfigSchema } from '@cloudflare/config';
+import type { ModuleType } from '@cloudflare/config';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'pathslash';
 import type { Plugin } from 'vite';
 import { migrateBuiltWranglerConfig, record } from './cf-config-migrate.ts';
@@ -328,9 +329,9 @@ export async function prepareCfBuildOutput(
     await readBuildOutput(directory);
     return {
       directory,
-      ...(typeof assetsDirectory === 'string'
-        ? { assetsDirectory: resolve(source, assetsDirectory) }
-        : {}),
+      ...(typeof assetsDirectory === 'string' && {
+        assetsDirectory: resolve(source, assetsDirectory),
+      }),
       dispose,
     };
   } catch (error) {
@@ -418,9 +419,9 @@ async function prepareNativeBuildOutput(
     await readBuildOutput(directory);
     return {
       directory,
-      ...(built.workers.default.assetsDir
-        ? { assetsDirectory: built.workers.default.assetsDir }
-        : {}),
+      ...(!!built.workers.default.assetsDir && {
+        assetsDirectory: built.workers.default.assetsDir,
+      }),
       dispose,
     };
   } catch (error) {
@@ -575,7 +576,7 @@ async function prepareBundledBuildOutput(options: {
         outDir: scratch,
         emptyOutDir: true,
         lib: { entry: options.entry, formats: ['es'], fileName: 'index' },
-        ...(options.external ? { rollupOptions: { external: options.external } } : {}),
+        ...(!!options.external && { rollupOptions: { external: options.external } }),
         target: 'es2022',
       },
     });

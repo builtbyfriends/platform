@@ -79,7 +79,7 @@ describe('project token command', () => {
       expiresInDays: 30,
       json: true,
     });
-    const [url, init] = request.mock.calls[0]!;
+    const [url, init] = request.mock.calls[0];
     expect(url).toBe('https://api.example.test/rpc/tokens.create');
     expect(init).toBeDefined();
     expect(init!).toMatchObject({ method: 'POST', redirect: 'manual' });

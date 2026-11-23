@@ -1,5 +1,6 @@
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import cloudflare from '@cloudflare/oxlint-config';
 import { defineConfig } from 'vite-plus';
 import { SuiteSequencer } from './test/sequencer.ts';
 
@@ -67,6 +68,84 @@ const platformAlias = {
   ),
 };
 
+// Decision: These rules still have reports in older code, so they warn until the count reaches zero. Fix the
+// warnings in the files you touch, and move a rule back to the preset's error once it's clean.
+const unfinished = [
+  '@nkzw/require-use-effect-arguments',
+  '@typescript-eslint/no-floating-promises',
+  '@typescript-eslint/only-throw-error',
+  'eqeqeq',
+  'import/consistent-type-specifier-style',
+  'import/export',
+  'import/no-namespace',
+  'no-promise-executor-return',
+  'no-unused-vars',
+  'no-useless-assignment',
+  'object-shorthand',
+  'prefer-promise-reject-errors',
+  'preserve-caught-error',
+  'quality/no-array-filter-map',
+  'quality/no-chained-type-assertions',
+  'quality/no-conditional-empty-object-spread',
+  'quality/no-known-value-widening',
+  'quality/no-object-parameters',
+  'quality/no-reflect-apply',
+  'quality/no-reflect-get',
+  'quality/no-unknown-returns',
+  'quality/no-unsafe-dictionary-type',
+  'react-hooks/rules-of-hooks',
+  'react/button-has-type',
+  'react/no-unescaped-entities',
+  'react/purity',
+  'react/refs',
+  'react/set-state-in-effect',
+  'typescript/array-type',
+  'typescript/await-thenable',
+  'typescript/ban-ts-comment',
+  'typescript/consistent-type-imports',
+  'typescript/no-empty-object-type',
+  'typescript/no-floating-promises',
+  'typescript/no-import-type-side-effects',
+  'typescript/no-misused-promises',
+  'typescript/no-misused-spread',
+  'typescript/no-non-null-assertion',
+  'typescript/no-unnecessary-type-assertion',
+  'typescript/no-unsafe-argument',
+  'typescript/no-unsafe-assignment',
+  'typescript/no-unsafe-call',
+  'typescript/no-unsafe-member-access',
+  'typescript/no-unsafe-return',
+  'typescript/no-unsafe-type-assertion',
+  'typescript/no-unsafe-unary-minus',
+  'typescript/only-throw-error',
+  'typescript/require-array-sort-compare',
+  'typescript/return-await',
+  'typescript/switch-exhaustiveness-check',
+  'typescript/unbound-method',
+  'typescript/use-unknown-in-catch-callback-variable',
+  'unicorn/catch-error-name',
+  'unicorn/consistent-function-scoping',
+  'unicorn/no-array-fill-with-reference-type',
+  'unicorn/no-hex-escape',
+  'unicorn/numeric-separators-style',
+  'unicorn/prefer-at',
+  'unicorn/prefer-number-properties',
+  'unicorn/prefer-single-call',
+  'unicorn/prefer-string-raw',
+  'unicorn/prefer-string-replace-all',
+  'unicorn/prefer-structured-clone',
+  'unicorn/prefer-top-level-await',
+  'unicorn/text-encoding-identifier-case',
+];
+const unfinishedRules = Object.fromEntries(
+  unfinished.map((name) => {
+    const preset =
+      cloudflare.rules?.[name] ??
+      cloudflare.rules?.[name.replace('typescript/', '@typescript-eslint/')];
+    return [name, Array.isArray(preset) ? ['warn', ...preset.slice(1)] : 'warn'];
+  }),
+);
+
 export default defineConfig({
   run: {
     tasks: {
@@ -118,6 +197,7 @@ export default defineConfig({
     ],
   },
   lint: {
+    ...cloudflare,
     categories: {
       correctness: 'off',
     },
@@ -128,6 +208,7 @@ export default defineConfig({
       node: true,
     },
     jsPlugins: [
+      ...(cloudflare.jsPlugins ?? []),
       {
         name: 'vite-plus',
         specifier: 'vite-plus/oxlint-plugin',
@@ -140,8 +221,9 @@ export default defineConfig({
         name: 'bwf',
         specifier: './scripts/lint-plugin.mjs',
       },
+      'eslint-plugin-react-you-might-not-need-an-effect',
     ],
-    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc', 'oxc'],
+    plugins: [...new Set([...(cloudflare.plugins ?? []), 'node', 'jsdoc'] as const)],
     ignorePatterns: [
       'eeaao/**',
       '**/node_modules/**',
@@ -159,6 +241,8 @@ export default defineConfig({
       'platform/packages/api/src/admin/fate/client.generated.ts',
     ],
     overrides: [
+      ...(cloudflare.overrides ?? []),
+      { files: ['**/*'], rules: unfinishedRules },
       {
         files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
         rules: {
@@ -252,9 +336,57 @@ export default defineConfig({
           ],
         },
       },
+      {
+        // Decision: Tests call mocks and loose fixtures, cast test doubles and wait with bare promises.
+        files: [
+          '**/test/**',
+          '**/tests/**',
+          '**/e2e/**',
+          '**/__mocks__/**',
+          '**/fixtures/**',
+          '**/*.test.*',
+          '**/*.test-d.*',
+        ],
+        rules: {
+          'no-promise-executor-return': 'off',
+          'quality/no-chained-type-assertions': 'off',
+          'quality/no-known-value-widening': 'off',
+          'quality/no-unknown-returns': 'off',
+          'quality/no-unknown-type-aliases': 'off',
+          'quality/no-unsafe-dictionary-type': 'off',
+          'quality/no-widen-then-assert': 'off',
+          'typescript/no-explicit-any': 'off',
+          'typescript/no-non-null-assertion': 'off',
+          'typescript/no-unsafe-argument': 'off',
+          'typescript/no-unsafe-assignment': 'off',
+          'typescript/no-unsafe-call': 'off',
+          'typescript/no-unsafe-member-access': 'off',
+          'typescript/no-unsafe-return': 'off',
+          'typescript/no-unsafe-type-assertion': 'off',
+          'typescript/unbound-method': 'off',
+          'unicorn/consistent-function-scoping': 'off',
+        },
+      },
     ],
     rules: {
+      ...cloudflare.rules,
       'bwf/no-comments': 'error',
+      // Decision: Workers send their logs through console, and the command line tool and scripts print on purpose.
+      'no-console': 'off',
+      // Decision: The error classes here are checked with instanceof, in our code and in the upstream code we merge.
+      '@nkzw/no-instanceof': 'off',
+      // Decision: In untyped .mjs files this rule takes a string for an array, and its fix turned a substring check
+      // into a Set of characters.
+      'unicorn/prefer-set-has': 'off',
+      'react-you-might-not-need-an-effect/no-derived-state': 'error',
+      'react-you-might-not-need-an-effect/no-chain-state-updates': 'error',
+      'react-you-might-not-need-an-effect/no-event-handler': 'error',
+      'react-you-might-not-need-an-effect/no-adjust-state-on-prop-change': 'error',
+      'react-you-might-not-need-an-effect/no-reset-all-state-on-prop-change': 'error',
+      'react-you-might-not-need-an-effect/no-pass-live-state-to-parent': 'error',
+      'react-you-might-not-need-an-effect/no-pass-data-to-parent': 'error',
+      'react-you-might-not-need-an-effect/no-external-store-subscription': 'error',
+      'react-you-might-not-need-an-effect/no-initialize-state': 'error',
       '@typescript-eslint/array-type': [
         'error',
         {
@@ -264,8 +396,6 @@ export default defineConfig({
       '@typescript-eslint/no-duplicate-enum-values': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-extra-non-null-assertion': 'error',
-      // Decision: Type-aware: `vp run lint:platform` enforces it; plain `vp lint` skips it.
-      '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-new': 'error',
       '@typescript-eslint/no-non-null-asserted-optional-chain': 'error',
       '@typescript-eslint/no-require-imports': 'error',
@@ -397,9 +527,10 @@ export default defineConfig({
       'vite-plus/prefer-vite-plus-imports': 'error',
       // Decision: Vitest rejects `.only` only in CI; this catches it locally and in pre-commit too.
       'vitest/no-focused-tests': 'error',
+      ...unfinishedRules,
     },
     options: {
-      typeAware: false,
+      ...cloudflare.options,
       typeCheck: false,
     },
   },

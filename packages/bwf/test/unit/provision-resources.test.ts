@@ -15,9 +15,8 @@ import {
   resolvePinnedApiBaseUrl,
   resolveWorkersDevComplianceRegion,
   WranglerQuarantineError,
-  type DesiredResourceSet,
-  type RunWrangler,
 } from '../../src/cli/provision.ts';
+import type { DesiredResourceSet, RunWrangler } from '../../src/cli/provision.ts';
 import { materializeCloudflareConfig } from '../../src/cloudflare-config.ts';
 import {
   AMBIENT_ACCOUNT,
@@ -124,10 +123,10 @@ describe('provisionCloudflareResources — typed operations', () => {
     ]);
     expect(inputs).toEqual([connection]);
     expect(JSON.stringify(operations)).not.toContain('synthetic-password');
-    const encoded = encodeCloudflareOperation(operations[0]!);
+    const encoded = encodeCloudflareOperation(operations[0]);
     expect(encoded).toHaveLength(1);
     expect(encoded.join(' ')).not.toContain('synthetic-password');
-    expect(JSON.parse(encoded[0]!)).toEqual(operations[0]);
+    expect(JSON.parse(encoded[0])).toEqual(operations[0]);
   });
 
   it('adopts structured Queue identity despite misleading human prose', async () => {
@@ -333,7 +332,7 @@ describe('provisionCloudflareResources — read-first', () => {
       wranglerPath,
       { ...emptyDesired, d1: { binding: 'DB', name: 'myapp-db', readReplication: true } },
       { runWrangler: run, log: silentLog },
-    ).catch((e: unknown) => e as Error);
+    ).catch((error_: unknown) => error_ as Error);
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain('Run `bwf cloudflare login`');
@@ -389,7 +388,7 @@ describe('provisionCloudflareResources — config discovery (fail closed, single
     // Decision: A BOM mustn't defeat read-first (a fail-open-to-{} parse would re-provision).
     expect(calls.some((c) => c[0] === 'd1')).toBe(false);
     expect(result.resources[0]).toMatchObject({ kind: 'd1', action: 'reused', id: uuid('db1') });
-    expect(readFileSync(wranglerPath, 'utf-8').charCodeAt(0)).toBe(0xfeff);
+    expect(readFileSync(wranglerPath, 'utf8').charCodeAt(0)).toBe(0xfe_ff);
   });
 
   it('fails closed on a malformed root config — throws, no wrangler calls, no write', async () => {
@@ -405,7 +404,7 @@ describe('provisionCloudflareResources — config discovery (fail closed, single
       ),
     ).rejects.toThrow(/not valid JSON/);
     expect(calls).toEqual([]);
-    expect(readFileSync(wranglerPath, 'utf-8')).toBe(malformed);
+    expect(readFileSync(wranglerPath, 'utf8')).toBe(malformed);
   });
 
   it('reads and writes the SAME single resolved file when both wrangler.json and wrangler.jsonc exist', async () => {
@@ -429,9 +428,9 @@ describe('provisionCloudflareResources — config discovery (fail closed, single
       { runWrangler: run, log: silentLog },
     );
     expect(result.configPath).toBe(toSlash(jsonPath));
-    const jsonAfter = parseJsoncRaw(readFileSync(jsonPath, 'utf-8')) as Record<string, unknown>;
+    const jsonAfter = parseJsoncRaw(readFileSync(jsonPath, 'utf8')) as Record<string, unknown>;
     expect((jsonAfter.kv_namespaces as Array<Record<string, unknown>>)[0].id).toBe(hex32('kv'));
-    const jsoncAfter = parseJsoncRaw(readFileSync(jsoncPath, 'utf-8')) as Record<string, unknown>;
+    const jsoncAfter = parseJsoncRaw(readFileSync(jsoncPath, 'utf8')) as Record<string, unknown>;
     expect((jsoncAfter.kv_namespaces as Array<Record<string, unknown>>)[0].id).toBe('local');
   });
 });
@@ -932,7 +931,7 @@ describe('provisionCloudflareResources — idempotent re-run', () => {
       runWrangler: first.run,
       log: silentLog,
     });
-    const afterFirst = readFileSync(wranglerPath, 'utf-8');
+    const afterFirst = readFileSync(wranglerPath, 'utf8');
 
     const second = makeRunner([]);
     const result = await provisionCloudflareResources(tmpDir, wranglerPath, desired, {
@@ -943,7 +942,7 @@ describe('provisionCloudflareResources — idempotent re-run', () => {
     expect(result.resources).toEqual([
       { kind: 'kv', binding: 'KV', name: 'myapp-kv', action: 'reused', id: hex32('kv') },
     ]);
-    expect(readFileSync(wranglerPath, 'utf-8')).toBe(afterFirst);
+    expect(readFileSync(wranglerPath, 'utf8')).toBe(afterFirst);
   });
 });
 
@@ -956,7 +955,7 @@ describe('provisionCloudflareResources — R2', () => {
       if (operation.type === 'r2.bucket.info') {
         return Promise.resolve({
           ...fail('', 'The specified bucket does not exist'),
-          errorCode: 10006,
+          errorCode: 10_006,
         });
       }
       simulateUpdateConfig('r2_buckets', { binding: 'STORAGE', bucket_name: 'myapp-uploads' });
@@ -1308,7 +1307,7 @@ describe('provisionCloudflareResources — Hyperdrive API token requirement', ()
         },
       },
       { runWrangler: run, log: silentLog },
-    ).catch((e: unknown) => e as Error);
+    ).catch((error_: unknown) => error_ as Error);
     expect(error).toBeInstanceOf(Error);
     const message = (error as Error).message;
     expect(message).toContain('CLOUDFLARE_API_TOKEN');
@@ -1448,7 +1447,7 @@ describe('provisionCloudflareResources — Hyperdrive API token requirement', ()
         hyperdrive: { binding: 'HYPERDRIVE', name: 'myapp-hd', connectionString: '' },
       },
       { runWrangler: run, log: silentLog },
-    ).catch((e: unknown) => e as Error);
+    ).catch((error: unknown) => error as Error);
     expect(err).toBeInstanceOf(Error);
     const message = (err as Error).message;
     expect(message).toContain('DATABASE_URL');
@@ -2517,7 +2516,7 @@ describe('provisionCloudflareResources — boundary account fence', () => {
           return [];
         },
       },
-    ).catch((e: unknown) => e as Error);
+    ).catch((error_: unknown) => error_ as Error);
     expect(error).toBeInstanceOf(Error);
     const message = (error as Error).message;
     expect(message).toMatch(/no Cloudflare account is resolvable/);
@@ -2556,7 +2555,7 @@ describe('provisionCloudflareResources — absolute config path', () => {
       expect(i).toBeGreaterThanOrEqual(0);
       expect(argv[i + 1]).toBe(toSlash(abs));
     }
-    const after = parseJsoncRaw(readFileSync(abs, 'utf-8')) as Record<string, unknown>;
+    const after = parseJsoncRaw(readFileSync(abs, 'utf8')) as Record<string, unknown>;
     expect((after.kv_namespaces as Array<Record<string, unknown>>)[0].id).toBe(hex32('kv'));
   });
 });
@@ -3420,7 +3419,7 @@ describe('provisionCloudflareResources — Hyperdrive password never reaches wra
     const sidecar = `${wranglerPath}.bwf-provision.lock.quarantine.json`;
     const conn = 'postgres://dbuser:sup3r-secret@db.example.com:5432/app';
     const quarantineError = new WranglerQuarantineError(
-      54321,
+      54_321,
       `kill failed while running hyperdrive create --connection-string=${conn}`,
     );
     const run: RunWrangler = provisionOperationFixture(() => Promise.reject(quarantineError));
@@ -3440,7 +3439,7 @@ describe('provisionCloudflareResources — Hyperdrive password never reaches wra
     }
     // Decision: The same object propagates, so the provision still recognizes it and retains the lock.
     expect(thrown).toBe(quarantineError);
-    expect((thrown as WranglerQuarantineError).pid).toBe(54321);
+    expect((thrown as WranglerQuarantineError).pid).toBe(54_321);
     expect((thrown as Error).message).not.toContain('sup3r-secret');
     expect((thrown as Error).message).toContain('[REDACTED]');
     expect(existsSync(lockMutex)).toBe(true);

@@ -23,8 +23,8 @@ import {
   parseCapturedMessage,
   pushToDevBuffer,
   serializeCapturedMessage,
-  type CapturedMessage,
 } from '../../src/runtime/email/dev-inbox.ts';
+import type { CapturedMessage } from '../../src/runtime/email/dev-inbox.ts';
 import {
   buildMime,
   MAX_ADDRESS_LENGTH,
@@ -213,7 +213,7 @@ describe('dev inbox capture cap (sized for the serialized capture)', () => {
   // Decision: A control byte is `=01` in the quoted-printable MIME but `\u0001` in the JSON text, so this
   // legal message serializes past three MIME budgets.
   it('captures a legal message whose serialized capture exceeds three MIME budgets', async () => {
-    const text = '\x01'.repeat(Math.floor(MAX_MESSAGE_BYTES / 3.15));
+    const text = '\u0001'.repeat(Math.floor(MAX_MESSAGE_BYTES / 3.15));
     const server = createFakeViteServer();
     const assets = fakeAssetsBinding(server);
     const result = await withRuntimeEnv(devEnv(assets), () =>
@@ -236,14 +236,14 @@ describe('dev inbox capture cap (sized for the serialized capture)', () => {
     expect(DEV_INBOX_MAX_CAPTURE_BYTES).toBeGreaterThan(bound);
 
     const base = { from: 'a@x.dev', to: 'b@y.dev', subject: 's' };
-    const control = '\x01'.repeat(30_000);
+    const control = '\u0001'.repeat(30_000);
     const shapes: Array<[string, Parameters<typeof normalizeEmail>[0]]> = [
       // Decision: Encoded-word header: base64 plus framing (1.6) in the MIME, 6 in JSON, so 3.75x.
       ['control subject', { ...base, subject: control, text: 't' }],
       ['control display name', { ...base, to: [{ email: 'b@y.dev', name: control }], text: 't' }],
       [
         'control custom header value',
-        { ...base, headers: { 'X-Note': control.slice(0, 8_192) }, text: 't' },
+        { ...base, headers: { 'X-Note': control.slice(0, 8192) }, text: 't' },
       ],
       // Decision: Body: `=01` (3) in the MIME, `\u0001` (6) in JSON, so 2x.
       ['control text', { ...base, text: control }],

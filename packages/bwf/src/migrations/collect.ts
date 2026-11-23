@@ -15,7 +15,7 @@ export function collectMigrations(migrationsDir: string): Array<{ name: string; 
     .sort()
     .map((name) => ({
       name,
-      sql: readFileSync(join(migrationsDir, name), 'utf-8'),
+      sql: readFileSync(join(migrationsDir, name), 'utf8'),
     }));
 }
 
@@ -49,10 +49,11 @@ export function readJournal(
     return undefined;
   }
   try {
-    return JSON.parse(readFileSync(journalPath, 'utf-8')) as DrizzleJournal;
-  } catch (err) {
+    return JSON.parse(readFileSync(journalPath, 'utf8')) as DrizzleJournal;
+  } catch (error) {
     throw new Error(
-      `db: Failed to parse ${sourceRelative('db/migrations/meta/_journal.json')}: '${(err as Error).message}'.`,
+      `db: Failed to parse ${sourceRelative('db/migrations/meta/_journal.json')}: '${(error as Error).message}'.`,
+      { cause: error },
     );
   }
 }

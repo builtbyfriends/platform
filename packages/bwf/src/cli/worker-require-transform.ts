@@ -1,28 +1,64 @@
 import MagicString from 'magic-string';
 import { parseSync } from 'vite';
-import { isIdentifier, isLiteral, type AstNode, type AstProgram } from '../shared/ast.ts';
+import { isAstProgram, isIdentifier, isLiteral } from '../shared/ast.ts';
+import type { AstNode, AstProgram } from '../shared/ast.ts';
 
-type Edit = { start: number; end: number; replacement: string };
+type Span = { start: number; end: number };
+type Edit = Span & { replacement: string };
+
+function isAstNode(value: unknown): value is AstNode {
+  return (
+    typeof value === 'object' && value !== null && 'type' in value && typeof value.type === 'string'
+  );
+}
+
+function childNode(value: unknown): AstNode | undefined {
+  return isAstNode(value) ? value : undefined;
+}
+
+function childNodes(value: unknown): Array<AstNode> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const children: Array<AstNode> = [];
+  for (const item of value) {
+    if (!isAstNode(item)) {
+      return undefined;
+    }
+    children.push(item);
+  }
+  return children;
+}
+
+function identifierName(node: AstNode | undefined): string | undefined {
+  return isIdentifier(node) ? node.name : undefined;
+}
+
+function span(node: AstNode): Span {
+  if (node.start === undefined || node.end === undefined) {
+    throw new Error('deploy: Bundle syntax node has no source range.');
+  }
+  return { start: node.start, end: node.end };
+}
 
 function nodes(root: AstNode): Array<AstNode> {
   const found: Array<AstNode> = [];
   const pending: Array<AstNode> = [root];
   while (pending.length > 0) {
-    const node = pending.pop()!;
+    const node = pending.pop();
+    if (!node) {
+      break;
+    }
     found.push(node);
     for (const value of Object.values(node)) {
       if (Array.isArray(value)) {
         for (const child of value) {
-          if (child && typeof child === 'object' && typeof child.type === 'string') {
-            pending.push(child as AstNode);
+          if (isAstNode(child)) {
+            pending.push(child);
           }
         }
-      } else if (
-        value &&
-        typeof value === 'object' &&
-        typeof (value as AstNode).type === 'string'
-      ) {
-        pending.push(value as AstNode);
+      } else if (isAstNode(value)) {
+        pending.push(value);
       }
     }
   }
@@ -44,58 +80,56 @@ export function transformWorkerRequireBundle(
   if (!code.includes('createRequire') && !code.includes('pgpass')) {
     return code;
   }
-  const program = parseSync(filename, code).program as unknown as AstProgram;
+  const parsedProgram = parseSync(filename, code).program;
+  if (!isAstProgram(parsedProgram)) {
+    return code;
+  }
+  const program: AstProgram = parsedProgram;
   const edits: Array<Edit> = [];
   let hasRequireBinding = false;
   let pgpassCalls = 0;
   for (const statement of program.body ?? []) {
     if (
       statement.type === 'ImportDeclaration' &&
-      (statement.source as { value?: unknown } | undefined)?.value === 'node:module'
+      childNode(statement.source)?.value === 'node:module'
     ) {
-      const specifiers = statement.specifiers as Array<AstNode> | undefined;
+      const specifiers = childNodes(statement.specifiers);
       if (
         specifiers?.length !== 1 ||
-        !isIdentifier(specifiers[0]?.imported as AstNode | undefined) ||
-        (specifiers[0]!.imported as { name: string }).name !== 'createRequire'
+        identifierName(childNode(specifiers[0]?.imported)) !== 'createRequire'
       ) {
         throw new Error(
           `deploy: Unsupported node:module import in ${database} bundle ${filename}.`,
         );
       }
-      edits.push({ start: statement.start!, end: statement.end!, replacement: '' });
+      edits.push({ ...span(statement), replacement: '' });
     }
     if (statement.type === 'VariableDeclaration') {
-      const declarations = statement.declarations as Array<AstNode> | undefined;
+      const declarations = childNodes(statement.declarations);
       if (
         declarations?.some(
-          (declaration) =>
-            isIdentifier(declaration.id as AstNode | undefined) &&
-            (declaration.id as { name: string }).name === '__require',
+          (declaration) => identifierName(childNode(declaration.id)) === '__require',
         )
       ) {
         if (declarations.length !== 1 || hasRequireBinding) {
           throw new Error(`deploy: Unsupported require binding in ${database} bundle ${filename}.`);
         }
         hasRequireBinding = true;
-        edits.push({ start: statement.start!, end: statement.end!, replacement: requireShim });
+        edits.push({ ...span(statement), replacement: requireShim });
       }
     }
   }
   for (const node of nodes(program)) {
-    if (
-      node.type !== 'CallExpression' ||
-      !isIdentifier(node.callee as AstNode | undefined) ||
-      (node.callee as { name: string }).name !== '__require'
-    ) {
+    if (node.type !== 'CallExpression' || identifierName(childNode(node.callee)) !== '__require') {
       continue;
     }
-    const args = node.arguments as Array<AstNode> | undefined;
-    if (args?.length !== 1 || !isLiteral(args[0]) || args[0].value !== 'pgpass') {
+    const args = childNodes(node.arguments);
+    const [firstArg] = args ?? [];
+    if (args?.length !== 1 || !isLiteral(firstArg) || firstArg.value !== 'pgpass') {
       continue;
     }
     pgpassCalls++;
-    edits.push({ start: node.start!, end: node.end!, replacement: '__platformPgpassNoop' });
+    edits.push({ ...span(node), replacement: '__platformPgpassNoop' });
   }
   if (code.includes('createRequire') && !hasRequireBinding) {
     throw new Error(

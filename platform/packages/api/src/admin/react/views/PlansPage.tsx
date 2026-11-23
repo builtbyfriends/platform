@@ -10,12 +10,8 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { useToast } from '@astryxdesign/core/Toast';
-import {
-  PLAN_EDITABLE_LIMIT_KEYS,
-  PLAN_LIMITS,
-  type EditablePlanLimit,
-  type PlatformPlanDefinition,
-} from '@builtbyfriends/platform/plans';
+import { PLAN_EDITABLE_LIMIT_KEYS, PLAN_LIMITS } from '@builtbyfriends/platform/plans';
+import type { EditablePlanLimit, PlatformPlanDefinition } from '@builtbyfriends/platform/plans';
 import { useEffect, useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import type { AiLoggingMode, PlanAiLoggingSettings } from '../../../ai-logging-policy.ts';
@@ -73,7 +69,7 @@ const aiLoggingLabels: Record<AiLoggingMode, string> = {
   full: 'Full (prompts and responses)',
 };
 function aiLoggingMode(modes: PlanAiLoggingSettings['modes'], planId: string): AiLoggingMode {
-  return Object.hasOwn(modes, planId) ? modes[planId]! : 'inherit';
+  return Object.hasOwn(modes, planId) ? modes[planId] : 'inherit';
 }
 function usePlans(path: string) {
   const { plans: ref } = useRequest(plansRequest(path), { mode: 'stale-while-revalidate' });
@@ -614,7 +610,7 @@ export function PlanProgressPage({
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ expectedRevision: initial.revision }),
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300000)]),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)]),
           redirect: 'error',
         });
         if (!response.ok) {

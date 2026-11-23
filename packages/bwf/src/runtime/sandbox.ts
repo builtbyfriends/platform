@@ -6,10 +6,12 @@ import {
   SandboxContainer,
   SANDBOX_PORT_HEADER,
   validateSandboxOptions,
-  type SandboxCapability,
-  type SandboxOptions,
-  type SandboxExecOptions,
-  type SandboxProcessWire,
+} from './sandbox-container.ts';
+import type {
+  SandboxCapability,
+  SandboxOptions,
+  SandboxExecOptions,
+  SandboxProcessWire,
 } from './sandbox-container.ts';
 
 export * from '@cloudflare/sandbox';
@@ -199,7 +201,7 @@ function client(
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
         return (await call('fetch', [port, request])) as Response;
       }
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
         throw new TypeError('Invalid Sandbox TCP port.');
       }
       if (!nativeFetch) {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { openAsBlob } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { sanitizeTerminalLogText } from './terminal-log-text.ts';
 
 type Json = Record<string, unknown>;
@@ -26,7 +27,7 @@ class D1ImportStatusError extends Error {}
 class D1ImportRefusedError extends Error {}
 
 function object(value: unknown): Json {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
+  return isRecord(value) ? value : {};
 }
 
 function strings(value: unknown): Array<string> {

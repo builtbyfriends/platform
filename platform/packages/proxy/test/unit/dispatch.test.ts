@@ -13,7 +13,7 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 async function signAiToken(projectId: string, secret: string): Promise<string> {
@@ -365,7 +365,7 @@ describe('WfP dispatch path', () => {
         return path.includes('/internal/resolve-worker/')
           ? Response.json({ workerName: 'user-my-app', deploymentId: 'dpl_active' })
           : Response.json({ cf_id: 'kv-namespace' });
-      }) as unknown as typeof env.API.fetch;
+      });
       const restFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('from-rest'));
 
       const res = await worker.fetch(
@@ -462,7 +462,7 @@ describe('WfP dispatch path', () => {
           return Response.json({ cf_id: 'd1-uuid-abc' });
         }
         return Response.json({ error: 'not found' }, { status: 404 });
-      }) as unknown as typeof env.API.fetch;
+      });
 
       const res = await worker.fetch(
         post('/d1/query', {
@@ -517,7 +517,7 @@ describe('WfP dispatch path', () => {
           return Response.json({ cf_id: 'd1-uuid-abc' });
         }
         return Response.json({ error: 'not found' }, { status: 404 });
-      }) as unknown as typeof env.API.fetch;
+      });
 
       const res = await worker.fetch(
         post('/d1/query', {
@@ -549,7 +549,7 @@ describe('WfP dispatch path', () => {
           workerName,
           deploymentId: workerName?.split('-').at(-1),
         });
-      }) as unknown as typeof env.API.fetch;
+      });
 
       await worker.fetch(
         post('/d1/query', {

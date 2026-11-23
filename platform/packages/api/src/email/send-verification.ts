@@ -77,10 +77,10 @@ export async function sendPlatformVerificationEmail(
 
   try {
     await env.EMAIL.send({ from, to: address, subject, text });
-  } catch (err) {
+  } catch (error) {
     console.error(
       `[email-verify] platform verification email failed for project=${project.id} address=${address}:`,
-      err,
+      error,
     );
   }
 }

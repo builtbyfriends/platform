@@ -4,8 +4,8 @@ import {
   createPlatformDeploymentManifest,
   createPlatformInstallationManifest,
   PLATFORM_DISABLED_KEY,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   getPlatformRuntimeDirectory,
   PLATFORM_ADMIN_CLIENT_ASSET_PATH,
@@ -18,7 +18,8 @@ import { importLegacyAuthentication } from '../../src/auth/configuration.ts';
 import { app } from '../../src/index.ts';
 import { users } from '../../src/schema.ts';
 import { adminHtml } from '../helpers/admin-html.tsx';
-import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let admin: Awaited<ReturnType<typeof createTestUser>>;

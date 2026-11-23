@@ -13,8 +13,8 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   getPlatformRuntimeDirectory,
   resolvePlatformRuntime,
@@ -312,7 +312,7 @@ describe('installed platform upgrade', () => {
         'installation',
       ),
     ).toBe(
-      "bwf platform rollback installation --runtime '/tmp/earlier runtime' --from-runtime '/tmp/current'\\''s runtime' --yes",
+      String.raw`bwf platform rollback installation --runtime '/tmp/earlier runtime' --from-runtime '/tmp/current'\''s runtime' --yes`,
     );
   });
   it('replays --runtime-logs in the upgrade resume command', () => {
@@ -589,7 +589,7 @@ describe('installed platform upgrade', () => {
           })),
         );
         expect(state.patchScriptSettings.mock.invocationCallOrder[0]).toBeGreaterThan(
-          vi.mocked(installPlatform).mock.invocationCallOrder[0]!,
+          vi.mocked(installPlatform).mock.invocationCallOrder[0],
         );
         expect(log.warn).not.toHaveBeenCalled();
       },
@@ -652,7 +652,7 @@ describe('installed platform upgrade', () => {
     expect(state.progress.stop).toHaveBeenCalledExactlyOnceWith('Platform upgrade complete.');
     expect(state.progress.error).not.toHaveBeenCalled();
     expect(state.progress.stop.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(printSuccess).mock.invocationCallOrder[0]!,
+      vi.mocked(printSuccess).mock.invocationCallOrder[0],
     );
   });
 
@@ -777,7 +777,7 @@ describe('installed platform upgrade', () => {
     });
     await upgrade({ plan: true });
     expect(state.progress.clear.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      vi.mocked(note).mock.invocationCallOrder[0]!,
+      vi.mocked(note).mock.invocationCallOrder[0],
     );
     expect(installPlatform).not.toHaveBeenCalled();
     expect(state.progress.start).not.toHaveBeenCalledWith('Upgrading the platform');
@@ -851,7 +851,7 @@ describe('installed platform upgrade', () => {
 
   it('forwards spinner cancellation to coordinated CLI shutdown', async () => {
     await upgrade();
-    const onCancel = state.spinner.mock.calls[0]![0].onCancel;
+    const onCancel = state.spinner.mock.calls[0][0].onCancel;
     const emit = vi.spyOn(process, 'emit').mockReturnValueOnce(true);
     onCancel();
     expect(emit).toHaveBeenCalledWith('SIGINT');
@@ -1352,7 +1352,7 @@ describe('installed platform upgrade', () => {
       });
       const explicit = await upgrade().then(
         () => null,
-        (failure: unknown) => failure as Error,
+        (error: unknown) => error as Error,
       );
       expect(explicit?.message).toContain(
         'platform: The runtime API token cannot use platform email. Cloudflare denied: Zone → Zone Settings → Edit, Zone → Email Routing Rules → Edit, Account → Email Routing Addresses → Edit (HTTP 403). Check that the token is valid',
@@ -1534,7 +1534,7 @@ describe('installed platform upgrade', () => {
 
       const error = await upgrade().then(
         () => null,
-        (failure: unknown) => failure as Error,
+        (error_: unknown) => error_ as Error,
       );
       expect(error).toBeInstanceOf(Error);
       expect(error?.message).toContain(
@@ -1564,7 +1564,7 @@ describe('installed platform upgrade', () => {
         apiWorker(),
       );
       expect(installPlatform).toHaveBeenCalledOnce();
-      expect(vi.mocked(installPlatform).mock.calls[0]![3]).not.toHaveProperty(
+      expect(vi.mocked(installPlatform).mock.calls[0][3]).not.toHaveProperty(
         'replaceOutsideChanges',
       );
       expect(state.cfRunner).not.toHaveBeenCalled();
@@ -1595,7 +1595,7 @@ describe('installed platform upgrade', () => {
       const checkpoint = state.createSecrets.mock.calls.at(-1)![0].checkpoint;
       expect(checkpoint.billingPending).toBe('true');
       expect(JSON.parse(checkpoint.billingJson)).toEqual({ STRIPE_PRICE_SOLO: 'price_solo' });
-      expect(vi.mocked(installPlatform).mock.calls[0]![1]).toBe(
+      expect(vi.mocked(installPlatform).mock.calls[0][1]).toBe(
         state.createSecrets.mock.results.at(-1)!.value,
       );
       expect(
@@ -1683,7 +1683,7 @@ describe('installed platform upgrade', () => {
 
         const error = await upgrade().then(
           () => null,
-          (failure: unknown) => failure as Error,
+          (error_: unknown) => error_ as Error,
         );
 
         expect(error?.message).toContain(apiWorker());
@@ -1709,7 +1709,7 @@ describe('installed platform upgrade', () => {
 
         expect(state.getWorkerLastDeployedFrom).toHaveBeenCalledTimes(2);
         expect(installPlatform).toHaveBeenCalledOnce();
-        expect(vi.mocked(installPlatform).mock.calls[0]![3]).not.toHaveProperty(
+        expect(vi.mocked(installPlatform).mock.calls[0][3]).not.toHaveProperty(
           'replaceOutsideChanges',
         );
       });
@@ -1774,7 +1774,7 @@ describe('installed platform upgrade', () => {
 
         const error = await upgrade().then(
           () => null,
-          (failure: unknown) => failure as Error,
+          (error_: unknown) => error_ as Error,
         );
 
         expect(error?.message).toContain(
@@ -1796,7 +1796,7 @@ describe('installed platform upgrade', () => {
           `/accounts/account/workers/scripts/${apiWorker()}/versions/${earlierVersion}`,
         );
         expect(installPlatform).toHaveBeenCalledOnce();
-        expect(vi.mocked(installPlatform).mock.calls[0]![3]).not.toHaveProperty(
+        expect(vi.mocked(installPlatform).mock.calls[0][3]).not.toHaveProperty(
           'replaceOutsideChanges',
         );
       });
@@ -1876,7 +1876,7 @@ describe('installed platform upgrade', () => {
         try {
           return await upgrade({ yes: false }).then(
             () => null,
-            (failure: unknown) => failure as Error,
+            (error: unknown) => error as Error,
           );
         } finally {
           vi.mocked(installPlatform).mockImplementation(installer);
@@ -1901,7 +1901,7 @@ describe('installed platform upgrade', () => {
           initialValue: false,
         });
         expect(state.cfRunner).toHaveBeenCalledOnce();
-        expect(state.cfRunner.mock.calls[0]![0]).toMatchObject({
+        expect(state.cfRunner.mock.calls[0][0]).toMatchObject({
           type: 'versions.upload',
           interactive: true,
         });
@@ -1918,7 +1918,7 @@ describe('installed platform upgrade', () => {
         expect(uploaded).toHaveLength(1);
         expect(uploaded[0]).toContain(createdCacheId);
         expect(JSON.stringify(state.manifest!.resources)).not.toContain(createdCacheId);
-        expect(vi.mocked(installPlatform).mock.calls[0]![3]).toMatchObject({
+        expect(vi.mocked(installPlatform).mock.calls[0][3]).toMatchObject({
           replaceOutsideChanges: [apiWorker()],
         });
       });
@@ -1956,7 +1956,7 @@ describe('installed platform upgrade', () => {
           'outer-release',
           'local-release',
         ]);
-        expect(vi.mocked(installPlatform).mock.calls[0]![3]).toMatchObject({
+        expect(vi.mocked(installPlatform).mock.calls[0][3]).toMatchObject({
           replaceOutsideChanges: [apiWorker()],
         });
       });

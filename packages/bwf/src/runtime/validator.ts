@@ -164,8 +164,8 @@ function formRecordToObject(
   const assign = (segments: Array<string>, value: FormEntry): void => {
     let parent: Record<string, unknown> | Array<unknown> = root;
     for (let i = 0; i < segments.length - 1; i++) {
-      const segment = segments[i] as string;
-      const next = segments[i + 1] as string;
+      const segment = segments[i];
+      const next = segments[i + 1];
       const nextIsArray = next === '' || arrayIndex(next) !== null;
       const child = read(parent, segment);
       const childIsContainer = nextIsArray ? Array.isArray(child) : isContainerRecord(child);
@@ -177,7 +177,7 @@ function formRecordToObject(
       }
       parent = container;
     }
-    write(parent, segments[segments.length - 1] as string, value);
+    write(parent, segments.at(-1) as string, value);
   };
 
   for (const [key, raw] of Object.entries(record)) {

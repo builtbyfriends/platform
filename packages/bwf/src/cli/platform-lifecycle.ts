@@ -3,8 +3,8 @@ import {
   createPlatformResourceNames,
   normalizeApplicationDomain,
   normalizeInstallationSlug,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   confirm,
   isCancel,
@@ -38,8 +38,8 @@ import {
   PlatformCloudflareApiError,
   PlatformRuntimeTokenEmailPermissionError,
   verifyPlatformRuntimeTokenPermissions,
-  type CloudflareAccount,
 } from './platform-cloudflare.ts';
+import type { CloudflareAccount } from './platform-cloudflare.ts';
 import {
   selectInstallationAuthentication,
   collectInstallationAuthentication,
@@ -63,8 +63,8 @@ import {
   createPlatformInstallPlan,
   formatPlatformInstallPlan,
   revalidatePlatformInstallAction,
-  type PlatformExternalHyperdrive,
 } from './platform-plan.ts';
+import type { PlatformExternalHyperdrive } from './platform-plan.ts';
 import { createPlatformProgress, withPlatformProgress } from './platform-progress.ts';
 import {
   acquirePlatformLifecycleLock,
@@ -334,7 +334,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
           (install) => install.deployment.installationSlug === slug,
         );
         if (process.stdin.isTTY && matches.length > 0) {
-          let selected = matches[0]!;
+          let selected = matches[0];
           if (matches.length > 1) {
             const choice = await select({
               message: `Which ${slug} installation do you want to resume?`,
@@ -1628,10 +1628,10 @@ async function selectAccount(
         `platform: Cloudflare account ${JSON.stringify(selector)} is ambiguous. Use --account <id> to select a specific account.`,
       );
     }
-    return matches[0]!.id;
+    return matches[0].id;
   }
   if (accounts.length === 1) {
-    return accounts[0]!.id;
+    return accounts[0].id;
   }
   if (!process.stdin.isTTY) {
     throw new Error(

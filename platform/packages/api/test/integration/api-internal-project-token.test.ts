@@ -14,11 +14,8 @@ import { signJwt } from '../../src/auth/jwt.ts';
 import { createResource, upsertProjectCredential } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import { encryptProjectSecret } from '../../src/project-secrets.ts';
-import {
-  deriveProxyInternalAuth,
-  deriveProxyToken,
-  type ProxyInternalRoute,
-} from '../../src/proxy-token.ts';
+import { deriveProxyInternalAuth, deriveProxyToken } from '../../src/proxy-token.ts';
+import type { ProxyInternalRoute } from '../../src/proxy-token.ts';
 import { credentialSecretName } from '../../src/routes/internal-credential.ts';
 import { deployments, projects } from '../../src/schema.ts';
 import {
@@ -30,8 +27,8 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -112,7 +109,7 @@ async function proxyRequest(projectId: string, aiToken: string) {
         fetch: (input: string | Request, init?: RequestInit) =>
           app.fetch(new Request(input, init), env),
       },
-    } as never,
+    },
   );
   return { response, run };
 }

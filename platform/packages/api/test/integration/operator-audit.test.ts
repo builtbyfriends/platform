@@ -9,8 +9,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;
@@ -213,7 +213,7 @@ test('records complete and partial 207 mutation outcomes as failed', async () =>
   const events = await env.db.select().from(operatorEvents);
   expect(events).toHaveLength(2);
   expect(
-    JSON.parse(events.find((event) => event.action === 'workers/rollback-all')!.target!),
+    JSON.parse(events.find((event) => event.action === 'workers/rollback-all')!.target),
   ).toMatchObject({ versions: { 'email-gateway': 'previous' } });
   expect(events).toEqual(
     expect.arrayContaining([

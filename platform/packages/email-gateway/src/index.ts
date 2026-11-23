@@ -20,7 +20,7 @@ const MAX_CONCURRENT_DELIVERIES = 2;
 const CONFIRMATION_PATH = '/email/destinations/confirm';
 const MAX_CONFIRMATION_TOKEN_LENGTH = 4 * 1024;
 const MAX_CONFIRMATION_RESPONSE_BYTES = 32 * 1024;
-const CONFIRMATION_DEADLINE_MS = 5_000;
+const CONFIRMATION_DEADLINE_MS = 5000;
 let activeDeliveries = 0;
 
 class MimeHeaderError extends Error {
@@ -95,7 +95,7 @@ async function resolveIngress(
     native?: true;
   },
 ): Promise<Route | null> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 5000;
   const controller = new AbortController();
   const beforeDeadline = async <T>(run: () => Promise<T>): Promise<T> => {
     const remaining = deadline - Date.now();
@@ -391,11 +391,9 @@ async function ingress(request: Request, env: Env, ctx: ExecutionContext): Promi
     };
     let stub: Fetcher;
     try {
-      stub = (
-        route.limits
-          ? env.DISPATCH.get(route.workerName, {}, { limits: route.limits })
-          : env.DISPATCH.get(route.workerName)
-      ) as Fetcher;
+      stub = route.limits
+        ? env.DISPATCH.get(route.workerName, {}, { limits: route.limits })
+        : env.DISPATCH.get(route.workerName);
     } catch (error) {
       console.error('[email-gateway] tenant dispatch stub unavailable:', error);
       return new Response(null, { status: 503 });
@@ -495,7 +493,7 @@ async function probe(request: Request, env: Env): Promise<Response> {
   }
   const bytes = new Uint8Array(1024);
   let size = 0;
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 5000;
   try {
     while (true) {
       const remaining = deadline - Date.now();
@@ -557,7 +555,7 @@ async function probe(request: Request, env: Env): Promise<Response> {
     env.EMAIL_SIGNING_SECRET,
   );
   const controller = new AbortController();
-  const apiDeadline = Date.now() + 5_000;
+  const apiDeadline = Date.now() + 5000;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const response = await Promise.race([
@@ -667,10 +665,10 @@ async function confirmDestination(request: Request, env: Env): Promise<Response>
   const entries = [...url.searchParams.entries()];
   if (
     entries.length !== 1 ||
-    entries[0]![0] !== 'token' ||
-    !entries[0]![1] ||
-    entries[0]![1].length > MAX_CONFIRMATION_TOKEN_LENGTH ||
-    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(entries[0]![1])
+    entries[0][0] !== 'token' ||
+    !entries[0][1] ||
+    entries[0][1].length > MAX_CONFIRMATION_TOKEN_LENGTH ||
+    !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(entries[0][1])
   ) {
     return confirmationResponse(null, 400);
   }
@@ -684,7 +682,7 @@ async function confirmDestination(request: Request, env: Env): Promise<Response>
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const target = new URL(`https://api${CONFIRMATION_PATH}`);
-    target.searchParams.set('token', entries[0]![1]);
+    target.searchParams.set('token', entries[0][1]);
     // Decision: GET shows the Confirm button and its POST grants consent. Only the method and the token are
     // relayed, not the request body.
     const serviceRequest = env.API.fetch(target.toString(), {

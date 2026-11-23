@@ -132,7 +132,7 @@ describe('promptDeployProjectConfig', () => {
     });
     expect(client.createProject).toHaveBeenCalledWith('new-app');
     expect(config).toEqual({ projectId: 'proj_new', slug: 'new-app' });
-    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
       applicationDomain: 'void.app',
       platform: 'platform',
       platformUrl: 'https://platform.buildwithfriends.dev',

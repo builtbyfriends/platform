@@ -9,9 +9,10 @@ import {
   getCliVersionDeploymentStats,
   getProjectsWithOwnerByIds,
   getSystemStats,
-  type Db,
 } from '../db.ts';
-import { type ApiEnv, isDevBypass } from '../env.ts';
+import type { Db } from '../db.ts';
+import { isDevBypass } from '../env.ts';
+import type { ApiEnv } from '../env.ts';
 import { getRequestsDataset, queryTopProjectTraffic } from '../routes/usage.ts';
 
 /** Derive the base cloud domain from the API request hostname.
@@ -62,13 +63,13 @@ async function checkUrl(
           }
         : {}),
     };
-  } catch (err) {
+  } catch (error) {
     return {
       name,
       ok: false,
       latencyMs: Date.now() - start,
       error:
-        err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
           ? 'Health check timed out after 5 seconds.'
           : 'Could not reach the service.',
     };

@@ -93,7 +93,7 @@ export function truncateUtf8(value: string, maxBytes: number): string {
 
   let end = maxBytes - 3;
 
-  while (end > 0 && (encoded[end]! & 0xc0) === 0x80) {
+  while (end > 0 && (encoded[end] & 0xc0) === 0x80) {
     end--;
   }
 

@@ -36,11 +36,11 @@ import {
   cfSuccess,
   cfError,
   captureQueries,
-  type TestEnv,
   rpcRequest,
   rpcData,
   rpcError,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -1728,7 +1728,7 @@ describe('scheduled() — stale pending domain janitor', () => {
     const activation = await tryActivateDomain(
       bindings,
       env.db,
-      pendingDomain as unknown as Domain,
+      pendingDomain,
       project as unknown as Project,
     );
     expect(activation).toMatchObject({ activated: false, awaitingDeployment: true });
@@ -2701,7 +2701,7 @@ describe('scheduled() — cron-driven auto-activation reconciliation', () => {
     const result = await tryActivateDomain(
       makeBindings(env),
       env.db,
-      pendingRow as unknown as Domain,
+      pendingRow,
       project as unknown as Project,
     );
 

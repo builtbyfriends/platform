@@ -1,11 +1,12 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { parsePlatformResourceOwnershipMarker } from '@builtbyfriends/platform';
 
 /** Attribute infrastructure uploads using the installer's existing ownership proof. */
 export function platformWorkerUploadAttribution(
-  config: Record<string, unknown>,
+  config: Readonly<{ account_id?: unknown; name?: unknown; vars?: unknown }>,
 ): string | undefined {
-  const vars = config.vars as Record<string, unknown> | undefined;
-  if (typeof vars?.PLATFORM_OWNERSHIP_MARKER !== 'string') {
+  const vars = config.vars;
+  if (!isRecord(vars) || typeof vars.PLATFORM_OWNERSHIP_MARKER !== 'string') {
     return undefined;
   }
   try {

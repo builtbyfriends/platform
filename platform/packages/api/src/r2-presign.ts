@@ -81,7 +81,7 @@ function hexToBase64(hex: string): string {
   }
   let bin = '';
   for (let i = 0; i < 32; i += 2) {
-    bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+    bin += String.fromCharCode(Number.parseInt(hex.slice(i, i + 2), 16));
   }
   return btoa(bin);
 }
@@ -92,7 +92,7 @@ function hexToBase64(hex: string): string {
  * separators stripped).
  */
 function formatAmzDate(d: Date): string {
-  return d.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  return d.toISOString().replaceAll(/[:-]|\.\d{3}/g, '');
 }
 
 /**

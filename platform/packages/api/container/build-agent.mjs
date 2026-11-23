@@ -64,7 +64,7 @@ const LOG_FLUSH_MS = 500;
 // single-flight log flush forever (logging would silently stop for the rest of the build);
 // with it the flush retries on the next tick. Also bounds how long the final drain at exit can
 // block before the container terminates.
-const DO_POST_TIMEOUT_MS = 10000;
+const DO_POST_TIMEOUT_MS = 10_000;
 // Decision: BuildManager injects BWF_CLI_VERSION. If absent, use the release manifest copied into this
 // image, not a mutable npm dist-tag or the untrusted app's manifest.
 export const DEFAULT_PLATFORM_CLI_VERSION = bwfPackageJson.version;
@@ -81,18 +81,18 @@ export const DEFAULT_PLATFORM_CLI_VERSION = bwfPackageJson.version;
 
 // Decision: No bytes received for this long aborts the in-flight attempt. Reset by each chunk, so it
 // measures a dead stream, not a slow one.
-export const SOURCE_STALL_TIMEOUT_MS = 20000;
+export const SOURCE_STALL_TIMEOUT_MS = 20_000;
 // Decision: Hard ceiling on the whole download phase, across all attempts. Sized to sit well inside the
 // smallest plan budget (free tier = 10 minutes) so a pathological but never-quite-stalled
 // trickle still leaves most of the budget for the build.
-export const SOURCE_PHASE_BUDGET_MS = 240000;
+export const SOURCE_PHASE_BUDGET_MS = 240_000;
 // Decision: Attempts per build, including the first.
 export const SOURCE_DOWNLOAD_MAX_ATTEMPTS = 3;
 export const SOURCE_RETRY_BACKOFF_MS = [2000, 5000];
 // Decision: How often the download logs progress, so a stalled download is visible in the live tail and
 // the check-run tail. The check run keeps the last 100 lines and the phase is capped at 4
 // minutes, so this can add at most about 16 lines.
-export const SOURCE_PROGRESS_INTERVAL_MS = 15000;
+export const SOURCE_PROGRESS_INTERVAL_MS = 15_000;
 // Decision: How long a killed `tar` gets between SIGTERM and SIGKILL. A child that ignores SIGTERM
 // mustn't be able to hold the retry loop, and so the phase budget, open.
 export const EXTRACT_KILL_GRACE_MS = 5000;
@@ -209,7 +209,7 @@ let bufferedBytes = 0;
 // much. `record()` evicts the oldest lines in a chunk once over this cap. The /logs pull is a
 // best-effort tail, so a far-behind puller misses the very start; `seq` stays monotonic, so
 // `since` queries over retained lines are still exact.
-export const MAX_BUFFERED_LOG_LINES = 10000;
+export const MAX_BUFFERED_LOG_LINES = 10_000;
 
 // Decision: Companion byte cap on the same ring. The line cap bounds the count, not the size: at
 // MAX_PARTIAL_LINE_CHARS each, 10000 retained lines is about 1.22 GiB of live strings, and a
@@ -230,7 +230,7 @@ export const MAX_BUFFERED_LOG_BYTES = 16 * 1024 * 1024;
 // per-line byte cap (MAX_PARTIAL_LINE_CHARS) bounds one line's size but not the count of short
 // lines, so this bounds the count too. `record()` evicts the oldest entries once over the cap,
 // keeping the most recent output; the retained PULL history is bounded separately.
-export const MAX_PENDING_LOG_LINES = 10000;
+export const MAX_PENDING_LOG_LINES = 10_000;
 
 // Decision: Per-response bounds on `GET /logs?since=N`.
 //
@@ -662,7 +662,7 @@ export function startControlServer(port = PORT) {
         lines.push(entry);
         responseBytes += entryBytes;
       }
-      const servedSeq = lines.length > 0 ? lines[lines.length - 1].seq : lastSeq;
+      const servedSeq = lines.length > 0 ? lines.at(-1).seq : lastSeq;
       // Decision: Explicit, because the puller can't infer it: it doesn't know our caps, and a page that
       // lands exactly on one looks like the last page. Without it the puller waits a full tick per
       // page, and the exit barrier's idle deadline resets only when the acknowledged cursor
@@ -719,7 +719,7 @@ export function startControlServer(port = PORT) {
 // pulled is never acked. That costs a slot for `idleTimeoutMs` on a container that's already
 // failing, which is the right side of the trade against losing its logs.
 export const LOG_DRAIN_IDLE_TIMEOUT_MS = 8000;
-export const LOG_DRAIN_ABSOLUTE_TIMEOUT_MS = 120000;
+export const LOG_DRAIN_ABSOLUTE_TIMEOUT_MS = 120_000;
 export const LOG_DRAIN_POLL_MS = 100;
 
 /** @param {number} ms */
@@ -897,7 +897,7 @@ export const SECONDARY_RATE_LIMIT_PATTERN = /secondary rate limit|abuse detectio
 export const ERROR_BODY_SNIFF_BYTES = 2048;
 
 // Decision: Fallback wait for a rate limit that names no delay (GitHub advises >= 60s).
-export const SECONDARY_RATE_LIMIT_DELAY_MS = 60000;
+export const SECONDARY_RATE_LIMIT_DELAY_MS = 60_000;
 
 export function parseRetryAfterMs(headers, now = Date.now()) {
   if (!headers || typeof headers.get !== 'function') {
@@ -1297,13 +1297,13 @@ export async function downloadSource(options = {}) {
         progressIntervalMs,
       });
       return;
-    } catch (err) {
+    } catch (error) {
       lastError = /** @type {Error & { retryable?: boolean }} */ (
-        err instanceof Error ? err : new Error(String(err))
+        error instanceof Error ? error : new Error(String(error))
       );
       // Decision: A cancel isn't a download failure and mustn't be retried.
       if (isCancelled()) {
-        throw new Error('build cancelled');
+        throw new Error('build cancelled', { cause: error });
       }
       if (lastError.retryable !== true || attempt >= maxAttempts) {
         break;
@@ -1313,7 +1313,7 @@ export async function downloadSource(options = {}) {
       const backoff =
         typeof lastError.retryAfterMs === 'number' && lastError.retryAfterMs >= 0
           ? lastError.retryAfterMs
-          : (backoffMs[attempt - 1] ?? backoffMs[backoffMs.length - 1] ?? 0);
+          : (backoffMs[attempt - 1] ?? backoffMs.at(-1) ?? 0);
       // Decision: Don't sleep into the deadline just to be refused at the top of the loop. This also keeps a
       // long `retry-after` from parking the whole build: a delay that doesn't fit the phase budget
       // ends the download now.
@@ -1456,7 +1456,7 @@ async function downloadSourceAttempt(args) {
     agentLog(
       `source extracted (${formatBytes(bytes)} in ${formatDuration(elapsed)}, ${formatRate(bytes, elapsed)})`,
     );
-  } catch (err) {
+  } catch (error) {
     // Decision: An abort surfaces as a generic AbortError from fetch or the pipeline, so the watchdog's
     // reason is the only thing that says which bound was hit.
     if (abortReason) {
@@ -1465,16 +1465,16 @@ async function downloadSourceAttempt(args) {
     // Decision: A cancel isn't a transport failure and mustn't be retried; the loop's own `isCancelled()`
     // check owns it. Pass it through untouched.
     if (cancelled) {
-      throw err;
+      throw error;
     }
     // Decision: Anything already classified (an HTTP status, a non-zero `tar`) keeps its verdict.
-    if (err instanceof Error && typeof (/** @type {any} */ (err).retryable) === 'boolean') {
-      throw err;
+    if (error instanceof Error && typeof (/** @type {any} */ (error).retryable) === 'boolean') {
+      throw error;
     }
     // Decision: Everything else reaching here came off the wire: `fetch` rejecting with `TypeError: fetch
     // failed`, or the body stream erroring mid-transfer so `pipeline` rejects. Those are the most
     // ordinary transient failures, so retry them; `maxAttempts` and the phase budget bound it.
-    throw sourceError(err instanceof Error ? err.message : String(err), true);
+    throw sourceError(error instanceof Error ? error.message : String(error), true);
   } finally {
     clearInterval(watchdog);
   }
@@ -2087,8 +2087,8 @@ export async function runBuild(deps = {}) {
     });
     agentLog(`bwf deploy exited with code ${deployCode}`);
     return deployCode;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     record(`[build-agent] fatal: ${message}`, 'stderr');
     return 1;
   }
@@ -2163,10 +2163,10 @@ async function main() {
 // the control server or spawning build steps.
 const isEntrypoint = argv[1] && import.meta.url === pathToFileURL(argv[1]).href;
 if (isEntrypoint) {
-  main().catch((err) => {
+  main().catch((error) => {
     // Decision: Last-resort guard: main() already wraps its body, but don't let an unhandled rejection
     // leave the container hanging without an exit code.
-    console.error(err);
+    console.error(error);
     process.exit(1);
   });
 }

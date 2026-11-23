@@ -1,7 +1,5 @@
-import {
-  parsePlatformLoginConfiguration,
-  type PlatformLoginConfiguration,
-} from '@builtbyfriends/platform';
+import { parsePlatformLoginConfiguration } from '@builtbyfriends/platform';
+import type { PlatformLoginConfiguration } from '@builtbyfriends/platform';
 import { and, eq, sql } from 'drizzle-orm';
 import { getPlatformCapabilities } from '../capabilities.ts';
 import type { Db } from '../db.ts';
@@ -323,6 +321,6 @@ export async function stageLoginConfiguration(
       .update(platformAuthSettings)
       .set({ revision: sql`${platformAuthSettings.revision} + 1` })
       .where(eq(platformAuthSettings.singleton, true));
-    return connection!;
+    return connection;
   });
 }

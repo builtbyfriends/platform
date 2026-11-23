@@ -199,7 +199,7 @@ describe('ensurePreviouslyDeployedLiveBindingConfig', () => {
       true,
     );
 
-    const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'));
+    const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'));
     expect(wrangler.durable_objects.bindings).toContainEqual({
       name: 'BWF_LIVE_a1b2c3d4',
       class_name: 'PlatformLiveStreamDurableObject_a1b2c3d4',
@@ -241,7 +241,7 @@ describe('resolveDeployLiveBindingConfig', () => {
       }),
     ).resolves.toBeUndefined();
 
-    const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8'));
+    const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'));
     expect(wrangler.migrations).toBeUndefined();
   });
 
@@ -432,6 +432,6 @@ describe('toManifestSchedulesAndQueues', () => {
       },
       { name: 'jobs', bindingName: 'QUEUE_JOBS' },
     ]);
-    expect(Object.keys(queues[1]!)).toEqual(['name', 'bindingName']);
+    expect(Object.keys(queues[1])).toEqual(['name', 'bindingName']);
   });
 });

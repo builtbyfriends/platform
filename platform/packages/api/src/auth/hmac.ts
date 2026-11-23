@@ -52,7 +52,7 @@ export async function hmacSignState(data: string, secret: string): Promise<strin
   const key = await getSignKey(secret);
   const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
   const binary = String.fromCharCode(...new Uint8Array(sig));
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 export async function hmacVerifyState(
@@ -63,7 +63,7 @@ export async function hmacVerifyState(
   const key = await getVerifyKey(secret);
   let sigBytes: Uint8Array<ArrayBuffer>;
   try {
-    const padded = signature.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = signature.replaceAll('-', '+').replaceAll('_', '/');
     const binary = atob(padded);
     sigBytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   } catch {

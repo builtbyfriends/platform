@@ -1,6 +1,6 @@
 import { platformProjectHostname, readPlatformApplication } from '@builtbyfriends/platform';
 import { sql as drizzleSql } from 'drizzle-orm';
-import { type Context } from 'hono';
+import type { Context } from 'hono';
 import { deleteDispatchScript } from '../cf-api.ts';
 import {
   getProject,
@@ -16,17 +16,17 @@ import {
 } from '../db.ts';
 import { sendDeployFailedEmail } from '../email.ts';
 import type { ApiEnv } from '../env.ts';
-import { type DeployLogger } from '../observability/logger.ts';
+import type { DeployLogger } from '../observability/logger.ts';
 import { ProjectAccessDeniedError } from '../project-access.ts';
 import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { deleteSandboxController } from '../provisioning/sandbox-controller.ts';
 import { projectRouteKey } from '../routing.ts';
-import {
-  type DeployManifest,
-  type DeployEvent,
-  type Deployment,
-  type Project,
-  type DeploymentStatus,
+import type {
+  DeployManifest,
+  DeployEvent,
+  Deployment,
+  Project,
+  DeploymentStatus,
 } from '../types.ts';
 import {
   resolveProjectZeroTrustRoutingForPublication,
@@ -107,23 +107,23 @@ export async function recoverFailedDeployment(input: {
   const msg = sanitizeDeployErrorMessage(raw);
   if (msg !== raw) {
     logger.error('catch', 'raw_error_before_sanitization', err, {
-      workerName: workerName,
+      workerName,
       currentPhase: currentStep,
     });
   }
   logger.error('catch', 'pipeline_error', err, {
     currentPhase: currentStep,
-    routingSwitched: routingSwitched,
-    workerUploaded: workerUploaded,
+    routingSwitched,
+    workerUploaded,
   });
 
   if (!routingSwitched && input.wfpMirroredManifestDeploymentId) {
     const id = input.wfpMirroredManifestDeploymentId;
     input.wfpMirroredManifestDeploymentId = null;
-    await context.env.ROUTING.delete(`manifest:${id}`).catch((e) =>
+    await context.env.ROUTING.delete(`manifest:${id}`).catch((error) =>
       logger.warn('catch', 'mirrored_manifest_evict_failed', {
         deploymentId: id,
-        err: e instanceof Error ? e.message : String(e),
+        err: error instanceof Error ? error.message : String(error),
       }),
     );
   }
@@ -277,18 +277,18 @@ export async function recoverFailedDeployment(input: {
 
     const compensationErrors: Array<unknown> = [];
     if (!cutoverCommitted) {
-      await restoreTrackedQueueConsumers().catch((e) => {
-        compensationErrors.push(e);
-        logger.error('catch', 'queue_consumer_rollback_failed', e);
+      await restoreTrackedQueueConsumers().catch((error) => {
+        compensationErrors.push(error);
+        logger.error('catch', 'queue_consumer_rollback_failed', error);
       });
     }
-    await restoreTrackedRouting().catch((e) => {
-      compensationErrors.push(e);
-      logger.error('catch', 'routing_rollback_failed', e);
+    await restoreTrackedRouting().catch((error) => {
+      compensationErrors.push(error);
+      logger.error('catch', 'routing_rollback_failed', error);
     });
-    await restoreTrackedCronState().catch((e) => {
-      compensationErrors.push(e);
-      logger.error('catch', 'cron_rollback_failed', e);
+    await restoreTrackedCronState().catch((error) => {
+      compensationErrors.push(error);
+      logger.error('catch', 'cron_rollback_failed', error);
     });
 
     // Decision: Snapshot compensation is per surface and can partly fail. Retry once when an exact undo failed,
@@ -362,8 +362,8 @@ export async function recoverFailedDeployment(input: {
       await fetch(workerUploadUrl, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${context.env.CF_API_TOKEN}` },
-      }).catch((e) =>
-        logger.error('catch', 'orphan_worker_delete_failed', e, {
+      }).catch((error) =>
+        logger.error('catch', 'orphan_worker_delete_failed', error, {
           workerName: failedWorkerName,
         }),
       );
@@ -452,14 +452,16 @@ export async function recoverFailedDeployment(input: {
     const latest = await getDeployment(context.get('db'), failedDeployment.id);
     const wasCanceled =
       latest && CANCELLATION_REQUESTED_DEPLOYMENT_STATUSES.includes(latest.status);
-    await restoreTrackedRouting().catch((e) => logger.error('catch', 'routing_rollback_failed', e));
+    await restoreTrackedRouting().catch((error) =>
+      logger.error('catch', 'routing_rollback_failed', error),
+    );
     await deleteDispatchScript(
       context.env.CF_ACCOUNT_ID,
       context.env.CF_API_TOKEN,
       failedDispatchNamespace,
       failedWorkerName,
-    ).catch((e) =>
-      logger.error('catch', 'worker_script_cleanup_failed', e, {
+    ).catch((error) =>
+      logger.error('catch', 'worker_script_cleanup_failed', error, {
         workerName: failedWorkerName,
       }),
     );
@@ -483,8 +485,8 @@ export async function recoverFailedDeployment(input: {
     emit({ event: 'error', message: msg, step: currentStep });
     if (!wasCanceled && context.env.EMAIL && owner.email) {
       const notification = sendDeployFailedEmail(context.env, owner.email, project.slug, msg).catch(
-        (err) =>
-          logger.error('catch', 'failed_email_send_failed', err, {
+        (error) =>
+          logger.error('catch', 'failed_email_send_failed', error, {
             projectSlug: project.slug,
           }),
       );

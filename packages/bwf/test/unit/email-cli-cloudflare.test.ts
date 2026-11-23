@@ -5,11 +5,8 @@ import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
 import { log } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import {
-  SENDING_FREE_PLAN_HINT,
-  type EmailDns,
-  type EmailWranglerRunResult,
-} from '../../src/cli/email-cloudflare.ts';
+import { SENDING_FREE_PLAN_HINT } from '../../src/cli/email-cloudflare.ts';
+import type { EmailDns, EmailWranglerRunResult } from '../../src/cli/email-cloudflare.ts';
 import { runEmailCloudflareCommand, runEmailCommand } from '../../src/cli/email.ts';
 import * as terminalOutput from '../../src/cli/output.ts';
 
@@ -39,7 +36,7 @@ function routingSettings(name: string, status: string, enabled = true): EmailWra
   return {
     status: 0,
     stdout: '',
-    data: { name, enabled: enabled, status, tag: ZONE_ID },
+    data: { name, enabled, status, tag: ZONE_ID },
     stderr: BETA_WARNING,
   };
 }
@@ -101,7 +98,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function fakeFetch(table: Record<string, () => Response>, calls: Array<FetchCall>): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
@@ -120,7 +117,7 @@ function fakeFetch(table: Record<string, () => Response>, calls: Array<FetchCall
       throw new Error(`unexpected fetch: ${key}`);
     }
     return hit();
-  }) as typeof fetch;
+  };
 }
 
 function fakeDns(mx: Record<string, Array<string>>): EmailDns {
@@ -142,9 +139,9 @@ function fakeDns(mx: Record<string, Array<string>>): EmailDns {
 function captureLog(): { lines: Array<string>; restore: () => void } {
   const lines: Array<string> = [];
   const spies = (['message', 'info', 'warn', 'error', 'success', 'step'] as const).map((level) =>
-    vi.spyOn(log, level).mockImplementation(((...args: Array<unknown>) => {
+    vi.spyOn(log, level).mockImplementation((...args: Array<unknown>) => {
       lines.push(args.map(String).join(' '));
-    }) as never),
+    }),
   );
   const success = vi.spyOn(terminalOutput, 'printSuccess').mockImplementation((message) => {
     lines.push(message);
@@ -183,11 +180,11 @@ async function run(
       },
     );
     return 0;
-  } catch (err) {
-    if (err instanceof ExitSignal) {
-      return err.code;
+  } catch (error) {
+    if (error instanceof ExitSignal) {
+      return error.code;
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -253,11 +250,11 @@ function transcriptDeps(
 }
 
 function readJsonc(path: string): Record<string, unknown> {
-  const text = readFileSync(path, 'utf-8')
+  const text = readFileSync(path, 'utf8')
     .split('\n')
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n')
-    .replace(/,(\s*[}\]])/g, '$1');
+    .replaceAll(/,(\s*[}\]])/g, '$1');
   return JSON.parse(text) as Record<string, unknown>;
 }
 
@@ -319,7 +316,7 @@ const sendingRefused: EmailWranglerRunResult = {
   stdout: '',
   data: '',
   stderr: `${BETA_WARNING}✘ [ERROR] A request to the Cloudflare API (/zones/${ZONE_ID}/email/sending/subdomains) failed.\n\n  something went wrong [code: 10105]\n`,
-  errorCode: 10105,
+  errorCode: 10_105,
 };
 const sendingOnboarded: EmailWranglerRunResult = {
   status: 0,
@@ -337,7 +334,7 @@ const subdomainsListed = (names: Array<string>) => () =>
 const sendingRefusedByApi = () =>
   jsonResponse(403, {
     success: false,
-    errors: [{ code: 10105, message: 'email.sending.error.authentication.not_entitled' }],
+    errors: [{ code: 10_105, message: 'email.sending.error.authentication.not_entitled' }],
     result: null,
   });
 
@@ -432,7 +429,7 @@ describe('sending-only email setup and status', () => {
     const { root, configPath, deps, calls, fetchCalls, printed } = savedSendingOnly({
       fetchTable: { [`POST ${SENDING_SUBDOMAINS}`]: sendingRefusedByApi },
     });
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirms: Array<string> = [];
     const logged = captureLog();
     let code: number;
@@ -466,7 +463,7 @@ describe('sending-only email setup and status', () => {
     expect(output).toContain('Zone Read + Email Sending Edit');
     expect(output).not.toContain('verified destinations only');
     expect(logged.lines.join('\n')).toContain('Follow the Workers Paid steps above.');
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
   });
 });
 
@@ -519,7 +516,7 @@ describe('bwf email setup --platform cloudflare', () => {
       expect(call.url).not.toContain(BEARER);
     }
 
-    const written = readFileSync(configPath, 'utf-8');
+    const written = readFileSync(configPath, 'utf8');
     expect(written).toContain('// the pinned account');
     expect(readJsonc(configPath)).toEqual({
       account_id: ACCOUNT,
@@ -551,7 +548,7 @@ describe('bwf email setup --platform cloudflare', () => {
   it('declined: nothing is written or called after the checklist', async () => {
     const root = makeProject();
     roots.push(root);
-    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf8');
     const { deps, calls, fetchCalls } = transcriptDeps();
 
     const code = await run(root, 'setup', {
@@ -561,7 +558,7 @@ describe('bwf email setup --platform cloudflare', () => {
     });
 
     expect(code).toBe(0);
-    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(before);
     expect(calls.map((c) => c.args[0])).toEqual(['whoami', 'email', 'email', 'email', 'email']);
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
@@ -570,7 +567,7 @@ describe('bwf email setup --platform cloudflare', () => {
   it('non-interactive and not ready: checklist, exit 1, no writes (CI cannot press Enter)', async () => {
     const root = makeProject();
     roots.push(root);
-    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf8');
     const { deps, calls, fetchCalls, printed } = transcriptDeps();
     const confirm = vi.fn(async () => true);
 
@@ -581,7 +578,7 @@ describe('bwf email setup --platform cloudflare', () => {
     expect(printed[0]).toContain(
       'This changes YOUR Cloudflare account. acme.com itself is not touched.',
     );
-    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(before);
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
   });
@@ -633,7 +630,7 @@ describe('bwf email setup --platform cloudflare', () => {
         [`PATCH /zones/${ZONE_ID}/email/routing`]: () =>
           jsonResponse(403, {
             success: false,
-            errors: [{ code: 10000, message: 'Authentication error' }],
+            errors: [{ code: 10_000, message: 'Authentication error' }],
           }),
       },
       mx: {},
@@ -684,7 +681,7 @@ describe('bwf email setup --platform cloudflare', () => {
           stdout: '',
           data: '',
           stderr: `${BETA_WARNING}✘ [ERROR] A request to the Cloudflare API (/zones/${ZONE_ID}/email/sending/subdomains) failed.\n\n  something went wrong [code: 10105]\n`,
-          errorCode: 10105,
+          errorCode: 10_105,
         },
       },
       fetchTable: {
@@ -721,7 +718,7 @@ describe('bwf email setup --platform cloudflare', () => {
     const { root, configPath, deps, calls, fetchCalls, printed } = freeAfterSetup({
       runnerTable: { 'email sending enable mail.acme.com': sendingRefused },
     });
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirms: Array<string> = [];
     const logged = captureLog();
     let code: number;
@@ -758,7 +755,7 @@ describe('bwf email setup --platform cloudflare', () => {
     expect(printed.at(-1)).toContain(
       'outbound  sendEmail() from noreply@mail.acme.com   (verified destinations only)',
     );
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
     expect(logged.lines.join('\n')).toContain('Email set up on mail.acme.com.');
   });
 
@@ -766,7 +763,7 @@ describe('bwf email setup --platform cloudflare', () => {
     const { root, configPath, deps, calls, printed } = freeAfterSetup({
       runnerTable: { 'email sending enable mail.acme.com': sendingEnabled('mail.acme.com') },
     });
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const logged = captureLog();
     let code: number;
     try {
@@ -784,13 +781,13 @@ describe('bwf email setup --platform cloudflare', () => {
         '    outbound  sendEmail() from noreply@mail.acme.com',
       ].join('\n'),
     );
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
     expect(logged.lines.join('\n')).toContain('Email set up on mail.acme.com.');
   });
 
   it('Workers Free after `setup`, retry declined: nothing changed, no `enable` call, no write', async () => {
     const { root, configPath, deps, calls, fetchCalls } = freeAfterSetup();
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirms: Array<string> = [];
     const logged = captureLog();
     let code: number;
@@ -812,12 +809,12 @@ describe('bwf email setup --platform cloudflare', () => {
     expect(logged.lines).toContain('Nothing changed.');
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('Workers Free after `setup`, non-interactive: the retry is never run unasked — exit 1, no `enable` call', async () => {
     const { root, configPath, deps, calls } = freeAfterSetup();
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirm = vi.fn(async () => true);
 
     const code = await run(root, 'setup', { ...deps, isInteractive: false, confirm });
@@ -825,14 +822,14 @@ describe('bwf email setup --platform cloudflare', () => {
     expect(code).toBe(1);
     expect(confirm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('second run, everything ready: no prompt, zero writes, config unchanged, exit 0', async () => {
     const { root, configPath, deps, calls, fetchCalls, printed } = freeAfterSetup({
       runnerTable: { 'email sending settings mail.acme.com': sendingOnboarded },
     });
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirm = vi.fn(async () => true);
 
     const code = await run(root, 'setup', { ...deps, isInteractive: false, confirm });
@@ -841,7 +838,7 @@ describe('bwf email setup --platform cloudflare', () => {
     expect(confirm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
     expect(printed[0]).toContain('    rules     support@mail.acme.com → acme-support   (ready)');
     expect(printed[0]).not.toContain('\n    + ');
   });
@@ -904,7 +901,7 @@ describe('bwf email status --platform cloudflare', () => {
       },
     });
     const { getSessionBearer: _injectedBearer, ...defaultBearerDeps } = deps;
-    const runWrangler = defaultBearerDeps.runWrangler!;
+    const runWrangler = defaultBearerDeps.runWrangler;
     const temporaryConfigPaths: Array<string> = [];
     defaultBearerDeps.runWrangler = (operation, options) => {
       const temporaryConfigPath = operation.configPath as string;
@@ -926,7 +923,7 @@ describe('bwf email status --platform cloudflare', () => {
       expect(fetchCalls.every((call) => call.method === 'GET')).toBe(true);
       expect(temporaryConfigPaths.length).toBeGreaterThan(0);
       expect(new Set(temporaryConfigPaths).size).toBe(1);
-      expect(existsSync(temporaryConfigPaths[0] as string)).toBe(false);
+      expect(existsSync(temporaryConfigPaths[0])).toBe(false);
       expect(calls.every((call) => call.operation.configPath === temporaryConfigPaths[0])).toBe(
         true,
       );
@@ -946,7 +943,7 @@ describe('bwf email status --platform cloudflare', () => {
   it('not ready: status rows + address map, exit 1, read-only', async () => {
     const root = makeProject();
     roots.push(root);
-    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf8');
     const { deps, calls, fetchCalls, printed } = transcriptDeps();
     const confirm = vi.fn(async () => true);
 
@@ -956,7 +953,7 @@ describe('bwf email status --platform cloudflare', () => {
     expect(confirm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
-    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(before);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(before);
 
     expect(printed).toHaveLength(2);
     expect(printed[0]).toContain('    routing   mail.acme.com  not enabled · subaddressing off');
@@ -971,7 +968,7 @@ describe('bwf email status --platform cloudflare', () => {
 
   it('Workers Free after `setup` (binding committed, sending still not onboarded): exit 0, the row says what works and how to retry', async () => {
     const { root, configPath, deps, calls, fetchCalls, printed } = freeAfterSetup();
-    const before = readFileSync(configPath, 'utf-8');
+    const before = readFileSync(configPath, 'utf8');
     const confirm = vi.fn(async () => true);
     const logged = captureLog();
     let code: number;
@@ -985,7 +982,7 @@ describe('bwf email status --platform cloudflare', () => {
     expect(confirm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.args.includes('enable'))).toBe(false);
     expect(fetchCalls.every((c) => c.method === 'GET')).toBe(true);
-    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
     expect(printed[0]).toContain(
       '    sending   mail.acme.com  not onboarded — verified destinations only; after upgrading to Workers Paid run bwf email setup --platform cloudflare',
     );

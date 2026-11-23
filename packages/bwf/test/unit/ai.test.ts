@@ -63,7 +63,7 @@ describe('runtime ai', () => {
           body: { messages: [] },
           signal: controller.signal,
         });
-        const init = request.mock.calls[0]![1];
+        const init = request.mock.calls[0][1];
         expect(init.signal).toBe(controller.signal);
         const payload = JSON.parse(init.body as string);
         expect(payload).not.toHaveProperty('signal');
@@ -481,12 +481,9 @@ describe('runtime ai', () => {
         __PLATFORM_PROXY_URL: 'https://proxy.test',
       },
       async () => {
-        const result = await ai.run(
-          '@cf/black-forest-labs/flux-1-schnell' as keyof AiModels,
-          {
-            prompt: 'a small robot',
-          } as never,
-        );
+        const result = await ai.run('@cf/black-forest-labs/flux-1-schnell' as keyof AiModels, {
+          prompt: 'a small robot',
+        });
 
         expect(result).toBeInstanceOf(Blob);
         expect((result as Blob).type).toBe('image/png');

@@ -4,8 +4,8 @@ import {
   classifySqlMigration,
   getMigrationPlanHashInput,
   MIGRATION_CLASSIFIER_VERSION,
-  type MigrationPlanHashInput,
 } from '@builtbyfriends/deploy-core';
+import type { MigrationPlanHashInput } from '@builtbyfriends/deploy-core';
 
 export type ServerMigrationPlan = {
   name: string;
@@ -31,7 +31,7 @@ export async function validateSubmittedExecutionPlans(
     return 'executionPlans must match migrations length';
   }
   for (let index = 0; index < migrations.length; index++) {
-    const migration = migrations[index]!;
+    const migration = migrations[index];
     const plan = plans[index]!;
     if (plan.name !== migration.name) {
       return `executionPlans[${index}].name must match migrations[${index}].name`;

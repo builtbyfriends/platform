@@ -52,8 +52,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -691,7 +691,7 @@ describe('builds', () => {
     )) as {
       rows: ReadonlyArray<{ now: string }>;
     };
-    const fence = fenceRes.rows[0]!.now;
+    const fence = fenceRes.rows[0].now;
 
     const reused = await supersedeAndCreateContainerBuild(env.db, {
       projectId: project.id,
@@ -770,7 +770,7 @@ describe('builds', () => {
     const c1Builds = await getProjectBuilds(env.db, project.id);
     const queuedC1 = c1Builds.filter((b) => b.commit_sha === 'C1' && b.status === 'queued');
     expect(queuedC1).toHaveLength(1);
-    expect(queuedC1[0]!.id).toBe(rollback.build!.id);
+    expect(queuedC1[0].id).toBe(rollback.build!.id);
 
     const redeliver = await supersedeAndCreateContainerBuild(env.db, {
       projectId: project.id,
@@ -827,7 +827,7 @@ describe('builds', () => {
       .select({ active: projects.active_deployment_id })
       .from(projects)
       .where(eq(projects.id, project.id));
-    expect(projRow!.active).toBe(depB.id);
+    expect(projRow.active).toBe(depB.id);
 
     const rollback = await supersedeAndCreateContainerBuild(env.db, {
       projectId: project.id,
@@ -2026,7 +2026,7 @@ describe('createGithubActionsBuildWithinLimit', () => {
 
     const all = await getProjectBuilds(env.db, project.id);
     expect(all).toHaveLength(1);
-    expect(all[0]!.status).toBe('building');
+    expect(all[0].status).toBe('building');
   });
 
   it('does NOT supersede an active Actions build on a DIFFERENT branch', async () => {
@@ -2948,7 +2948,7 @@ describe('github_installations', () => {
 
     const byUser = await getGitHubInstallationsByUser(env.db, user.id);
     expect(byUser).toHaveLength(1);
-    expect(byUser[0]!.installation_id).toBe('555');
+    expect(byUser[0].installation_id).toBe('555');
   });
 
   it('setGitHubInstallationRepositories replaces the repo list', async () => {

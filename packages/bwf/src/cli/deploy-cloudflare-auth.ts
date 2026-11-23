@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import {
-  CloudflareWorkerInspectionError,
-  type CloudflareCommandResult,
-  type ExistingCloudflareWorker,
+import { CloudflareWorkerInspectionError } from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import { isCI as ciInfoIsCI } from 'ci-info';
 import {
@@ -22,7 +23,7 @@ import { createCloudflareProcessRunner, isCleanCloudflareExit } from './cloudfla
 import { log } from './deploy-helpers.ts';
 import { CloudflareAuthSecretError, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { deployChildEnv } from './deploy-transport.ts';
-import { type DeployWranglerRun, type DeployWranglerRunResult } from './deploy-types.ts';
+import type { DeployWranglerRun, DeployWranglerRunResult } from './deploy-types.ts';
 import {
   listSelfHostSecretNames,
   SelfHostFirstDeployError,
@@ -79,7 +80,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
       // Decision: Authentication works. Keep the original Worker or permission error.
       throw error;
     }
-    const loggedOut = (identity.data as { loggedIn?: unknown } | undefined)?.loggedIn === false;
+    const loggedOut = isRecord(identity.data) && identity.data.loggedIn === false;
     const authenticationError =
       loggedOut ||
       wrongAccount ||
@@ -89,12 +90,14 @@ export async function prepareExistingCloudflareDeployWithAuth(
     if (!authenticationError || identity.signal || identity.error) {
       throw new Error(
         'Could not verify the Cloudflare session after the Worker check failed. Run `bwf cloudflare status` and retry.',
+        { cause: error },
       );
     }
     const overrides = cloudflareCredentialOverrides();
     if (overrides.length > 0) {
       throw new Error(
         `Cloudflare credentials from ${overrides.join(', ')} were rejected or cannot access account ${options.accountId}. Correct or unset them, then retry the deploy.`,
+        { cause: error },
       );
     }
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -102,6 +105,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
         wrongAccount
           ? `The Cloudflare session cannot access account ${options.accountId}. Run \`bwf cloudflare login\` with the correct user, or set a token for that account in CI, then retry.`
           : 'Cloudflare authentication expired or is unavailable. Run `bwf cloudflare login` in a terminal, or set CLOUDFLARE_API_TOKEN in CI, then retry.',
+        { cause: error },
       );
     }
     log.warn(
@@ -119,6 +123,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
     if (!authenticated.accounts.some((account) => account.id === options.accountId)) {
       throw new Error(
         `The signed-in Cloudflare user cannot access account ${options.accountId}. Sign in with a user who can access it, then retry.`,
+        { cause: error },
       );
     }
     if (!beforeRun()) {
@@ -145,7 +150,7 @@ export async function chooseCloudflareDeployAccount(options: {
     configPath: existsSync(options.configPath) ? options.configPath : undefined,
   });
   const accounts = session.accounts;
-  let account = accounts[0]!;
+  let account = accounts[0];
   if (accounts.length > 1) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       throw new Error(
@@ -191,6 +196,23 @@ export type WranglerAuthTokenResult =
   | { ok: true; token: string }
   | { ok: false; failure: CloudflareCommandResult };
 
+function fail(
+  status: number,
+  signal: NodeJS.Signals | null | undefined,
+  stderr: string,
+): WranglerAuthTokenResult {
+  return {
+    ok: false,
+    // Decision: A clean status here would read as a successful upload.
+    failure: {
+      status: status === 0 ? 1 : status,
+      ...(!!signal && { signal }),
+      stdout: '',
+      stderr,
+    },
+  };
+}
+
 /**
  * Read the current Cloudflare session bearer through the pinned deploy runner, for API calls
  * bwf makes itself. The token goes only to the caller. A failure is built fresh from the
@@ -201,20 +223,6 @@ export async function readWranglerAuthToken(
   runWrangler: DeployWranglerRun,
   configPath: string,
 ): Promise<WranglerAuthTokenResult> {
-  const fail = (
-    status: number,
-    signal: NodeJS.Signals | null | undefined,
-    stderr: string,
-  ): WranglerAuthTokenResult => ({
-    ok: false,
-    // Decision: A clean status here would read as a successful upload.
-    failure: {
-      status: status === 0 ? 1 : status,
-      ...(signal ? { signal } : {}),
-      stdout: '',
-      stderr,
-    },
-  });
   let result: DeployWranglerRunResult;
   try {
     result = await Promise.resolve(
@@ -227,7 +235,7 @@ export async function readWranglerAuthToken(
       `${describeCloudflareChildFailure({ status: 1, error: getErrorMessage(error) })}.`,
     );
   }
-  const parsed = result.data as { type?: unknown; token?: unknown } | null | undefined;
+  const parsed = isRecord(result.data) ? result.data : undefined;
   if (!isCleanCloudflareExit(result)) {
     // Decision: A Global API Key session has no bearer; the child marks it so the next step can be named.
     if (parsed?.type === 'api_key' && !result.error && !result.signal) {

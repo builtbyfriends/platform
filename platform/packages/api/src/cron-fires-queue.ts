@@ -63,12 +63,12 @@ async function invokeWorker(
         new Request('https://internal/__scheduled', { method: 'POST', headers, body }),
       );
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     // Decision: Not retried: see the at-most-once note in processCronFiresBatch.
     return {
       responseReceived: false,
-      unreachable: isWorkerNotFoundError(err),
+      unreachable: isWorkerNotFoundError(error),
       bodySnippet: msg,
     };
   }

@@ -1,13 +1,6 @@
 import { auth, fetch as bwfFetch } from '@builtbyfriends/bwf/client';
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useState,
-  type ComponentType,
-  type FormEvent,
-  type ReactNode,
-} from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import type { ComponentType, FormEvent, ReactNode } from 'react';
 
 const sections: Record<string, () => ReactNode> = {
   '/': Home,

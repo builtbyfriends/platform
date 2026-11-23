@@ -6,7 +6,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 it.each([
   ['/usr/local/bin/bwf-dev', 'bwf-dev'],
-  ['C:\\tools\\bwf-dev.cmd', 'bwf-dev'],
+  [String.raw`C:\tools\bwf-dev.cmd`, 'bwf-dev'],
   ['/usr/local/bin/bwf', 'bwf'],
   ['/checkout/packages/bwf/dist/cli/cli.mjs', 'bwf'],
   ['/tmp/untrusted-command', 'bwf'],

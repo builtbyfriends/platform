@@ -9,7 +9,7 @@ describe('platformConnectCommand', () => {
     ['http://127.0.0.1:8787', "bwf connect '127.0.0.1:8787'"],
     ['http://[::1]:8787', "bwf connect '[::1]:8787'"],
     ['https://localhost:8787', "bwf connect 'https://localhost:8787'"],
-    ["https://a'b.example.com", "bwf connect 'a'\\''b.example.com'"],
+    ["https://a'b.example.com", String.raw`bwf connect 'a'\''b.example.com'`],
   ])('generates a copyable command for %s', (url, command) => {
     expect(platformConnectCommand(url)).toBe(command);
   });

@@ -68,9 +68,8 @@ import {
   evaluateAiLimit,
   evaluateSandboxRuntimeLimit,
   UsageCounter,
-  type CounterState,
-  type UsageEvent,
 } from '../../src/usage-counter.ts';
+import type { CounterState, UsageEvent } from '../../src/usage-counter.ts';
 
 vi.mock('../../src/routes/usage.ts', () => ({
   queryProjectAiUsage: vi.fn(async () => ({ neurons: 0 })),
@@ -1144,7 +1143,7 @@ describe('UsageCounter ownership changes', () => {
       billingPeriodInitialized: true,
       totalRequests: 10_000_000,
       totalNeurons: 100_001,
-      totalSandboxSeconds: 30 * 3_600,
+      totalSandboxSeconds: 30 * 3600,
       requestsSuspended: true,
       aiSuspended: true,
       sandboxRuntimeSuspended: true,
@@ -1901,7 +1900,7 @@ describe('UsageCounter operation ordering and persistence', () => {
       await resume.promise;
       await realPut(key, value);
     };
-    const first = counter.fetch(recordRequest([sandboxInterval(from, from + 2_000, 3)], 'u1'));
+    const first = counter.fetch(recordRequest([sandboxInterval(from, from + 2000, 3)], 'u1'));
     await writing.promise;
     const initialize = counter.fetch(
       new Request('https://do/init', {
@@ -1913,7 +1912,7 @@ describe('UsageCounter operation ordering and persistence', () => {
         }),
       }),
     );
-    const second = counter.fetch(recordRequest([sandboxInterval(from, from + 3_000, 5)], 'u1'));
+    const second = counter.fetch(recordRequest([sandboxInterval(from, from + 3000, 5)], 'u1'));
     resume.resolve();
     await Promise.all([first, initialize, second]);
     expect(storage.data.get('state')).toMatchObject({
@@ -1970,7 +1969,7 @@ describe('UsageCounter operation ordering and persistence', () => {
       throw new Error('KV unavailable');
     };
     const from = Date.now() - 60_000;
-    const record = counter.fetch(recordRequest([sandboxInterval(from, from + 2_000)], 'u1'));
+    const record = counter.fetch(recordRequest([sandboxInterval(from, from + 2000)], 'u1'));
     const failed = expect(record).rejects.toThrow('KV unavailable');
     await suspending.promise;
     let stateRead = false;
@@ -2142,7 +2141,7 @@ describe('UsageCounter durable sandbox receipts', () => {
     const { counter, storage } = makeCounter({ plan: 'pro' });
     const event = sandboxInterval(from, from + 10_000);
     await counter.fetch(recordRequest([event], 'u1'));
-    const originalKey = Array.from(storedWatermarks(storage).keys())[0]!;
+    const originalKey = Array.from(storedWatermarks(storage).keys())[0];
     // Decision: Seeds the durable record shape directly, so the test doesn't need 10,000 simulated requests to
     // reach the old eviction threshold.
     for (let i = 0; i < 10_000; i++) {

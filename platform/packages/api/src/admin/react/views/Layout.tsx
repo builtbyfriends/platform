@@ -18,7 +18,8 @@ import {
   Terminal,
   Users,
 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { formatPlatformPageTitle } from '../../../platform-identity.ts';
 import { useNavigation, useRouter } from '../spa.tsx';
 import { BwfLogo } from './BwfLogo.tsx';

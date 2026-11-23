@@ -1,10 +1,12 @@
 import type { CloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
-import { isRecord } from '@builtbyfriends/deploy-core';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 
+// oxlint-disable-next-line quality/no-unknown-returns -- Cloudflare API reads are untrusted and narrowed at each use
 type ReadCloudflare = (path: string) => Promise<unknown>;
 
-function record(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null;
+function record(value: unknown): JsonObject | null {
+  return isJsonObject(value) ? value : null;
 }
 
 function sameStrings(actual: ReadonlyArray<string>, expected: ReadonlyArray<string>): boolean {
@@ -15,7 +17,7 @@ function sameStrings(actual: ReadonlyArray<string>, expected: ReadonlyArray<stri
   );
 }
 
-function desiredQueue(value: unknown): Record<string, unknown> | null {
+function desiredQueue(value: unknown): JsonObject | null {
   const queue = record(value);
   if (
     !queue ||
@@ -44,7 +46,7 @@ function desiredQueue(value: unknown): Record<string, unknown> | null {
 
 function matchesQueueConsumer(
   liveValue: unknown,
-  desired: Record<string, unknown>,
+  desired: JsonObject,
   workerName: string,
 ): boolean {
   const live = record(liveValue);
@@ -113,7 +115,7 @@ export async function platformWorkerLiveTriggersMatch(options: {
       (!desired.preserveWorkersDev && subdomain.enabled !== desired.workers_dev) ||
       (!desired.preservePreviewUrls && subdomain.previews_enabled !== desired.preview_urls) ||
       !Array.isArray(schedules) ||
-      !Array.isArray(worker.references && record(worker.references)?.queues) ||
+      !isJsonArray(record(worker.references)?.queues) ||
       !Array.isArray(workflowsValue) ||
       workflowsValue.length >= 100 ||
       !Array.isArray(nextWorkflowsValue) ||
@@ -124,7 +126,7 @@ export async function platformWorkerLiveTriggersMatch(options: {
     const liveCrons = schedules.map((entry) => record(entry)?.cron);
     if (
       !liveCrons.every((cron) => typeof cron === 'string') ||
-      !sameStrings(liveCrons as Array<string>, desired.crons as Array<string>) ||
+      !sameStrings(liveCrons, desired.crons) ||
       workflowsValue.some((entry) => {
         const workflow = record(entry);
         return (
@@ -136,8 +138,8 @@ export async function platformWorkerLiveTriggersMatch(options: {
     ) {
       return false;
     }
-    const references = record(worker.references)!.queues as Array<unknown>;
-    if (references.length !== queues.length) {
+    const references = record(worker.references)?.queues;
+    if (!isJsonArray(references) || references.length !== queues.length) {
       return false;
     }
     const matched = new Set<string>();

@@ -16,8 +16,8 @@ import {
   selectPlatformConnection,
   listInstallationManifests,
   platformConnectionSlug,
-  type PlatformConnection,
 } from './platform-registry.ts';
+import type { PlatformConnection } from './platform-registry.ts';
 
 function normalizePlatformInputUrl(input: string): string {
   const value = input.trim();
@@ -81,7 +81,7 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
     throw new Error('platform: No platforms configured. Run `bwf connect <url>`.');
   }
   if (connections.length === 1) {
-    return selectPlatformConnection(connections[0]!.id);
+    return selectPlatformConnection(connections[0].id);
   }
   if (!process.stdin.isTTY) {
     throw new Error(

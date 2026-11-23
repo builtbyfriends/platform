@@ -6,12 +6,10 @@
  * room's Durable Object, so they can broadcast or close connections locally.
  */
 import type { WebSocketRouteMap } from '@builtbyfriends/bwf/routes';
-import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw.ts';
-import {
-  buildWebSocketInstanceId,
-  __getWebSocketRoute,
-  type WebSocketRouteMeta,
-} from './ws-server.ts';
+import { getRawRuntimeEnv } from './env-raw.ts';
+import type { RuntimeEnv } from './env-raw.ts';
+import { buildWebSocketInstanceId, __getWebSocketRoute } from './ws-server.ts';
+import type { WebSocketRouteMeta } from './ws-server.ts';
 import type { RoomActionContext } from './ws.ts';
 
 type RouteParamsOf<P extends keyof WebSocketRouteMap> = WebSocketRouteMap[P] extends {
@@ -62,14 +60,15 @@ type RoomActionRequest = {
   params: Record<string, string>;
 };
 
-type RoomActionStub = {
+type RoomActionTarget = Rpc.DurableObjectBranded & {
   __platformRoomAction(request: RoomActionRequest): Promise<unknown>;
 };
+type RoomActionStub = DurableObjectStub<RoomActionTarget>;
 
 function resolveRoomBinding(
   route: WebSocketRouteMeta,
   explicitEnv: RuntimeEnv | undefined,
-): DurableObjectNamespace {
+): DurableObjectNamespace<RoomActionTarget> {
   let env: RuntimeEnv;
   if (explicitEnv) {
     env = explicitEnv;
@@ -82,7 +81,7 @@ function resolveRoomBinding(
       );
     }
   }
-  const binding = env[route.bindingName] as DurableObjectNamespace | undefined;
+  const binding = env[route.bindingName] as DurableObjectNamespace<RoomActionTarget> | undefined;
   if (!binding) {
     throw new Error(`ws: Missing Durable Object binding "${route.bindingName}".`);
   }
@@ -94,17 +93,20 @@ function createActionProxy(
   id: string,
   params: Record<string, string>,
 ): Record<string, (...args: Array<unknown>) => Promise<unknown>> {
-  return new Proxy({} as Record<string, (...args: Array<unknown>) => Promise<unknown>>, {
-    get(_target, property) {
-      // Decision: `await` and `Promise.resolve` read `then`. Returning a function there would
-      // dispatch an action named "then" with resolver callbacks it cannot clone.
-      if (typeof property !== 'string' || property === 'then') {
-        return undefined;
-      }
-      return (...args: Array<unknown>) =>
-        stub.__platformRoomAction({ name: property, args, id, params });
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        // Decision: `await` and `Promise.resolve` read `then`. Returning a function there would
+        // dispatch an action named "then" with resolver callbacks it cannot clone.
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
+        return (...args: Array<unknown>) =>
+          stub.__platformRoomAction({ name: property, args, id, params });
+      },
     },
-  });
+  );
 }
 
 export function getRoom<P extends RoomPath & string>(
@@ -138,6 +140,6 @@ export function getRoom(
   }
   const binding = resolveRoomBinding(route, options.env);
   const id = buildWebSocketInstanceId(route, params);
-  const stub = binding.get(binding.idFromName(id)) as unknown as RoomActionStub;
+  const stub = binding.get(binding.idFromName(id));
   return { actions: createActionProxy(stub, id, params) } as RoomHandle<RoomPath & string>;
 }

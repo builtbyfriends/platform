@@ -17,9 +17,7 @@ describe('platform storage location', () => {
         appAccess: 'public',
       });
       expect(deployment.schemaVersion).toBe(6);
-      expect(parsePlatformDeploymentManifest(JSON.parse(JSON.stringify(deployment)))).toEqual(
-        deployment,
-      );
+      expect(parsePlatformDeploymentManifest(structuredClone(deployment))).toEqual(deployment);
       expect(workerConfigs({ deployment }).api.vars).toHaveProperty('R2_LOCATION_HINT', 'apac');
       expect(workerConfigs().api.vars).not.toHaveProperty('R2_LOCATION_HINT');
       expect(() =>

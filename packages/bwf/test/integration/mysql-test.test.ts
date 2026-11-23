@@ -1,4 +1,5 @@
-import { execSync, type ChildProcess } from 'node:child_process';
+import { execSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -6,9 +7,10 @@ import {
   killChild,
   spawnPlaygroundServer,
   startServer,
-  type StartedServer,
 } from '../../../../test/integration-helpers.ts';
-import { startFakeMySqlServer, type FakeMySqlServer } from '../helpers/fake-mysql-server.ts';
+import type { StartedServer } from '../../../../test/integration-helpers.ts';
+import { startFakeMySqlServer } from '../helpers/fake-mysql-server.ts';
+import type { FakeMySqlServer } from '../helpers/fake-mysql-server.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = join(ROOT, 'playground/mysql-test');

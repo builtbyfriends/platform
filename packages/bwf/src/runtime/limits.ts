@@ -1,4 +1,5 @@
-import { readUsageLimit, usageLimitResponse, type UsageLimitData } from '@builtbyfriends/edge';
+import { readUsageLimit, usageLimitResponse } from '@builtbyfriends/edge';
+import type { UsageLimitData } from '@builtbyfriends/edge';
 export { readUsageLimit, type UsageLimitData } from '@builtbyfriends/edge';
 
 export class UsageLimit extends Error {
@@ -54,7 +55,7 @@ export async function limitFromResponse(
   const retry = response.headers.get('retry-after');
   const retryTime =
     retry === null
-      ? NaN
+      ? Number.NaN
       : /^\d+$/.test(retry)
         ? Date.now() + Number(retry) * 1000
         : Date.parse(retry);

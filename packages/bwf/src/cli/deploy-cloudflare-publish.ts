@@ -6,10 +6,8 @@ import {
 } from '@builtbyfriends/deploy-cloudflare';
 import { readVersionMetadataBinding } from '../shared/version-metadata.ts';
 import { createActiveSecretPinner } from './cf-version-runner.ts';
-import {
-  clearCloudflareCandidate,
-  type CloudflareCandidateReceipt,
-} from './cloudflare-candidate.ts';
+import { clearCloudflareCandidate } from './cloudflare-candidate.ts';
+import type { CloudflareCandidateReceipt } from './cloudflare-candidate.ts';
 import type { CloudflareChildReporter } from './cloudflare-child-report.ts';
 import type { CloudflareBuild } from './deploy-cloudflare-build.ts';
 import {
@@ -26,8 +24,8 @@ import type { CloudflareDeploySource, CloudflarePreflight } from './deploy-cloud
 import { log } from './deploy-helpers.ts';
 import { formatCloudflareSandboxUnavailable, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { formatDeploySummary } from './deploy-summary.ts';
-import { type CloudflareDeployDeps } from './deploy-types.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CloudflareDeployDeps } from './deploy-types.ts';
+import type { CliLogger } from './log-file.ts';
 import { note } from './output.ts';
 import { readWranglerManagedQueueCleanupCandidates } from './wrangler.ts';
 
@@ -99,47 +97,52 @@ export async function publishCloudflareWorker(input: {
     output: cfOutput,
     handoffPending: pinnedHandoffLink !== null,
     requiredNames: schemaFacts.requiredKeys,
-    ...(initialAuthSecret ? { explicitNames: [BETTER_AUTH_SECRET_NAME] } : {}),
+    ...(!!initialAuthSecret && { explicitNames: [BETTER_AUTH_SECRET_NAME] }),
   });
   const hasVersionMetadata =
     readVersionMetadataBinding(parseRootWranglerConfig(generatedConfigPath)) !== undefined;
-  const execution = await activateCloudflareVersionWithProgress(
-    deps.activateVersion ?? activateCloudflareVersion,
-    {
-      ...cloudflareCandidateActivationOptions({
-        root,
-        rootConfigPath: configPath,
-        uploadConfigPath: generatedConfigPath,
-        accountId,
-        apiBaseUrl,
-        complianceRegion,
-        workerName,
-        workersDevSubdomain,
-        readinessAccessOrigin,
-        runWrangler,
-        readExistingWorker: deps.readExistingWorker,
-        existingWorker,
-        pinnedHandoffLink,
-        initialCloudflareCandidate,
-        assertUploaderStillPinned,
-        queueConsumerCleanup,
-      }),
-      runWrangler: activationRunner,
-      verifyUploader: cfOutput ? cfUploaderIsPinned : assertUploaderStillPinned,
-      requireVersionMetadata: existingWorker === null || hasVersionMetadata,
-      requirePreviewForReadiness: existingWorker !== null && !hasVersionMetadata,
-      message: encodeCloudflareVersionMessage(input.migration.migrationHistory, {
-        ...readCloudflareTriggerConfig(generatedConfigPath, configPath),
-        ...(existingWorker ? { preserve: true } : {}),
-      }),
-      allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
-      ...(pinActiveSecrets ? { pinActiveSecrets } : {}),
-      atomic,
-      ...(initialAuthSecret
-        ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
-        : {}),
-    },
-  ).finally(() => cfOutput?.dispose());
+  let execution: Awaited<ReturnType<typeof activateCloudflareVersionWithProgress>>;
+  try {
+    execution = await activateCloudflareVersionWithProgress(
+      deps.activateVersion ?? activateCloudflareVersion,
+      {
+        ...cloudflareCandidateActivationOptions({
+          root,
+          rootConfigPath: configPath,
+          uploadConfigPath: generatedConfigPath,
+          accountId,
+          apiBaseUrl,
+          complianceRegion,
+          workerName,
+          workersDevSubdomain,
+          readinessAccessOrigin,
+          runWrangler,
+          readExistingWorker: deps.readExistingWorker,
+          existingWorker,
+          pinnedHandoffLink,
+          initialCloudflareCandidate,
+          assertUploaderStillPinned,
+          queueConsumerCleanup,
+        }),
+        runWrangler: activationRunner,
+        verifyUploader: cfOutput ? cfUploaderIsPinned : assertUploaderStillPinned,
+        requireVersionMetadata: existingWorker === null || hasVersionMetadata,
+        requirePreviewForReadiness: existingWorker !== null && !hasVersionMetadata,
+        message: encodeCloudflareVersionMessage(input.migration.migrationHistory, {
+          ...readCloudflareTriggerConfig(generatedConfigPath, configPath),
+          ...(!!existingWorker && { preserve: true }),
+        }),
+        allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
+        ...(!!pinActiveSecrets && { pinActiveSecrets }),
+        atomic,
+        ...(!!initialAuthSecret && {
+          candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret },
+        }),
+      },
+    );
+  } finally {
+    await cfOutput?.dispose();
+  }
   if (!execution.ok) {
     if (
       execution.reason === 'atomic-readiness-failed' ||

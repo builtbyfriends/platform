@@ -2,12 +2,12 @@ import { execFile, spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import {
-  parseCloudflareVersionMessage,
-  type CloudflareCommandResult,
-  type CloudflareCommandRunner,
-  type CloudflareOperation,
-  type CloudflareVersionActivationOptions,
+import { parseCloudflareVersionMessage } from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  CloudflareCommandRunner,
+  CloudflareOperation,
+  CloudflareVersionActivationOptions,
 } from '@builtbyfriends/deploy-cloudflare';
 import { isRecord as record } from '@builtbyfriends/deploy-core';
 import { getWorkerConfigPath, readBuildOutput } from '@cloudflare/build-output-utils';
@@ -20,14 +20,12 @@ import {
 } from './cf-command-values.ts';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 import { getCfCliVersion } from './cf-user-agent.ts';
-import {
-  isSecretBindingType,
-  uploadPinnedCloudflareVersion,
-  type CfCommand,
-} from './cf-version-api.ts';
+import { isSecretBindingType, uploadPinnedCloudflareVersion } from './cf-version-api.ts';
+import type { CfCommand } from './cf-version-api.ts';
 import { publishCloudflareWorkerSettings } from './cf-worker-settings.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import type { WranglerAuthTokenResult } from './deploy-cloudflare-auth.ts';
+import { Buffer } from './node-buffer.ts';
 
 function failed(message: string): CloudflareCommandResult {
   return { status: 1, stdout: '', stderr: message };
@@ -40,7 +38,7 @@ function credentialFailed(
 ): CloudflareCommandResult {
   return {
     status: failure.status,
-    ...(failure.signal ? { signal: failure.signal } : {}),
+    ...(!!failure.signal && { signal: failure.signal }),
     stdout: '',
     stderr: `${header}: ${failure.stderr}`,
   };
@@ -60,6 +58,25 @@ function publishesWorkerSettings(message: string | undefined): boolean {
     metadata.triggerConfig.observability !== undefined ||
     metadata.triggerConfig.logpush !== undefined
   );
+}
+
+type VersionItem = { id: string; number: number; [key: string]: unknown };
+
+function readVersionItems(body: unknown, pageSize: number): Array<VersionItem> | null {
+  if (!Array.isArray(body) || body.length > pageSize) {
+    return null;
+  }
+  const items: Array<VersionItem> = [];
+  for (const item of body) {
+    if (!record(item) || typeof item.id !== 'string' || typeof item.number !== 'number') {
+      return null;
+    }
+    if (!Number.isSafeInteger(item.number)) {
+      return null;
+    }
+    items.push({ ...item, id: item.id, number: item.number });
+  }
+  return new Set(items.map((item) => item.number)).size === items.length ? items : null;
 }
 
 function parseJson(value: string): unknown {
@@ -119,7 +136,7 @@ export async function pinActiveWorkerSecrets(options: {
   if (!record(worker) || (worker.env !== undefined && !record(worker.env))) {
     return false;
   }
-  const env = (worker.env ?? {}) as Record<string, unknown>;
+  const env = worker.env ?? {};
   for (const [name, value] of Object.entries(env)) {
     if (
       record(value) &&
@@ -298,8 +315,8 @@ export function createCfCommand(options: {
         if (processGroup && child.pid) {
           try {
             process.kill(-child.pid, 'SIGKILL');
-          } catch (cause) {
-            if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') {
+          } catch (error_) {
+            if (!(record(error_) && error_.code === 'ESRCH')) {
               child.kill('SIGKILL');
             }
           }
@@ -357,7 +374,7 @@ export function createCfCommand(options: {
         }
         const output = Buffer.concat(stdout).toString('utf8');
         const diagnostic = Buffer.concat(stderr).toString('utf8');
-        const completed = typeof status === 'number' && signal == null && error == null;
+        const completed = typeof status === 'number' && signal === null && error === null;
         const code = completed
           ? (output + '\n' + diagnostic).match(/\[(?:code:\s*)?(\d{4,})\]/)?.[1]
           : undefined;
@@ -372,22 +389,40 @@ export function createCfCommand(options: {
           args[1] === 'versions' &&
           args[2] === 'create' &&
           (output + '\n' + diagnostic)
-            .replace(/\s+/g, ' ')
+            .replaceAll(/\s+/g, ' ')
             .includes('You cannot upload a new version of a Worker that does not yet exist.');
         resolve({
           status: typeof status === 'number' ? status : 1,
           stdout: output,
           stderr: diagnostic,
-          ...(code ? { errorCode: Number(code) } : {}),
-          ...(missingUploadTarget ? { failure: 'not-found' as const } : {}),
-          ...(completed && status !== 0
-            ? { errors: [{ message: output + '\n' + diagnostic }] }
-            : {}),
+          ...(!!code && { errorCode: Number(code) }),
+          ...(missingUploadTarget && { failure: 'not-found' as const }),
+          ...(completed && status !== 0 && { errors: [{ message: output + '\n' + diagnostic }] }),
           signal,
           error,
         });
       });
     });
+  };
+}
+
+function uploadedResult(result: CloudflareCommandResult): CloudflareCommandResult {
+  if (!isCleanCloudflareExit(result)) {
+    return result;
+  }
+  if (record(result.data) && typeof result.data.versionId === 'string') {
+    return result;
+  }
+  const { versionId, previewUrl, workersDevUrl } = readCfUploadOutput(result);
+  return {
+    ...result,
+    data: versionId
+      ? {
+          versionId,
+          ...(!!previewUrl && { previewUrl }),
+          ...(!!workersDevUrl && { workersDevUrl }),
+        }
+      : undefined,
   };
 }
 
@@ -412,25 +447,6 @@ export function createCfVersionRunner(options: {
     const result = await runCf(args, { cwd, capture });
     return { ...result, data: result.data ?? parseJson(result.stdout) };
   };
-  const uploadedResult = (result: CloudflareCommandResult): CloudflareCommandResult => {
-    if (!isCleanCloudflareExit(result)) {
-      return result;
-    }
-    if (record(result.data) && typeof result.data.versionId === 'string') {
-      return result;
-    }
-    const { versionId, previewUrl, workersDevUrl } = readCfUploadOutput(result);
-    return {
-      ...result,
-      data: versionId
-        ? {
-            versionId,
-            ...(previewUrl ? { previewUrl } : {}),
-            ...(workersDevUrl ? { workersDevUrl } : {}),
-          }
-        : undefined,
-    };
-  };
   // Decision: The session bearer is read before upload, so a deploy that can't get one (Global API Key session,
   // broken helper child) stops while traffic is unchanged. The pinned upload reuses it. The settings
   // publisher, which runs after traffic moves, reads again so an OAuth token that expired during the
@@ -454,9 +470,9 @@ export function createCfVersionRunner(options: {
     let credential: WranglerAuthTokenResult;
     try {
       credential = await credentials.getToken();
-    } catch (cause) {
+    } catch (error) {
       if (sessionToken === undefined) {
-        throw cause;
+        throw error;
       }
       return { ok: true, token: sessionToken };
     }
@@ -533,8 +549,8 @@ export function createCfVersionRunner(options: {
         apiBaseUrl: options.pinnedUpload.apiBaseUrl,
         workerName,
         token,
-        ...(operation.message ? { message: operation.message } : {}),
-        ...(operation.secretsFilePath ? { secretsFilePath: operation.secretsFilePath } : {}),
+        ...(!!operation.message && { message: operation.message }),
+        ...(!!operation.secretsFilePath && { secretsFilePath: operation.secretsFilePath }),
         atomic,
         verifyUploader: options.pinnedUpload.verifyUploader,
         runCf,
@@ -543,11 +559,11 @@ export function createCfVersionRunner(options: {
       return {
         status: 0,
         stdout: '',
-        data: { versionId: version.id, ...(preview ? { previewUrl: preview } : {}) },
+        data: { versionId: version.id, ...(!!preview && { previewUrl: preview }) },
         stderr: '',
       };
-    } catch (cause) {
-      return failed(cause instanceof Error ? cause.message : 'Cloudflare version upload failed.');
+    } catch (error) {
+      return failed(error instanceof Error ? error.message : 'Cloudflare version upload failed.');
     }
   };
 
@@ -560,7 +576,7 @@ export function createCfVersionRunner(options: {
       const body = result.data;
       const deployments = record(body) ? body.deployments : undefined;
       if (Array.isArray(deployments) && deployments.length === 0) {
-        return { ...failed('The Cloudflare Worker has no deployments.'), errorCode: 10007 };
+        return { ...failed('The Cloudflare Worker has no deployments.'), errorCode: 10_007 };
       }
       if (!Array.isArray(deployments) || !record(deployments[0])) {
         return failed('The Cloudflare Worker deployment was not readable.');
@@ -585,20 +601,7 @@ export function createCfVersionRunner(options: {
           ],
           true,
         );
-        const body = result.data;
-        return {
-          result,
-          versions:
-            Array.isArray(body) &&
-            body.length <= pageSize &&
-            body.every(
-              (item) =>
-                record(item) && typeof item.id === 'string' && Number.isSafeInteger(item.number),
-            ) &&
-            new Set(body.map((item) => item.number)).size === body.length
-              ? body
-              : null,
-        };
+        return { result, versions: readVersionItems(result.data, pageSize) };
       };
       const first = await readPage(1);
       if (!isCleanCloudflareExit(first.result)) {
@@ -617,8 +620,8 @@ export function createCfVersionRunner(options: {
           return failed('The Cloudflare Worker version history was not readable.');
         }
         if (second.versions.length > 0) {
-          const firstNumbers = versions.map((item) => item.number as number);
-          const secondNumbers = second.versions.map((item) => item.number as number);
+          const firstNumbers = versions.map((item) => item.number);
+          const secondNumbers = second.versions.map((item) => item.number);
           if (Math.min(...secondNumbers) > Math.max(...firstNumbers)) {
             versions.push(...second.versions);
             let last = Math.max(...secondNumbers);
@@ -633,7 +636,7 @@ export function createCfVersionRunner(options: {
               if (next.versions.length === 0) {
                 break;
               }
-              const numbers = next.versions.map((item) => item.number as number);
+              const numbers = next.versions.map((item) => item.number);
               if (Math.min(...numbers) <= last) {
                 return failed('The Cloudflare Worker version history changed during inspection.');
               }
@@ -653,7 +656,7 @@ export function createCfVersionRunner(options: {
       }
       return {
         ...first.result,
-        data: versions.sort((a, b) => (a.number as number) - (b.number as number)).slice(-10),
+        data: versions.sort((a, b) => a.number - b.number).slice(-10),
       };
     }
 
@@ -833,7 +836,7 @@ export function createCfVersionRunner(options: {
           return failed('The Cloudflare trigger snapshot was not convertible.');
         }
         const next = migrated.triggers ?? [];
-        const previous = Array.isArray(worker.triggers) ? worker.triggers : [];
+        const previous: Array<unknown> = Array.isArray(worker.triggers) ? worker.triggers : [];
         const preserveRoutes = raw.routes === undefined && raw.route === undefined;
         const preserveEmail = raw.addresses === undefined;
         worker.triggers = [
@@ -910,9 +913,9 @@ export function createCfVersionRunner(options: {
               logpush: raw.logpush,
               headers: { Authorization: `Bearer ${token}` },
             });
-          } catch (cause) {
+          } catch (error) {
             return failed(
-              cause instanceof Error ? cause.message : 'Cloudflare settings update failed.',
+              error instanceof Error ? error.message : 'Cloudflare settings update failed.',
             );
           }
         }
@@ -935,7 +938,9 @@ export function createCfVersionRunner(options: {
       if (!Array.isArray(allQueues)) {
         return failed('The Cloudflare Queue list was not readable.');
       }
-      const queue = allQueues.find((item) => record(item) && item.queue_name === queueName);
+      const queue: unknown = allQueues.find(
+        (item: unknown) => record(item) && item.queue_name === queueName,
+      );
       if (!record(queue) || typeof queue.queue_id !== 'string') {
         return failed(`Cloudflare Queue ${queueName} was not found.`);
       }

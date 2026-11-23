@@ -1,63 +1,107 @@
 import { defineRegistry } from '@builtbyfriends/realtime';
-import * as billing from './procedures/billing.ts';
-import * as credentials from './procedures/credentials.ts';
-import * as database from './procedures/database.ts';
-import * as deploy from './procedures/deploy.ts';
-import * as deployments from './procedures/deployments.ts';
-import * as domains from './procedures/domains.ts';
-import * as finalize from './procedures/finalize.ts';
-import * as me from './procedures/me.ts';
-import * as projects from './procedures/projects.ts';
-import * as secrets from './procedures/secrets.ts';
-import * as team from './procedures/team.ts';
-import * as tokens from './procedures/tokens.ts';
-import * as usage from './procedures/usage.ts';
+import { checkout as billingCheckout } from './procedures/billing.ts';
+import {
+  list as credentialsList,
+  remove as credentialsRemove,
+  set as credentialsSet,
+} from './procedures/credentials.ts';
+import {
+  getUrl as databaseGetUrl,
+  provision as databaseProvision,
+  setUrl as databaseSetUrl,
+} from './procedures/database.ts';
+import {
+  preflight as deployPreflight,
+  uploadUrls as deployUploadUrls,
+  workerUploadUrls as deployWorkerUploadUrls,
+} from './procedures/deploy.ts';
+import { events as deploymentsEvents, list as deploymentsList } from './procedures/deployments.ts';
+import {
+  add as domainsAdd,
+  list as domainsList,
+  remove as domainsRemove,
+  status as domainsStatus,
+} from './procedures/domains.ts';
+import { finalize as finalizeFinalize } from './procedures/finalize.ts';
+import { get as meGet } from './procedures/me.ts';
+import {
+  choices as projectsChoices,
+  create as projectsCreate,
+  get as projectsGet,
+  list as projectsList,
+  resolve as projectsResolve,
+  resources as projectsResources,
+} from './procedures/projects.ts';
+import {
+  list as secretsList,
+  remove as secretsRemove,
+  set as secretsSet,
+} from './procedures/secrets.ts';
+import {
+  invite as teamInvite,
+  leave as teamLeave,
+  listInvitations as teamListInvitations,
+  listMembers as teamListMembers,
+  myInvitations as teamMyInvitations,
+  removeMember as teamRemoveMember,
+  resend as teamResend,
+  respond as teamRespond,
+  revoke as teamRevoke,
+  setRole as teamSetRole,
+} from './procedures/team.ts';
+import {
+  create as tokensCreate,
+  list as tokensList,
+  renew as tokensRenew,
+  revoke as tokensRevoke,
+} from './procedures/tokens.ts';
+import { account as usageAccount, project as usageProject } from './procedures/usage.ts';
 
 /** Every platform procedure. The API Worker serves it at `/rpc`; clients import only its type. */
 export const registry = defineRegistry([
-  billing.checkout,
-  me.get,
-  projects.create,
-  projects.list,
-  projects.choices,
-  projects.resolve,
-  projects.get,
-  projects.resources,
-  finalize.finalize,
-  deploy.preflight,
-  deploy.uploadUrls,
-  deploy.workerUploadUrls,
-  deployments.list,
-  deployments.events,
-  database.provision,
-  database.setUrl,
-  database.getUrl,
-  domains.add,
-  domains.list,
-  domains.status,
-  domains.remove,
-  secrets.list,
-  credentials.set,
-  credentials.list,
-  credentials.remove,
-  secrets.set,
-  secrets.remove,
-  team.listMembers,
-  team.listInvitations,
-  team.invite,
-  team.resend,
-  team.revoke,
-  team.setRole,
-  team.removeMember,
-  team.leave,
-  team.myInvitations,
-  team.respond,
-  tokens.list,
-  tokens.create,
-  tokens.renew,
-  tokens.revoke,
-  usage.account,
-  usage.project,
+  billingCheckout,
+  meGet,
+  projectsCreate,
+  projectsList,
+  projectsChoices,
+  projectsResolve,
+  projectsGet,
+  projectsResources,
+  finalizeFinalize,
+  deployPreflight,
+  deployUploadUrls,
+  deployWorkerUploadUrls,
+  deploymentsList,
+  deploymentsEvents,
+  databaseProvision,
+  databaseSetUrl,
+  databaseGetUrl,
+  domainsAdd,
+  domainsList,
+  domainsStatus,
+  domainsRemove,
+  secretsList,
+  credentialsSet,
+  credentialsList,
+  credentialsRemove,
+  secretsSet,
+  secretsRemove,
+  teamListMembers,
+  teamListInvitations,
+  teamInvite,
+  teamResend,
+  teamRevoke,
+  teamSetRole,
+  teamRemoveMember,
+  teamLeave,
+  teamMyInvitations,
+  teamRespond,
+  tokensList,
+  tokensCreate,
+  tokensRenew,
+  tokensRevoke,
+  usageAccount,
+  usageProject,
 ]);
 
 export type PlatformRegistry = typeof registry;

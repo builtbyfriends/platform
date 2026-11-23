@@ -8,8 +8,10 @@ import {
   setInstallationEndpoints,
   platformDashboardUrl,
   transitionInstallation,
-  type PlatformInstallationManifest,
-  type PlatformLifecycleOperation,
+} from '@builtbyfriends/platform';
+import type {
+  PlatformInstallationManifest,
+  PlatformLifecycleOperation,
 } from '@builtbyfriends/platform';
 import {
   PLATFORM_ADMIN_ASSETS_DIRECTORY,
@@ -53,23 +55,23 @@ import {
   secretCheckpoint,
   createPlatformHealthProbeToken,
 } from './platform-installer-secrets.ts';
-import {
-  type PlatformInstallerDependencies,
-  type PlatformWorkerRollback,
-  type InstallationCheckpointWriter,
-  PlatformWorkerRecoveryIncompleteError,
-  type PlatformInstallationSecrets,
-  type PlatformInstallationResult,
-  type PlatformInstallRunState,
-  type PlatformWorkerKey,
-  type PlatformWorkerSecretUpdateIntent,
-  type InstallerClient,
-  type PlatformHealthCheckContext,
+import { PlatformWorkerRecoveryIncompleteError } from './platform-installer-types.ts';
+import type {
+  PlatformInstallerDependencies,
+  PlatformWorkerRollback,
+  InstallationCheckpointWriter,
+  PlatformInstallationSecrets,
+  PlatformInstallationResult,
+  PlatformInstallRunState,
+  PlatformWorkerKey,
+  PlatformWorkerSecretUpdateIntent,
+  InstallerClient,
+  PlatformHealthCheckContext,
 } from './platform-installer-types.ts';
+import type { runPlatformWrangler } from './platform-installer-workers.ts';
 import {
   recordWorkerCutoverResolution,
   recordWorkerTrafficState,
-  runPlatformWrangler,
   runPlatformWranglerAtApiBase,
   stablePublicEndpointState,
   interruptedWorkerCutover,
@@ -78,11 +80,8 @@ import {
   nextWorkerCutoverGeneration,
   recordWorkerSecretUpdateState,
 } from './platform-installer-workers.ts';
-import {
-  platformWorkersDevUrl,
-  type PlatformInstallPlan,
-  type PlatformInstallPlanAction,
-} from './platform-plan.ts';
+import { platformWorkersDevUrl } from './platform-plan.ts';
+import type { PlatformInstallPlan, PlatformInstallPlanAction } from './platform-plan.ts';
 import {
   latestPlatformWorkerCutoverGeneration,
   platformWorkerSecretUpdateIntentState,
@@ -96,6 +95,14 @@ import { assertPlatformStorageSupported } from './platform-storage.ts';
 import { platformManagedWorkerTraffic } from './platform-traffic.ts';
 
 export { PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY as REMOTE_INSTALLATION_MANIFEST_KEY } from '@builtbyfriends/platform';
+
+type MutablePlatformHealthCheckContext = {
+  -readonly [K in keyof PlatformHealthCheckContext]: PlatformHealthCheckContext[K];
+};
+
+type MutablePlatformInstallationResult = {
+  -readonly [K in keyof PlatformInstallationResult]: PlatformInstallationResult[K];
+};
 
 // Decision: Preserve the routing gate first; rollback and manifest failure checkpoints
 // follow while the database lifecycle lock is still held by the caller.
@@ -117,7 +124,7 @@ async function recoverFailedPlatformInstallation(
     now: () => string;
     writeRemoteInstallationCheckpoint: InstallationCheckpointWriter;
   }>,
-): Promise<unknown> {
+): Promise<Error> {
   const {
     plan,
     dependencies,
@@ -133,7 +140,8 @@ async function recoverFailedPlatformInstallation(
     writeRemoteInstallationCheckpoint,
   } = state;
   let { manifest } = state;
-  let failure: unknown = error;
+  let failure: Error =
+    error instanceof Error ? error : new Error(getErrorMessage(error), { cause: error });
   const currentWorkerRecoveryIncomplete = error instanceof PlatformWorkerRecoveryIncompleteError;
   if (workerTrafficGuarded) {
     try {
@@ -311,7 +319,7 @@ export async function installPlatform(
         name: hyperdriveAction.name,
         user: plan.externalHyperdrive?.user ?? live.origin.user ?? '',
       },
-      ...(recordedHyperdrive ? { recordedHash: recordedHyperdrive.configHash } : {}),
+      recordedHash: recordedHyperdrive?.configHash,
     });
   }
   const runtimeProvenance = {
@@ -604,7 +612,7 @@ export async function installPlatform(
       requiresSandboxDrain ||
       (!!state.plan.deployment.appAccess &&
         !state.manifest.steps.some((step) => step.key === 'app-access-initialized:v1'));
-    const configInput = {
+    const configInput: Parameters<typeof createPlatformWorkerConfigs>[0] = {
       authenticationDatabaseUncached: true,
       proxyHealthBinding: true,
       accountId: state.plan.account.id,
@@ -627,13 +635,15 @@ export async function installPlatform(
         routingKv: requireId(ids, 'routing-kv'),
         zone: zoneId,
       },
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- emailGateway entrypoint is absent when the artifact is, and the config type requires every key
       runtimeEntrypoints: entrypoints as Record<PlatformWorkerKey, string>,
-      ...(runtime.assets
-        ? {
-            runtimeApiAssetsDirectory: join(runtimeDirectory, PLATFORM_ADMIN_ASSETS_DIRECTORY),
-          }
-        : {}),
     };
+    if (runtime.assets) {
+      configInput.runtimeApiAssetsDirectory = join(
+        runtimeDirectory,
+        PLATFORM_ADMIN_ASSETS_DIRECTORY,
+      );
+    }
     const enabledConfigs = createPlatformWorkerConfigs({
       ...configInput,
       privatePreviews: runtime.privatePreviews === 1,
@@ -643,9 +653,10 @@ export async function installPlatform(
     // Decision: The Cloudflare CLI asks the operator before it replaces changes made
     // outside bwf. Let it ask now: the resources that these configs use
     // exist, and this run has not paused traffic or deployed a Worker.
-    const outsideChangeConfigs = workerKeys
-      .map((key) => enabledConfigs[key])
-      .filter((config) => dependencies.replaceOutsideChanges?.includes(String(config.name)));
+    const outsideChangeConfigs = workerKeys.flatMap((key) => {
+      const config = enabledConfigs[key];
+      return dependencies.replaceOutsideChanges?.includes(String(config.name)) ? [config] : [];
+    });
     if (outsideChangeConfigs.length > 0) {
       await dependencies.uploadOutsideChanges?.(outsideChangeConfigs);
     }
@@ -909,13 +920,17 @@ export async function installPlatform(
       !state.manifest.steps.some((step) => step.key === 'app-access-initialized:v1')
     ) {
       dependencies.onProgress?.('Configuring and verifying deployed-app access');
+      const { appAccessSetupJson, appAccessSetupToken } = state.secrets;
+      if (!appAccessSetupJson || !appAccessSetupToken) {
+        throw new Error('platform: The deployed-app access setup credentials are missing.');
+      }
       try {
         await (dependencies.initializeAppAccess ?? initializeInstalledAppAccess)({
           apiUrl: state.plan.apiUrl,
           installationId: state.manifest.id,
           probeToken: createPlatformHealthProbeToken(state.manifest.ownershipNonce),
-          setupJson: state.secrets.appAccessSetupJson!,
-          setupToken: state.secrets.appAccessSetupToken!,
+          setupJson: appAccessSetupJson,
+          setupToken: appAccessSetupToken,
         });
       } catch (error) {
         if (error instanceof PlatformAppAccessCredentialError) {
@@ -938,7 +953,7 @@ export async function installPlatform(
         {
           key: 'app-access-initialized:v1',
           completedAt: now(),
-          resultHash: hash(state.secrets.appAccessSetupJson!),
+          resultHash: hash(appAccessSetupJson),
         },
         now(),
       );
@@ -954,9 +969,8 @@ export async function installPlatform(
       ensurePlatformAccessToken(state.plan.apiUrl, false, true);
       ensurePlatformAccessToken(state.plan.proxyUrl, false, true);
     }
-    const healthCheckContext: PlatformHealthCheckContext = {
+    const healthCheckContext: MutablePlatformHealthCheckContext = {
       accountName: state.plan.account.name,
-      ...(state.plan.deployment.authentication.accessProtection ? { accessProtected: true } : {}),
       workers: [
         state.plan.deployment.resources.apiWorker,
         state.plan.deployment.resources.proxyWorker,
@@ -964,8 +978,13 @@ export async function installPlatform(
         state.plan.deployment.resources.dispatchWorker,
       ],
       resumeCommand: dependencies.healthCheckResumeCommand,
-      ...(emailGatewayUrl ? { emailGatewayUrl } : {}),
     };
+    if (state.plan.deployment.authentication.accessProtection) {
+      healthCheckContext.accessProtected = true;
+    }
+    if (emailGatewayUrl) {
+      healthCheckContext.emailGatewayUrl = emailGatewayUrl;
+    }
     await (dependencies.verifyHealth ?? verifyPlatformHealth)(
       state.plan.apiUrl,
       state.manifest.id,
@@ -1020,7 +1039,12 @@ export async function installPlatform(
           zoneNameServers: zone?.nameServers ?? [],
         };
       }
-      const completedDrain = await prepareSandboxDrain!();
+      if (!prepareSandboxDrain) {
+        throw new Error(
+          'platform: Sandbox drain preparation is unavailable. Traffic remains disabled.',
+        );
+      }
+      const completedDrain = await prepareSandboxDrain();
       if (completedDrain.state !== 'complete') {
         throw new Error(
           'platform: Sandbox drain completion changed while it was being verified. Traffic remains disabled.',
@@ -1072,14 +1096,17 @@ export async function installPlatform(
     writePendingInstallationSecrets(state.manifest, secretCheckpoint(state.secrets));
     promoteInstallationSecrets(state.manifest);
     saveInstalledPlatformConnection(state.plan, state.manifest);
-    return {
+    const result: MutablePlatformInstallationResult = {
       manifest: state.manifest,
-      ...(emailOperationId ? { emailOperationId } : {}),
       setupPending,
       waitingForDns: false,
       waitingForSandboxDrain: false,
       zoneNameServers: zone?.nameServers ?? [],
     };
+    if (emailOperationId) {
+      result.emailOperationId = emailOperationId;
+    }
+    return result;
   } catch (error) {
     throw await recoverFailedPlatformInstallation(error, {
       ...state,

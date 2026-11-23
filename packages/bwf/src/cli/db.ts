@@ -10,19 +10,21 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { confirm, isCancel, outro, log, text } from '@voidzero-dev/vite-plus-prompts';
 import { createJiti } from 'jiti';
 import { basename, dirname, extname, join, relative, resolve } from 'pathslash';
+import type { Client } from 'pg';
 import {
   readConfig,
   getDatabaseCasing,
   getDatabaseDialect,
   resolveBindingNames,
-  type DatabaseCasing,
-  type DatabaseDialect,
 } from '../config.ts';
-import type { DatabaseProviderAdapter, DatabaseProviderDialect } from '../database-provider.ts';
-import { resolveLocalD1Target, type LocalD1Target } from '../local-d1.ts';
+import type { DatabaseCasing, DatabaseDialect } from '../config.ts';
+import type { DatabaseProviderAdapter } from '../database-provider.ts';
+import { resolveLocalD1Target } from '../local-d1.ts';
+import type { LocalD1Target } from '../local-d1.ts';
 import {
   collectMigrations,
   readJournal,
@@ -52,6 +54,8 @@ import {
   quoteSqlString,
 } from './db-export-sequences.ts';
 import { formatTimestamp } from './gen.ts';
+import { isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import { Buffer } from './node-buffer.ts';
 import { printSuccess, dim, formatCount, formatUrl, getErrorMessage, pc } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
@@ -118,7 +122,6 @@ type SeedTarget = {
 };
 
 type PgClient = {
-  connect(): Promise<unknown>;
   end(): Promise<void>;
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
@@ -136,11 +139,16 @@ function getLocalDatabaseUrl(root: string, dialect: 'postgresql' | 'mysql'): str
   return url;
 }
 
-async function withPgClient<T>(root: string, fn: (client: PgClient) => Promise<T>): Promise<T> {
+async function connectPgClient(root: string): Promise<Client> {
   const url = getLocalDatabaseUrl(root, 'postgresql');
-  const { Client } = await import('pg');
-  const client: PgClient = new Client({ connectionString: url });
+  const { Client: PgDriverClient } = await import('pg');
+  const client = new PgDriverClient({ connectionString: url });
   await client.connect();
+  return client;
+}
+
+async function withPgClient<T>(root: string, fn: (client: PgClient) => Promise<T>): Promise<T> {
+  const client: PgClient = await connectPgClient(root);
   try {
     return await fn(client);
   } finally {
@@ -159,9 +167,12 @@ async function withMySqlClient<T>(
     uri: getLocalDatabaseUrl(root, 'mysql'),
     multipleStatements: true,
     // Decision: Read dates, JSON and large integers as MySQL's own text, not as JavaScript values.
-    ...(options.textValues
-      ? { dateStrings: true, jsonStrings: true, supportBigNumbers: true, bigNumberStrings: true }
-      : {}),
+    ...(!!options.textValues && {
+      dateStrings: true,
+      jsonStrings: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
+    }),
   });
   try {
     return await fn(toMySqlClient(connection));
@@ -220,8 +231,8 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
 
 export function writeLocalDatabaseUrl(root: string, connectionString: string): void {
   const envPath = join(root, '.env');
-  const original = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
-  const lines = original ? original.replace(/\r\n/g, '\n').split('\n') : [];
+  const original = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  const lines = original ? original.replaceAll('\r\n', '\n').split('\n') : [];
   const assignment = `DATABASE_URL=${JSON.stringify(connectionString)}`;
   const index = lines.findIndex((line) => /^\s*(?:export\s+)?DATABASE_URL\s*=/.test(line));
   if (index === -1) {
@@ -250,16 +261,20 @@ function assertDatabaseProvider(value: unknown, source: string): DatabaseProvide
   if (!value || typeof value !== 'object') {
     throw new Error(`Database provider '${source}' did not export an adapter object.`);
   }
-  const adapter = value as Partial<DatabaseProviderAdapter>;
-  if (
-    typeof adapter.id !== 'string' ||
-    typeof adapter.label !== 'string' ||
-    !Array.isArray(adapter.dialects) ||
-    typeof adapter.provision !== 'function'
-  ) {
+  if (!isDatabaseProviderAdapter(value)) {
     throw new Error(`Database provider '${source}' does not implement DatabaseProviderAdapter.`);
   }
-  return adapter as DatabaseProviderAdapter;
+  return value;
+}
+
+function isDatabaseProviderAdapter(value: unknown): value is DatabaseProviderAdapter {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.label === 'string' &&
+    Array.isArray(value.dialects) &&
+    typeof value.provision === 'function'
+  );
 }
 
 export async function loadDatabaseProvider(
@@ -283,8 +298,9 @@ export async function loadDatabaseProvider(
       `Could not resolve database provider adapter '${provider}' from this project. Install it first or pass a file path.`,
     );
   }
-  const mod = (await import(pathToFileURL(resolved).href)) as Record<string, unknown>;
-  return assertDatabaseProvider(mod.default ?? mod.databaseProvider, provider);
+  const mod: unknown = await import(pathToFileURL(resolved).href);
+  const exported = isRecord(mod) ? (mod.default ?? mod.databaseProvider) : undefined;
+  return assertDatabaseProvider(exported, provider);
 }
 
 async function runConnect(
@@ -308,7 +324,7 @@ async function runConnect(
   let connectionString = args.url;
   if (args.provider) {
     const adapter = await loadDatabaseProvider(root, args.provider);
-    if (!adapter.dialects.includes(dialect as DatabaseProviderDialect)) {
+    if (!adapter.dialects.includes(dialect)) {
       throw new Error(`${adapter.label} does not support the configured ${dialect} dialect.`);
     }
     log.info(`Provisioning ${adapter.label} database...`);
@@ -335,7 +351,7 @@ async function runConnect(
     if (isCancel(answer)) {
       process.exit(0);
     }
-    connectionString = answer as string;
+    connectionString = answer;
   }
 
   const parsed = new URL(connectionString);
@@ -423,8 +439,8 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
 
   try {
     assertJournalCoherence(migrationsDir, allMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -675,8 +691,8 @@ async function resetDatabase(
   const migrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, migrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
   await confirmReset(root, dialect, yes);
@@ -769,7 +785,7 @@ async function runSeed(
   // Decision: Load the seed before the reset, so a wrong path or a broken module stops the command before any
   // data is dropped. Importing a module runs its code, so ask about the database first.
   const seed = resolveSeedTarget(root, file);
-  const sql = seed.kind === 'sql' ? readFileSync(seed.path, 'utf-8') : undefined;
+  const sql = seed.kind === 'sql' ? readFileSync(seed.path, 'utf8') : undefined;
   await confirmReset(root, dialect, yes);
   const seedFn = sql === undefined ? await loadSeedFunction(seed.path) : undefined;
 
@@ -804,8 +820,8 @@ async function runSeed(
     } finally {
       db.close();
     }
-  } else {
-    await runSeedModule(root, seedFn!, dialect);
+  } else if (seedFn !== undefined) {
+    await runSeedModule(root, seedFn, dialect);
   }
 
   log.info(dim("Restart your dev server if it's running."));
@@ -824,7 +840,7 @@ function isSafeStatement(sql: string): boolean {
   if (sql.replace(/;\s*$/, '').includes(';')) {
     return false;
   }
-  const decommented = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const decommented = sql.replaceAll(/\/\*[\s\S]*?\*\//g, ' ').replaceAll(/--[^\n]*/g, ' ');
   const stripped = decommented.replace(/;\s*$/, '');
   if (/^\s*SELECT\b/i.test(stripped)) {
     return true;
@@ -872,14 +888,14 @@ async function fetchRemoteDatabaseUrl(client: PlatformClient, projectId: string)
   try {
     const result = await client.getDatabaseUrl(projectId);
     return result.url;
-  } catch (err) {
-    if (err instanceof PlatformApiError && err.status === 404) {
+  } catch (error) {
+    if (error instanceof PlatformApiError && error.status === 404) {
       log.error(
         "This project's database URL isn't stored on the platform yet. Run `bwf db set-url` once to populate it, then retry.",
       );
       process.exit(1);
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -889,13 +905,13 @@ async function executeExternalRemoteSql(
   sql: string,
 ): Promise<void> {
   if (dialect === 'postgresql') {
-    const { Client } = await import('pg');
-    const pgClient: PgClient = new Client({ connectionString: dbUrl });
+    const { Client: PgDriverClient } = await import('pg');
+    const pgClient = new PgDriverClient({ connectionString: dbUrl });
     await pgClient.connect();
     try {
       const result = await pgClient.query(sql);
       if (result.rows && result.rows.length > 0) {
-        printTable(result.rows);
+        printTable(result.rows.flatMap((row: unknown) => (isRecord(row) ? [row] : [])));
       }
     } finally {
       await pgClient.end();
@@ -907,7 +923,7 @@ async function executeExternalRemoteSql(
   try {
     const [rows] = await mySqlClient.query(sql);
     if (Array.isArray(rows) && rows.length > 0) {
-      printTable(rows as Array<Record<string, unknown>>);
+      printTable(rows.flatMap((row) => (isRecord(row) ? [row] : [])));
     }
   } finally {
     await mySqlClient.end();
@@ -942,6 +958,20 @@ async function confirmDestructiveRemote(
 // limit on the query API, which prints rows; a larger dump runs as a D1 import (up to 5 GB).
 const D1_MAX_SQL_STATEMENT_BYTES = 100_000;
 
+function readExecuteSql(
+  root: string,
+  command: string | undefined,
+  file: string | undefined,
+): string {
+  if (file) {
+    return readFileSync(resolve(root, file), 'utf8');
+  }
+  if (command === undefined) {
+    throw new Error('db: Usage: bwf db execute <sql> or bwf db execute --file <path>.');
+  }
+  return command;
+}
+
 async function runExecute(
   root: string,
   command: string | undefined,
@@ -952,7 +982,7 @@ async function runExecute(
 ): Promise<void> {
   if (remote) {
     const directCloudflare = readDeploymentPlatform(root) === 'cloudflare';
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = readExecuteSql(root, command, file);
 
     if (directCloudflare) {
       const bulkImport =
@@ -1032,7 +1062,7 @@ async function runExecute(
       // Decision: The configured binding wins. A renamed binding leaves its old resource behind, so only a single
       // D1 resource is a safe fallback.
       if (!d1Bindings.includes(configuredBinding) && d1Bindings.length === 1) {
-        binding = d1Bindings[0]!;
+        binding = d1Bindings[0];
       }
     } catch {
       // Decision: Keep the configured binding name (or 'DB' by default) if resource discovery fails.
@@ -1081,11 +1111,8 @@ async function runExecute(
       process.exit(1);
     }
 
-    const data = (await res.json()) as {
-      results?: Array<Record<string, unknown>>;
-      success?: boolean;
-    };
-    const rows = data.results ?? [];
+    const data: unknown = await res.json();
+    const rows = isRecord(data) && Array.isArray(data.results) ? data.results.filter(isRecord) : [];
     if (rows.length > 0) {
       printTable(rows);
     }
@@ -1094,7 +1121,7 @@ async function runExecute(
   }
 
   if (dialect === 'postgresql') {
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = readExecuteSql(root, command, file);
     await withPgClient(root, async (client) => {
       const result = await client.query(sql);
       if (result.rows && result.rows.length > 0) {
@@ -1106,7 +1133,7 @@ async function runExecute(
   }
 
   if (dialect === 'mysql') {
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = readExecuteSql(root, command, file);
     await withMySqlClient(root, async (client) => {
       const rows = await client.query(sql);
       if (rows.length > 0) {
@@ -1125,7 +1152,7 @@ async function runExecute(
     process.exit(1);
   }
 
-  const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+  const sql = readExecuteSql(root, command, file);
 
   const db = await openSqliteDatabase(dbPath);
   try {
@@ -1179,8 +1206,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
 
   try {
     assertJournalCoherence(migrationsDir, rawMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1333,9 +1360,9 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     try {
       const status = await client.getMigrationStatus(config.projectId, dialect);
       remoteApplied = new Set(status.applied.map((m) => m.name));
-    } catch (err) {
+    } catch (error) {
       log.error(
-        `db: Failed to fetch remote migration status: '${err instanceof Error ? err.message : String(err)}'.`,
+        `db: Failed to fetch remote migration status: '${error instanceof Error ? error.message : String(error)}'.`,
       );
       process.exit(1);
     }
@@ -1349,8 +1376,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
 
     try {
       validateMigrations(pendingMigrations);
-    } catch (err: unknown) {
-      log.error(getErrorMessage(err));
+    } catch (error: unknown) {
+      log.error(getErrorMessage(error));
       process.exit(1);
     }
 
@@ -1388,8 +1415,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       const appliedNames = await readPgAppliedMigrations(client).catch(() => []);
       try {
         validatePendingMigrations(rawMigrations, new Set(appliedNames));
-      } catch (err: unknown) {
-        log.error(getErrorMessage(err));
+      } catch (error: unknown) {
+        log.error(getErrorMessage(error));
         process.exit(1);
       }
 
@@ -1415,8 +1442,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       const appliedNames = await readMySqlAppliedMigrations(client).catch(() => []);
       try {
         validatePendingMigrations(rawMigrations, new Set(appliedNames));
-      } catch (err: unknown) {
-        log.error(getErrorMessage(err));
+      } catch (error: unknown) {
+        log.error(getErrorMessage(error));
         process.exit(1);
       }
 
@@ -1441,8 +1468,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   try {
     const existingRows = await getAppliedMigrations(dbPath);
     validatePendingMigrations(rawMigrations, new Set(existingRows.map((row) => row.name)));
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1613,18 +1640,19 @@ async function hasDeployedCloudflareDatabase(root: string): Promise<boolean> {
   const { readRootWranglerConfig } = await import('./wrangler.ts');
   const { isRealD1Id, isRealHyperdriveId } = await import('./provision.ts');
   const config = readRootWranglerConfig(root)?.config;
-  const entries = (key: string): Array<Record<string, unknown>> => {
+  const entries = (key: string): Array<JsonObject> => {
     const value = config?.[key];
-    return Array.isArray(value)
-      ? value.filter(
-          (entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object',
-        )
-      : [];
+    return Array.isArray(value) ? value.filter(isJsonObject) : [];
   };
   return (
     entries('d1_databases').some((entry) => isRealD1Id(entry.database_id)) ||
     entries('hyperdrive').some((entry) => isRealHyperdriveId(entry.id))
   );
+}
+
+function snapshotPrefix(tag: string): string {
+  // Decision: Drizzle-kit finds a snapshot by the part of the journal tag before the first underscore.
+  return tag.split('_')[0];
 }
 
 async function runRenameMigrations(root: string, dialect: DatabaseDialect): Promise<void> {
@@ -1641,8 +1669,8 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
   const currentMigrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, currentMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1728,8 +1756,6 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
     ? readFileSync(journalPath)
     : null;
   const journal = readJournal(migrationsDir, paths.sourceRelative);
-  // Decision: Drizzle-kit finds a snapshot by the part of the journal tag before the first underscore.
-  const snapshotPrefix = (tag: string): string => tag.split('_')[0];
   const snapshotPathFor = (tag: string): string =>
     join(metaDir, `${snapshotPrefix(tag)}_snapshot.json`);
 
@@ -1774,12 +1800,12 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
       await client.renameMigrations(config.projectId, renames);
       remoteRenamed = true;
       log.info('Remote migration records updated.');
-    } catch (err) {
+    } catch (error) {
       log.error(
         'db: Failed to update remote migration records. No local changes were made.\n' +
           'Fix the connection and run `bwf db rename-migrations` again.',
       );
-      log.error(String(err));
+      log.error(String(error));
       process.exit(1);
     }
   }
@@ -1844,8 +1870,8 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         renamedSnapshots.push({ from: snapshotFrom, to: snapshotTo });
       }
     }
-  } catch (err) {
-    await rollback('db: Failed to rename migration files. All changes have been reverted.', err);
+  } catch (error) {
+    await rollback('db: Failed to rename migration files. All changes have been reverted.', error);
   }
 
   // Decision: Rewrite journal tags before the tracking tables, so a tracking failure also restores it.
@@ -1872,10 +1898,10 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         dialect: current.dialect,
         entries: updatedEntries,
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         `db: Failed to update ${dir}/meta/_journal.json. File renames have been reverted.`,
-        err,
+        error,
       );
     }
   }
@@ -1895,16 +1921,16 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
             await client.query('UPDATE _void_migrations SET name = $1 WHERE name = $2', [to, from]);
           }
           await client.query('COMMIT');
-        } catch (err) {
+        } catch (error) {
           await client.query('ROLLBACK');
-          throw err;
+          throw error;
         }
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         'db: Failed to update PostgreSQL tracking table. File renames have been reverted.\n' +
           'Fix the database connection and run `bwf db rename-migrations` again.',
-        err,
+        error,
       );
     }
   } else if (dialect === 'mysql') {
@@ -1925,17 +1951,17 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
             ]);
           }
           await client.query('COMMIT');
-        } catch (err) {
+        } catch (error) {
           // Decision: A lost connection also rolls back on the server, so report the first error.
           await client.query('ROLLBACK').catch(() => {});
-          throw err;
+          throw error;
         }
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         'db: Failed to update MySQL tracking table. File renames have been reverted.\n' +
           'Fix the database connection and run `bwf db rename-migrations` again.',
-        err,
+        error,
       );
     }
   } else {
@@ -1966,11 +1992,11 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         } finally {
           db.close();
         }
-      } catch (err) {
+      } catch (error) {
         await rollback(
           'db: Failed to update SQLite tracking table. File renames have been reverted.\n' +
             'Fix the database issue and run `bwf db rename-migrations` again.',
-          err,
+          error,
         );
       }
     }
@@ -2012,7 +2038,9 @@ function formatMySqlExportValue(value: unknown): string {
   if (value instanceof Uint8Array) {
     return `X'${Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')}'`;
   }
-  return `'${String(value).replaceAll('\\', '\\\\').replaceAll("'", "''")}'`;
+  return `'${String(value)
+    .replaceAll('\\', String.raw`\\`)
+    .replaceAll("'", "''")}'`;
 }
 
 function formatSqliteExportValue(value: unknown): string {
@@ -2120,7 +2148,7 @@ async function runExport(
               if (typeof value === 'number') {
                 return String(value);
               }
-              return `'${String(value).replace(/'/g, "''")}'`;
+              return `'${String(value).replaceAll("'", "''")}'`;
             });
             parts.push(
               `INSERT INTO ${tableName} (${cols.map(quoteSqlIdentifier).join(', ')})${overriding} VALUES (${vals.join(', ')});`,
@@ -2248,8 +2276,11 @@ async function runExport(
     for (const table of tables) {
       if (!args.noSchema) {
         const row = db
-          .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
-          .get(table) as { sql: string };
+          .prepare<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+          .get(table);
+        if (row === undefined) {
+          throw new Error(`db: Table '${table}' was not found while exporting.`);
+        }
         parts.push(row.sql + ';');
       }
 
@@ -2263,9 +2294,9 @@ async function runExport(
             .filter((column) => column.hidden === 0)
             .map((column) => column.name),
         );
-        const rows = db.prepare(`SELECT * FROM ${quoteSqlIdentifier(table)}`).all() as Array<
-          Record<string, unknown>
-        >;
+        const rows = db
+          .prepare<Record<string, unknown>>(`SELECT * FROM ${quoteSqlIdentifier(table)}`)
+          .all();
         for (const row of rows) {
           const cols = Object.keys(row).filter((column) => insertableColumns.has(column));
           const vals = cols.map((column) => formatSqliteExportValue(row[column]));
@@ -2291,8 +2322,10 @@ async function runExport(
       for (const sequence of sequences) {
         if (tables.includes(sequence.name)) {
           const name = quoteSqlString(sequence.name);
-          parts.push(`DELETE FROM sqlite_sequence WHERE name = ${name};`);
-          parts.push(`INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`);
+          parts.push(
+            `DELETE FROM sqlite_sequence WHERE name = ${name};`,
+            `INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`,
+          );
         }
       }
     }
@@ -2375,7 +2408,7 @@ async function runSetUrl(root: string, dialect: DatabaseDialect): Promise<void> 
   }
 
   const client = new PlatformClient(token, { root });
-  await client.setDatabaseUrl(projectConfig.projectId, connectionString as string);
+  await client.setDatabaseUrl(projectConfig.projectId, connectionString);
 
   printSuccess('Database URL updated.');
 }
@@ -2386,9 +2419,10 @@ function resolveSeedTarget(root: string, file: string | undefined): SeedTarget {
   }
 
   const paths = readProjectPaths(root);
-  const defaults = DEFAULT_SEED_FILES.map((candidate) => paths.sourceRelative(candidate)).filter(
-    (candidate) => existsSync(join(root, candidate)),
-  );
+  const defaults = DEFAULT_SEED_FILES.flatMap((candidate) => {
+    const relativePath = paths.sourceRelative(candidate);
+    return existsSync(join(root, relativePath)) ? [relativePath] : [];
+  });
   if (defaults.length === 0) {
     log.error(
       `db: No seed file found. Create one of: ${DEFAULT_SEED_FILES.map((candidate) => paths.sourceRelative(candidate)).join(', ')} or pass --file <path>.`,
@@ -2436,12 +2470,14 @@ async function runSeedModule(
 
   if (dialect === 'postgresql') {
     const { drizzle } = await import('drizzle-orm/node-postgres');
-    await withPgClient(root, async (client) => {
+    const client = await connectPgClient(root);
+    try {
       const options = getDrizzleSchemaOptions(schema, casing);
-      const drizzleClient = client as never;
-      const db = options ? drizzle(drizzleClient, options) : drizzle(drizzleClient);
+      const db = options ? drizzle(client, options) : drizzle(client);
       await seed({ dialect, db, schema });
-    });
+    } finally {
+      await client.end();
+    }
     return;
   }
 
@@ -2464,10 +2500,14 @@ async function runSeedModule(
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
   const { openSqliteDatabase } = await import('../migrations/runner.ts');
   const { databasePath: dbPath } = getLocalD1Target(root);
+  const { default: BetterSqlite3 } = await import('better-sqlite3');
   const sqlite = await openSqliteDatabase(dbPath);
   try {
+    if (!(sqlite instanceof BetterSqlite3)) {
+      throw new TypeError('db: The local SQLite database is not a better-sqlite3 connection.');
+    }
     const options = getDrizzleSchemaOptions(schema, casing);
-    const db = options ? drizzle(sqlite as never, options) : drizzle(sqlite as never);
+    const db = options ? drizzle(sqlite, options) : drizzle(sqlite);
     await seed({ dialect, db, schema });
   } finally {
     sqlite.close();
@@ -2476,18 +2516,21 @@ async function runSeedModule(
 
 async function loadSeedFunction(seedPath: string): Promise<SeedFn<Record<string, unknown>>> {
   const mod = await importLocalModule(seedPath);
-  const seed =
-    typeof mod.default === 'function'
-      ? mod.default
-      : typeof mod.seed === 'function'
-        ? mod.seed
-        : undefined;
+  const seed = isSeedFunction(mod.default)
+    ? mod.default
+    : isSeedFunction(mod.seed)
+      ? mod.seed
+      : undefined;
   if (!seed) {
     throw new Error(
       `db: Seed module '${seedPath}' must export a default function or a named "seed" function.`,
     );
   }
-  return seed as SeedFn<Record<string, unknown>>;
+  return seed;
+}
+
+function isSeedFunction(value: unknown): value is SeedFn<Record<string, unknown>> {
+  return typeof value === 'function';
 }
 
 async function loadSeedSchema(root: string): Promise<Record<string, unknown>> {
@@ -2507,12 +2550,15 @@ async function loadSeedSchema(root: string): Promise<Record<string, unknown>> {
 
   const files = collectSchemaModuleFiles(location.path);
   const parts = await Promise.all(files.map((file) => importLocalModule(file)));
-  return Object.assign(
-    {},
-    ...parts.map((mod) =>
-      Object.fromEntries(Object.entries(mod).filter(([name]) => name !== 'default')),
-    ),
-  );
+  const schema: Record<string, unknown> = {};
+  for (const mod of parts) {
+    for (const [name, value] of Object.entries(mod)) {
+      if (name !== 'default') {
+        schema[name] = value;
+      }
+    }
+  }
+  return schema;
 }
 
 function collectSchemaModuleFiles(dir: string): Array<string> {
@@ -2550,8 +2596,8 @@ function getDrizzleSchemaOptions(
   casing: DatabaseCasing | undefined,
 ): { schema?: Record<string, unknown>; casing?: DatabaseCasing } | undefined {
   const options = {
-    ...(Object.keys(schema).length > 0 ? { schema } : {}),
-    ...(casing ? { casing } : {}),
+    ...(Object.keys(schema).length > 0 && { schema }),
+    ...(!!casing && { casing }),
   };
   return Object.keys(options).length > 0 ? options : undefined;
 }

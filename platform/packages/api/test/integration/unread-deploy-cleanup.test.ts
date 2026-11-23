@@ -12,8 +12,8 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { setGetProjectOverride } from './setup.ts';
 
 // Decision: A JSON deploy keeps running after its response is returned, until the NDJSON body is read. On
@@ -46,7 +46,7 @@ async function lockWaitOrTimeout(limitMs: number): Promise<void> {
       sql`select count(*)::int as n from pg_stat_activity
           where datname = current_database() and wait_event_type = 'Lock'`,
     )) as unknown as { rows: Array<{ n: number }> };
-    if (rows[0]!.n > 0) {
+    if (rows[0].n > 0) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -59,7 +59,7 @@ describe('fixture cleanup after an unread deploy stream', () => {
     const project = await createTestProject(env.db, user.id, 'unread-deploy');
     mockCfApi();
     const bytes = new TextEncoder().encode('<h1>hi</h1>');
-    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${HASH(1)}`, bytes.buffer as ArrayBuffer);
+    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${HASH(1)}`, bytes.buffer);
 
     let reached!: () => void;
     const locked = new Promise<void>((resolve) => (reached = resolve));
@@ -73,7 +73,7 @@ describe('fixture cleanup after an unread deploy stream', () => {
         const { rows } = (await env.db.execute(
           sql`select count(*)::int as n from deployments where project_id = ${id}`,
         )) as unknown as { rows: Array<{ n: number }> };
-        if (rows[0]!.n > 0) {
+        if (rows[0].n > 0) {
           setGetProjectOverride(null);
           reached();
           await gate;
@@ -116,7 +116,7 @@ describe('fixture cleanup after an unread deploy stream', () => {
     await locked;
     // Decision: Let the deploy continue once the next cleanup waits on its lock, or after a short bound when the
     // harness finishes the deploy before cleanup.
-    void lockWaitOrTimeout(1_000).then(release);
+    void lockWaitOrTimeout(1000).then(release);
   });
 
   postgres('starts the next test only after that deploy finished', async () => {

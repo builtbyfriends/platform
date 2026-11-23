@@ -1,11 +1,7 @@
 import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import {
-  PlatformApiError,
-  PlatformClient,
-  type EmailDomainResponse,
-  type RemoveEmailDomainResponse,
-} from '../../src/cli/client.ts';
+import { PlatformApiError, PlatformClient } from '../../src/cli/client.ts';
+import type { EmailDomainResponse, RemoveEmailDomainResponse } from '../../src/cli/client.ts';
 import {
   buildCfApiTokenTemplateUrl,
   classifyCfApiTokenShape,
@@ -17,8 +13,8 @@ import {
   emailDomainRotateSecret,
   isValidEmailDomainInput,
   normalizeEmailDomainInput,
-  type EmailDomainAddDeps,
 } from '../../src/cli/email.ts';
+import type { EmailDomainAddDeps } from '../../src/cli/email.ts';
 import * as output from '../../src/cli/output.ts';
 import { withPlatformDiscovery } from '../helpers/platform-discovery.ts';
 
@@ -654,7 +650,7 @@ describe('PlatformClient.removeEmailDomain', () => {
     vi.stubGlobal('fetch', withPlatformDiscovery(fetchMock));
     const client = new PlatformClient('tok', { apiUrl: 'https://api.test' });
     await client.removeEmailDomain('prj_1', 'acme.com');
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('https://api.test/projects/prj_1/email/domains/acme.com');
     expect(init?.method).toBe('DELETE');
   });
@@ -728,7 +724,7 @@ describe('PlatformClient.rotateEmailDomainSecret', () => {
     vi.stubGlobal('fetch', withPlatformDiscovery(fetchMock));
     const client = new PlatformClient('tok', { apiUrl: 'https://api.test' });
     await client.rotateEmailDomainSecret('prj_1', 'acme.com', 'attempt_1');
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe(
       'https://api.test/projects/prj_1/email/domains/acme.com/rotate-secret',
     );

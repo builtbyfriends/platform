@@ -206,8 +206,8 @@ describe('detectPreset — strictBackend', () => {
     let message = '';
     try {
       detectPreset(root, { strictBackend: true });
-    } catch (err) {
-      message = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
     }
     expect(message).toContain('routes/');
     expect(message).toContain('middleware/');
@@ -266,7 +266,7 @@ describe('resolveCloudflareStaticPreset — configured app type', () => {
 
   it('still refuses the unconfigured SSG plus backend case', () => {
     const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
-    expect(() => resolveCloudflareStaticPreset(root, {} as BwfConfig, {})).toThrow('vitepress');
+    expect(() => resolveCloudflareStaticPreset(root, {}, {})).toThrow('vitepress');
   });
 
   it('keeps resolving a configured static app that also has backend sources', () => {
@@ -374,7 +374,7 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
     if (process.platform === 'win32') {
       expect(cmd).toBe(`"${toSlash(binPath)}" build`);
     } else {
-      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' build`);
+      expect(cmd).toBe(`'${binPath.replaceAll("'", String.raw`'\''`)}' build`);
     }
   });
 
@@ -383,7 +383,7 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
     () => {
       const { root } = setupSpacedProject('vitepress');
       const cmd = resolveProjectCommand(root, 'vitepress build docs');
-      const out = execSync(cmd, { encoding: 'utf-8' });
+      const out = execSync(cmd, { encoding: 'utf8' });
       expect(out).toContain('PLATFORM_BIN_OK');
       expect(out).toContain('args=build docs');
     },
@@ -398,8 +398,8 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
         JSON.stringify({ devDependencies: { 'vite-plus': '^1.0.0' } }),
       );
       const cmd = resolveProjectCommand(SPACED_TMP, 'vite build');
-      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' build`);
-      const out = execSync(cmd, { encoding: 'utf-8' });
+      expect(cmd).toBe(`'${binPath.replaceAll("'", String.raw`'\''`)}' build`);
+      const out = execSync(cmd, { encoding: 'utf8' });
       expect(out).toContain('PLATFORM_BIN_OK');
       expect(out).toContain('args=build');
     },

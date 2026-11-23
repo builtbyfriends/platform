@@ -15,9 +15,9 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcRequest,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;

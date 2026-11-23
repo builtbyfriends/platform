@@ -358,13 +358,13 @@ export async function addQueueConsumer(
       body: JSON.stringify(consumerBody),
     });
     return { status: 'created' };
-  } catch (err) {
+  } catch (error) {
     if (
-      !(err instanceof Error) ||
-      (!err.message.toLowerCase().includes('already exists') &&
-        !err.message.toLowerCase().includes('already has a consumer'))
+      !(error instanceof Error) ||
+      (!error.message.toLowerCase().includes('already exists') &&
+        !error.message.toLowerCase().includes('already has a consumer'))
     ) {
-      throw err;
+      throw error;
     }
   }
 
@@ -435,8 +435,8 @@ export async function getDispatchWorkerProxyToken(
   let bindings: ReadonlyArray<DispatchWorkerBinding>;
   try {
     bindings = await cfFetch<ReadonlyArray<DispatchWorkerBinding>>(url, apiToken);
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+  } catch (error_) {
+    const error = error_ instanceof Error ? error_ : new Error(String(error_));
     return { kind: 'error', error };
   }
   const token = bindings.find(

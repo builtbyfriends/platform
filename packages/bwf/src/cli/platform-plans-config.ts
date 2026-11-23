@@ -1,10 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { stripVTControlCharacters } from 'node:util';
-import {
-  AI_LOGGING_MODES,
-  parsePlanAiLoggingInput,
-  type AiLoggingMode,
-} from '@builtbyfriends/platform/ai-logging';
+import { AI_LOGGING_MODES, parsePlanAiLoggingInput } from '@builtbyfriends/platform/ai-logging';
+import type { AiLoggingMode } from '@builtbyfriends/platform/ai-logging';
 import {
   PLAN_EDITABLE_LIMIT_KEYS,
   PLAN_LIMITS,
@@ -12,16 +9,10 @@ import {
   parsePlanName,
   parseBuildInstanceType,
   parsePlatformPlanId,
-  type PlatformPlanCatalog,
-  type PlatformPlanDefinition,
 } from '@builtbyfriends/platform/plans';
-import {
-  type CANCEL_SYMBOL,
-  confirm,
-  isCancel,
-  select,
-  text,
-} from '@voidzero-dev/vite-plus-prompts';
+import type { PlatformPlanCatalog, PlatformPlanDefinition } from '@builtbyfriends/platform/plans';
+import { confirm, isCancel, select, text } from '@voidzero-dev/vite-plus-prompts';
+import type { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
 import { utcTime } from './operator-ai-logging.ts';
 import { readOperatorToken, resolveOperatorOrigin } from './operator-auth.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
@@ -268,7 +259,7 @@ async function changesInput(
     try {
       parsePlanAiLoggingInput(object.aiLogging);
     } catch (error) {
-      throw new Error(`platform: ${(error as Error).message}`);
+      throw new Error(`platform: ${(error as Error).message}`, { cause: error });
     }
     if (object.allowShortSlugs !== undefined && typeof object.allowShortSlugs !== 'boolean') {
       throw new Error('platform: allowShortSlugs must be a boolean.');
@@ -488,7 +479,7 @@ async function save(
       typeof details === 'object' &&
       'catalog' in details
     ) {
-      return details as Record<string, unknown>;
+      return details;
     }
     throw error;
   }
@@ -510,7 +501,7 @@ function progressed(progress: Progress): boolean {
 export async function runPlatformPlansConfig(args: PlatformPlansArgs): Promise<void> {
   const origin = resolveOperatorOrigin(args.connection);
   const client = new OperatorClient(origin, readOperatorToken(origin));
-  const listing = (await client.request('/config/plans')) as unknown as Listing;
+  const listing = (await client.request('/config/plans')) as Listing;
   const { catalog } = listing;
   if (!args.action) {
     if (!process.stdin.isTTY || args.json) {

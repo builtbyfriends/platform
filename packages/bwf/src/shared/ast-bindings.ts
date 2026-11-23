@@ -1,5 +1,6 @@
 import { walk } from 'estree-walker';
-import { isIdentifier, type AstNode, type AstProgram } from './ast.ts';
+import { astChild, astChildren, isAstNode, isIdentifier } from './ast.ts';
+import type { AstNode, AstProgram } from './ast.ts';
 
 /** Names introduced by a binding pattern, excluding keys and default expressions. */
 export function bindingNames(node: AstNode | null | undefined): Array<string> {
@@ -7,20 +8,18 @@ export function bindingNames(node: AstNode | null | undefined): Array<string> {
     return [node.name];
   }
   if (node?.type === 'ObjectPattern') {
-    return ((node.properties as Array<AstNode> | undefined) ?? []).flatMap((property) =>
-      bindingNames(
-        (property.type === 'RestElement' ? property.argument : property.value) as AstNode,
-      ),
+    return astChildren(node, 'properties').flatMap((property) =>
+      bindingNames(astChild(property, property.type === 'RestElement' ? 'argument' : 'value')),
     );
   }
   if (node?.type === 'ArrayPattern') {
-    return ((node.elements as Array<AstNode | null> | undefined) ?? []).flatMap(bindingNames);
+    return astChildren(node, 'elements').flatMap(bindingNames);
   }
   if (node?.type === 'AssignmentPattern' || node?.type === 'RestElement') {
-    return bindingNames((node.left ?? node.argument) as AstNode | undefined);
+    return bindingNames(astChild(node, 'left') ?? astChild(node, 'argument'));
   }
   if (node?.type === 'TSParameterProperty') {
-    return bindingNames(node.parameter as AstNode | undefined);
+    return bindingNames(astChild(node, 'parameter'));
   }
   return [];
 }
@@ -30,6 +29,16 @@ type Scope = {
   bindings?: Map<string, AstNode>;
   varScope: boolean;
 };
+
+type WalkNode = Parameters<typeof walk>[0];
+
+function isWalkNode(value: AstNode | WalkNode): value is WalkNode {
+  return isAstNode(value);
+}
+
+function toAstNode(value: WalkNode | null | undefined): AstNode | undefined {
+  return isAstNode(value) ? value : undefined;
+}
 
 const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
 
@@ -52,14 +61,20 @@ export function bindingResolver(
       }
     }
   };
-  walk(program as unknown as Parameters<typeof walk>[0], {
+  if (!isWalkNode(program)) {
+    return () => undefined;
+  }
+  walk(program, {
     enter(raw, rawParent, key) {
-      const node = raw as AstNode;
-      const parent = rawParent as AstNode | null;
+      const node = toAstNode(raw);
+      if (!node) {
+        return;
+      }
+      const parent = isAstNode(rawParent) ? rawParent : null;
       const outerScope = scope;
       // Decision: The discriminant and all its descendants precede the case block's scope.
       if (parent?.type === 'SwitchStatement' && key === 'discriminant') {
-        scope = scope.parent!;
+        scope = scope.parent ?? scope;
       }
       if (
         [
@@ -69,7 +84,7 @@ export function bindingResolver(
           'TSModuleDeclaration',
         ].includes(node.type)
       ) {
-        declare(node.id as AstNode | undefined, node);
+        declare(astChild(node, 'id'), node);
       }
       const isFunction = FUNCTIONS.has(node.type);
       if (
@@ -102,19 +117,19 @@ export function bindingResolver(
       }
       if (isFunction) {
         if (node.type === 'FunctionExpression') {
-          declare(node.id as AstNode | undefined, node);
+          declare(astChild(node, 'id'), node);
         }
-        for (const parameter of (node.params as Array<AstNode> | undefined) ?? []) {
+        for (const parameter of astChildren(node, 'params')) {
           declare(parameter, parameter);
         }
       } else if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') {
-        declare(node.id as AstNode | undefined, node);
+        declare(astChild(node, 'id'), node);
       } else if (node.type === 'CatchClause') {
-        declare(node.param as AstNode | undefined, node);
+        declare(astChild(node, 'param'), node);
       } else if (node.type === 'ImportDeclaration' && node.importKind !== 'type') {
-        for (const specifier of (node.specifiers as Array<AstNode> | undefined) ?? []) {
+        for (const specifier of astChildren(node, 'specifiers')) {
           if (specifier.importKind !== 'type') {
-            declare(specifier.local as AstNode | undefined, specifier);
+            declare(astChild(specifier, 'local'), specifier);
           }
         }
       } else if (node.type === 'VariableDeclaration') {
@@ -124,13 +139,14 @@ export function bindingResolver(
             target = target.parent;
           }
         }
-        for (const declaration of (node.declarations as Array<AstNode> | undefined) ?? []) {
-          declare(declaration.id as AstNode | undefined, declaration, target);
+        for (const declaration of astChildren(node, 'declarations')) {
+          declare(astChild(declaration, 'id'), declaration, target);
         }
       }
     },
     leave(raw) {
-      const outer = outerScopes.get(raw as AstNode);
+      const node = toAstNode(raw);
+      const outer = node ? outerScopes.get(node) : undefined;
       if (outer) {
         scope = outer;
       }

@@ -36,8 +36,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;
@@ -259,7 +259,7 @@ describe('operator email recipient policy', () => {
     const recorded = await events();
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({ action: 'email/policy', status: 'success' });
-    expect(JSON.parse(recorded[0]!.target)).toEqual({
+    expect(JSON.parse(recorded[0].target)).toEqual({
       mode: 'domains',
       domains: 'corp.example, example.net corp.example',
     });
@@ -369,7 +369,7 @@ describe('operator email settings', () => {
     const recorded = await events();
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({ action: 'email/settings', status: 'success' });
-    expect(JSON.parse(recorded[0]!.target)).toEqual({ domains: 'admin' });
+    expect(JSON.parse(recorded[0].target)).toEqual({ domains: 'admin' });
   });
 
   test('rejects an unknown management mode', async () => {
@@ -504,11 +504,11 @@ describe('operator email attempt recovery', () => {
     const listed = await list.json();
     expect(listed).toMatchObject({
       total: 1,
-      attempts: [{ id: fence!.id, projectId: project.id }],
+      attempts: [{ id: fence.id, projectId: project.id }],
     });
     expect(JSON.stringify(listed)).not.toContain('recipient@example.com');
 
-    const tooRecent = await req(`/email/attempts/${fence!.id}/resolve`, {
+    const tooRecent = await req(`/email/attempts/${fence.id}/resolve`, {
       ended: true,
       reason: 'Original Worker execution ended',
       dryRun: true,
@@ -518,17 +518,17 @@ describe('operator email attempt recovery', () => {
     await env.db
       .update(emailUnresolvedAttempts)
       .set({ started_at: old })
-      .where(eq(emailUnresolvedAttempts.id, fence!.id));
+      .where(eq(emailUnresolvedAttempts.id, fence.id));
     await env.db
       .update(emailActionRecipients)
       .set({ attempt_started_at: old })
-      .where(eq(emailActionRecipients.id, fence!.id));
-    const missingAttestation = await req(`/email/attempts/${fence!.id}/resolve`, {
+      .where(eq(emailActionRecipients.id, fence.id));
+    const missingAttestation = await req(`/email/attempts/${fence.id}/resolve`, {
       reason: 'Original Worker execution ended',
       dryRun: true,
     });
     expect(missingAttestation.status).toBe(400);
-    const preview = await req(`/email/attempts/${fence!.id}/resolve`, {
+    const preview = await req(`/email/attempts/${fence.id}/resolve`, {
       ended: true,
       reason: 'Original Worker execution ended',
       dryRun: true,
@@ -536,7 +536,7 @@ describe('operator email attempt recovery', () => {
     expect(preview.status).toBe(200);
     expect(await preview.json()).toMatchObject({ dryRun: true, action: 'email.attempt.resolve' });
     expect(await events()).toHaveLength(0);
-    const response = await req(`/email/attempts/${fence!.id}/resolve`, {
+    const response = await req(`/email/attempts/${fence.id}/resolve`, {
       ended: true,
       reason: 'Original Worker execution ended',
     });
@@ -546,11 +546,11 @@ describe('operator email attempt recovery', () => {
     const recorded = await events();
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
-      action: `email/attempts/${fence!.id}/resolve`,
+      action: `email/attempts/${fence.id}/resolve`,
       status: 'success',
     });
-    expect(JSON.parse(recorded[0]!.target)).toEqual({
-      attemptId: fence!.id,
+    expect(JSON.parse(recorded[0].target)).toEqual({
+      attemptId: fence.id,
       ended: true,
       reason: 'Original Worker execution ended',
     });

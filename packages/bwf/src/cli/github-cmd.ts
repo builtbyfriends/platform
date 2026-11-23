@@ -7,19 +7,20 @@ import {
   openBrowser,
   getToken,
 } from './auth.ts';
-import {
-  PlatformApiError,
-  PlatformClient,
-  parsePlatformErrorBody,
-  type GithubConnection,
-  type GithubInstallation,
-} from './client.ts';
+import { PlatformApiError, PlatformClient, parsePlatformErrorBody } from './client.ts';
+import type { GithubConnection, GithubInstallation } from './client.ts';
 import { collectGitDeployMetadata } from './git-metadata.ts';
 import type { GithubArgs } from './github-args.ts';
 import { printSuccess, formatUrl, pc } from './output.ts';
 import { platformErrorMessage } from './platform-errors.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
+
+type GithubConnectionPatch = {
+  branch?: string;
+  buildExecutor?: 'container' | 'github_actions';
+  workflowPath?: string;
+};
 
 /**
  * The workflow file `bwf init --github` scaffolds and the platform default for
@@ -135,21 +136,24 @@ export function formatInstallations(installations: Array<GithubInstallation>): s
     .join('\n\n');
 }
 
+function connectionRow(label: string, value: string): string {
+  return `  ${label.padEnd(16)}${value}`;
+}
+
 /**
  * Render a GitHub connection for `bwf github status`. Container builds never
  * read the workflow file, so it is marked unused for them.
  */
 export function formatConnection(connection: GithubConnection): string {
-  const row = (label: string, value: string): string => `  ${label.padEnd(16)}${value}`;
   const workflow =
     connection.build_executor === 'github_actions'
       ? connection.workflow_path
       : `${connection.workflow_path} (unused for container builds)`;
   const rows = [
-    row('Repository', connection.repo_full_name),
-    row('Branch', connection.branch),
-    row('Build executor', connection.build_executor),
-    row('Deploy workflow', workflow),
+    connectionRow('Repository', connection.repo_full_name),
+    connectionRow('Branch', connection.branch),
+    connectionRow('Build executor', connection.build_executor),
+    connectionRow('Deploy workflow', workflow),
   ];
   return rows.join('\n');
 }
@@ -194,34 +198,34 @@ export async function runInstall(
   let url: string;
   try {
     ({ url } = await client.getGithubInstallUrl());
-  } catch (err) {
+  } catch (error) {
     if (
-      err instanceof PlatformApiError &&
-      err.status === 403 &&
-      err.code === 'github_identity_required'
+      error instanceof PlatformApiError &&
+      error.status === 403 &&
+      error.code === 'github_identity_required'
     ) {
       log.message('Your bwf account needs a linked GitHub identity. Starting the GitHub link…');
       await linkIdentity(client);
       try {
         ({ url } = await client.getGithubInstallUrl());
-      } catch (retryErr) {
+      } catch (error_) {
         // Decision: Only the same identity-required 403 means linking didn't take, so show the link and install
         // guidance. Any other failure (401, 426, 500, a different 403) is the real error and has to surface
         // normally.
         if (
-          retryErr instanceof PlatformApiError &&
-          retryErr.status === 403 &&
-          retryErr.code === 'github_identity_required'
+          error_ instanceof PlatformApiError &&
+          error_.status === 403 &&
+          error_.code === 'github_identity_required'
         ) {
           log.error(
             'Could not start the GitHub App install after linking. Try `bwf github link`, then `bwf github install` again.',
           );
           process.exit(1);
         }
-        throw retryErr;
+        throw error_;
       }
     } else {
-      throw err;
+      throw error;
     }
   }
 
@@ -263,19 +267,19 @@ export async function runGithubLink(client: PlatformClient): Promise<void> {
         return client.completeGithubLink(linkCode, verifier);
       },
     }));
-  } catch (err) {
-    if (err instanceof PlatformApiError && err.code === 'github_already_linked') {
+  } catch (error) {
+    if (error instanceof PlatformApiError && error.code === 'github_already_linked') {
       log.error('Your bwf account is already linked to a different GitHub account.');
       process.exit(1);
     }
     if (
-      err instanceof PlatformApiError &&
-      (err.status === 409 || err.code === 'github_identity_conflict')
+      error instanceof PlatformApiError &&
+      (error.status === 409 || error.code === 'github_identity_conflict')
     ) {
       log.error('This GitHub account is already linked to another bwf account.');
       process.exit(1);
     }
-    throw err;
+    throw error;
   }
 
   if (status === 'already_linked') {
@@ -324,18 +328,18 @@ export async function runGithubJoin(client: PlatformClient): Promise<void> {
   let count: number;
   try {
     count = await performGithubJoin(client);
-  } catch (err) {
+  } catch (error) {
     // Decision: Fail closed: org-installation sharing OAuth isn't configured on this instance. The membership
     // flow has no already-joined conflict to map.
     if (
-      err instanceof PlatformApiError &&
-      err.status === 503 &&
-      err.code === 'github_oauth_not_configured'
+      error instanceof PlatformApiError &&
+      error.status === 503 &&
+      error.code === 'github_oauth_not_configured'
     ) {
       log.error('Organization installation sharing is not enabled on this bwf instance.');
       process.exit(1);
     }
-    throw err;
+    throw error;
   }
 
   if (count === 0) {
@@ -425,7 +429,7 @@ async function promptRepoFullName(root: string): Promise<string> {
     cancel('Cancelled.');
     process.exit(0);
   }
-  return (input as string).trim();
+  return input.trim();
 }
 
 /**
@@ -472,7 +476,7 @@ async function resolveGithubProjectId(
     cancel('Cancelled.');
     process.exit(0);
   }
-  return picked as string;
+  return picked;
 }
 
 export async function runConnect(
@@ -497,15 +501,15 @@ export async function runConnect(
     autoJoinAttempted = true;
     try {
       return await performGithubJoin(client);
-    } catch (err) {
+    } catch (error) {
       if (
-        err instanceof PlatformApiError &&
-        err.status === 503 &&
-        err.code === 'github_oauth_not_configured'
+        error instanceof PlatformApiError &&
+        error.status === 503 &&
+        error.code === 'github_oauth_not_configured'
       ) {
         return 0;
       }
-      throw err;
+      throw error;
     }
   };
 
@@ -530,6 +534,7 @@ export async function runConnect(
   }
 
   let installation: GithubInstallation;
+  const onlyInstallation = installations.length === 1 ? installations[0] : undefined;
 
   if (args.installationId) {
     let found = installations.find((i) => i.installation_id === args.installationId);
@@ -547,8 +552,8 @@ export async function runConnect(
       process.exit(1);
     }
     installation = found;
-  } else if (installations.length === 1) {
-    installation = installations[0]!;
+  } else if (installations.length === 1 && onlyInstallation !== undefined) {
+    installation = onlyInstallation;
   } else if (!isTTY) {
     log.error('connect: Multiple installations found. Pass --installation <id>.');
     process.exit(1);
@@ -564,7 +569,12 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    installation = installations.find((i) => i.installation_id === picked)!;
+    const chosen = installations.find((i) => i.installation_id === picked);
+    if (!chosen) {
+      log.error('connect: The selected installation is no longer available.');
+      process.exit(1);
+    }
+    installation = chosen;
   }
 
   let repoFullName: string;
@@ -584,7 +594,7 @@ export async function runConnect(
       }
       repoFullName = await promptRepoFullName(root);
     } else if (installation.repositories.length === 1) {
-      repoFullName = installation.repositories[0]!.full_name;
+      repoFullName = installation.repositories[0].full_name;
     } else if (!isTTY) {
       log.error('connect: Multiple repositories available. Pass --repo <owner/repo>.');
       process.exit(1);
@@ -597,7 +607,7 @@ export async function runConnect(
         cancel('Cancelled.');
         process.exit(0);
       }
-      repoFullName = picked as string;
+      repoFullName = picked;
     }
   } else {
     // Decision: 'all': repos aren't enumerable. Don't infer the repo from git in CI: GITHUB_REPOSITORY or origin
@@ -630,7 +640,7 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    branch = (input as string).trim() || branchDefault;
+    branch = input.trim() || branchDefault;
   }
 
   let executor: 'container' | 'github_actions';
@@ -639,7 +649,7 @@ export async function runConnect(
   } else if (!isTTY) {
     executor = 'container';
   } else {
-    const picked = await select({
+    const picked = await select<'container' | 'github_actions'>({
       message: 'Build executor:',
       options: [
         { value: 'container', label: 'Cloudflare Container', hint: 'build on bwf (default)' },
@@ -651,7 +661,7 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    executor = picked as 'container' | 'github_actions';
+    executor = picked;
   }
 
   // Decision: Container builds don't read the workflow file. A prompted value equal to the default stays unset,
@@ -674,7 +684,7 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    const chosen = (input as string).trim() || DEFAULT_WORKFLOW_PATH;
+    const chosen = input.trim() || DEFAULT_WORKFLOW_PATH;
     if (chosen !== DEFAULT_WORKFLOW_PATH) {
       workflowPath = chosen;
     }
@@ -692,11 +702,11 @@ export async function runConnect(
 
   try {
     await attemptConnect();
-  } catch (err) {
-    if (!(err instanceof PlatformApiError)) {
-      throw err;
+  } catch (error) {
+    if (!(error instanceof PlatformApiError)) {
+      throw error;
     }
-    if (err.status === 403 && err.code === 'connect_authorization_required') {
+    if (error.status === 403 && error.code === 'connect_authorization_required') {
       if (!isTTY) {
         // Decision: Authorization waits for a browser callback, so fail now instead of hanging until it times out.
         log.error(
@@ -714,11 +724,11 @@ export async function runConnect(
           connectGrant: grant.connectGrant,
           codeVerifier: grant.codeVerifier,
         });
-      } catch (retryErr) {
+      } catch (error_) {
         if (
-          retryErr instanceof PlatformApiError &&
-          retryErr.status === 403 &&
-          retryErr.code === 'invalid connect grant'
+          error_ instanceof PlatformApiError &&
+          error_.status === 403 &&
+          error_.code === 'invalid connect grant'
         ) {
           // Decision: The grant expired or the browser identity differs from the linked one; the generic 403 message
           // would wrongly blame project access.
@@ -727,15 +737,15 @@ export async function runConnect(
           );
           process.exit(1);
         }
-        throw retryErr;
+        throw error_;
       }
     } else {
-      const message = describeGithubClientError(err, describeConnectError);
+      const message = describeGithubClientError(error, describeConnectError);
       if (message !== null) {
         log.error(`connect: ${message}`);
         process.exit(1);
       }
-      throw err;
+      throw error;
     }
   }
 
@@ -767,15 +777,15 @@ export async function runGithubUpdate(
   let current: GithubConnection;
   try {
     current = await client.getGithubConnection(projectId);
-  } catch (err) {
-    if (err instanceof PlatformApiError) {
-      const message = describeGithubClientError(err, describeUpdateError);
+  } catch (error) {
+    if (error instanceof PlatformApiError) {
+      const message = describeGithubClientError(error, describeUpdateError);
       if (message !== null) {
         log.error(`update: ${message}`);
         process.exit(1);
       }
     }
-    throw err;
+    throw error;
   }
 
   let branch: string;
@@ -795,7 +805,7 @@ export async function runGithubUpdate(
         cancel('Cancelled.');
         process.exit(0);
       }
-      branch = (input as string).trim() || current.branch;
+      branch = input.trim() || current.branch;
     }
 
     if (args.executor !== undefined) {
@@ -813,7 +823,7 @@ export async function runGithubUpdate(
         cancel('Cancelled.');
         process.exit(0);
       }
-      executor = picked as 'container' | 'github_actions';
+      executor = picked;
     }
 
     // Decision: Container builds don't read the workflow file, so there's nothing to ask.
@@ -834,18 +844,14 @@ export async function runGithubUpdate(
         cancel('Cancelled.');
         process.exit(0);
       }
-      workflowPath = (input as string).trim() || current.workflow_path;
+      workflowPath = input.trim() || current.workflow_path;
     }
   } else {
     branch = args.branch ?? current.branch;
     executor = args.executor ?? current.build_executor;
   }
 
-  const patch: {
-    branch?: string;
-    buildExecutor?: 'container' | 'github_actions';
-    workflowPath?: string;
-  } = {};
+  const patch: GithubConnectionPatch = {};
   if (branch !== current.branch) {
     patch.branch = branch;
   }
@@ -870,15 +876,15 @@ export async function runGithubUpdate(
   let updated: GithubConnection;
   try {
     updated = await client.updateGithubConnection(projectId, patch);
-  } catch (err) {
-    if (err instanceof PlatformApiError) {
-      const message = describeGithubClientError(err, describeUpdateError);
+  } catch (error) {
+    if (error instanceof PlatformApiError) {
+      const message = describeGithubClientError(error, describeUpdateError);
       if (message !== null) {
         log.error(`update: ${message}`);
         process.exit(1);
       }
     }
-    throw err;
+    throw error;
   }
 
   printSuccess(
@@ -899,15 +905,15 @@ async function runStatus(
   let connection: GithubConnection;
   try {
     connection = await client.getGithubConnection(projectId);
-  } catch (err) {
-    if (err instanceof PlatformApiError) {
-      const message = describeGithubClientError(err, describeUpdateError);
+  } catch (error) {
+    if (error instanceof PlatformApiError) {
+      const message = describeGithubClientError(error, describeUpdateError);
       if (message !== null) {
         log.error(`status: ${message}`);
         process.exit(1);
       }
     }
-    throw err;
+    throw error;
   }
 
   log.message(formatConnection(connection));
@@ -935,20 +941,20 @@ export async function runGithubDisconnect(
   let connection: GithubConnection;
   try {
     connection = await client.getGithubConnection(projectId);
-  } catch (err) {
-    if (err instanceof PlatformApiError) {
+  } catch (error) {
+    if (error instanceof PlatformApiError) {
       // Decision: No connection is already the goal state.
-      if (err.status === 404 && err.code?.includes('connection not found')) {
+      if (error.status === 404 && error.code?.includes('connection not found')) {
         log.info('This project is not connected to a GitHub repository. Nothing to disconnect.');
         return;
       }
-      const message = describeGithubClientError(err, describeConnectError);
+      const message = describeGithubClientError(error, describeConnectError);
       if (message !== null) {
         log.error(`disconnect: ${message}`);
         process.exit(1);
       }
     }
-    throw err;
+    throw error;
   }
 
   if (!args.yes) {
@@ -974,15 +980,15 @@ export async function runGithubDisconnect(
 
   try {
     await client.deleteGithubConnection(projectId);
-  } catch (err) {
-    if (err instanceof PlatformApiError) {
-      const message = describeGithubClientError(err, describeConnectError);
+  } catch (error) {
+    if (error instanceof PlatformApiError) {
+      const message = describeGithubClientError(error, describeConnectError);
       if (message !== null) {
         log.error(`disconnect: ${message}`);
         process.exit(1);
       }
     }
-    throw err;
+    throw error;
   }
 
   printSuccess(`Disconnected ${connection.repo_full_name}.`);

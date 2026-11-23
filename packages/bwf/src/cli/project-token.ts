@@ -46,10 +46,14 @@ export async function runProjectTokenCommand(root: string, args: TokenArgs): Pro
   }
   const { client, projectId, slug } = await resolveTarget(root, args);
   if (args.action === 'create') {
-    const result = await client.createProjectToken(projectId, {
-      ...(args.name ? { name: args.name } : {}),
-      ...(args.expiresInDays ? { expiresInDays: args.expiresInDays } : {}),
-    });
+    const input: Parameters<typeof client.createProjectToken>[1] = {};
+    if (args.name) {
+      input.name = args.name;
+    }
+    if (args.expiresInDays) {
+      input.expiresInDays = args.expiresInDays;
+    }
+    const result = await client.createProjectToken(projectId, input);
     printIssued(args, result, client.apiUrl);
   } else if (args.action === 'renew') {
     printIssued(

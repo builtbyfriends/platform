@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 import {
   PLATFORM_HEALTH_HOSTNAME_LABEL,
   parsePlatformAppAccessSetup,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   PlatformAccessClient,
   platformAccessCreateRejected,
   platformAccessPublicDestinations,
-  type PlatformAccessCheckpoint,
 } from './platform-access-provision.ts';
+import type { PlatformAccessCheckpoint } from './platform-access-provision.ts';
 import { parsePlatformAccessSetupSpec } from './platform-access-setup.ts';
 import { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
@@ -168,7 +168,7 @@ export async function ensurePlatformAccessHealthChecks(input: {
     }
     // Decision: A manually configured or project-managed exact exception is verified without taking ownership.
     if (!recorded && matching.length === 1) {
-      await verifyHealthException(access, matching[0]!, destination);
+      await verifyHealthException(access, matching[0], destination);
       continue;
     }
     if (!recorded?.id && recorded?.pending) {
@@ -213,7 +213,7 @@ export async function ensurePlatformAccessHealthChecks(input: {
         throw error;
       }
     }
-    const app = (await access.get(`apps/${encodeURIComponent(recorded.id!)}`)) as Record<
+    const app = (await access.get(`apps/${encodeURIComponent(recorded.id)}`)) as Record<
       string,
       unknown
     >;

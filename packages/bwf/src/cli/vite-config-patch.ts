@@ -23,6 +23,19 @@ type Node = {
   expression?: Node;
 };
 
+function isNode(value: unknown): value is Node {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof value.type === 'string' &&
+    'start' in value &&
+    typeof value.start === 'number' &&
+    'end' in value &&
+    typeof value.end === 'number'
+  );
+}
+
 function unwrap(node: Node | undefined): Node | undefined {
   while (
     node &&
@@ -66,9 +79,7 @@ function propertyName(property: Node): string | undefined {
 
 function nodeValue(node: Node | undefined): Node | undefined {
   const value = node?.value;
-  return value !== null && typeof value === 'object' && 'type' in value
-    ? (value as Node)
-    : undefined;
+  return isNode(value) ? value : undefined;
 }
 
 function lineIndent(code: string, index: number): string {
@@ -82,12 +93,16 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
     return undefined;
   }
 
-  let program: Node;
+  let parsed: unknown;
   try {
-    program = parseSync(filePath, code).program as unknown as Node;
+    parsed = parseSync(filePath, code).program;
   } catch {
     return undefined;
   }
+  if (!isNode(parsed)) {
+    return undefined;
+  }
+  const program = parsed;
 
   const object = configObject(program);
   if (!object) {
@@ -103,6 +118,7 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
   }
 
   const imports = program.body?.filter((node) => node.type === 'ImportDeclaration') ?? [];
+  const lastImport = imports.at(-1);
   const importedName = imports
     .filter((node) => node.source?.value === '@builtbyfriends/bwf')
     .flatMap((node) => node.specifiers ?? [])
@@ -129,7 +145,7 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
         ms.overwrite(insertAt, plugins.end - 1, `${pluginName}()`);
       }
     } else {
-      const indent = lineIndent(code, pluginProperties[0]!.start);
+      const indent = lineIndent(code, pluginProperties[0].start);
       const next = code[insertAt];
       ms.appendLeft(
         insertAt,
@@ -161,12 +177,11 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
   }
 
   if (!importedName) {
-    const insertAt =
-      imports.length > 0
-        ? imports[imports.length - 1]!.end
-        : code.startsWith('#!')
-          ? code.indexOf('\n') + 1
-          : 0;
+    const insertAt = lastImport
+      ? lastImport.end
+      : code.startsWith('#!')
+        ? code.indexOf('\n') + 1
+        : 0;
     const prefix = insertAt > 0 && code[insertAt - 1] !== '\n' ? '\n' : '';
     ms.appendLeft(insertAt, `${prefix}import { bwfPlugin } from "@builtbyfriends/bwf";\n`);
   }

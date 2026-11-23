@@ -4,8 +4,10 @@ import {
   parsePlatformAdmissionPolicy,
   parsePlatformLoginConfiguration,
   validatePlatformAdmissionPolicy,
-  type PlatformAuthenticationRecovery,
-  type PlatformLoginConfiguration,
+} from '@builtbyfriends/platform';
+import type {
+  PlatformAuthenticationRecovery,
+  PlatformLoginConfiguration,
 } from '@builtbyfriends/platform';
 import type { QueryConnection } from './platform-zero-trust-uninstall.ts';
 

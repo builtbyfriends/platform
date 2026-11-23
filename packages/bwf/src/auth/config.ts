@@ -1,14 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
-import {
-  type AliasOptions,
-  isRunnableDevEnvironment,
-  parseSync,
-  runnerImport,
-  type ViteDevServer,
-} from 'vite';
+import { isRunnableDevEnvironment, parseSync, runnerImport } from 'vite';
+import type { AliasOptions, ViteDevServer } from 'vite';
 import { discoverSchema } from '../drizzle/discover.ts';
-import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
+import { readProjectPaths } from '../project-paths.ts';
+import type { ProjectPaths } from '../project-paths.ts';
 import type { BwfAuthConfig } from '../runtime/auth.ts';
+import { isAstProgram } from '../shared/ast.ts';
 import type { AstNode, AstProgram } from '../shared/ast.ts';
 
 function isBwfAuthConfigSource(code: string, filename: string): boolean {
@@ -17,7 +14,11 @@ function isBwfAuthConfigSource(code: string, filename: string): boolean {
   }
   let program: AstProgram;
   try {
-    program = parseSync(filename, code).program as unknown as AstProgram;
+    const parsed = parseSync(filename, code).program;
+    if (!isAstProgram(parsed)) {
+      return false;
+    }
+    program = parsed;
   } catch {
     return false;
   }
@@ -41,7 +42,7 @@ export function findBwfAuthConfig(
     if (!existsSync(absPath)) {
       continue;
     }
-    const code = readFileSync(absPath, 'utf-8');
+    const code = readFileSync(absPath, 'utf8');
     if (isBwfAuthConfigSource(code, absPath)) {
       return absPath;
     }

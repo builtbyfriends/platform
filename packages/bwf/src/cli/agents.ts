@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 
 export function getPackageDir(): string {
-  let dir = join(fileURLToPath(import.meta.url), '..');
+  let dir = join(import.meta.filename, '..');
   for (let i = 0; i < 5; i++) {
     if (existsSync(join(dir, 'package.json'))) {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
-      if (pkg.name === '@builtbyfriends/bwf') {
+      const pkg: unknown = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+      if (isRecord(pkg) && pkg.name === '@builtbyfriends/bwf') {
         return dir;
       }
     }
@@ -17,7 +17,11 @@ export function getPackageDir(): string {
 }
 
 export function getOwnVersion(): string {
-  return JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8')).version;
+  const pkg: unknown = JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf8'));
+  if (!isRecord(pkg) || typeof pkg.version !== 'string') {
+    throw new Error('The bwf package.json has no version.');
+  }
+  return pkg.version;
 }
 
 // Decision: Agent configs: the project-local skillsDir and how to detect the agent in the project root.

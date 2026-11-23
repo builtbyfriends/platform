@@ -1,4 +1,5 @@
 import { parsePlatformLoginId } from '@builtbyfriends/platform';
+import type { JsonObject } from './json-value.ts';
 import { OPERATOR_MAX_TIMEOUT_MS } from './operator-client.ts';
 
 /** Public operator commands. This table also drives nested CLI help. */
@@ -689,7 +690,7 @@ export type OperatorArgs = {
   method: 'GET' | 'POST';
   path: string;
   query: Record<string, string>;
-  body: Record<string, unknown>;
+  body: JsonObject;
 };
 
 export function parseOperatorArgs(args: Array<string>): OperatorArgs {
@@ -705,7 +706,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
     ...operatorCommands.flatMap((command) => Object.keys(command.booleans ?? {})),
   ]);
   for (let index = 0; index < args.length; index++) {
-    const arg = args[index]!;
+    const arg = args[index];
     if (!arg.startsWith('-')) {
       positional.push(arg);
       continue;
@@ -756,8 +757,7 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   if (!command) {
     throw new Error(
       `platform: Usage: bwf platform ${group} <${operatorCommands
-        .filter((entry) => entry.group === group)
-        .map(({ action }) => action)
+        .flatMap((entry) => (entry.group === group ? [entry.action] : []))
         .join('|')}>.`,
     );
   }
@@ -812,8 +812,8 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
   parsed.path = command.path;
   parsed.method = command.method ?? 'GET';
   if (identitySignupEntry) {
-    const connectionId = parameters[1]!;
-    const subject = parameters[2]!;
+    const connectionId = parameters[1];
+    const subject = parameters[2];
     try {
       parsePlatformLoginId(connectionId);
     } catch {
@@ -847,11 +847,11 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
       continue;
     }
     if (name === 'timeout') {
-      const maximum = OPERATOR_MAX_TIMEOUT_MS / 1_000;
+      const maximum = OPERATOR_MAX_TIMEOUT_MS / 1000;
       if (!/^[1-9]\d*$/.test(value) || Number(value) > maximum) {
         throw new Error(`platform: --timeout must be an integer from 1 to ${maximum} seconds.`);
       }
-      parsed.timeoutMs = Number(value) * 1_000;
+      parsed.timeoutMs = Number(value) * 1000;
       continue;
     }
     if (name === 'page' || name === 'limit') {
@@ -925,13 +925,18 @@ export function parseOperatorArgs(args: Array<string>): OperatorArgs {
     ) {
       throw new Error('platform: --existing-projects must be protected or public.');
     }
-    parsed.body = {
+    const zeroTrustBody: JsonObject = {
       identityProviderIds: identityProviderIds ?? [],
       policyIds: policyIds ?? [],
-      ...(publicAccess ? { publicAccess: true } : {}),
-      ...(existingProjects ? { existingProjects } : {}),
-      protectNewProjects: flags.has('protect-new-projects'),
     };
+    if (publicAccess) {
+      zeroTrustBody.publicAccess = true;
+    }
+    if (existingProjects) {
+      zeroTrustBody.existingProjects = existingProjects;
+    }
+    zeroTrustBody.protectNewProjects = flags.has('protect-new-projects');
+    parsed.body = zeroTrustBody;
   } else if (group === 'zero-trust' && action === 'status') {
     // Decision: A GET carries its options in the query string.
     delete parsed.body.check;

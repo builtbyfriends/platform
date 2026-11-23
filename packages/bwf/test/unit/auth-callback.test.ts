@@ -70,8 +70,8 @@ describe('awaitBrowserCallback', () => {
     expect(html).toContain('aria-label="Success"');
 
     expect(finalize).toHaveBeenCalledTimes(1);
-    expect(finalize.mock.calls[0]![0].get('link_code')).toBe('abc');
-    expect(finalize.mock.calls[0]![0].get('state')).toBe(state);
+    expect(finalize.mock.calls[0][0].get('link_code')).toBe('abc');
+    expect(finalize.mock.calls[0][0].get('state')).toBe(state);
 
     await expect(resultPromise).resolves.toEqual({ linked: 'abc' });
   });

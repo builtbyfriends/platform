@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'pathslash';
-import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
+import { readProjectPaths } from '../project-paths.ts';
+import type { ProjectPaths } from '../project-paths.ts';
 import { writeFileIfChanged } from './write-if-changed.ts';
 
 export type ProjectTsconfigOptions = {

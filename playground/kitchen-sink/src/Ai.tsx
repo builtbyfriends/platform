@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
 
 function textFromAiResult(value: unknown): string {
   if (typeof value !== 'object' || value === null) {
@@ -123,8 +124,8 @@ export default function AiPage() {
           }
         }
       }
-    } catch (err) {
-      setError(String(err));
+    } catch (error_) {
+      setError(String(error_));
     } finally {
       setLoading(false);
     }

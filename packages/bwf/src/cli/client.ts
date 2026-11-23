@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { getPackageDir } from './agents.ts';
@@ -6,11 +7,8 @@ import { getApiUrl } from './auth.ts';
 import { ensurePlatformAccessToken, isCloudflareAccessChallenge } from './cf-access.ts';
 import type { CliLogger } from './log-file.ts';
 import { readPlatformDiscoveryResponse } from './platform-discovery.ts';
-import {
-  formatPlatformApiError,
-  parsePlatformErrorBody,
-  type ProjectPermission,
-} from './platform-errors.ts';
+import { formatPlatformApiError, parsePlatformErrorBody } from './platform-errors.ts';
+import type { ProjectPermission } from './platform-errors.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 import type {
   DeployAssetUploadRequest,
@@ -20,12 +18,14 @@ import type {
   DeployWorkerUploadResponse,
 } from './types.ts';
 
+type PlatformRequestInit = Omit<RequestInit, 'headers'> & { headers?: Record<string, string> };
+
 // Decision: Null omits `X-Platform-CLI-Version`: the platform answers an unparseable version with 426.
 function readCliVersion(): string | null {
   try {
     const pkgPath = join(getPackageDir(), 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : null;
+    const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    return isRecord(pkg) && typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     return null;
   }
@@ -64,9 +64,12 @@ type PlatformVersionProbe =
  */
 export function isOlderPlatformVersion(version: string, minimumVersion: string): boolean | null {
   const actual = RELEASE_VERSION.exec(version);
-  const minimum = RELEASE_VERSION.exec(minimumVersion)!;
+  const minimum = RELEASE_VERSION.exec(minimumVersion);
   if (!actual) {
     return null;
+  }
+  if (!minimum) {
+    throw new Error(`Invalid minimum platform version ${minimumVersion}.`);
   }
   for (const part of [1, 2, 3]) {
     const difference = Number(actual[part]) - Number(minimum[part]);
@@ -575,7 +578,7 @@ export type ManifestOnlyDeployPayload = DeployUploadPayload;
 // final. All attempts send the same idempotency key, so the platform answers a replay with the
 // earlier deployment's receipt or a 409.
 const DEPLOY_POST_MAX_RETRIES = 3;
-const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10000];
+const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10_000];
 /**
  * Every transport failure is retried, so a `TypeError` thrown by the deploy
  * POST always comes after this many attempts.
@@ -669,7 +672,7 @@ export class PlatformClient {
     };
   }
 
-  private async request(url: string | URL, options: RequestInit = {}): Promise<Response> {
+  private async request(url: string | URL, options: PlatformRequestInit = {}): Promise<Response> {
     if (new URL(url).origin !== this.baseUrl) {
       throw new Error('Platform credentials cannot be sent to another origin.');
     }
@@ -719,10 +722,8 @@ export class PlatformClient {
     if (!response.ok && response.status !== 404) {
       await throwPlatformApiError('Failed to check migration capabilities', response, 'deploy');
     }
-    const capabilities = response.ok
-      ? ((await response.json()) as { skipMigrations?: unknown })
-      : null;
-    if (capabilities?.skipMigrations !== true) {
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.skipMigrations !== true) {
       throw new Error(
         'deploy: This bwf platform does not support --skip-migrations. Ask its administrator to upgrade with `bwf platform upgrade`.',
       );
@@ -741,10 +742,8 @@ export class PlatformClient {
         'deploy',
       );
     }
-    const capabilities = response.ok
-      ? ((await response.json()) as { d1ReadReplication?: unknown })
-      : null;
-    if (capabilities?.d1ReadReplication !== true) {
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.d1ReadReplication !== true) {
       throw new Error(
         'deploy: This bwf platform cannot apply `database.readReplication` from bwf.config.ts. Ask its administrator to upgrade with `bwf platform upgrade`.',
       );
@@ -780,7 +779,7 @@ export class PlatformClient {
     }
   }
 
-  private async send(url: string | URL, options: RequestInit): Promise<Response> {
+  private async send(url: string | URL, options: PlatformRequestInit): Promise<Response> {
     // Decision: A service-token pair is long-lived and was captured before managed deploy scrubs the parent
     // environment. User tokens can be renewed in the browser, so keep checking for a newer environment
     // value when no service pair was captured, and let current credentials override the fallback below.
@@ -799,7 +798,7 @@ export class PlatformClient {
         response: fetch(url, {
           ...options,
           headers: {
-            ...(options.headers as Record<string, string>),
+            ...options.headers,
             ...accessHeaders,
           },
           redirect: 'manual',
@@ -873,8 +872,9 @@ export class PlatformClient {
     }
     let body = text;
     try {
-      const { error } = JSON.parse(text) as { error?: { code?: string; message?: string } };
-      if (error?.code) {
+      const parsed: unknown = JSON.parse(text);
+      const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : undefined;
+      if (typeof error?.code === 'string' && error.code) {
         body = JSON.stringify({ error: error.code.toLowerCase(), message: error.message });
       }
     } catch {
@@ -893,7 +893,7 @@ export class PlatformClient {
     action: string,
     options?: { method?: string; body?: unknown; permission?: ProjectPermission },
   ): Promise<T> {
-    return (await this.call(url, action, options)).json() as Promise<T>;
+    return (await this.call(url, action, options)).json<T>();
   }
 
   async startIdentityLink(
@@ -1007,7 +1007,7 @@ export class PlatformClient {
       { projectId },
       { permission: 'read' },
     );
-    return { members: body.members, ...(body.warnings ? { warnings: body.warnings } : {}) };
+    return { members: body.members, ...(!!body.warnings && { warnings: body.warnings }) };
   }
 
   async listProjectInvitations(projectId: string): Promise<Array<ProjectInvitationResponse>> {
@@ -1045,7 +1045,7 @@ export class PlatformClient {
     return this.rpc(
       'tokens.renew',
       'Failed to renew project token',
-      { projectId, credentialId, ...(expiresInDays ? { expiresInDays } : {}) },
+      { projectId, credentialId, ...(!!expiresInDays && { expiresInDays }) },
       { permission: 'owner' },
     );
   }
@@ -1133,12 +1133,10 @@ export class PlatformClient {
     migrationDiff?: Array<string>;
     error?: string;
   }> {
-    const body: { deploymentId: string; allowDestructive?: Array<string> } = {
+    const body = {
       deploymentId,
+      ...(!!options?.allowDestructive?.length && { allowDestructive: options.allowDestructive }),
     };
-    if (options?.allowDestructive && options.allowDestructive.length > 0) {
-      body.allowDestructive = options.allowDestructive;
-    }
     return this.json(`${this.baseUrl}/projects/${projectId}/rollback`, 'Rollback failed', {
       method: 'POST',
       body,
@@ -1258,9 +1256,9 @@ export class PlatformClient {
           { permission: 'deploy' },
         ));
         break;
-      } catch (err) {
-        if (err instanceof PlatformApiError) {
-          const parsed = err.status === 409 ? parsePlatformErrorBody(err.body) : null;
+      } catch (error) {
+        if (error instanceof PlatformApiError) {
+          const parsed = error.status === 409 ? parsePlatformErrorBody(error.body) : null;
           const inFlight = /deployment ([A-Za-z0-9_-]{1,128})$/.exec(parsed?.message ?? '')?.[1];
           if (parsed?.error === 'deploy_in_progress' && inFlight) {
             // Decision: A deployment is in flight: possibly an earlier attempt of this deploy.
@@ -1274,17 +1272,17 @@ export class PlatformClient {
             };
             return;
           }
-          throw err;
+          throw error;
         }
-        if (!(err instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
-          cliLog?.error('deploy_fetch_rejected', err, { projectId, attempts: attempt + 1 });
-          throw err;
+        if (!(error instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
+          cliLog?.error('deploy_fetch_rejected', error, { projectId, attempts: attempt + 1 });
+          throw error;
         }
         cliLog?.warn('deploy_fetch_retry', {
           projectId,
           attempt: attempt + 1,
           delayMs: DEPLOY_POST_BACKOFF_MS[attempt],
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         await sleep(DEPLOY_POST_BACKOFF_MS[attempt]);
         attempt++;
@@ -1362,13 +1360,13 @@ export class PlatformClient {
         if (Date.now() >= deadline) {
           throw new DeploymentObservationTimeoutError(deploymentId);
         }
-      } catch (err) {
+      } catch (error) {
         const transient =
-          err instanceof TypeError ||
-          (err instanceof DOMException && err.name === 'TimeoutError') ||
-          (err instanceof PlatformApiError && (err.status === 429 || err.status >= 500));
+          error instanceof TypeError ||
+          (error instanceof DOMException && error.name === 'TimeoutError') ||
+          (error instanceof PlatformApiError && (error.status === 429 || error.status >= 500));
         if (!transient || failures >= DEPLOY_OBSERVATION_BACKOFF_MS.length) {
-          throw err;
+          throw error;
         }
         const delayMs = DEPLOY_OBSERVATION_BACKOFF_MS[failures++];
         this.cliLog?.warn('deploy_observation_retry', { deploymentId, cursor, delayMs });
@@ -1598,7 +1596,7 @@ export class PlatformClient {
     );
     return {
       entries: json.data,
-      ...(json.runtimeLogs === 'minimal' ? { runtimeLogs: 'minimal' as const } : {}),
+      ...(json.runtimeLogs === 'minimal' && { runtimeLogs: 'minimal' as const }),
     };
   }
 
@@ -1804,7 +1802,7 @@ export class PlatformClient {
     );
     // Decision: 201 means the address was registered now; 200 means it was already listed. Whether a link went
     // out is the body's `verificationSent`, not the status.
-    const body = (await res.json()) as EmailDestinationResponse;
+    const body = await res.json<EmailDestinationResponse>();
     return { ...body, created: res.status === 201 };
   }
 
@@ -1853,8 +1851,8 @@ export class PlatformClient {
         method: 'POST',
         body: {
           domain: input.domain,
-          ...(input.apiToken !== undefined ? { apiToken: input.apiToken } : {}),
-          ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
+          ...(input.apiToken !== undefined && { apiToken: input.apiToken }),
+          ...(input.attemptId !== undefined && { attemptId: input.attemptId }),
         },
         permission: 'settings',
       },
@@ -1899,5 +1897,7 @@ export class PlatformClient {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

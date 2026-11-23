@@ -22,8 +22,8 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const zeroTrust = vi.hoisted(() => ({ progressed: false }));
 vi.mock('../../src/zero-trust/installation.ts', async (importOriginal) => {
@@ -707,7 +707,7 @@ describe('scheduled() proxy token rotations', () => {
       .select({ payload: projectCleanupJobs.payload })
       .from(projectCleanupJobs)
       .where(eq(projectCleanupJobs.target, proxyTokenRotationTarget(projectId)));
-    return { gen: project!.gen, phase: job?.payload.phase };
+    return { gen: project.gen, phase: job?.payload.phase };
   }
 
   it.each([

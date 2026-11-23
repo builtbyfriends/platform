@@ -33,7 +33,7 @@ export async function prepareContainerImage(
     if (result.status !== 'pending') {
       throw new Error('Cloudflare Container image preparation failed. Retry the deployment.');
     }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, remaining)));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(2000, remaining)));
   }
 }
 
@@ -123,11 +123,11 @@ export async function deleteContainerApplicationIdempotent(
 ): Promise<void> {
   try {
     await deleteContainerApplication(accountId, apiToken, applicationId);
-  } catch (err) {
-    if (err instanceof CloudflareApiError && err.status === 404) {
+  } catch (error) {
+    if (error instanceof CloudflareApiError && error.status === 404) {
       return;
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -177,14 +177,14 @@ export async function tryCreateContainerApplication(
         }),
       },
     );
-  } catch (err) {
-    if (err instanceof CloudflareApiError && err.status === 409) {
+  } catch (error) {
+    if (error instanceof CloudflareApiError && error.status === 409) {
       return undefined;
     }
-    if (err instanceof Error && isAlreadyExistsError(err.message)) {
+    if (error instanceof Error && isAlreadyExistsError(error.message)) {
       return undefined;
     }
-    throw err;
+    throw error;
   }
 }
 

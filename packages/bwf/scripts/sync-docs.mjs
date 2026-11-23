@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'pathslash';
 import { globSync } from 'tinyglobby';
 
-const scriptsDir = dirname(fileURLToPath(import.meta.url));
+const scriptsDir = dirname(import.meta.filename);
 const packageDir = resolve(scriptsDir, '..');
 const sourceDir = resolve(packageDir, '../../docs');
 const targetDir = resolve(packageDir, 'docs');

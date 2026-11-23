@@ -3,16 +3,16 @@ import { sql } from 'drizzle-orm';
 import { findMissingR2Assets, persistedR2AssetSizes } from '../../asset-inventory.ts';
 import { activeOAuthApproval, OAuthError } from '../../auth/oauth.ts';
 import { uploadPool } from '../../concurrency.ts';
-import { getDeployment, getProject, type Db } from '../../db.ts';
+import { getDeployment, getProject } from '../../db.ts';
+import type { Db } from '../../db.ts';
 import { requireActiveDeployAccess } from '../../deploy/recovery.ts';
 import {
   HEX_32_REGEX,
   MAX_UPLOAD_URLS_BATCH,
   moduleContentType,
   workerUploadModulesProblem,
-  type UploadUrlsRequestAsset,
-  type WorkerUploadModule,
 } from '../../deploy/shared.ts';
+import type { UploadUrlsRequestAsset, WorkerUploadModule } from '../../deploy/shared.ts';
 import { deploymentInputPrefix } from '../../deployment-execution.ts';
 import { cliVersionProblem } from '../../middleware/cli-version.ts';
 import { createDeployLogger } from '../../observability/logger.ts';
@@ -23,7 +23,8 @@ import {
 } from '../../project-state.ts';
 import { presignAssetPut } from '../../r2-presign.ts';
 import { canOnProject, grantedAccess } from '../access.ts';
-import { member, procedure, type Caller } from '../procedure.ts';
+import { member, procedure } from '../procedure.ts';
+import type { Caller } from '../procedure.ts';
 
 // Decision: 30 minutes. On a slow uplink a tail asset can wait in the upload pool for more than 10 minutes
 // before its first PUT, and the CLI treats R2's 403 SignatureExpired as terminal.
@@ -278,7 +279,7 @@ export const workerUploadUrls = procedure('deploy.workerUploadUrls')
     // the stale-input sweep and project teardown already cover.
     const failed = await presignUnderProjectLock(ctx, project.id, async (_tx, signingKeyCache) => {
       await uploadPool([...modules.keys()], PRESIGN_BATCH_CONCURRENCY, async (index) => {
-        const module = modules[index]!;
+        const module = modules[index];
         urls[index] = await presignAssetPut(
           {
             accountId: env.CF_ACCOUNT_ID,

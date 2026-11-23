@@ -18,8 +18,8 @@ import {
   dispatchToSinks,
   hasActiveSink,
   serializeCapturedMessage,
-  type CapturedMessage,
 } from './email/dev-inbox.ts';
+import type { CapturedMessage } from './email/dev-inbox.ts';
 import {
   bytesToReadableStream,
   readEnvString,
@@ -165,11 +165,11 @@ async function sendViaBinding(
   let EmailMessage: (typeof import('cloudflare:email'))['EmailMessage'];
   try {
     ({ EmailMessage } = await import('cloudflare:email'));
-  } catch (e) {
+  } catch (error) {
     return err(
       'UPSTREAM_ERROR',
-      `email: SEND_EMAIL is bound but cloudflare:email could not be loaded: ${e instanceof Error ? e.message : String(e)}`,
-      e,
+      `email: SEND_EMAIL is bound but cloudflare:email could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      error,
     );
   }
   const deliveries: Array<SendEmailRecipientResult> = [];
@@ -199,15 +199,15 @@ async function sendViaBinding(
       );
       const mid = typeof result?.messageId === 'string' ? result.messageId : '';
       deliveries.push({ recipient, ok: true, messageId: mid || fallbackId });
-    } catch (e) {
+    } catch (error_) {
       const error =
-        e instanceof EmailBindingTimeoutError
+        error_ instanceof EmailBindingTimeoutError
           ? makeError(
               'OUTCOME_UNKNOWN',
               'email: binding submission timed out; inspect provider logs before retrying',
-              e,
+              error_,
             )
-          : classifyBindingError(e);
+          : classifyBindingError(error_);
       deliveries.push({
         recipient,
         ok: false,
@@ -649,7 +649,7 @@ async function postToDevInbox(
       }),
     ).then(
       (res) => ({ kind: 'response' as const, res }),
-      (cause: unknown) => ({ kind: 'error' as const, cause }),
+      (error: unknown) => ({ kind: 'error' as const, cause: error }),
     );
     const settled = await Promise.race([
       attempt,
@@ -678,8 +678,8 @@ async function postToDevInbox(
       return { ok: false, reason: 'response did not come from the dev inbox' };
     }
     return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -706,7 +706,8 @@ function capturedResult(normalized: NormalizedEmail, captureId: string): SendEma
 export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
   if (
     opts.idempotencyKey !== undefined &&
-    (typeof opts.idempotencyKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(opts.idempotencyKey))
+    (typeof opts.idempotencyKey !== 'string' ||
+      !/^[\u0021-\u007e]{1,128}$/.test(opts.idempotencyKey))
   ) {
     return err(
       'MIME_ERROR',
@@ -743,11 +744,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
   try {
     normalized = await normalizeEmail(optsWithFrom);
     ({ raw, messageId } = buildMime(normalized));
-  } catch (e) {
-    if (e instanceof MimeError) {
-      return err(e.code, e.message, e);
+  } catch (error) {
+    if (error instanceof MimeError) {
+      return err(error.code, error.message, error);
     }
-    return err('MIME_ERROR', e instanceof Error ? e.message : String(e), e);
+    return err('MIME_ERROR', error instanceof Error ? error.message : String(error), error);
   }
 
   // Decision: A sink in this isolate (`createEmailTestHarness`) owns the capture; do
@@ -819,11 +820,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
         signal: controller.signal,
       }),
     );
-  } catch (e) {
+  } catch (error) {
     return err(
       'OUTCOME_UNKNOWN',
-      `email: send outcome is unknown: ${e instanceof Error ? e.message : String(e)}. Check email logs or repeat the same idempotency key; do not create a new send.`,
-      e,
+      `email: send outcome is unknown: ${error instanceof Error ? error.message : String(error)}. Check email logs or repeat the same idempotency key; do not create a new send.`,
+      error,
     );
   }
   return readResponseAsResult(res, recipients, messageId, beforeDeadline);

@@ -31,7 +31,7 @@ describe('playground/pg-test', () => {
 
     const migrationSql = readFileSync(
       join(ROOT, 'playground/pg-test/db/migrations/0000_initial.sql'),
-      'utf-8',
+      'utf8',
     );
     await pglite.exec(migrationSql);
 

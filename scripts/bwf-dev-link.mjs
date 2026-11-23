@@ -15,7 +15,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repositoryRoot = resolve(import.meta.dirname, '..');
 const localCliPath = join(repositoryRoot, 'packages/bwf/dist/cli/cli.mjs');
 
 export function resolvePnpmGlobalBin(runPnpm = defaultRunPnpm) {
@@ -160,7 +160,7 @@ function run() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   try {
     run();
   } catch (error) {

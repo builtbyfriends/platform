@@ -73,7 +73,7 @@ export async function openSqliteDatabase(
 ): Promise<SqliteDatabase> {
   try {
     const Database = (await import('better-sqlite3')).default;
-    return new Database(dbPath, options) as unknown as SqliteDatabase;
+    return new Database(dbPath, options);
   } catch (error) {
     throw toBetterSqlite3Error(error);
   }
@@ -288,10 +288,10 @@ export async function runMigrations(
       let applied: boolean;
       try {
         applied = tx.immediate();
-      } catch (err) {
+      } catch (error) {
         throw new Error(
-          `migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err },
+          `migration ${migration.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         );
       }
       if (applied) {

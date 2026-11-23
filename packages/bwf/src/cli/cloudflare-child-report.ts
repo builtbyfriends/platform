@@ -1,8 +1,9 @@
-import {
-  cloudflareCommandDiagnostic,
-  type CloudflareCommandResult,
-  type CloudflareOperation,
+import { cloudflareCommandDiagnostic } from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { redactMessage } from '../shared/env-mask.ts';
 import { WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted-env.ts';
 import type { CfCommand } from './cf-version-api.ts';
@@ -82,16 +83,14 @@ export function scrubCloudflareResult<T extends CloudflareCommandResult>(
   return {
     ...result,
     stderr: redactor.redact(result.stderr),
-    ...(isCleanCloudflareExit(result) ? {} : { stdout: redactor.redact(result.stdout) }),
-    ...(result.error ? { error: redactor.redact(result.error) } : {}),
-    ...(result.errors
-      ? {
-          errors: result.errors.map((error) => ({
-            ...error,
-            message: redactor.redact(error.message),
-          })),
-        }
-      : {}),
+    ...(!isCleanCloudflareExit(result) && { stdout: redactor.redact(result.stdout) }),
+    ...(!!result.error && { error: redactor.redact(result.error) }),
+    ...(!!result.errors && {
+      errors: result.errors.map((error) => ({
+        ...error,
+        message: redactor.redact(error.message),
+      })),
+    }),
   };
 }
 
@@ -176,17 +175,15 @@ function logCloudflareOp(
     op,
     ok,
     status: result.status,
-    ...(result.signal ? { signal: result.signal } : {}),
+    ...(!!result.signal && { signal: result.signal }),
     ms,
-    ...(ok
-      ? {}
-      : {
-          diagnostic: cloudflareCommandDiagnostic({
-            ...result,
-            // Decision: auth.token stdout is the credential envelope, so don't format it.
-            stdout: op === 'auth.token' ? '' : result.stdout,
-          }),
-        }),
+    ...(!ok && {
+      diagnostic: cloudflareCommandDiagnostic({
+        ...result,
+        // Decision: auth.token stdout is the credential envelope, so don't format it.
+        stdout: op === 'auth.token' ? '' : result.stdout,
+      }),
+    }),
   });
 }
 
@@ -210,8 +207,7 @@ export function observeCloudflareRunner(
       throw thrown;
     }
     if (operation.type === 'auth.token' && isCleanCloudflareExit(result)) {
-      const data = result.data as { token?: unknown } | null | undefined;
-      reporter.redactor.add(data?.token);
+      reporter.redactor.add(isRecord(result.data) ? result.data.token : undefined);
     }
     const scrubbed = scrubCloudflareResult(result, reporter.redactor);
     logCloudflareOp(reporter, operation.type, startedAt, { result: scrubbed });

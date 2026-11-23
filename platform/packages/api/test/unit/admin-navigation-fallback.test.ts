@@ -2,7 +2,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vite-plus/test';
 import { AdminNavigationFallback } from '../../src/admin/react/AdminNavigationFallback.tsx';
-import { SpaContext, type PageObject } from '../../src/admin/react/spa.tsx';
+import { SpaContext } from '../../src/admin/react/spa.tsx';
+import type { PageObject } from '../../src/admin/react/spa.tsx';
 
 it('renders the destination skeleton outside the Platform page context', () => {
   const initialPageData: PageObject = {

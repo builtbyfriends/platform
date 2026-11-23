@@ -10,11 +10,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
-import {
-  acquireProvisionLock,
-  WranglerQuarantineError,
-  type RunWrangler,
-} from '../../src/cli/provision.ts';
+import { acquireProvisionLock, WranglerQuarantineError } from '../../src/cli/provision.ts';
+import type { RunWrangler } from '../../src/cli/provision.ts';
 import {
   emptyDesired,
   fail,
@@ -151,7 +148,7 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
           stdio: ['ignore', 'pipe', 'pipe'],
         });
         let stdout = '';
-        child.stdout.setEncoding('utf-8');
+        child.stdout.setEncoding('utf8');
         child.stdout.on('data', (chunk: string) => {
           stdout += chunk;
         });
@@ -272,7 +269,7 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
           listHyperdriveConfigs: async () => [],
           ...(retries !== undefined ? { lockOptions: { retries } } : {}),
         },
-      ) as Promise<{ resources: Array<{ kind: string; action: string }> }>;
+      );
     const held = await acquireProvisionLock(realpathSync(wranglerPath));
     await expect(makeProv(aliasName, 0)).rejects.toThrow(/already being held/);
     await held.release();
@@ -307,7 +304,7 @@ describe('provisionCloudflareResources — whole-provision cross-process lock (p
     const result = await prov;
     expect(result.resources[0]).toMatchObject({ kind: 'kv', action: 'adopted', id: hex32('kv') });
     expect(existsSync(lockMutex)).toBe(false);
-  }, 15000);
+  }, 15_000);
 
   it('a genuine unlock failure REJECTS the provision (leaked mutex surfaced, not swallowed)', async () => {
     setup(JSON.stringify({ account_id: 'acct' }));
@@ -374,7 +371,7 @@ describe('provisionCloudflareResources — quarantine retains the whole-provisio
     // Decision: A runner whose child couldn't be confirmed dead: the default runner rejects with a quarantine
     // error in that state, so injecting the same rejection tests the provision-level contract: no
     // release, mutex retained, error surfaced verbatim.
-    const quarantineError = new WranglerQuarantineError(43210, 'test: child unconfirmed');
+    const quarantineError = new WranglerQuarantineError(43_210, 'test: child unconfirmed');
     const run: RunWrangler = provisionOperationFixture(() => Promise.reject(quarantineError));
     let thrown: unknown;
     try {
@@ -394,8 +391,8 @@ describe('provisionCloudflareResources — quarantine retains the whole-provisio
     expect(existsSync(lockMutex)).toBe(true);
     const sidecar = `${wranglerPath}.bwf-provision.lock.quarantine.json`;
     expect(existsSync(sidecar)).toBe(true);
-    const recorded = JSON.parse(readFileSync(sidecar, 'utf-8')) as Record<string, unknown>;
-    expect(recorded.pid).toBe(43210);
+    const recorded = JSON.parse(readFileSync(sidecar, 'utf8')) as Record<string, unknown>;
+    expect(recorded.pid).toBe(43_210);
     expect(String(recorded.reason)).toMatch(/pid 43210/);
     // Decision: quarantine() detached the lock from proper-lockfile, so removing it fires no callback.
     rmSync(lockMutex, { recursive: true, force: true });
@@ -446,7 +443,7 @@ describe('provisionCloudflareResources — dangling-symlink lock identity', () =
           listHyperdriveConfigs: async () => [],
           ...(retries !== undefined ? { lockOptions: { retries } } : {}),
         },
-      ) as Promise<{ resources: Array<{ kind: string; action: string }> }>;
+      );
     const canonicalTarget = join(realpathSync(sharedDir), 'wrangler.jsonc');
     const held = await acquireProvisionLock(canonicalTarget);
     await expect(makeProv(aliasA, 0)).rejects.toThrow(/already being held/);

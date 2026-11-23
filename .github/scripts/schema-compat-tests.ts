@@ -139,7 +139,7 @@ async function runIsolatedCompatibilityTests(options: {
   const worker = async () => {
     while (cursor < options.files.length) {
       const index = cursor++;
-      const file = options.files[index]!;
+      const file = options.files[index];
       const name = `${prefix}_${index}`;
       const database = new URL(template);
       database.pathname = `/${name}`;
@@ -198,7 +198,7 @@ function runFile(root: string, file: string, databaseUrl: string): Promise<numbe
     const timeout = setTimeout(() => {
       expired = true;
       kill('SIGTERM');
-      force = setTimeout(() => kill('SIGKILL'), 5_000);
+      force = setTimeout(() => kill('SIGKILL'), 5000);
     }, 180_000);
     child.on('error', (error) => {
       clearTimeout(timeout);

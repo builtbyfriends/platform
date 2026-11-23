@@ -7,7 +7,8 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { describe, it, before, after } from 'node:test';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import {
   resetKitchenSink,
   waitForFreshHeartbeat,
@@ -85,7 +86,7 @@ async function pollForText(page: Page, path: string, text: string, timeoutMs = 3
     if (body?.includes(text)) {
       return;
     }
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(2000);
   }
   throw new Error(`Timed out after ${timeoutMs}ms waiting for "${text}" on ${path}`);
 }
@@ -143,7 +144,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       const assetMatch = html.match(/\/(assets\/[^"']+[-._][A-Za-z0-9_-]{6,}\.(js|css))/);
       assert.ok(assetMatch, 'found hashed asset URL in HTML');
 
-      const assetUrl = `${BASE}/${assetMatch![1]}?smoke=${uid}`;
+      const assetUrl = `${BASE}/${assetMatch[1]}?smoke=${uid}`;
 
       // Decision: A unique URL forces a fresh GET without sending cache-bypass directives to the origin. Cookies
       // are left out because cookie-bearing requests bypass the shared asset cache. Access service-token

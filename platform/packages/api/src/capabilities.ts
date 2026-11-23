@@ -36,9 +36,14 @@ export function getPlatformCapabilities(
       throw new Error(`PLATFORM_CAPABILITIES.${name} must be a boolean.`);
     }
   }
-  return Object.fromEntries(
-    CAPABILITY_NAMES.map((name) => [name, record[name]]),
-  ) as unknown as PlatformCapabilities;
+  const capabilities = { ...HOSTED_CAPABILITIES };
+  for (const name of CAPABILITY_NAMES) {
+    const value = record[name];
+    if (typeof value === 'boolean') {
+      capabilities[name] = value;
+    }
+  }
+  return capabilities;
 }
 
 export function capabilityMiddleware(

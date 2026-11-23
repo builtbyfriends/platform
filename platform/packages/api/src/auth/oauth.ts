@@ -1,9 +1,7 @@
-import {
-  deployArtifactDigest,
-  createDeployArtifact,
-  type DeployArtifact,
-} from '@builtbyfriends/deploy-core';
-import { and, eq, gt, isNull, sql, type SQL } from 'drizzle-orm';
+import { deployArtifactDigest, createDeployArtifact } from '@builtbyfriends/deploy-core';
+import type { DeployArtifact } from '@builtbyfriends/deploy-core';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import type { Db, DbOrTx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import {
@@ -91,7 +89,7 @@ export async function registerOAuthClient(
       secret_hash: await hashLoginProof(secret),
     })
     .returning();
-  return { client: publicOAuthClient(client!), clientSecret: secret };
+  return { client: publicOAuthClient(client), clientSecret: secret };
 }
 export function publicOAuthClient(client: typeof oauthClients.$inferSelect) {
   const { secret_hash: _secret, events_secret: eventsSecret, ...value } = client;
@@ -280,7 +278,7 @@ export async function activeOAuthGrant(
     grant.session.exp <= Date.now() / 1000 ||
     (!appPersonGrant(grant) &&
       !(await validateHumanSession(
-        db as Db,
+        db,
         grant.session,
         companyIdentity ?? grant.session.companyIdentity,
       )))

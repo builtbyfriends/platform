@@ -49,8 +49,8 @@ import {
   mockCfApi,
   rpcData,
   withLegacyDeploy,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 const origin = 'https://platform.example.com';
@@ -270,7 +270,7 @@ describe('app billing', () => {
     const first = await dataOf(call('/usage.status', { person: 'p1' }));
     expect(first).toMatchObject({ plan: 'free', withinCaps: true, used: { aiNeurons: 0 } });
 
-    const cap = first.caps.aiNeuronsPerMonth as number;
+    const cap = first.caps.aiNeuronsPerMonth;
     const hit = await dataOf(call('/usage.record', { person: 'p1', id: 'e1', aiNeurons: cap }));
     expect(hit).toMatchObject({ aiNeuronsUsed: cap, withinCaps: false });
 

@@ -1,11 +1,8 @@
 import type { Context } from 'hono';
 import type { ApiEnv } from './env.ts';
 import { isProjectId } from './id.ts';
-import {
-  PROXY_INTERNAL_AUTH_HEADER,
-  type ProxyInternalRoute,
-  verifyProxyInternalAuth,
-} from './proxy-token.ts';
+import { PROXY_INTERNAL_AUTH_HEADER, verifyProxyInternalAuth } from './proxy-token.ts';
+import type { ProxyInternalRoute } from './proxy-token.ts';
 
 /**
  * Authenticates the proxy on an internal metadata route. The proxy signs

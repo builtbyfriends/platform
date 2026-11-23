@@ -134,8 +134,8 @@ async function fetchDeliveriesPage(
         status: res.status,
         body,
       });
-    } catch (err) {
-      logFailure('webhook-deliveries-list', 'network-error', { url, attempt, err: errInfo(err) });
+    } catch (error) {
+      logFailure('webhook-deliveries-list', 'network-error', { url, attempt, err: errInfo(error) });
     }
     if (attempt < WEBHOOK_DELIVERY_RETRY_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, WEBHOOK_DELIVERY_RETRY_DELAY_MS));
@@ -171,8 +171,8 @@ export async function listFailedWebhookDeliveries(
   let appJwt: string;
   try {
     appJwt = await createAppJwt(env);
-  } catch (err) {
-    logFailure('webhook-deliveries-list', 'jwt-error', { err: errInfo(err) });
+  } catch (error) {
+    logFailure('webhook-deliveries-list', 'jwt-error', { err: errInfo(error) });
     return results;
   }
 
@@ -218,8 +218,8 @@ export async function redeliverWebhookDelivery(
   let appJwt: string;
   try {
     appJwt = await createAppJwt(env);
-  } catch (err) {
-    logFailure('webhook-redeliver', 'jwt-error', { deliveryId, err: errInfo(err) });
+  } catch (error) {
+    logFailure('webhook-redeliver', 'jwt-error', { deliveryId, err: errInfo(error) });
     return false;
   }
   const url = `${GITHUB_API_BASE}/app/hook/deliveries/${encodeURIComponent(deliveryId)}/attempts`;
@@ -247,8 +247,12 @@ export async function redeliverWebhookDelivery(
         status: res.status,
         body,
       });
-    } catch (err) {
-      logFailure('webhook-redeliver', 'network-error', { deliveryId, attempt, err: errInfo(err) });
+    } catch (error) {
+      logFailure('webhook-redeliver', 'network-error', {
+        deliveryId,
+        attempt,
+        err: errInfo(error),
+      });
     }
     if (attempt < WEBHOOK_DELIVERY_RETRY_ATTEMPTS) {
       await new Promise((r) => setTimeout(r, WEBHOOK_DELIVERY_RETRY_DELAY_MS));

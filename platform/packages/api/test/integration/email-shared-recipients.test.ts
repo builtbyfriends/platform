@@ -36,9 +36,9 @@ import {
   setupEnv,
   skipOrphanSweepDelay,
   teardownEnv,
-  type TestEnv,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -83,7 +83,7 @@ function bindings(): ApiEnv['Bindings'] {
     EMAIL_SHARED_ACCOUNT_ID: env.CF_ACCOUNT_ID,
     EMAIL_SHARED_ZONE_ID: 'shared-zone',
     EMAIL_SHARED_INGRESS_NAME: 'native-gateway',
-  } as ApiEnv['Bindings'];
+  };
 }
 async function setup(config: NonNullable<Parameters<typeof stubCustomerCf>[0]> = {}) {
   const provider = stubCustomerCf({
@@ -112,7 +112,7 @@ async function deployEmailHandlers(projectId: string) {
   return deployment;
 }
 async function ledger() {
-  return (await env.db.select().from(emailSharedRecipients))[0]!;
+  return (await env.db.select().from(emailSharedRecipients))[0];
 }
 
 describe('shared inbound allocation', () => {
@@ -145,7 +145,7 @@ describe('shared inbound allocation', () => {
       await env.db
         .update(deployments)
         .set({ manifest: JSON.stringify(manifest) })
-        .where(eq(deployments.id, active!.id));
+        .where(eq(deployments.id, active.id));
       await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
       await reconcileSharedEmailRecipients(env.db, bindings());
     }
@@ -332,7 +332,7 @@ describe('operator shared recipient creation recovery', () => {
     expect(callsByTag(provider.calls, 'literalRuleDelete')).toHaveLength(0);
     const [audit] = await env.db.select().from(operatorEvents);
     expect(audit).toMatchObject({ status: 'success' });
-    expect(JSON.parse(audit!.target)).toMatchObject({
+    expect(JSON.parse(audit.target)).toMatchObject({
       recipientId: row.id,
       outcome: 'not-applied',
       reason: body.reason,
@@ -349,7 +349,7 @@ describe('operator shared recipient creation recovery', () => {
     await reconcileSharedEmailRecipient(env.db, bindings(), project.id);
     const row = await ledger();
     await ageCreation(row.id);
-    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0]!;
+    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0];
     rule.enabled = false;
     const token = await recoveryOperator();
     const body = {
@@ -425,7 +425,7 @@ describe('operator shared recipient creation recovery', () => {
       .update(emailSharedRecipients)
       .set({ status: 'unknown', lease_started_at: null })
       .where(eq(emailSharedRecipients.id, row.id));
-    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0]!;
+    const rule = [...provider.routingRuleStates.get('shared-zone')!.values()][0];
     rule.actions = [{ type: 'worker', value: ['foreign-worker'] }];
     expect((await operatorRequest(token, path, body)).status).toBe(409);
     expect(await ledger()).toMatchObject({ create_started_at: expect.any(String), rule_id: null });
@@ -874,7 +874,7 @@ describe('managed shared subdomain recipients', () => {
     await expect(
       removeSharedEmailRecipients(
         env.db,
-        { ...bindings(), EMAIL_SHARED_ZONE_ID: 'foreign-zone' } as ApiEnv['Bindings'],
+        { ...bindings(), EMAIL_SHARED_ZONE_ID: 'foreign-zone' },
         project.id,
       ),
     ).rejects.toThrow('identity');
@@ -944,7 +944,7 @@ describe('project email alias recipients', () => {
     expect(callsByTag(provider.calls, 'literalRuleCreate')).toHaveLength(2);
     expect(callsByTag(provider.calls, 'literalRuleDelete')).toHaveLength(0);
     const addresses = [...provider.routingRuleStates.get('shared-zone')!.values()].map(
-      (rule) => (rule.matchers as Array<{ value: string }>)[0]!.value,
+      (rule) => (rule.matchers as Array<{ value: string }>)[0].value,
     );
     expect(addresses.sort()).toEqual([slugAddress, aliasAddress].sort());
   });

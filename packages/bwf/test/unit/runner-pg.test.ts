@@ -5,11 +5,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
-import {
-  applyPgMigrations,
-  readPgAppliedMigrations,
-  type PgClient,
-} from '../../src/migrations/runner-pg.ts';
+import { applyPgMigrations, readPgAppliedMigrations } from '../../src/migrations/runner-pg.ts';
+import type { PgClient } from '../../src/migrations/runner-pg.ts';
 
 let pglite: PGlite;
 let client: PgClient;
@@ -198,7 +195,7 @@ describe('applyPgMigrations', () => {
       { name: '002_bad.sql', sql: 'INVALID SQL THAT WILL FAIL' },
     ];
 
-    const error = await applyPgMigrations(client, migrations).catch((caught: unknown) => caught);
+    const error = await applyPgMigrations(client, migrations).catch((error_: unknown) => error_);
 
     expect((error as Error).message).toBe(
       'migration 002_bad.sql failed: syntax error at or near "INVALID"',

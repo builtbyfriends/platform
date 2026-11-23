@@ -1,7 +1,5 @@
-import {
-  parsePlatformDiscoveryDocument,
-  type PlatformDiscoveryDocument,
-} from '@builtbyfriends/platform';
+import { parsePlatformDiscoveryDocument } from '@builtbyfriends/platform';
+import type { PlatformDiscoveryDocument } from '@builtbyfriends/platform';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 
 /** Discovery was refused because the platform traffic gate is closed. */
@@ -52,6 +50,7 @@ export async function readPlatformDiscoveryResponse(
   } catch (error) {
     throw new Error(
       `platform: ${apiUrl} returned invalid discovery metadata: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const finalOrigin = normalizePlatformApiUrl(response.url ? new URL(response.url).origin : apiUrl);

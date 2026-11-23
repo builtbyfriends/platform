@@ -5,7 +5,7 @@ import { resolvePlatformSourceRevision } from './source-revision.mjs';
 
 // Decision: Records the source revision in the manifest that scripts/build-runtime.mjs wrote, so a new
 // revision reruns only this step and not the cached runtime build.
-const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const packageRoot = join(dirname(import.meta.filename), '..');
 const repositoryRoot = join(packageRoot, '..', '..');
 const manifestPath = join(packageRoot, 'dist', 'runtime', 'manifest.json');
 const { parsePlatformRuntimeManifest } = await import(

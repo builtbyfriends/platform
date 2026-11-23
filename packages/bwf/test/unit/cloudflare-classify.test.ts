@@ -28,7 +28,7 @@ describe('classifyCloudflareDeployApp', () => {
     const root = mkdtempSync(join(tmpdir(), 'platform-cloudflare-classify-'));
     roots.push(root);
 
-    const result = classify(root, { inference: { appType: 'static' } } as BwfConfig);
+    const result = classify(root, { inference: { appType: 'static' } });
 
     expect(result).toEqual({
       supported: false,

@@ -10,7 +10,8 @@ import {
 } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@voidzero-dev/vite-plus-prompts';
-import { parseTree, type Node } from 'jsonc-parser';
+import { parseTree } from 'jsonc-parser';
+import type { Node } from 'jsonc-parser';
 import { join } from 'pathslash';
 import {
   ignoreMaterializedCloudflareConfig,
@@ -20,7 +21,7 @@ import {
 } from '../cloudflare-config.ts';
 import { loadTypedBwfConfigFile, TYPED_CONFIG_FILE } from '../config-loader.ts';
 import { GENERATED_MARKERS, renderBwfConfig } from '../config-write.ts';
-import { validateConfig, type BwfConfig } from '../config.ts';
+import { validateConfig } from '../config.ts';
 import { ensureGitignoreLines } from '../shared/gitignore.ts';
 import { parseJsoncObject } from './generated-wrangler-config.ts';
 import { printSuccess } from './output.ts';
@@ -144,10 +145,7 @@ export function migrateLegacyBwfConfig(root: string): boolean {
         `migrate: ${TYPED_CONFIG_FILE} already exists. Move the legacy settings into it before deleting the old files.`,
       );
     }
-    current = validateConfig(loadTypedBwfConfigFile(typedPath), TYPED_CONFIG_FILE) as Record<
-      string,
-      unknown
-    >;
+    current = validateConfig(loadTypedBwfConfigFile(typedPath), TYPED_CONFIG_FILE);
     const currentBwf = { ...current };
     delete currentBwf.cloudflare;
     if (
@@ -177,7 +175,7 @@ export function migrateLegacyBwfConfig(root: string): boolean {
   const needsTypedWrite = !hadTyped || !isDeepStrictEqual(current, next);
   const temporaryPath = join(root, `.bwf.config.${randomUUID()}.ts`);
   if (needsTypedWrite) {
-    writeFileSync(temporaryPath, renderBwfConfig(next as BwfConfig), { flag: 'wx' });
+    writeFileSync(temporaryPath, renderBwfConfig(next), { flag: 'wx' });
   }
   try {
     if (needsTypedWrite) {

@@ -10,8 +10,8 @@ import {
   isProtocolRelative,
   parseHostPrefixedSource,
   VALID_REDIRECT_STATUSES,
-  type RoutingConfig,
 } from '../config.ts';
+import type { RoutingConfig } from '../config.ts';
 import { bwfWarn } from '../log.ts';
 import type { DevRedirectRule, HeaderRule } from './types.ts';
 
@@ -48,7 +48,7 @@ export function parseHeadersFile(dir: string): Array<HeaderRule> | undefined {
     return undefined;
   }
 
-  const content = readFileSync(filePath, 'utf-8');
+  const content = readFileSync(filePath, 'utf8');
   const rules: Array<HeaderRule> = [];
   let current: HeaderRule | null = null;
 
@@ -102,7 +102,7 @@ export function readGeneratedAssetHeadersFile(dir: string): string | undefined {
   if (!existsSync(filePath)) {
     return undefined;
   }
-  const content = readFileSync(filePath, 'utf-8');
+  const content = readFileSync(filePath, 'utf8');
   return isGeneratedAssetHeaders(content) ? content : undefined;
 }
 
@@ -122,7 +122,7 @@ export function parseRedirectsFile(dir: string): ParsedRedirects | undefined {
     return undefined;
   }
 
-  const content = readFileSync(filePath, 'utf-8');
+  const content = readFileSync(filePath, 'utf8');
   const rules: Array<DevRedirectRule> = [];
   let redundantForceOn3xx = 0;
 
@@ -165,14 +165,14 @@ export function parseRedirectsFile(dir: string): ParsedRedirects | undefined {
     if (statusStr) {
       if (statusStr.endsWith('!')) {
         const numericPart = statusStr.slice(0, -1);
-        status = parseInt(numericPart, 10);
+        status = Number.parseInt(numericPart, 10);
         if (status === 200) {
           force = true;
         } else if (status >= 300 && status < 400) {
           redundantForceOn3xx++;
         }
       } else {
-        status = parseInt(statusStr, 10);
+        status = Number.parseInt(statusStr, 10);
       }
     } else {
       status = 302;
@@ -218,14 +218,18 @@ export function parseRedirectsFile(dir: string): ParsedRedirects | undefined {
   return { rules, redundantForceOn3xx };
 }
 
+export type SplitRedirectRules = {
+  always: Array<DevRedirectRule>;
+  fallbacks: Array<DevRedirectRule>;
+};
+
 /**
  * Split `_redirects` rules into rules that always apply and fallbacks: unforced
  * 200 rewrites, which apply only when no static asset matches.
  */
-export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefined): {
-  always: Array<DevRedirectRule>;
-  fallbacks: Array<DevRedirectRule>;
-} {
+export function splitRedirectRulesByForce(
+  rules: Array<DevRedirectRule> | undefined,
+): SplitRedirectRules {
   const always: Array<DevRedirectRule> = [];
   const fallbacks: Array<DevRedirectRule> = [];
   if (!rules) {
@@ -241,6 +245,13 @@ export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefi
   return { always, fallbacks };
 }
 
+export type MergedRoutingRules = {
+  headerRules: Array<HeaderRule>;
+  redirectRules: Array<DevRedirectRule>;
+  fallbackRules: Array<DevRedirectRule> | undefined;
+  redundantForceOn3xx: number;
+};
+
 /**
  * Merge `_redirects` and `_headers` in `dir` with `routing` from bwf.config.ts.
  * Deploy and dev share it so both build the same rule tables; callers lint them.
@@ -248,12 +259,7 @@ export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefi
 export function mergeRoutingRules(opts: {
   dir: string | null;
   routing: RoutingConfig | undefined;
-}): {
-  headerRules: Array<HeaderRule>;
-  redirectRules: Array<DevRedirectRule>;
-  fallbackRules: Array<DevRedirectRule> | undefined;
-  redundantForceOn3xx: number;
-} {
+}): MergedRoutingRules {
   const { dir, routing } = opts;
   // Decision: `dir === null` when the user set `publicDir: false` in the Vite config. Skip file-based rule reads
   // but still merge config-based rules below.

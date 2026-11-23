@@ -1,10 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  createPlatformInstallationManifest,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import { createPlatformInstallationManifest } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { resolvePlatformRuntime } from '@builtbyfriends/platform/installer';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { verifyPlatformDeploymentExecutionDrain } from '../../src/cli/platform-installer-health.ts';

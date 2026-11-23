@@ -12,13 +12,8 @@ import { readConfig } from '../config.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { scanEmailHandlersSync } from '../router/email.ts';
 import { getToken, openBrowser } from './auth.ts';
-import {
-  PlatformApiError,
-  PlatformClient,
-  type EmailDomainResponse,
-  type EmailOperationResponse,
-  type EmailSharedInbound,
-} from './client.ts';
+import { PlatformApiError, PlatformClient } from './client.ts';
+import type { EmailDomainResponse, EmailOperationResponse, EmailSharedInbound } from './client.ts';
 import {
   createDeployWranglerRunner,
   deriveWorkerName,
@@ -38,12 +33,15 @@ import {
   probeMx,
   renderAddressMap,
   renderEmailChecklist,
-  type EmailCloudflareInputs,
-  type EmailDns,
-  type EmailFetch,
-  type EmailPreflight,
-  type EmailWranglerRun,
 } from './email-cloudflare.ts';
+import type {
+  EmailCloudflareInputs,
+  EmailDns,
+  EmailFetch,
+  EmailPreflight,
+  EmailWranglerRun,
+} from './email-cloudflare.ts';
+import { isJsonObject } from './json-value.ts';
 import { printSuccess, createSpinner, formatUrl, note, pc } from './output.ts';
 import { resolveCommandProjectId } from './resolve-project.ts';
 import { writeProvisionedWranglerConfig } from './wrangler.ts';
@@ -84,9 +82,9 @@ export async function runEmailCommand(root: string, args: EmailArgs): Promise<vo
     case 'destinations':
       return emailDestinations(client, projectId);
     case 'allow':
-      return emailAllow(client, projectId, args.address!);
+      return emailAllow(client, projectId, requireEmailArg(args.address, 'address', 'allow'));
     case 'disallow':
-      return emailDisallow(client, projectId, args.address!);
+      return emailDisallow(client, projectId, requireEmailArg(args.address, 'address', 'disallow'));
     case 'alias':
       return emailAlias(client, projectId, args.address, { yes: args.yes === true });
     case 'domain':
@@ -150,12 +148,11 @@ export async function emailAlias(
   }
   const result = await client.setEmailAlias(projectId, name);
   printSuccess(`Email alias set: ${result.address}`);
-  const status = result.sharedInbound?.status;
-  if (status && status !== 'ready') {
+  const sharedInbound = result.sharedInbound;
+  const status = sharedInbound?.status;
+  if (sharedInbound && status && status !== 'ready') {
     const other =
-      result.sharedInbound!.recipient === result.address
-        ? ''
-        : ` at ${result.sharedInbound!.recipient}`;
+      sharedInbound.recipient === result.address ? '' : ` at ${sharedInbound.recipient}`;
     log.info(
       `Inbound mail${other} is ${status}${result.sharedInbound?.reason ? `: ${result.sharedInbound.reason}` : ''}. It starts working once the project has an email handler deployed and routing is ready; check with \`bwf email alias\`.`,
     );
@@ -385,8 +382,9 @@ async function verifyCfApiToken(token: string): Promise<CfTokenVerification> {
     return 'unknown';
   }
   try {
-    const body = (await res.json()) as { result?: { status?: unknown } };
-    return body.result?.status === 'active' ? 'active' : 'inactive';
+    const body: unknown = await res.json();
+    const result = isJsonObject(body) ? body.result : undefined;
+    return isJsonObject(result) && result.status === 'active' ? 'active' : 'inactive';
   } catch {
     return 'unknown';
   }
@@ -412,7 +410,7 @@ type EnterRace = { promise: Promise<'enter'>; stop: () => void };
  * Resolves when Enter is pressed during the clipboard watch. `stop` removes the listener so
  * a losing race cannot eat the first keystroke of a later prompt.
  */
-function createEnterRace(waitForEnter?: () => Promise<unknown>): EnterRace {
+function createEnterRace(waitForEnter?: () => Promise<void>): EnterRace {
   if (waitForEnter) {
     return { promise: waitForEnter().then((): 'enter' => 'enter'), stop: () => {} };
   }
@@ -450,7 +448,7 @@ export interface EmailDomainAddDeps {
   /** Confirms the account/zone resource restriction shown in the token form. */
   confirmScope?: (domain: string) => Promise<boolean>;
   /** The Enter keypress that switches paths (default: one stdin line). */
-  waitForEnter?: () => Promise<unknown>;
+  waitForEnter?: () => Promise<void>;
   watchIntervalMs?: number;
   /** Default 10 minutes. */
   watchTimeoutMs?: number;
@@ -909,11 +907,13 @@ export async function emailDomainRotateSecret(
     if (!operation) {
       throw new Error(
         `email: secret rotation outcome is unknown (operation key ${attemptId}); inspect \`bwf email domain status ${domain}\` before starting another rotation.`,
+        { cause: error },
       );
     }
     if (operation.status !== 'completed') {
       throw new Error(
         `email: secret rotation ${operation.status}; inspect operation ${operation.operationId}`,
+        { cause: error },
       );
     }
     printSuccess('Zone ingress secret rotated and verified on the deployed Worker.');
@@ -953,20 +953,35 @@ async function runEmailDomainCommand(
   projectId: string,
   args: EmailArgs,
 ): Promise<void> {
-  switch (args.domainVerb) {
+  const verb = args.domainVerb;
+  if (verb === undefined) {
+    throw new Error('email: `bwf email domain` needs a verb.');
+  }
+  switch (verb) {
     case 'add':
-      return emailDomainAdd(client, projectId, args.domain!);
+      return emailDomainAdd(client, projectId, requireEmailArg(args.domain, 'domain', verb));
     case 'status':
-      return emailDomainStatus(client, projectId, args.domain!);
+      return emailDomainStatus(client, projectId, requireEmailArg(args.domain, 'domain', verb));
     case 'list':
       return emailDomainList(client, projectId);
     case 'sync':
-      return emailDomainSync(client, projectId, args.domain!);
+      return emailDomainSync(client, projectId, requireEmailArg(args.domain, 'domain', verb));
     case 'rotate-secret':
-      return emailDomainRotateSecret(client, projectId, args.domain!);
+      return emailDomainRotateSecret(
+        client,
+        projectId,
+        requireEmailArg(args.domain, 'domain', verb),
+      );
     case 'remove':
-      return emailDomainRemove(client, projectId, args.domain!);
+      return emailDomainRemove(client, projectId, requireEmailArg(args.domain, 'domain', verb));
   }
+}
+
+function requireEmailArg(value: string | undefined, name: string, subcommand: string): string {
+  if (value === undefined) {
+    throw new Error(`email: \`bwf email ${subcommand}\` needs a ${name}.`);
+  }
+  return value;
 }
 
 /** Test seams for {@link runEmailCloudflareCommand}. */
@@ -1092,8 +1107,8 @@ async function runEmailCloudflareCommandInConfig(
   let apiBaseUrl: string;
   try {
     apiBaseUrl = resolveDeployTransport(root, rootConfig);
-  } catch (err) {
-    return fail(`email: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    return fail(`email: ${error instanceof Error ? error.message : String(error)}`);
   }
   const accountId =
     readWranglerTopLevelString(rootConfig, 'account_id') ??
@@ -1128,8 +1143,8 @@ async function runEmailCloudflareCommandInConfig(
   let pre: EmailPreflight;
   try {
     pre = await preflightEmail(inputs);
-  } catch (err) {
-    return fail(`email: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    return fail(`email: ${error instanceof Error ? error.message : String(error)}`);
   }
   print(renderEmailChecklist(pre));
   const sendingOnly = pre.usage.handlers.length === 0;
@@ -1196,9 +1211,9 @@ async function runEmailCloudflareCommandInConfig(
   }
   try {
     writeProvisionedWranglerConfig(root, out.patch, { configPath });
-  } catch (err) {
+  } catch (error) {
     return fail(
-      `email: could not update ${configPath} — ${err instanceof Error ? err.message : String(err)}`,
+      `email: could not update ${configPath} — ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 

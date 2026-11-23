@@ -39,10 +39,9 @@ import {
   setupEnv,
   skipOrphanSweepDelay,
   teardownEnv,
-  type TestEnv,
-  type MockCfApiHandle,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv, MockCfApiHandle } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -96,7 +95,7 @@ beforeEach(async () => {
         return cfSuccess([]);
       }
       return Response.json(
-        { success: false, errors: [{ code: 10007, message: 'script not found' }] },
+        { success: false, errors: [{ code: 10_007, message: 'script not found' }] },
         { status: 404 },
       );
     }
@@ -280,7 +279,7 @@ describe('managed native Durable Objects', () => {
                 {
                   type: 'ESModule',
                   path: join(directory, 'application/index.js'),
-                  contents: application.modules['index.js']!,
+                  contents: application.modules['index.js'],
                 },
               ],
               durableObjects: { WORKSPACE: object },
@@ -442,7 +441,7 @@ describe('managed native Durable Objects', () => {
       first.id,
     );
     expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
         .active_deployment_id,
     ).toBe(first.id);
   });
@@ -752,7 +751,7 @@ describe('managed native Durable Objects', () => {
       second.id,
     );
     expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
         .active_deployment_id,
     ).toBe(second.id);
   });

@@ -1,5 +1,6 @@
 import { defineHandler } from '@builtbyfriends/bwf';
-import { sendEmail, type SendEmailOptions } from '@builtbyfriends/bwf/email';
+import { sendEmail } from '@builtbyfriends/bwf/email';
+import type { SendEmailOptions } from '@builtbyfriends/bwf/email';
 import { env } from '@builtbyfriends/bwf/env';
 import { kv } from '@builtbyfriends/bwf/kv';
 

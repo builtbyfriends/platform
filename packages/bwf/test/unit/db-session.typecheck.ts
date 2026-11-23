@@ -1,6 +1,7 @@
 import { integer, sqliteTable } from 'drizzle-orm/sqlite-core';
 import { expectTypeOf } from 'vite-plus/test';
-import { createDb, getBookmark, setSession, type DrizzleD1Database } from '../../src/runtime/db.ts';
+import { createDb, getBookmark, setSession } from '../../src/runtime/db.ts';
+import type { DrizzleD1Database } from '../../src/runtime/db.ts';
 
 declare const binding: D1Database;
 

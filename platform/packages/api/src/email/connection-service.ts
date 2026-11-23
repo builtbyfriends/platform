@@ -27,8 +27,8 @@ import {
   emailOperations,
   emailOperationSteps,
   emailZoneConnections,
-  type EmailInboundMode,
 } from './connection-schema.ts';
+import type { EmailInboundMode } from './connection-schema.ts';
 import { isValidEmailDomain, normalizeEmailDomain } from './domain-name.ts';
 import { RELAY_COMPATIBILITY_DATE, RELAY_SOURCE, RELAY_VERSION } from './relay-worker.ts';
 
@@ -447,7 +447,7 @@ function ingressName(installationId: string, zoneId: string): string {
   const suffix = [installationId, zoneId]
     .join('-')
     .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
+    .replaceAll(/[^a-z0-9-]/g, '-')
     .slice(-48);
   return `platform-email-${suffix}`;
 }
@@ -784,10 +784,10 @@ async function resumeBlockedEmailOperationTx(
       ),
     )
     .orderBy(emailOperationSteps.ordinal);
-  if (blocked.length !== 1 || operation.current_step !== blocked[0]!.kind) {
+  if (blocked.length !== 1 || operation.current_step !== blocked[0].kind) {
     throw new EmailOperationError('blocked email operation step is unavailable', 409);
   }
-  const step = blocked[0]!;
+  const step = blocked[0];
   const resumed = await tx
     .update(emailOperationSteps)
     .set({
@@ -1048,7 +1048,7 @@ export async function replaceBlockedSystemEmailCleanupCredential(
   if (candidates.length !== 1) {
     throw new EmailOperationError('blocked system cleanup operation is unavailable', 409);
   }
-  const operation = candidates[0]!;
+  const operation = candidates[0];
   const client = createCfCustomerClient(token);
   let verifiedToken: { tokenId: string; expiresOn: string | null };
   try {
@@ -1391,7 +1391,7 @@ export async function requestEmailDomainAdd(
   if (input.actor.kind === 'system') {
     throw new EmailOperationError('system cannot assign project email domains', 403);
   }
-  const actor = input.actor as Exclude<EmailActor, { kind: 'system' }>;
+  const actor = input.actor;
   if (outboundOnly && actor.kind !== 'admin') {
     throw new EmailOperationError('outbound-only email domains are administrator-managed', 403);
   }
@@ -2122,7 +2122,7 @@ export async function ensureSharedEmailConnection(db: Db, env: Bindings): Promis
       installation_id: installationId,
       connection_id: connection.id,
       route_id: routeId,
-      route_generation: route!.desired_generation,
+      route_generation: route.desired_generation,
       actor_kind: 'system',
       actor_scope: 'system:shared',
       kind: 'setup',
@@ -2136,7 +2136,7 @@ export async function ensureSharedEmailConnection(db: Db, env: Bindings): Promis
     const stepRoute: EmailStepRoute = {
       id: routeId,
       domain,
-      desired_generation: route!.desired_generation,
+      desired_generation: route.desired_generation,
     };
     await insertEmailOperationSteps(tx, env, {
       operationId,
@@ -2814,7 +2814,7 @@ export async function runEmailOperation(db: Db, env: Bindings, operationId: stri
           : route?.inboundMode === 'none'
             ? { outboundOnly: true }
             : !canManageConnection(
-                  { kind: op.actor_kind, userId: op.actor_user_id ?? '' } as EmailActor,
+                  { kind: op.actor_kind, userId: op.actor_user_id ?? '' },
                   connection,
                 )
               ? { retainedForManager: true }
@@ -3785,7 +3785,7 @@ export async function resolveUnknownEmailOperation(
     }
     if (input.outcome === 'applied' && step.kind === 'ingress_deploy') {
       const match = /\/relay\/(\d+)$/.exec(step.resource_identity);
-      const relayVersion = match ? Number(match[1]) : NaN;
+      const relayVersion = match ? Number(match[1]) : Number.NaN;
       if (!Number.isSafeInteger(relayVersion) || relayVersion < 1) {
         throw new EmailOperationError('email relay recovery identity is invalid', 409);
       }

@@ -1,6 +1,7 @@
 import { defineMiddleware } from '@builtbyfriends/bwf';
 import { deleteCookie, getCookie } from 'hono/cookie';
-import { getCurrentUser, type CurrentUser } from '../lib/api.ts';
+import { getCurrentUser } from '../lib/api.ts';
+import type { CurrentUser } from '../lib/api.ts';
 
 export type DashboardUser = CurrentUser;
 

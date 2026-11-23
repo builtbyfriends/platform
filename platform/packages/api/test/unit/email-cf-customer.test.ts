@@ -56,7 +56,7 @@ describe('cf-customer client', () => {
       fetchMock.mockImplementation(async () => cfError('invalid token', 401));
       const client = createCfCustomerClient(CREDENTIAL);
 
-      const error = await client.verifyToken(ACCOUNT).catch((err: unknown) => err);
+      const error = await client.verifyToken(ACCOUNT).catch((error_: unknown) => error_);
       expect(error).toBeInstanceOf(CloudflareApiError);
       expect((error as CloudflareApiError).status).toBe(401);
       expect((error as CloudflareApiError).message).toContain('invalid token');
@@ -360,7 +360,7 @@ describe('cf-customer client', () => {
       fetchMock.mockResolvedValueOnce(cfError('forbidden', 403));
       const client = createCfCustomerClient(CREDENTIAL);
 
-      const error = await client.getCatchAll(ZONE).catch((err: unknown) => err);
+      const error = await client.getCatchAll(ZONE).catch((error_: unknown) => error_);
       expect(error).toBeInstanceOf(CloudflareApiError);
       expect((error as CloudflareApiError).status).toBe(403);
     });
@@ -400,7 +400,9 @@ describe('cf-customer client', () => {
       fetchMock.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
       const client = createCfCustomerClient(CREDENTIAL);
 
-      const error = await client.relayScriptExists(ACCOUNT, RELAY).catch((err: unknown) => err);
+      const error = await client
+        .relayScriptExists(ACCOUNT, RELAY)
+        .catch((error_: unknown) => error_);
       expect(error).toBeInstanceOf(CloudflareApiError);
       expect((error as CloudflareApiError).status).toBe(403);
     });

@@ -17,10 +17,10 @@ import {
   teardownEnv,
   clearTables,
   createMockExecutionContext,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 const origin = 'https://platform.example.com';

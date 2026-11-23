@@ -7,7 +7,7 @@ import {
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetConfig,
 } from '../asset-routing.ts';
-import { type BwfConfig } from '../config.ts';
+import type { BwfConfig } from '../config.ts';
 import { hasEmailHandlers } from '../router/email.ts';
 import {
   isSandboxAttached,
@@ -16,7 +16,7 @@ import {
 } from '../sandbox/config.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
 import { resolveDistDir, resolveWorkerDirName } from './build-output-dir.ts';
-import { PlatformClient } from './client.ts';
+import type { PlatformClient } from './client.ts';
 import { assertDeploySchemaDriftFree } from './deploy-drift.ts';
 import {
   resolveFullDeployBuildCommand,
@@ -38,8 +38,9 @@ import {
 } from './deploy-managed-events.ts';
 import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
 import { MANAGED_DEPLOY_BUILD_ENV } from './deploy-transport.ts';
-import { type GitDeployMetadata } from './git-metadata.ts';
-import { type CliLogger } from './log-file.ts';
+import type { GitDeployMetadata } from './git-metadata.ts';
+import { isJsonObject } from './json-value.ts';
+import type { CliLogger } from './log-file.ts';
 import { createSpinner, formatCount, note } from './output.ts';
 import {
   buildBwfManifest,
@@ -47,7 +48,7 @@ import {
   collectWorkerFiles,
   detectNonSpaFallbackWarning,
 } from './package.ts';
-import { type ProjectConfig } from './project.ts';
+import type { ProjectConfig } from './project.ts';
 import type { AssetConfig } from './types.ts';
 
 export async function runFullDeploy(
@@ -86,9 +87,9 @@ export async function runFullDeploy(
         ),
       });
       cliLog?.info('build_end', { durationMs: Date.now() - buildStartedAt });
-    } catch (err: unknown) {
-      cliLog?.error('build_failed', err, { durationMs: Date.now() - buildStartedAt });
-      process.exit(getExitCode(err));
+    } catch (error: unknown) {
+      cliLog?.error('build_failed', error, { durationMs: Date.now() - buildStartedAt });
+      process.exit(getExitCode(error));
     }
   } else {
     cliLog?.info('build_skipped', { reason: 'skipBuild' });
@@ -102,12 +103,11 @@ export async function runFullDeploy(
   let assetsPrefix = 'assets';
   const clientManifestPath = join(distDir, 'client', '.vite', 'manifest.json');
   if (existsSync(clientManifestPath)) {
-    const manifest: Record<string, { file?: string }> = JSON.parse(
-      readFileSync(clientManifestPath, 'utf-8'),
-    );
-    for (const entry of Object.values(manifest)) {
-      if (entry.file?.includes('/')) {
-        const dir = entry.file.slice(0, entry.file.indexOf('/'));
+    const manifest: unknown = JSON.parse(readFileSync(clientManifestPath, 'utf8'));
+    for (const entry of isJsonObject(manifest) ? Object.values(manifest) : []) {
+      const file = isJsonObject(entry) ? entry.file : undefined;
+      if (typeof file === 'string' && file.includes('/')) {
+        const dir = file.slice(0, file.indexOf('/'));
         if (dir !== 'assets') {
           assetsPrefix = dir;
         }

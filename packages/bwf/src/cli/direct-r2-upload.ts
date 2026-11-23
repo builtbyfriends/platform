@@ -87,7 +87,7 @@ export async function uploadAssetsToR2(
     return;
   }
 
-  let firstError: unknown = null;
+  const errors: Array<Error> = [];
   let nextIndex = 0;
 
   // Decision: Bounded-pool worker pattern: each worker pulls the next index until exhausted or a sibling worker
@@ -97,16 +97,18 @@ export async function uploadAssetsToR2(
   for (let w = 0; w < workerCount; w++) {
     workers.push(
       (async () => {
-        while (firstError === null) {
+        while (errors.length === 0) {
           const i = nextIndex++;
           if (i >= items.length) {
             return;
           }
           try {
             await uploadOne(items[i], cliLog, fetchImpl);
-          } catch (err) {
-            if (firstError === null) {
-              firstError = err;
+          } catch (error) {
+            if (errors.length === 0) {
+              errors.push(
+                error instanceof Error ? error : new Error(String(error), { cause: error }),
+              );
             }
             return;
           }
@@ -117,7 +119,8 @@ export async function uploadAssetsToR2(
     );
   }
   await Promise.all(workers);
-  if (firstError !== null) {
+  const [firstError] = errors;
+  if (firstError) {
     throw firstError;
   }
 }
@@ -144,10 +147,10 @@ async function uploadOne(
     try {
       res = await fetchImpl(item.url, {
         method: 'PUT',
-        body: new Uint8Array(body) as unknown as BodyInit,
+        body: new Uint8Array(body) as BodyInit,
         headers: item.headers,
       });
-    } catch (err) {
+    } catch (error) {
       // Decision: A network-level error is treated like a 5xx for retries (it's transient by nature), but
       // exhaustion still throws.
       if (attempt < MAX_R2_PUT_RETRIES) {
@@ -156,13 +159,13 @@ async function uploadOne(
           path: item.path,
           attempt: attempt + 1,
           status: 0,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         await sleep(RETRY_BACKOFF_MS[attempt]);
         attempt++;
         continue;
       }
-      cliLog?.error('r2_put_end', err, {
+      cliLog?.error('r2_put_end', error, {
         hash: item.hash,
         path: item.path,
         durationMs: Date.now() - startedAt,
@@ -172,7 +175,7 @@ async function uploadOne(
         0,
         item.hash,
         item.path,
-        err instanceof Error ? err.message : String(err),
+        error instanceof Error ? error.message : String(error),
       );
     }
 
@@ -230,5 +233,7 @@ function truncate(s: string): string {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

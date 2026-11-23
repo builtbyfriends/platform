@@ -7,13 +7,8 @@ import { canonicalJson, isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { parseRootWranglerConfig } from './config.ts';
 import { cloudflareCommandDiagnostic } from './diagnostics.ts';
-import {
-  isCleanCommandExit,
-  isCompletedCommand,
-  isWorkerNotFound,
-  type CloudflareCommandResult,
-  type CloudflareCommandRunner,
-} from './execute.ts';
+import { isCleanCommandExit, isCompletedCommand, isWorkerNotFound } from './execute.ts';
+import type { CloudflareCommandResult, CloudflareCommandRunner } from './execute.ts';
 import type { CloudflareUploadResult } from './operations.ts';
 import {
   isBwfSecretDraftHeader,
@@ -23,8 +18,8 @@ import {
   PLATFORM_SECRET_DRAFT_SOURCE,
 } from './secret-draft.ts';
 
-const DURABLE_MIGRATION_VERSION_ERROR = 10211;
-const CLOUDFLARE_SECRET_CHANGED_ERROR = 10220;
+const DURABLE_MIGRATION_VERSION_ERROR = 10_211;
+const CLOUDFLARE_SECRET_CHANGED_ERROR = 10_220;
 
 export type CloudflareVersionMetadata =
   | Readonly<{
@@ -676,7 +671,7 @@ function desiredTriggerConfigFor(
 /** A well-formed `addresses` array, or `undefined` when the field is absent or malformed. */
 function readEmailAddresses(value: unknown): ReadonlyArray<string> | undefined {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-    ? (value as ReadonlyArray<string>)
+    ? value
     : undefined;
 }
 
@@ -993,7 +988,7 @@ async function activateCloudflareVersionWithSecretsFile(
         inheritedChain.length > 0 &&
         inheritedChain.every(
           (version, index) =>
-            index === 0 || version.number === inheritedChain[index - 1]!.number + 1,
+            index === 0 || version.number === inheritedChain[index - 1].number + 1,
         ) &&
         (arraysEqual(inheritedCandidates, trustedInheritanceVersionIds ?? []) ||
           options.pinActiveSecrets !== undefined);
@@ -1281,7 +1276,7 @@ async function activateCloudflareVersionWithSecretsFile(
       (upload.failure === 'durable-migration' ||
         upload.failure === 'not-found' ||
         cloudflareErrorCode === DURABLE_MIGRATION_VERSION_ERROR ||
-        cloudflareErrorCode === 10007);
+        cloudflareErrorCode === 10_007);
     if (
       !options.preserveTriggers &&
       isBootstrapError &&
@@ -1323,7 +1318,7 @@ async function activateCloudflareVersionWithSecretsFile(
         recent?.length === baseline.length &&
         recent.every(
           (version, index) =>
-            version.id === baseline[index]!.id && version.number === baseline[index]!.number,
+            version.id === baseline[index].id && version.number === baseline[index].number,
         );
       return unchanged ? null : recent;
     };
@@ -2542,7 +2537,7 @@ function versionPercentages(
 ): Array<{ versionId: string; percentage: number }> {
   return values.map((value) => {
     const [versionId, percentage] = value.split('@');
-    return { versionId: versionId!, percentage: Number(percentage) };
+    return { versionId, percentage: Number(percentage) };
   });
 }
 
@@ -2792,7 +2787,7 @@ async function probeReadiness(
       }
     }
     if (attempt + 1 < attempts) {
-      const waitMs = Math.min(250 * 2 ** attempt, 2_000, deadline - Date.now());
+      const waitMs = Math.min(250 * 2 ** attempt, 2000, deadline - Date.now());
       if (waitMs > 0) {
         await sleep(waitMs);
       }

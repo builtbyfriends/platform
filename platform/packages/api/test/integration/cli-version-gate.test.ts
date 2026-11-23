@@ -10,10 +10,10 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
-  type TestEnv,
   rpcRequest,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 import { setTestDb } from './setup.ts';
@@ -246,8 +246,7 @@ describe('cliVersionGate — defers to project authorization', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             if (!beforeTxHoldFired) {
               beforeTxHoldFired = true;
               beforeTxReached?.();
@@ -256,11 +255,11 @@ describe('cliVersionGate — defers to project authorization', () => {
               });
             }
             return realTransaction(fn);
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(target, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     try {

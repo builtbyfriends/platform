@@ -1,10 +1,9 @@
-import {
-  createDefaultPlanCatalog,
-  parsePlatformPlanCatalog,
-  type BuiltinPlanId,
-  type PlanLimits,
-  type PlatformPlanCatalog,
-  type PlatformPlanDefinition,
+import { createDefaultPlanCatalog, parsePlatformPlanCatalog } from '@builtbyfriends/platform/plans';
+import type {
+  BuiltinPlanId,
+  PlanLimits,
+  PlatformPlanCatalog,
+  PlatformPlanDefinition,
 } from '@builtbyfriends/platform/plans';
 import { count, sql } from 'drizzle-orm';
 import type { DbOrTx } from './db.ts';

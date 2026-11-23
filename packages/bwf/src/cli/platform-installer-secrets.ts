@@ -1,23 +1,23 @@
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  type PlatformInstallationManifest,
-  parsePlatformAuthenticationSetup,
-} from '@builtbyfriends/platform';
+import { parsePlatformAuthenticationSetup } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   checkpointPlatformAccessResources,
   isPlatformAuthenticationPreparationKey,
 } from './platform-access-setup.ts';
 import {
   PLATFORM_BILLING_SECRET_NAMES,
-  type PlatformBillingSecretName,
-  type PlatformInstallationSecrets,
-  type PlatformWorkerKey,
-  type PlatformWorkerSecretUpdateIntent,
-  type PlatformWorkerSecretUpdateName,
   PLATFORM_API_WORKER_SECRET_UPDATE_NAMES,
-  type PlatformWorkerSecretUpdates,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan } from './platform-plan.ts';
+import type {
+  PlatformBillingSecretName,
+  PlatformInstallationSecrets,
+  PlatformWorkerKey,
+  PlatformWorkerSecretUpdateIntent,
+  PlatformWorkerSecretUpdateName,
+  PlatformWorkerSecretUpdates,
+} from './platform-installer-types.ts';
+import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export function createPlatformInstallationSecrets(input: {
   configurableAuthentication?: boolean;
@@ -780,7 +780,7 @@ export function readPlatformBillingInput(
         `platform: ${match[1]} is not a billing value. Use ${PLATFORM_BILLING_SECRET_NAMES.join(', ')}.`,
       );
     }
-    const value = match[2]!.replace(/^(['"])(.*)\1$/, '$2');
+    const value = match[2].replace(/^(['"])(.*)\1$/, '$2');
     if (value) {
       billing[name] = value;
     }

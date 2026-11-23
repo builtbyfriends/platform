@@ -625,7 +625,7 @@ export class PlatformCloudflareClient {
     const after = await this.listWorkerRoutes(zoneId);
     for (const pattern of patterns) {
       const matches = after.filter((route) => route.pattern === pattern);
-      if (matches.length !== 1 || matches[0]!.script !== workerName) {
+      if (matches.length !== 1 || matches[0].script !== workerName) {
         throw new PlatformWorkerRoutesChangedError(
           `platform: Worker route ${JSON.stringify(pattern)} changed concurrently after publication; retaining live routes for safe reconciliation.`,
         );
@@ -1564,7 +1564,7 @@ function cloudflarePrerequisiteHelp(
   if (scope !== 'accounts' || !accountId) {
     return;
   }
-  if (service === 'r2' && envelope.errors?.some((error) => error.code === 10042)) {
+  if (service === 'r2' && envelope.errors?.some((error) => error.code === 10_042)) {
     return (
       'Cloudflare R2 is not enabled for this account (code 10042). ' +
       `Complete R2 activation at ${formatUrl(`https://dash.cloudflare.com/${accountId}/r2/overview`)}, then retry the same command.`
@@ -1573,7 +1573,7 @@ function cloudflarePrerequisiteHelp(
   if (
     service === 'workers' &&
     resource === 'dispatch' &&
-    envelope.errors?.some((error) => error.code === 10121)
+    envelope.errors?.some((error) => error.code === 10_121)
   ) {
     return (
       'Cloudflare Workers for Platforms requires a paid subscription for this account (code 10121). ' +
@@ -1789,7 +1789,7 @@ function parseHyperdriveConfig(value: Record<string, unknown>): CloudflareHyperd
         ? null
         : typeof record.port === 'number' || typeof record.port === 'string'
           ? Number(record.port)
-          : NaN;
+          : Number.NaN;
     if (port !== null && (!Number.isInteger(port) || port <= 0 || port > 65_535)) {
       throw new Error('platform: Cloudflare Hyperdrive config has an invalid origin port.');
     }

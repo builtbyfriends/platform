@@ -1,4 +1,5 @@
-import { usageLimitResponse, type UsageLimitData } from '@builtbyfriends/edge';
+import { usageLimitResponse } from '@builtbyfriends/edge';
+import type { UsageLimitData } from '@builtbyfriends/edge';
 import { createErrorResponse, shouldServeHtmlErrorPage } from './error-page.ts';
 
 /** Runs entirely in dispatch: app execution and app resources are never needed. */

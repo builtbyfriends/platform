@@ -4,9 +4,11 @@ import {
   parsePlatformAppAccessSetup,
   PLATFORM_APP_ACCESS_SETUP_PROOF_PREFIX,
   PLATFORM_APP_ACCESS_TURN_OFF_PROOF_PREFIX,
-  type PlatformAppAccess,
-  type PlatformAppAccessSetup,
-  type PlatformDeploymentManifest,
+} from '@builtbyfriends/platform';
+import type {
+  PlatformAppAccess,
+  PlatformAppAccessSetup,
+  PlatformDeploymentManifest,
 } from '@builtbyfriends/platform';
 import { confirm, log, multiselect, password, select } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';

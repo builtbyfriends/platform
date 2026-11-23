@@ -9,11 +9,13 @@ import {
   useContext,
   useEffect,
   useState,
-  type AnchorHTMLAttributes,
-  type ComponentType,
-  type ElementType,
-  type MouseEvent,
-  type ReactNode,
+} from 'react';
+import type {
+  AnchorHTMLAttributes,
+  ComponentType,
+  ElementType,
+  MouseEvent,
+  ReactNode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
 

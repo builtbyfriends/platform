@@ -1,10 +1,7 @@
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
 import { applySqliteAuthMigrations } from './auth-migrations.ts';
-import {
-  createBwfAuthRuntime,
-  type BwfAuthEnv,
-  type BwfAuthRuntimeApi,
-} from './better-auth-shared.ts';
+import { createBwfAuthRuntime } from './better-auth-shared.ts';
+import type { BwfAuthEnv, BwfAuthRuntimeApi } from './better-auth-shared.ts';
 
 async function applyMigrations(
   env: BwfAuthEnv,

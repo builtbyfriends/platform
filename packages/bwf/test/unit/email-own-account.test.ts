@@ -315,7 +315,6 @@ function buildHandleEmail(
   expect(start).toBeGreaterThan(-1);
   const end = code.indexOf('\n}\n', start);
   const body = code.slice(start, end + 3);
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
   return new Function(
     '__filterInternalBindings',
     '__createMessageProxy',
@@ -411,7 +410,7 @@ describe('generated handleEmail on a native ForwardableEmailMessage', () => {
 
     const outcome = await handleEmail(message, {}, {}).then(
       () => 'resolved',
-      (e: unknown) => e,
+      (error: unknown) => error,
     );
 
     expect(calls.forwards).toEqual([]);

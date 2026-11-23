@@ -108,7 +108,7 @@ it('rejects non-HTTPS upload URLs without sending SQL or credentials', async () 
 async function importError(): Promise<Error> {
   const error = await importD1SqlFile(fixture()).then(
     () => undefined,
-    (reason: unknown) => reason,
+    (error_: unknown) => error_,
   );
   expect(error).toBeInstanceOf(Error);
   return error as Error;
@@ -189,7 +189,7 @@ it('keeps a stalled upload a plain failure that names its deadline', async () =>
     'fetch',
     vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(uploaded()[0]!)
+      .mockResolvedValueOnce(uploaded()[0])
       .mockRejectedValueOnce(
         new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
       ),
@@ -340,7 +340,7 @@ it('keeps an upload failure a plain failure', async () => {
     'fetch',
     vi
       .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(uploaded()[0]!)
+      .mockResolvedValueOnce(uploaded()[0])
       .mockRejectedValueOnce(new TypeError('fetch failed')),
   );
   expect((await importError()).message).toBe('fetch failed');

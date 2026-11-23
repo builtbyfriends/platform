@@ -426,9 +426,9 @@ app.get('/callback', async (context) => {
         // is signed into the existing account without a duplicate github row.
         try {
           await linkGitHubIdentity(db, existing.id, providerId);
-        } catch (err) {
-          if (!(err instanceof GitHubIdentityAlreadyLinkedError)) {
-            throw err;
+        } catch (error) {
+          if (!(error instanceof GitHubIdentityAlreadyLinkedError)) {
+            throw error;
           }
           githubIdentityRejected = true;
         }
@@ -485,13 +485,13 @@ app.get('/callback', async (context) => {
   if (emailVerified && email) {
     try {
       await acceptInvitationByEmail(db, email, user.id);
-    } catch (err) {
-      console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, err);
+    } catch (error) {
+      console.error(`Failed to accept invitation for ${email} (user ${user.id}):`, error);
     }
     if (createdUser && context.env.EMAIL) {
       context.executionCtx.waitUntil(
-        sendWelcomeEmail(context.env, email, login).catch((err) =>
-          console.error(`[welcome-email] Failed for ${email}:`, err),
+        sendWelcomeEmail(context.env, email, login).catch((error) =>
+          console.error(`[welcome-email] Failed for ${email}:`, error),
         ),
       );
     }
@@ -503,8 +503,8 @@ app.get('/callback', async (context) => {
     // not block login.
     try {
       await linkGitHubInstallationToUser(db, providerId, user.id);
-    } catch (err) {
-      console.error(`[github-app] Failed to backfill installations for ${login}:`, err);
+    } catch (error) {
+      console.error(`[github-app] Failed to backfill installations for ${login}:`, error);
     }
   }
 

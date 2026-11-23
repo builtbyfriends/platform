@@ -52,8 +52,8 @@ import {
   setupEnv,
   skipOrphanSweepDelay,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;
@@ -258,8 +258,8 @@ describe('operator tenant reads', () => {
     // fall in the current billing period.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-07-15T12:00:00.000Z'));
-    const ownedFrom = new Date(Date.now() - 5 * 24 * 60 * 60 * 1_000);
-    const transferredAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000);
+    const ownedFrom = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    const transferredAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     transferredAt.setMilliseconds(500);
     await env.db
       .update(users)
@@ -559,7 +559,7 @@ describe('operator tenant mutations', () => {
       })
       .from(projectDeployCredentials)
       .where(eq(projectDeployCredentials.id, 'transfer-deploy-credential'));
-    expect(revokedCredential!.sameTransferInstant).toBe(true);
+    expect(revokedCredential.sameTransferInstant).toBe(true);
     expect(counterCalls).toEqual([
       {
         ownerId: owner.id,
@@ -688,9 +688,9 @@ describe('operator tenant mutations', () => {
         body: { projectId: project.id, userId: target.id },
       },
     ]);
-    expect(transferCounterCalls[1]!.body).not.toHaveProperty('plan');
+    expect(transferCounterCalls[1].body).not.toHaveProperty('plan');
     expect(planCounterCalls.map((call) => call.path)).toEqual(['/init', '/reevaluate-limits']);
-    expect(planCounterCalls[1]!.body).toEqual({ userId: target.id });
+    expect(planCounterCalls[1].body).toEqual({ userId: target.id });
     expect(JSON.parse((await env.ROUTING.get(project.slug))!).suspended).toBeUndefined();
     expect(await env.ROUTING.get(`project-suspended:${project.id}`)).toBeNull();
 
@@ -1216,7 +1216,7 @@ describe('operator tenant mutations', () => {
       suspended: 'requests_exceeded',
     });
     expect(calls.map((call) => call.path)).toEqual(['/init', '/reevaluate-limits']);
-    expect(calls[0]!.body).toMatchObject({
+    expect(calls[0].body).toMatchObject({
       userId: user.id,
       plan: 'pro',
       projectSlugs: { [project.id]: project.slug },
@@ -1601,7 +1601,7 @@ describe('operator signup access and invitations', () => {
       warnings: ['Email failed: delivery@example.com. Signup access was granted.'],
     });
     expect(
-      await getInvitation(env.db, (await env.db.select().from(invitations))[0]!.id),
+      await getInvitation(env.db, (await env.db.select().from(invitations))[0].id),
     ).toMatchObject({
       email_delivery_status: 'failed',
     });
@@ -1667,7 +1667,7 @@ describe('operator signup access and invitations', () => {
     expect(await getAllowlist(env.ROUTING)).toEqual([
       expect.objectContaining({ type: 'email', pattern: 'invited@example.com' }),
     ]);
-    expect((await req(`/invitations/${result.invitations[0]!.id}/revoke`, {})).status).toBe(200);
+    expect((await req(`/invitations/${result.invitations[0].id}/revoke`, {})).status).toBe(200);
     expect(await getAllowlist(env.ROUTING)).toEqual([]);
   });
 

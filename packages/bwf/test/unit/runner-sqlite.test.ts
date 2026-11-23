@@ -149,7 +149,7 @@ describe('runMigrations (local SQLite)', () => {
     writeMigration(migDir, '001_init.sql', 'CREATE TABLE users (id TEXT PRIMARY KEY)');
 
     const error = await runMigrations(migDir, dbPath, (path) => `src/${path}`).catch(
-      (caught: unknown) => caught,
+      (error_: unknown) => error_,
     );
     const message = (error as Error).message;
     expect(message).toContain(
@@ -251,7 +251,7 @@ describe('runMigrations (local SQLite)', () => {
     writeMigration(migDir, '001_ok.sql', 'CREATE TABLE a (id TEXT PRIMARY KEY)');
     writeMigration(migDir, '002_bad.sql', 'INSERT INTO nope VALUES (1);');
 
-    const error = await runMigrations(migDir, dbPath).catch((caught: unknown) => caught);
+    const error = await runMigrations(migDir, dbPath).catch((error_: unknown) => error_);
 
     expect((error as Error).message).toBe('migration 002_bad.sql failed: no such table: nope');
     expect((error as Error).cause).toMatchObject({ code: 'SQLITE_ERROR' });

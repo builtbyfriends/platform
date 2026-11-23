@@ -52,7 +52,6 @@ function operator(path: string, body?: Record<string, unknown>) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = Record<string, any>;
 
 const json = async (response: Response | Promise<Response>) =>

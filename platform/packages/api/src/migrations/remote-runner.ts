@@ -56,10 +56,10 @@ async function upgradeTrackingTable(
     await queryD1(accountId, apiToken, databaseId, {
       sql: `INSERT OR IGNORE INTO _void_migrations (name, applied_at) SELECT name, applied_at FROM _migrations`,
     });
-  } catch (err) {
-    const msg = String((err as Error)?.message ?? err);
+  } catch (error) {
+    const msg = String((error as Error)?.message ?? error);
     if (!/no such table/i.test(msg)) {
-      throw err;
+      throw error;
     }
   }
   // Decision: DROP can fail if a concurrent caller already dropped the table; that's safe to ignore.
@@ -224,12 +224,12 @@ export async function queryD1(
       signal: controller.signal,
     });
     json = (await response.json()) as typeof json;
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
       const preview = query.sql.length > 80 ? `${query.sql.slice(0, 80)}…` : query.sql;
-      throw new Error(`D1 request timed out after ${timeoutMs}ms (${preview})`);
+      throw new Error(`D1 request timed out after ${timeoutMs}ms (${preview})`, { cause: error });
     }
-    throw err;
+    throw error;
   } finally {
     clearTimeout(timer);
   }

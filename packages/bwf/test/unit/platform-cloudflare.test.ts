@@ -59,14 +59,14 @@ describe('platform Cloudflare client', () => {
 
   it.each([
     {
-      code: 10042,
+      code: 10_042,
       path: '/accounts/account/r2/buckets',
       message: 'Please enable R2 through the Cloudflare Dashboard.',
       guidance: 'Cloudflare R2 is not enabled for this account (code 10042).',
       dashboard: 'https://dash.cloudflare.com/account/r2/overview',
     },
     {
-      code: 10121,
+      code: 10_121,
       path: '/accounts/account/workers/dispatch/namespaces',
       message:
         'You do not have access to dispatch namespaces. Purchase at https://dash.cloudflare.com?to=/:account/workers-for-platforms',
@@ -102,15 +102,15 @@ describe('platform Cloudflare client', () => {
     expect(error.message).not.toContain('--resume');
     expect(error.message).not.toContain('query-value');
     expect(error.message).not.toContain('secret-token');
-    if (test.code === 10121) {
+    if (test.code === 10_121) {
       expect(error.message).toContain('Enterprise customers');
     }
   });
 
   it.each([
-    { status: 401, code: 10000, path: '/accounts/account/r2/buckets' },
-    { status: 403, code: 10000, path: '/accounts/account/r2/buckets' },
-    { status: 403, code: 10042, path: '/accounts/account/ai-gateway/gateways' },
+    { status: 401, code: 10_000, path: '/accounts/account/r2/buckets' },
+    { status: 403, code: 10_000, path: '/accounts/account/r2/buckets' },
+    { status: 403, code: 10_042, path: '/accounts/account/ai-gateway/gateways' },
     { status: 500, code: 7000, path: '/accounts/account/ai-gateway/gateways' },
   ])('keeps unrelated provider errors unchanged: $status/$code', async ({ status, code, path }) => {
     const client = new PlatformCloudflareClient('token', {
@@ -590,7 +590,7 @@ describe('platform Cloudflare client', () => {
       'GET /client/v4/accounts/account/hyperdrive/configs',
       'POST /client/v4/zones/zone/purge_cache',
     ]);
-    const purge = JSON.parse(requests[1]!.body) as { files: ReadonlyArray<string> };
+    const purge = JSON.parse(requests[1].body) as { files: ReadonlyArray<string> };
     expect(purge.files).toHaveLength(1);
     expect(purge.files[0]).toMatch(
       /^https:\/\/apps\.example\.com\/\.well-known\/platform\/runtime-token-preflight-[a-f0-9-]+$/,
@@ -767,7 +767,7 @@ describe('platform Cloudflare client', () => {
                 errors: [
                   pathname === '/client/v4/zones/mail-zone'
                     ? { code: 9109, message: 'Invalid access token synthetic-runtime-secret' }
-                    : { code: 10000, message: 'Authentication error synthetic-runtime-secret' },
+                    : { code: 10_000, message: 'Authentication error synthetic-runtime-secret' },
                 ],
               },
               { status: pathname === '/client/v4/zones/mail-zone' ? 403 : 401 },
@@ -919,8 +919,8 @@ describe('platform Cloudflare client', () => {
       ['PUT', '/client/v4/accounts/account/storage/kv/namespaces/routing/bulk', 1],
       ['POST', '/client/v4/accounts/account/storage/kv/namespaces/routing/bulk/delete', 1],
     ]);
-    expect(requests[0]!.body[0]).toEqual(entries[0]);
-    expect(requests[2]!.body).toEqual(['ai-logging:gone']);
+    expect(requests[0].body[0]).toEqual(entries[0]);
+    expect(requests[2].body).toEqual(['ai-logging:gone']);
 
     failed = ['ai-logging:p1'];
     await expect(client.putKvBulk('account', 'routing', entries.slice(0, 2))).rejects.toThrow(
@@ -1194,7 +1194,7 @@ describe('platform Cloudflare client', () => {
         requests.push(`${method} ${url.pathname}${url.search}`);
         if (url.pathname.endsWith('/gone')) {
           return Response.json(
-            { success: false, errors: [{ code: 10007, message: 'not found' }] },
+            { success: false, errors: [{ code: 10_007, message: 'not found' }] },
             { status: 404 },
           );
         }
@@ -1436,7 +1436,7 @@ describe('platform Cloudflare client', () => {
             success: false,
             errors: [
               {
-                code: 100109,
+                code: 100_109,
                 message:
                   'Cannot delete this Worker as it is a Tail Worker consumer for other Workers.',
               },
@@ -1787,7 +1787,7 @@ describe('platform Cloudflare client', () => {
       },
       method: 'PUT',
     });
-    expect(requests[1]!.url).toContain(
+    expect(requests[1].url).toContain(
       '/accounts/account/workers/scripts/platform-api/domains/records',
     );
     expect(requests[2]).toMatchObject({ method: 'GET' });

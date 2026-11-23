@@ -1,6 +1,7 @@
 import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
-import { PlatformClient, type RequestEntry } from './client.ts';
+import { PlatformClient } from './client.ts';
+import type { RequestEntry } from './client.ts';
 import { dim, pc } from './output.ts';
 import { readProjectConfig } from './project.ts';
 
@@ -33,8 +34,8 @@ export async function runRequestsCommand(
   let entries: Array<RequestEntry>;
   try {
     entries = await client.getRequests(linked.projectId, range, 200, status || undefined);
-  } catch (err) {
-    log.error(err instanceof Error ? err.message : String(err));
+  } catch (error) {
+    log.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 
@@ -56,7 +57,7 @@ function printRequest(entry: RequestEntry): void {
   const method = (entry.method || '-').padEnd(4);
   const status = entry.status || '-';
 
-  const statusNum = parseInt(status, 10);
+  const statusNum = Number.parseInt(status, 10);
   const coloredStatus =
     statusNum >= 500 ? pc.red(status) : statusNum >= 400 ? pc.yellow(status) : status;
 

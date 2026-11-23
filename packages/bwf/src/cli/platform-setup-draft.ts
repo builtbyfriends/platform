@@ -3,8 +3,8 @@ import {
   createPlatformInstallationManifest,
   recordInstallationStep,
   transitionInstallation,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 import { writeInstallationManifest, writePendingInstallationSecrets } from './platform-registry.ts';
 

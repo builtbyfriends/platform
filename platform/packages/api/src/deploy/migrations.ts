@@ -1,4 +1,4 @@
-import { type DeployLogger } from '../observability/logger.ts';
+import type { DeployLogger } from '../observability/logger.ts';
 
 /**
  * Detect the known CF WfP bug where APIs return plain text about asset state
@@ -126,8 +126,8 @@ export async function probeWorkerMigrationCapabilities(
       };
     }
     return { ok: true, caps: data };
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
     logger.warn('migrate', 'capability_probe_failed', {
       err: errMsg,
     });
@@ -162,10 +162,10 @@ export async function dispatchStableAppMigration(
     } catch {
       return reconcileStableAppMigration(userWorker, token, attemptId);
     }
-  } catch (err) {
+  } catch (error) {
     logger.warn('migrate', 'app_attempt_unknown', {
       attemptId,
-      err: err instanceof Error ? err.message : String(err),
+      err: error instanceof Error ? error.message : String(error),
     });
     return reconcileStableAppMigration(userWorker, token, attemptId);
   }

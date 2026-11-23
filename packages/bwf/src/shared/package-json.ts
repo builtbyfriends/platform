@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'pathslash';
 
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- arbitrary package.json content; cli callers pass Record<string, unknown>
 export type PackageJson = Record<string, unknown>;
 
 export type PackageDependencyField =
@@ -20,7 +21,7 @@ function isPackageJson(value: unknown): value is PackageJson {
 
 export function readPackageJson(root: string): PackageJson | null {
   try {
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as unknown;
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as unknown;
     return isPackageJson(pkg) ? pkg : null;
   } catch {
     return null;
@@ -61,7 +62,7 @@ export function getPackageDependencies(
       }
     }
   }
-  return dependencies;
+  return Object.assign({}, dependencies);
 }
 
 export function hasPackageDependency(

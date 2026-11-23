@@ -1,9 +1,5 @@
-import {
-  SandboxContainer,
-  validateSandboxOptions,
-  type SandboxOptions,
-  type SandboxInstance,
-} from '@builtbyfriends/bwf/_sandbox-container';
+import { SandboxContainer, validateSandboxOptions } from '@builtbyfriends/bwf/_sandbox-container';
+import type { SandboxOptions, SandboxInstance } from '@builtbyfriends/bwf/_sandbox-container';
 import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 import { getSandboxShim } from './sandbox-shim.ts';
 
@@ -25,7 +21,7 @@ const LEASE_KEY = '__voidSandboxLease';
 const ACTIVITY_KEY = '__voidSandboxActivity';
 type Activity = { lastActivity: number; idleDeadline: number };
 const HEARTBEAT_MS = 30_000;
-const CONTROL_TIMEOUT_MS = 5_000;
+const CONTROL_TIMEOUT_MS = 5000;
 
 function denied(reason: string): Error {
   return new Error(
@@ -248,7 +244,7 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
   protected override get image(): string {
     return this.env.__PLATFORM_SANDBOX_IMAGE === 'cloudflare/debian-trixie'
       ? 'cloudflare/debian-trixie'
-      : this.container.images.default!;
+      : this.container.images.default;
   }
   protected override get entrypoint(): Array<string> | undefined {
     return this.image === 'cloudflare/debian-trixie' ? ['sleep', 'infinity'] : undefined;

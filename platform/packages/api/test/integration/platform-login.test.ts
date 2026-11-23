@@ -31,7 +31,8 @@ import {
 } from '../../src/schema.ts';
 import { putAllowlist } from '../../src/signup-allowlist.ts';
 import { adminHtml } from '../helpers/admin-html.tsx';
-import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let privateKey: CryptoKey;
@@ -166,7 +167,7 @@ async function start(provider = 'company') {
   authorization = new URL(response.headers.get('Location')!);
   return {
     state: authorization.searchParams.get('state')!,
-    cookie: response.headers.get('Set-Cookie')!.split(';')[0]!,
+    cookie: response.headers.get('Set-Cookie')!.split(';')[0],
   };
 }
 function callback(flow: { state: string; cookie: string }) {
@@ -375,7 +376,7 @@ describe('configured platform login routes', () => {
     authorization = new URL(start.headers.get('Location')!);
     const response = await callback({
       state: authorization.searchParams.get('state')!,
-      cookie: start.headers.get('Set-Cookie')!.split(';')[0]!,
+      cookie: start.headers.get('Set-Cookie')!.split(';')[0],
     });
     expect(response.status).toBe(200);
     expect(await adminHtml(response)).toContain('employee@example.com');
@@ -388,7 +389,7 @@ describe('configured platform login routes', () => {
     const cookie = response.headers
       .getSetCookie()
       .find((value) => value.startsWith('platform_link_confirm='))!
-      .split(';')[0]!;
+      .split(';')[0];
     const confirm = (originHeader: string) =>
       app.fetch(
         new Request(origin + '/auth/link/confirm', {
@@ -448,13 +449,13 @@ describe('configured platform login routes', () => {
       authorization = new URL(start.headers.get('Location')!);
       const response = await callback({
         state: authorization.searchParams.get('state')!,
-        cookie: start.headers.get('Set-Cookie')!.split(';')[0]!,
+        cookie: start.headers.get('Set-Cookie')!.split(';')[0],
       });
       expect(response.status).toBe(200);
       const cookie = response.headers
         .getSetCookie()
         .find((value) => value.startsWith('platform_link_confirm='))!
-        .split(';')[0]!;
+        .split(';')[0];
       let otherId: string | undefined;
       if (reason === 'revoked') {
         await env.db
@@ -794,13 +795,13 @@ describe('configured platform login routes', () => {
     authorization = new URL(providerStart.headers.get('Location')!);
     const completed = await callback({
       state: authorization.searchParams.get('state')!,
-      cookie: providerStart.headers.get('Set-Cookie')!.split(';')[0]!,
+      cookie: providerStart.headers.get('Set-Cookie')!.split(';')[0],
     });
     expect(completed.status).toBe(200);
     const confirmationCookie = completed.headers
       .getSetCookie()
       .find((value) => value.startsWith('platform_link_confirm='))!
-      .split(';')[0]!;
+      .split(';')[0];
     const confirmed = await app.fetch(
       new Request(`${origin}/auth/link/confirm`, {
         method: 'POST',
@@ -959,7 +960,7 @@ describe('configured platform login routes', () => {
     authorization = new URL(browser.headers.get('Location')!);
     const flow = {
       state: authorization.searchParams.get('state')!,
-      cookie: browser.headers.get('Set-Cookie')!.split(';')[0]!,
+      cookie: browser.headers.get('Set-Cookie')!.split(';')[0],
     };
     const completed = await callback(flow);
     expect(completed.status).toBe(200);

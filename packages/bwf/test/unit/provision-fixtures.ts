@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import {
   mkdir,
   mkdirSync,
@@ -16,12 +17,12 @@ import { parse as parseJsoncRaw } from 'jsonc-parser';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, vi } from 'vite-plus/test';
 import { operationFixture } from '../../../deploy-cloudflare/test/operation-fixture.ts';
-import {
-  type DesiredResourceSet,
-  type ProvisionLogger,
-  type RunWrangler,
-  type RunWranglerResult,
-  type WranglerCallContext,
+import type {
+  DesiredResourceSet,
+  ProvisionLogger,
+  RunWrangler,
+  RunWranglerResult,
+  WranglerCallContext,
 } from '../../src/cli/provision.ts';
 
 // Decision: proper-lockfile's callback-style fs seam. Tests override single calls on top of it.
@@ -69,10 +70,10 @@ export function useProvisionTestDir(name: string): ProvisionTestDir {
       writeFileSync(wranglerPath, content);
     },
     readConfig() {
-      return parseJsoncRaw(readFileSync(wranglerPath, 'utf-8')) as Record<string, unknown>;
+      return parseJsoncRaw(readFileSync(wranglerPath, 'utf8')) as Record<string, unknown>;
     },
     simulateUpdateConfig(field, entry, path = wranglerPath) {
-      const cfg = parseJsoncRaw(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+      const cfg = parseJsoncRaw(readFileSync(path, 'utf8')) as Record<string, unknown>;
       const list = Array.isArray(cfg[field]) ? (cfg[field] as Array<Record<string, unknown>>) : [];
       const index = list.findIndex((e) => e.binding === entry.binding);
       if (index >= 0) {

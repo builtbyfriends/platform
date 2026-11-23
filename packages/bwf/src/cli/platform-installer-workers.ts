@@ -13,27 +13,26 @@ import {
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import type { readCloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
 import {
   encodeCloudflareVersionMessage,
-  readCloudflareTriggerConfig,
   stabilizeCloudflareVersionTriggers,
-  type CloudflareCommandResult,
-  type CloudflareOperation,
-  type CloudflareTriggerConfig,
 } from '@builtbyfriends/deploy-cloudflare';
-import {
-  createPlatformWorkerConfigs,
-  PLATFORM_DISABLED_KEY,
-  PLATFORM_DISABLED_VALUE,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import type {
+  CloudflareCommandResult,
+  CloudflareOperation,
+  CloudflareTriggerConfig,
+} from '@builtbyfriends/deploy-cloudflare';
+import type { createPlatformWorkerConfigs } from '@builtbyfriends/platform';
+import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { dirname, join, resolve } from 'pathslash';
 import { getErrorMessage } from './output.ts';
 import {
   PlatformWorkerCustomDomainsChangedError,
   PlatformWorkerRoutesChangedError,
-  type CloudflareWorkerCustomDomainOrigin,
 } from './platform-cloudflare.ts';
+import type { CloudflareWorkerCustomDomainOrigin } from './platform-cloudflare.ts';
 import {
   readTriggerConfigFromObject,
   recordWorkerCutoverResolution,
@@ -60,8 +59,8 @@ import {
   PlatformWorkerOwnershipError,
   samePlatformWorkerTraffic,
 } from './platform-installer-inspection.ts';
+import type { runPlatformWrangler } from './platform-installer-process.ts';
 import {
-  runPlatformWrangler,
   platformWorkerCommandRunner,
   runPlatformWranglerForConditionalCreate,
 } from './platform-installer-process.ts';
@@ -75,18 +74,18 @@ import {
   validateReplannedWorkerActions,
   withoutPlatformWorkerTrafficAttachments,
 } from './platform-installer-resources.ts';
-import {
-  type InstallerClient,
-  type PlatformInstallerDependencies,
-  type InstallationCheckpointWriter,
-  type InterruptedWorkerCutover,
-  type PlatformWorkerKey,
-  type PlatformWorkerDeploymentOptions,
-  type PlatformWorkerRollback,
-  type PlatformWorkerDeployment,
-  PlatformWorkerRecoveryIncompleteError,
+import { PlatformWorkerRecoveryIncompleteError } from './platform-installer-types.ts';
+import type {
+  InstallerClient,
+  PlatformInstallerDependencies,
+  InstallationCheckpointWriter,
+  InterruptedWorkerCutover,
+  PlatformWorkerKey,
+  PlatformWorkerDeploymentOptions,
+  PlatformWorkerRollback,
+  PlatformWorkerDeployment,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan, type PlatformInstallPlanAction } from './platform-plan.ts';
+import type { PlatformInstallPlan, PlatformInstallPlanAction } from './platform-plan.ts';
 import { writeInstallationManifest } from './platform-registry.ts';
 import { platformWorkerLiveTriggersMatch } from './platform-trigger-proof.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
@@ -181,7 +180,10 @@ export async function recoverInterruptedPlatformWorkerCutover(
       'api',
     ];
     for (const key of recoveryOrder.filter((key) => interruptedCutover.staged.has(key))) {
-      const snapshot = interruptedCutover.staged.get(key)!;
+      const snapshot = interruptedCutover.staged.get(key);
+      if (!snapshot) {
+        continue;
+      }
       const preservedRoutes = dependencies.recoverWorkerCutover
         ? []
         : await inventoryUnmanagedPlatformWorkerTraffic(
@@ -353,7 +355,7 @@ function platformWorkerUploaderHash(): string | null {
           .toString('utf8')
           .matchAll(/\b(?:from|import)\s*(?:\(\s*)?['"](\.{1,2}\/[^'"]+)['"]/g),
       ]
-        .map((match) => match[1]!)
+        .map((match) => match[1])
         .sort();
       for (const specifier of imports) {
         visit(resolve(dirname(path), specifier), specifier);
@@ -661,7 +663,7 @@ export async function deployPlatformWorker(
           before[0]?.id !== after[0]?.id ||
           !deploymentRunsOnlyVersion(after[0], snapshot.versionId);
         if (!changedDuringRead && snapshot.contentHash === contentHash) {
-          candidate = { deploymentId: after[0]!.id, snapshot };
+          candidate = { deploymentId: after[0].id, snapshot };
         }
       } catch (error) {
         if (error instanceof PlatformWorkerOwnershipError) {
@@ -704,12 +706,13 @@ export async function deployPlatformWorker(
         workerName,
         readRunner,
       );
-      if (!deploymentRunsOnlyVersion(deployments[0], previousVersionId)) {
+      const currentDeployment = deployments[0];
+      if (!currentDeployment || !deploymentRunsOnlyVersion(currentDeployment, previousVersionId)) {
         throw new Error(
           `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
         );
       }
-      previousDeployment = deployments[0]!;
+      previousDeployment = currentDeployment;
       previousDeploymentId = previousDeployment.id;
       if (
         contentHash &&
@@ -745,11 +748,10 @@ export async function deployPlatformWorker(
       ? platformWorkerUploadFingerprint(immutableConfig, options.managedRoutes)
       : null;
     if (immutableConfig) {
-      uploadConfig = {
-        ...uploadConfig,
-        main: immutableConfig.main,
-        ...(immutableConfig.assets === undefined ? {} : { assets: immutableConfig.assets }),
-      };
+      uploadConfig = { ...uploadConfig, main: immutableConfig.main };
+      if (immutableConfig.assets !== undefined) {
+        uploadConfig.assets = immutableConfig.assets;
+      }
       writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, { mode: 0o600 });
     }
     const operation: CloudflareOperation = {
@@ -842,11 +844,11 @@ export async function deployPlatformWorker(
       await delay(wait);
       try {
         deploymentsAfterActivation = await readDeploymentHistory();
-      } catch (cause) {
+      } catch (error) {
         activatedVersionId = null;
         throw new PlatformWorkerRecoveryIncompleteError(
-          `platform: could not confirm activation of ${workerName} because rereading its deployment history failed: ${getErrorMessage(cause)}`,
-          { cause },
+          `platform: could not confirm activation of ${workerName} because rereading its deployment history failed: ${getErrorMessage(error)}`,
+          { cause: error },
         );
       }
     }
@@ -910,12 +912,15 @@ export async function deployPlatformWorker(
         `platform: Worker ${workerName} changed concurrently during activation. The intervening deployment was restored without deleting deployment history.`,
       );
     }
+    const knownTriggerConfigs: Record<string, typeof nextTriggers> = {
+      [uploadedVersionId]: nextTriggers,
+    };
+    if (previousVersionId) {
+      knownTriggerConfigs[previousVersionId] = previousTriggers;
+    }
     const triggers = await stabilizeCloudflareVersionTriggers({
       configPath,
-      knownTriggerConfigs: {
-        [uploadedVersionId]: nextTriggers,
-        ...(previousVersionId ? { [previousVersionId]: previousTriggers } : {}),
-      },
+      knownTriggerConfigs,
       manageRoutes: false,
       previousTriggerConfig: previousTriggers,
       runWrangler: platformWorkerCommandRunner(accountId, directory, readRunner),
@@ -931,11 +936,12 @@ export async function deployPlatformWorker(
       await options.publishRoutes(workerName, options.managedRoutes);
     }
     await options.onTrafficPublished();
+    const publishedVersionId = uploadedVersionId;
     const rollback = () =>
       rollbackPlatformWorker({
         accountId,
         activatedDeploymentId,
-        activatedVersionId: uploadedVersionId!,
+        activatedVersionId: publishedVersionId,
         config,
         nextTriggers,
         previousConfig: options.previousConfig,

@@ -84,7 +84,7 @@ describe('runProjectsCommand', () => {
         'Content-Type': 'application/json',
         'x-realtime-surface': 'cli',
         Authorization: 'Bearer test-token',
-        'X-Platform-CLI-Version': expect.stringMatching(/^\d+\.\d+\.\d+/) as unknown as string,
+        'X-Platform-CLI-Version': expect.stringMatching(/^\d+\.\d+\.\d+/),
       },
       redirect: 'manual',
     });

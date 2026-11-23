@@ -22,7 +22,7 @@ const ENV_SUFFIXES: Array<RouteEnvironment> = ['dev', 'prod'];
 function parsePath(relativePath: string, isWebSocketRoute: boolean): RouteDefinition {
   const filePath = relativePath;
 
-  let path = relativePath.replace(/\\/g, '/');
+  let path = relativePath.replaceAll('\\', '/');
 
   for (const ext of ROUTE_EXTENSIONS) {
     if (path.endsWith(`.${ext}`)) {
@@ -49,7 +49,7 @@ function parsePath(relativePath: string, isWebSocketRoute: boolean): RouteDefini
 
   segments.push(filename);
 
-  if (segments[segments.length - 1] === 'index') {
+  if (segments.at(-1) === 'index') {
     segments.pop();
   }
 

@@ -1,10 +1,11 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { basename } from 'pathslash';
 import { runWranglerAuthToken } from './deploy-cloudflare-auth.ts';
 import { log } from './deploy-helpers.ts';
-import {
-  type CloudflareEmailStepInput,
-  type CloudflareEmailStepResult,
-  type EmailAddressMapInput,
+import type {
+  CloudflareEmailStepInput,
+  CloudflareEmailStepResult,
+  EmailAddressMapInput,
 } from './deploy-types.ts';
 import {
   applyEmailSetup,
@@ -15,18 +16,18 @@ import {
   preflightEmail,
   SEND_EMAIL_BINDING,
   renderEmailChecklist,
-  type EmailCloudflareInputs,
-  type EmailPreflight,
 } from './email-cloudflare.ts';
+import type { EmailCloudflareInputs, EmailPreflight } from './email-cloudflare.ts';
 import { getErrorMessage } from './output.ts';
-import { writeProvisionedWranglerConfig, type ProvisionedWranglerPatch } from './wrangler.ts';
+import { writeProvisionedWranglerConfig } from './wrangler.ts';
+import type { ProvisionedWranglerPatch } from './wrangler.ts';
 
 /** Whether the root config carries the `send_email` binding bwf writes. */
 export function hasBwfSendEmailBinding(rootConfig: Record<string, unknown>): boolean {
   return (
     Array.isArray(rootConfig.send_email) &&
-    (rootConfig.send_email as Array<{ name?: unknown } | null>).some(
-      (binding) => binding?.name === SEND_EMAIL_BINDING,
+    rootConfig.send_email.some(
+      (binding: unknown) => isRecord(binding) && binding.name === SEND_EMAIL_BINDING,
     )
   );
 }
@@ -116,8 +117,10 @@ export async function runCloudflareEmailStep(
   let pre: EmailPreflight;
   try {
     pre = await preflightEmail(inputs);
-  } catch (err) {
-    log.warn(`deploy: email preflight failed — ${getErrorMessage(err)}. Deploying without email.`);
+  } catch (error) {
+    log.warn(
+      `deploy: email preflight failed — ${getErrorMessage(error)}. Deploying without email.`,
+    );
     return without;
   }
   const mapFor = (
@@ -138,8 +141,8 @@ export async function runCloudflareEmailStep(
     try {
       writeProvisionedWranglerConfig(input.root, patch, { configPath: input.configPath });
       return true;
-    } catch (err) {
-      log.error(`deploy: could not update ${configName} — ${getErrorMessage(err)}.`);
+    } catch (error) {
+      log.error(`deploy: could not update ${configName} — ${getErrorMessage(error)}.`);
       return false;
     }
   };

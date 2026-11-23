@@ -32,8 +32,8 @@ import {
   PLATFORM_BUILD_CHECK_RUN_NAME,
   completeCheckRun,
   preservedCheckRunConclusion,
-  type CheckRunConclusion,
 } from '../github/check-run.ts';
+import type { CheckRunConclusion } from '../github/check-run.ts';
 import { listInstallationRepositories } from '../github/installation-repos.ts';
 import {
   getBranchExistence,
@@ -177,8 +177,8 @@ async function pokeBuildScheduler(env: ApiEnv['Bindings']): Promise<void> {
   try {
     const scheduler = env.BUILD_SCHEDULER.get(env.BUILD_SCHEDULER.idFromName('global'));
     await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
-  } catch (err) {
-    console.error('[webhooks] failed to poke build scheduler:', err);
+  } catch (error) {
+    console.error('[webhooks] failed to poke build scheduler:', error);
   }
 }
 
@@ -286,8 +286,8 @@ async function rerunBuildForCommit(
           console.warn(`[webhooks] rerun report for check run ${runId} was rejected by GitHub`);
         }
       })
-      .catch((err: unknown) => {
-        console.error('[webhooks] failed to report rerun no-op:', err);
+      .catch((error: unknown) => {
+        console.error('[webhooks] failed to report rerun no-op:', error);
       });
     try {
       context.executionCtx.waitUntil(reported);
@@ -1045,8 +1045,8 @@ export async function handleVerifiedGitHubWebhook(
                     detailsUrl,
                   },
                 );
-              } catch (err) {
-                console.warn('[webhooks] workflow_run: best-effort completeCheckRun failed', err);
+              } catch (error) {
+                console.warn('[webhooks] workflow_run: best-effort completeCheckRun failed', error);
               }
             })(),
           );
@@ -1072,10 +1072,10 @@ export async function handleVerifiedGitHubWebhook(
               candidateHeadSha,
             );
             deploymentId = deployment?.id ?? null;
-          } catch (err) {
+          } catch (error) {
             console.error(
               '[webhooks] workflow_run: deployment lookup failed; finalizing without link',
-              err,
+              error,
             );
           }
         }

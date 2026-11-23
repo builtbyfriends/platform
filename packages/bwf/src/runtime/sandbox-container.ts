@@ -1,4 +1,4 @@
-import { Files, type FileOperationOptions } from '@cloudflare/sandbox';
+import { Files } from '@cloudflare/sandbox';
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 
 export type SandboxInstance =
@@ -179,7 +179,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
       return new Response('Invalid Sandbox TCP port.', { status: 400 });
     }
     const port = Number(value);
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
       return new Response('Invalid Sandbox TCP port.', { status: 400 });
     }
     const headers = new Headers(request.headers);
@@ -203,7 +203,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
     if (!this.ctx.container) {
       throw new Error('Sandbox container binding is missing.');
     }
-    return this.ctx.container as unknown as SandboxNativeContainer;
+    return this.ctx.container;
   }
 
   async configure(options: SandboxOptions): Promise<void> {
@@ -290,7 +290,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
     return undefined;
   }
   protected get image(): string {
-    return this.container.images.default!;
+    return this.container.images.default;
   }
 
   protected async ensureRunning(): Promise<void> {
@@ -371,7 +371,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
       await this.ensureRunning();
       const index = method === 'writeFile' || method === 'rename' ? 2 : 1;
       const { options, finish } = operationOptions(parameters[index]);
-      parameters[index] = options as FileOperationOptions;
+      parameters[index] = options;
       try {
         const files = new Files({ exec: (argv, options) => this.execProcess(argv, options) });
         const target = files[method as keyof Files] as (
@@ -445,7 +445,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
     }
     if (operation === 'fetch') {
       const [port, request] = args;
-      if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535) {
+      if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65_535) {
         throw new TypeError('Invalid Sandbox TCP port.');
       }
       await this.ensureRunning();

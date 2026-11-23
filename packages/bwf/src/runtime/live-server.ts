@@ -4,16 +4,17 @@ import {
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
-import {
-  __getLiveBindingName,
-  type LiveClientEvent,
-  type LiveControlErrorCode,
-  type LiveControlOperation,
-  type LiveControlOperationResult,
-  type LiveControlResponse,
-  type LiveLimits,
+import { __getLiveBindingName } from './live.ts';
+import type {
+  LiveClientEvent,
+  LiveControlErrorCode,
+  LiveControlOperation,
+  LiveControlOperationResult,
+  LiveControlResponse,
+  LiveLimits,
 } from './live.ts';
-import { eventStream, type SseStream } from './sse.ts';
+import { eventStream } from './sse.ts';
+import type { SseStream } from './sse.ts';
 
 type LiveDurableObjectEnv = Record<string, unknown>;
 
@@ -458,7 +459,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             throw outcome.reason;
           }
           const response = outcome.value;
-          const items = batch[index]![1];
+          const items = batch[index][1];
           // Decision: A missed delivery does not prove the still-open SSE connection is gone.
           if (!response) {
             continue;
@@ -487,7 +488,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
     private async pruneAllSubscribers(): Promise<void> {
       const rows = await this.state.storage.list<SubscriberRow>({ prefix: 'sub:' });
       const staleKeys = await this.findStaleSubscriberKeys([...rows], {
-        deliveryAttemptTimeoutMs: 1_500,
+        deliveryAttemptTimeoutMs: 1500,
       });
       if (staleKeys.length > 0) {
         await this.state.storage.delete(staleKeys);
@@ -510,7 +511,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
         const responses = await Promise.allSettled(
           batch.map(([connectionId, items]) =>
             fetchWithTimeout(
-              this.connectionStub(items[0]!.row.streamId, connectionId),
+              this.connectionStub(items[0].row.streamId, connectionId),
               internalUrl('/check'),
               {
                 method: 'POST',
@@ -527,7 +528,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
             throw outcome.reason;
           }
           const response = outcome.value;
-          const items = batch[index]![1];
+          const items = batch[index][1];
           if (!response) {
             continue;
           }

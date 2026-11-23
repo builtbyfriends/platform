@@ -9,7 +9,8 @@
     "skipLibCheck": true,
     "declaration": true,
     "isolatedDeclarations": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src", "test"]
 }

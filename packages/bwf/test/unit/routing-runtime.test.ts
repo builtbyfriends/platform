@@ -11,16 +11,18 @@ import {
   createAssetFallback,
   createWorkerFetch,
   filterInternalBindings,
-  type RuntimeEnvironment,
 } from '../../src/runtime/routing-worker.ts';
+import type { RuntimeEnvironment } from '../../src/runtime/routing-worker.ts';
 import {
   createAssetNotFound,
   createHttpRouteHandler,
   createModuleLoader,
   createRoutingRuntime,
-  type RoutingContext,
-  type RoutingHeaderRule,
-  type RoutingRuntime,
+} from '../../src/runtime/routing.ts';
+import type {
+  RoutingContext,
+  RoutingHeaderRule,
+  RoutingRuntime,
 } from '../../src/runtime/routing.ts';
 const context = { waitUntil() {}, passThroughOnException() {}, props: {} };
 const wrap = <T>(_env: RuntimeEnvironment, callback: () => T): T => callback();

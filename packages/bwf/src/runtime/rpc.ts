@@ -1,4 +1,4 @@
-import type { ErrorsOf, InputOf, OutputOf } from '@builtbyfriends/realtime';
+import type { ErrorsOf, InputOf, OutputOf, Registry } from '@builtbyfriends/realtime';
 import { createClient, RpcError } from '@builtbyfriends/realtime-http/client';
 
 export { RpcError };
@@ -89,8 +89,8 @@ export function rpcName(call: unknown): string | undefined {
 
 /** A client for another origin or runtime. Browsers can use the ready-made `rpc`. */
 export function createRpc(options: RpcOptions = {}): RpcClient {
-  const client = createClient<never>(options.baseUrl ?? '', options);
-  const call = client.call as unknown as (name: string, input?: unknown) => Promise<unknown>;
+  const client = createClient<Registry>(options.baseUrl ?? '', options);
+  const call = client.call as (name: string, input?: unknown) => Promise<unknown>;
   const proxy = (path: Array<string>): unknown =>
     new Proxy(() => {}, {
       get: (_target, key) =>

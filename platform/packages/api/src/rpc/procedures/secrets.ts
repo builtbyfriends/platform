@@ -16,8 +16,8 @@ import {
   ProjectAccessDeniedError,
   ProjectNotFoundError,
   requireProjectCapability,
-  type ProjectAccess,
 } from '../../project-access.ts';
+import type { ProjectAccess } from '../../project-access.ts';
 import {
   deleteWorkerSecret,
   encryptProjectSecret,
@@ -25,7 +25,8 @@ import {
 } from '../../project-secrets.ts';
 import { isReservedBindingName } from '../../reserved-bindings.ts';
 import { canOnProject } from '../access.ts';
-import { member, procedure, type Caller } from '../procedure.ts';
+import { member, procedure } from '../procedure.ts';
+import type { Caller } from '../procedure.ts';
 
 export const list = procedure('secrets.list')
   .use(member)

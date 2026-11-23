@@ -11,7 +11,8 @@
     "declaration": true,
     "outDir": "dist",
     "rootDir": ".",
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["./.vitepress/**/*.ts"]
 }

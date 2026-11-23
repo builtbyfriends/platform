@@ -1,4 +1,4 @@
-import { type RouteEnvironment } from './router/parse-filename.ts';
+import type { RouteEnvironment } from './router/parse-filename.ts';
 
 export function hasBinding(list: Array<{ binding: string }> | undefined, name: string): boolean {
   return Array.isArray(list) && list.some((b) => b.binding === name);

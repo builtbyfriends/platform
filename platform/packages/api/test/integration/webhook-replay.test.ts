@@ -3,7 +3,8 @@ import { getRedeliveredGuids, recordWebhookRedelivery } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import type { FailedWebhookDelivery } from '../../src/github/webhook-deliveries.ts';
 import { replayFailedWebhookDeliveries } from '../../src/webhook-replay.ts';
-import { clearTables, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { clearTables, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 // Decision: The factory closures read this module-level state at call time (like `compareStatus` in
 // api-webhooks.test.ts), so no `vi.hoisted` or TDZ workaround is needed.

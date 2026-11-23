@@ -71,8 +71,8 @@ async function runTransform(
   try {
     await handler.call(ctx, code, id);
     return { threw: false };
-  } catch (err) {
-    return { threw: true, error: err as Error };
+  } catch (error) {
+    return { threw: true, error: error as Error };
   }
 }
 
@@ -135,9 +135,9 @@ describe('envClientGuardPlugin', () => {
     );
     expect(result.threw).toBe(true);
     expect(ctx.errors).toHaveLength(1);
-    expect(ctx.errors[0]!.message).toContain('STRIPE_KEY');
-    expect(ctx.errors[0]!.message).toContain('VITE_*');
-    expect(ctx.errors[0]!.loc?.line).toBe(2);
+    expect(ctx.errors[0].message).toContain('STRIPE_KEY');
+    expect(ctx.errors[0].message).toContain('VITE_*');
+    expect(ctx.errors[0].loc?.line).toBe(2);
   });
 
   it('does not error when the key is VITE_-prefixed', async () => {
@@ -162,7 +162,7 @@ describe('envClientGuardPlugin', () => {
       `${ROOT}/src/page.ts`,
     );
     expect(result.threw).toBe(true);
-    expect(ctx.errors[0]!.message).toContain('STRIPE_KEY');
+    expect(ctx.errors[0].message).toContain('STRIPE_KEY');
   });
 
   it('catches namespace imports (`import * as bwfEnv`)', async () => {
@@ -174,7 +174,7 @@ describe('envClientGuardPlugin', () => {
       `${ROOT}/src/page.ts`,
     );
     expect(result.threw).toBe(true);
-    expect(ctx.errors[0]!.message).toContain('STRIPE_KEY');
+    expect(ctx.errors[0].message).toContain('STRIPE_KEY');
   });
 
   it('passes through keys not present in the schema (could be a binding or typo)', async () => {
@@ -201,7 +201,7 @@ describe('envClientGuardPlugin', () => {
     expect(result.threw).toBe(false);
     expect(ctx.errors).toEqual([]);
     expect(ctx.warnings).toHaveLength(1);
-    expect(ctx.warnings[0]!.message).toMatch(/Computed access/);
+    expect(ctx.warnings[0].message).toMatch(/Computed access/);
   });
 
   it('is a no-op when no env schema is registered', async () => {
@@ -270,12 +270,12 @@ describe('envClientGuardPlugin', () => {
     ].join('\n');
     const result = await runTransform(ctx, code, `${ROOT}/src/page.ts`);
     expect(result.threw).toBe(true);
-    expect(ctx.errors[0]!.loc).toEqual({
+    expect(ctx.errors[0].loc).toEqual({
       line: 4,
       column: 10,
       file: `${ROOT}/src/page.ts`,
     });
-    expect(ctx.errors[0]!.message).toContain('src/page.ts:4:10');
+    expect(ctx.errors[0].message).toContain('src/page.ts:4:10');
   });
 
   it('handles SFC virtual modules with `?vue&type=script&lang.ts` query', async () => {

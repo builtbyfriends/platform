@@ -1,22 +1,13 @@
 import { sql as drizzleSql } from 'drizzle-orm';
-import { type Context } from 'hono';
+import type { Context } from 'hono';
 import { retryWithBackoff } from '../cf-api.ts';
-import {
-  updateDeploymentStatus,
-  setAppliedMigrations,
-  appendProjectMigrations,
-  type Db,
-} from '../db.ts';
+import { updateDeploymentStatus, setAppliedMigrations, appendProjectMigrations } from '../db.ts';
+import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
-import { type DeployLogger } from '../observability/logger.ts';
-import { provisionBindings } from '../provisioning/provision.ts';
-import {
-  type DeployManifest,
-  type DeployEvent,
-  type Deployment,
-  type DeploymentStatus,
-} from '../types.ts';
+import type { DeployLogger } from '../observability/logger.ts';
+import type { provisionBindings } from '../provisioning/provision.ts';
+import type { DeployManifest, DeployEvent, Deployment, DeploymentStatus } from '../types.ts';
 import { assertDeploymentCanProceed } from './guards.ts';
 import {
   isCfAssetPlainText,
@@ -24,10 +15,10 @@ import {
   dispatchStableAppMigration,
   formatMigrationFailure,
   dispatchStableAuthMigration,
-  type UserWorkerMigrationResult,
   CF_MIGRATION_RETRY,
   normalizeUserWorkerMigrationResult,
 } from './migrations.ts';
+import type { UserWorkerMigrationResult } from './migrations.ts';
 import { requireActiveDeployAccess } from './recovery.ts';
 import { CF_READINESS_RETRY } from './shared.ts';
 
@@ -121,14 +112,14 @@ export async function migrateDeploymentWorker(input: {
               bodyPreview: text.slice(0, 200),
             });
             return undefined;
-          } catch (err) {
-            readinessFailure = `last readiness request threw: ${err instanceof Error ? err.message : String(err)}`;
+          } catch (error) {
+            readinessFailure = `last readiness request threw: ${error instanceof Error ? error.message : String(error)}`;
             logger.warn('migrate', 'readiness_probe_attempt_failed', {
               attempt,
               maxAttempts,
               latencyMs: Date.now() - attemptStart,
               code: 'threw',
-              err: err instanceof Error ? err.message : String(err),
+              err: error instanceof Error ? error.message : String(error),
             });
             return undefined;
           }

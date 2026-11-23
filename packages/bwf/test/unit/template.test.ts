@@ -11,7 +11,7 @@ describe('React starter', () => {
   it("pins @vitejs/plugin-react to the workspace catalog's range", () => {
     const workspace = readFileSync(
       new URL('../../../../pnpm-workspace.yaml', import.meta.url),
-      'utf-8',
+      'utf8',
     );
     const range = /^ {2}'@vitejs\/plugin-react': (\S+)$/m.exec(workspace)?.[1];
 
@@ -26,14 +26,14 @@ describe('Vite+ starter', () => {
   it("pins vite-plus and its core to the workspace catalog's Vite+ release", () => {
     const workspace = readFileSync(
       new URL('../../../../pnpm-workspace.yaml', import.meta.url),
-      'utf-8',
+      'utf8',
     );
     const catalogVitePlus = /^ {2}vite-plus: (\S+)$/m.exec(workspace)?.[1];
     const catalogVite = /^ {2}vite: (\S+)$/m.exec(workspace)?.[1];
     const installed = JSON.parse(
       readFileSync(
         new URL('../../../../node_modules/vite-plus/package.json', import.meta.url),
-        'utf-8',
+        'utf8',
       ),
     ) as { version: string; dependencies: { vite: string } };
 

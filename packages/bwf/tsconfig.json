@@ -16,10 +16,11 @@
     "skipLibCheck": true,
     "declaration": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "../..",
     "types": ["node", "@cloudflare/workers-types"],
     "isolatedDeclarations": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src", "test", "env.d.ts", "../../test/*.ts", "../../.github/scripts/*.ts"]
 }

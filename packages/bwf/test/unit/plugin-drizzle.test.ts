@@ -414,7 +414,7 @@ describe('drizzlePlugin db typing generation', () => {
         : mysqlTable('users', { id: int('id') });
 
     // Decision: drizzle reports an error from a running query as "Failed query: ...".
-    await expect(withRuntimeEnv({}, async () => await db.select().from(users))).rejects.toThrow(
+    await expect(withRuntimeEnv({}, async () => db.select().from(users))).rejects.toThrow(
       `db: ${name} is not configured.`,
     );
     expect(clients).toEqual([]);
@@ -704,7 +704,7 @@ createDb(binding, { session: { bookmark: null } });
     const code = load.call({}, '\0virtual:platform-db');
     const specifiers = Array.from(
       code.matchAll(/\b(?:from|import)\s*\(?\s*("[^"]+")/g),
-      (match) => JSON.parse(match[1]!) as string,
+      (match) => JSON.parse(match[1]) as string,
     );
 
     // Decision: The worker optimizer serves drizzle's bare driver import from a prebundle. A bare import here

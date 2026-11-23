@@ -39,7 +39,7 @@ export async function renderAdminPage(
   if (context.req.header('X-PlatformPages') === 'true') {
     return Response.json(pageObj, { headers, status: options.status ?? 200 });
   }
-  const json = JSON.stringify(pageObj).replace(/</g, '\\u003c');
+  const json = JSON.stringify(pageObj).replaceAll('<', String.raw`\u003c`);
   const htmlTitle = escapeHtml(pageObj.head?.title ?? platformName);
   const html = `<!doctype html><html lang="en" data-astryx-theme="neutral"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlTitle}</title><link rel="stylesheet" href="/admin/style.css"></head><body><div id="platform-admin-root"></div><script type="application/json" id="platform-admin-page">${json}</script><script src="/admin/client.js" defer></script></body></html>`;
   return new Response(html, {
@@ -49,7 +49,7 @@ export async function renderAdminPage(
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(
+  return value.replaceAll(
     /[&<>"]/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!,
   );

@@ -44,7 +44,7 @@ export async function selectPlatformLoginMethod(
   }
   const provider =
     providers.length === 1
-      ? providers[0]!
+      ? providers[0]
       : await select({
           message: 'Choose a login provider:',
           options: methods.map(({ id, label }) => ({
@@ -81,9 +81,9 @@ export async function promptForLoginToken(
     savePlatformToken(token, apiUrl);
     s.stop('Logged in!');
     return token;
-  } catch (err) {
+  } catch (error) {
     s.stop('Login failed');
-    throw err;
+    throw error;
   }
 }
 

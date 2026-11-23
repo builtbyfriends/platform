@@ -144,7 +144,9 @@ describe('initial commit hint', () => {
   it('targets the created subfolder, quoting shell metacharacters', () => {
     const child = join(root, "app's $name `value`");
     const argument =
-      process.platform === 'win32' ? `"${toSlash(child)}"` : `'${child.replaceAll("'", "'\\''")}'`;
+      process.platform === 'win32'
+        ? `"${toSlash(child)}"`
+        : `'${child.replaceAll("'", String.raw`'\''`)}'`;
     const git = `git -C ${argument}`;
     expect(initialCommitCommand(child)).toBe(
       `${git} add -A && ${git} commit -m "chore: initial commit"`,

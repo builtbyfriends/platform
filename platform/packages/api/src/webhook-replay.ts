@@ -1,4 +1,5 @@
-import { getRedeliveredGuids, recordWebhookRedelivery, type Db } from './db.ts';
+import { getRedeliveredGuids, recordWebhookRedelivery } from './db.ts';
+import type { Db } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import {
   listFailedWebhookDeliveries,
@@ -66,8 +67,8 @@ export async function replayFailedWebhookDeliveries(
         });
         redelivered++;
       }
-    } catch (err) {
-      console.warn('[webhook-replay] redeliver failed for guid', d.guid, err);
+    } catch (error) {
+      console.warn('[webhook-replay] redeliver failed for guid', d.guid, error);
     }
   }
 

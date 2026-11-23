@@ -18,10 +18,8 @@ import {
   projects as projectTable,
   projectZeroTrust,
 } from '../../src/schema.ts';
-import {
-  readZeroTrustConfigurationStrict,
-  type ZeroTrustConfigureInput,
-} from '../../src/zero-trust/configuration.ts';
+import { readZeroTrustConfigurationStrict } from '../../src/zero-trust/configuration.ts';
+import type { ZeroTrustConfigureInput } from '../../src/zero-trust/configuration.ts';
 import {
   configurePlatformZeroTrust,
   disablePlatformZeroTrust,
@@ -41,8 +39,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -133,23 +131,23 @@ function accessApi(options?: {
     if (policyMatch) {
       return Response.json({
         success: true,
-        result: applications.get(policyMatch[1]!)?.policies ?? [],
+        result: applications.get(policyMatch[1])?.policies ?? [],
       });
     }
     const match = path.match(/^apps\/([^/]+)$/);
     if (match && init?.method === 'PUT') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      const previous = applications.get(match[1]!);
+      const previous = applications.get(match[1]);
       const application = { ...body, id: match[1], aud: previous?.aud ?? `aud-${match[1]}` };
-      applications.set(match[1]!, application);
+      applications.set(match[1], application);
       return Response.json({ success: true, result: application });
     }
     if (match && init?.method === 'DELETE') {
-      applications.delete(match[1]!);
+      applications.delete(match[1]);
       return Response.json({ success: true, result: { id: match[1] } });
     }
     if (match) {
-      const application = applications.get(match[1]!);
+      const application = applications.get(match[1]);
       return application
         ? Response.json({ success: true, result: application })
         : Response.json(
@@ -544,7 +542,7 @@ describe('project Zero Trust reconciliation', () => {
       .limit(1);
     expect(unseeded).toBeDefined();
     await expect(
-      initializeNewProjectZeroTrust(bindings, env.db, unseeded!.id),
+      initializeNewProjectZeroTrust(bindings, env.db, unseeded.id),
     ).resolves.toMatchObject({ desired_protected: false, status: 'reconciling' });
 
     await env.ROUTING.put(FAST_MAINTENANCE_KEY, 'armed');

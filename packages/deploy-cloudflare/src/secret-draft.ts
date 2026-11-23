@@ -70,16 +70,14 @@ export const PLATFORM_SECRET_DRAFT_SOURCE =
 export const PLATFORM_SECRET_DRAFT_MESSAGE = 'platform:secret-draft';
 
 // Decision: Placeholders that earlier releases deployed carry these messages.
-const LEGACY_SECRET_DRAFT_MESSAGES: ReadonlyArray<unknown> = [
+const LEGACY_SECRET_DRAFT_MESSAGES: ReadonlySet<unknown> = new Set([
   'nosam:secret-draft',
   'void:secret-draft',
-];
+]);
 
 /** Whether a Worker version message marks a secret placeholder, from this or an earlier release. */
 export function isSecretDraftMessage(message: unknown): boolean {
-  return (
-    message === PLATFORM_SECRET_DRAFT_MESSAGE || LEGACY_SECRET_DRAFT_MESSAGES.includes(message)
-  );
+  return message === PLATFORM_SECRET_DRAFT_MESSAGE || LEGACY_SECRET_DRAFT_MESSAGES.has(message);
 }
 
 /**

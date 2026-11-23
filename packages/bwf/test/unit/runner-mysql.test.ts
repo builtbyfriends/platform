@@ -8,8 +8,8 @@ import {
   applyMySqlMigrations,
   readMySqlAppliedMigrations,
   runMySqlMigrations,
-  type MySqlClient,
 } from '../../src/migrations/runner-mysql.ts';
+import type { MySqlClient } from '../../src/migrations/runner-mysql.ts';
 import { runBwfAuthMigrations } from '../../src/runtime/better-auth-mysql.ts';
 import { createMigrationHandler } from '../../src/runtime/migration-handler-mysql.ts';
 import { holdMySqlMigrationLease } from '../../src/runtime/migration-lock-mysql.ts';
@@ -114,7 +114,7 @@ class FakeMySqlDatabase {
     }
     const name = String(params[0]);
     if (sql === 'SELECT DATABASE() AS db') {
-      return [{ db: this.sessions[session - 1]!.database ?? 'app' }];
+      return [{ db: this.sessions[session - 1].database ?? 'app' }];
     }
     if (sql.startsWith('SELECT GET_LOCK')) {
       const holder = this.locks.get(name);
@@ -152,7 +152,7 @@ class FakeMySqlDatabase {
     const now = Date.now();
     const clock = /UTC_TIMESTAMP\(6\)/.test(sql)
       ? now
-      : now + (this.sessions[session - 1]!.utcOffsetMs ?? 0);
+      : now + (this.sessions[session - 1].utcOffsetMs ?? 0);
     const filter = /`expires_at` ([<>]) (?:NOW|UTC_TIMESTAMP)\(6\)/.exec(sql)?.[1];
     const matches = (lease: Lease) =>
       filter === undefined || (filter === '<' ? lease.expiresAt < clock : lease.expiresAt > clock);
@@ -415,7 +415,7 @@ describe('MySQL migration runner', () => {
         name: '002_backfill.sql',
         sql: 'UPDATE c SET n = n + 1;\n--> statement-breakpoint\nINSERT INTO nope VALUES (1);',
       },
-    ]).catch((caught: unknown) => caught);
+    ]).catch((error_: unknown) => error_);
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe(
@@ -517,7 +517,7 @@ describe('MySQL migration runner', () => {
           name: '002_backfill.sql',
           sql: 'UPDATE c SET n = n + 1;\n--> statement-breakpoint\nUPDATE d SET n = n + 1;',
         },
-      ]).catch((caught: unknown) => caught);
+      ]).catch((error_: unknown) => error_);
 
       expect((error as Error).message).toBe(`migration 002_backfill.sql failed: ${cause.message}`);
       expect((error as Error).cause).toBe(cause);
@@ -540,7 +540,7 @@ describe('MySQL migration runner', () => {
 
     const error = await applyMySqlMigrations(client, [
       { name: '002_backfill.sql', sql: 'UPDATE c SET n = n + 1;' },
-    ]).catch((caught: unknown) => caught);
+    ]).catch((error_: unknown) => error_);
 
     expect((error as Error).message).toBe(`migration 002_backfill.sql failed: ${cause.message}`);
     expect((error as Error).cause).toBe(cause);
@@ -737,7 +737,7 @@ describe('MySQL migration lock across runners', () => {
         new FakeMySqlDatabase({ lease: { owner: 'deploy', expiresAt: Date.now() + 100_000 } }),
       );
       const failure = await applyMySqlMigrations(database.client(), RACE).catch(
-        (caught: unknown) => caught,
+        (error_: unknown) => error_,
       );
       expect(database.statements()).not.toContain('SELECT `name` FROM `_void_migrations`');
       expect(database.statements().at(-1)).toBe('SELECT RELEASE_LOCK(?)');
@@ -757,7 +757,7 @@ describe('MySQL migration lock across runners', () => {
       const failure = await applyMySqlMigrations(
         database.client({ utcOffsetMs: 9 * 3_600_000 }),
         RACE,
-      ).catch((caught: unknown) => caught);
+      ).catch((error_: unknown) => error_);
       expect(database.statements()).not.toContain('SELECT `name` FROM `_void_migrations`');
       return failure;
     });
@@ -884,7 +884,7 @@ describe('MySQL Better Auth migrations under the lock', () => {
 
     expect(bodies.map((body) => body.ok)).toEqual([true, true]);
     expect(runs).toHaveLength(2);
-    expect(runs[1]!.start).toBeGreaterThanOrEqual(runs[0]!.end);
+    expect(runs[1].start).toBeGreaterThanOrEqual(runs[0].end);
   });
 
   it('keeps the lease while Better Auth migrations outlast it', async () => {

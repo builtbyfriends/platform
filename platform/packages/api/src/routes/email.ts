@@ -2,7 +2,8 @@ import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { signConfirmToken, type ConfirmTokenPayload } from '../auth/confirm-token.ts';
+import { signConfirmToken } from '../auth/confirm-token.ts';
+import type { ConfirmTokenPayload } from '../auth/confirm-token.ts';
 import { capabilityMiddleware } from '../capabilities.ts';
 import {
   deleteEmailDestination,
@@ -16,9 +17,8 @@ import {
   queueUnreferencedEmailDestinationCleanup,
   tryCreateEmailDestination,
   updateEmailDestinationStatus,
-  type Db,
-  type OwnerVerificationAudit,
 } from '../db.ts';
+import type { Db, OwnerVerificationAudit } from '../db.ts';
 import { getProjectEmailUsage, getProjectEmailLogs } from '../email/admission.ts';
 import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
 import { EmailOperationError } from '../email/connection-service.ts';
@@ -57,8 +57,8 @@ import {
   addDestination,
   isAlreadyExistsError,
   listDestinations,
-  type CfDestinationAddress,
 } from '../provisioning/email-routing.ts';
+import type { CfDestinationAddress } from '../provisioning/email-routing.ts';
 import { projects } from '../schema.ts';
 import type { EmailDestination } from '../types.ts';
 import { requireProjectRouteCapability } from './project-access.ts';
@@ -214,8 +214,8 @@ const app = new Hono<ApiEnv>()
           row.cf_destination_id = cf.tag;
           row.verified_at = cf.verified;
         }
-      } catch (err) {
-        console.error('[email] destinations refresh failed:', err);
+      } catch (error) {
+        console.error('[email] destinations refresh failed:', error);
         // Decision: Non-fatal: return the cached view.
       }
     }
@@ -297,22 +297,22 @@ const app = new Hono<ApiEnv>()
     let recoveredExistingCfRow = false;
     try {
       cfRow = await addDestination(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN, address);
-    } catch (err) {
-      if (!isAlreadyExistsError(err)) {
-        console.error('[email] addDestination failed:', err);
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        console.error('[email] addDestination failed:', error);
         return context.json({ error: 'failed to register destination' }, 502);
       }
       try {
         const all = await listDestinations(context.env.CF_ACCOUNT_ID, context.env.CF_API_TOKEN);
         const found = all.find((r) => r.email.toLowerCase() === address);
         if (!found) {
-          console.error('[email] addDestination reported exists but list missed it:', err);
+          console.error('[email] addDestination reported exists but list missed it:', error);
           return context.json({ error: 'failed to register destination' }, 502);
         }
         cfRow = found;
         recoveredExistingCfRow = true;
-      } catch (innerErr) {
-        console.error('[email] addDestination recovery failed:', innerErr);
+      } catch (error) {
+        console.error('[email] addDestination recovery failed:', error);
         return context.json({ error: 'failed to register destination' }, 502);
       }
     }
@@ -331,7 +331,7 @@ const app = new Hono<ApiEnv>()
       // revoked if the owner's identity changes (see `revokeOwnerVerifiedDestinationsForUserChange`).
       const ownerAudit: OwnerVerificationAudit = {
         userId: project.user_id,
-        emailSnapshot: ownerEmail!,
+        emailSnapshot: ownerEmail,
       };
       const inserted = await tryInsertWithRetry(
         context,
@@ -699,7 +699,7 @@ const app = new Hono<ApiEnv>()
       ) {
         return context.json({ error: 'invalid attemptId' }, 400);
       }
-      attemptId = body.attemptId as string | undefined;
+      attemptId = body.attemptId;
     }
     return rotateEmailIngressSecretForProject(
       context,
@@ -737,7 +737,7 @@ export function parseCounter(raw: string | null): number {
   if (!raw) {
     return 0;
   }
-  const n = parseInt(raw, 10);
+  const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
@@ -870,8 +870,8 @@ async function tryInsertWithRetry(
         verificationSource,
         { actorUserId: context.get('user').id, ownerAudit },
       );
-    } catch (err) {
-      const accessResponse = projectAccessErrorResponse(context, err);
+    } catch (error) {
+      const accessResponse = projectAccessErrorResponse(context, error);
       if (accessResponse) {
         if (cfDestinationId) {
           await rollbackCfDestination(
@@ -883,8 +883,8 @@ async function tryInsertWithRetry(
         }
         return accessResponse;
       }
-      if (!isForeignKeyViolation(err)) {
-        throw err;
+      if (!isForeignKeyViolation(error)) {
+        throw error;
       }
       // Decision: Teardown committed its cascade between the route's unlocked `status === 'deleting'` guard and this
       // INSERT, so `email_destinations.project_id` has no project row. Retrying can't help. Return the same

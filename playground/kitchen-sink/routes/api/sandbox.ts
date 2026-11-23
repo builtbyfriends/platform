@@ -1,9 +1,10 @@
 import { defineHandler } from '@builtbyfriends/bwf';
 import { UsageLimit } from '@builtbyfriends/bwf/limits';
-import { getSandbox, type SandboxClient } from '@builtbyfriends/bwf/sandbox';
+import { getSandbox } from '@builtbyfriends/bwf/sandbox';
+import type { SandboxClient } from '@builtbyfriends/bwf/sandbox';
 import { sampleRequests } from '../../lib/sandbox-demo.ts';
 
-const MAX_CODE_LENGTH = 8_000;
+const MAX_CODE_LENGTH = 8000;
 const WORKDIR = '/workspace/platform-kitchen-sink-code-lab';
 
 const RUNNER = `import { readFile, writeFile } from "node:fs/promises";
@@ -64,7 +65,7 @@ export const POST = defineHandler(async (c) => {
     const started = performance.now();
     const result = await sandbox.run(['node', 'run.mjs'], {
       cwd: WORKDIR,
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(5000),
       env: {
         NODE_OPTIONS: '--disable-proto=throw',
       },
@@ -83,16 +84,16 @@ export const POST = defineHandler(async (c) => {
       exitCode: result.exitCode,
       duration: performance.now() - started,
     });
-  } catch (err) {
-    if (err instanceof UsageLimit) {
-      return err.response({
+  } catch (error) {
+    if (error instanceof UsageLimit) {
+      return error.response({
         message:
-          err.reason === 'concurrency'
+          error.reason === 'concurrency'
             ? 'All runners are busy. Your code has been kept; try again shortly.'
             : 'The execution allowance is exhausted. Your code has been kept.',
       });
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = error instanceof Error ? error.message : String(error);
     return c.json({ ok: false, error: message }, 500);
   } finally {
     if (sandbox) {

@@ -5,8 +5,10 @@
  * virtual module that auto-wires the D1 binding with the user's schema.
  * This stub exists for the published npm package and type declarations.
  */
-import { drizzle as _drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
-import { createD1SessionAccess, resolveD1SessionStart, type DbSessionStart } from './db-session.ts';
+import { drizzle as _drizzle } from 'drizzle-orm/d1';
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
+import { createD1SessionAccess, resolveD1SessionStart } from './db-session.ts';
+import type { DbSessionStart } from './db-session.ts';
 import { getRuntimeBinding, getRuntimeRequestResource, requireRuntimeBinding } from './env.ts';
 
 // Decision: Re-export commonly used Drizzle utilities so consumers never need
@@ -58,6 +60,7 @@ export function createDb(
   options?: { session?: DbSessionStart },
 ): DrizzleD1Database {
   return _drizzle(
+    // oxlint-disable-next-line quality/no-chained-type-assertions
     d1.withSession(
       resolveD1SessionStart(
         options?.session === undefined ? 'first-unconstrained' : options.session,

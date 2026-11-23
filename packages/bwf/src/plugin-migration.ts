@@ -114,8 +114,8 @@ export function migrationPlugin(
             if (pending.length > 0) {
               try {
                 validateMigrations(pending);
-              } catch (err) {
-                refuse(err);
+              } catch (error) {
+                refuse(error);
                 return;
               }
             }
@@ -161,8 +161,8 @@ export function migrationPlugin(
           if (pending.length > 0) {
             try {
               validateMigrations(pending);
-            } catch (err) {
-              refuse(err);
+            } catch (error) {
+              refuse(error);
               return;
             }
           }
@@ -179,8 +179,8 @@ export function migrationPlugin(
           }
           bwfLog('Applied Better Auth migrations');
         }
-      } catch (err) {
-        bwfError(`Migration error: ${err}`);
+      } catch (error) {
+        bwfError(`Migration error: ${error}`);
       }
     },
   };

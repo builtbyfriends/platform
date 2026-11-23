@@ -1,11 +1,8 @@
 import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createCodeChallenge } from '../../src/cli/auth.ts';
-import {
-  PlatformApiError,
-  type GithubInstallation,
-  type PlatformClient,
-} from '../../src/cli/client.ts';
+import { PlatformApiError } from '../../src/cli/client.ts';
+import type { GithubInstallation, PlatformClient } from '../../src/cli/client.ts';
 import * as gitMetadata from '../../src/cli/git-metadata.ts';
 import type { GithubArgs } from '../../src/cli/github-args.ts';
 import { runConnect } from '../../src/cli/github-cmd.ts';
@@ -170,11 +167,11 @@ describe('runConnect — non-owner member connect-authorization round-trip', () 
 
     expect(connectGithub).toHaveBeenCalledTimes(2);
 
-    const firstBody = connectGithub.mock.calls[0]![1] as Record<string, unknown>;
+    const firstBody = connectGithub.mock.calls[0][1] as Record<string, unknown>;
     expect(firstBody.connectGrant).toBeUndefined();
     expect(firstBody.codeVerifier).toBeUndefined();
 
-    const retryBody = connectGithub.mock.calls[1]![1] as Record<string, unknown>;
+    const retryBody = connectGithub.mock.calls[1][1] as Record<string, unknown>;
     expect(retryBody).toMatchObject({
       installationId,
       repoFullName,
@@ -204,7 +201,7 @@ describe('runConnect — non-owner member connect-authorization round-trip', () 
     await promise;
 
     expect(connectGithub).toHaveBeenCalledTimes(1);
-    const body = connectGithub.mock.calls[0]![1] as Record<string, unknown>;
+    const body = connectGithub.mock.calls[0][1] as Record<string, unknown>;
     expect(body.connectGrant).toBeUndefined();
     expect(getGithubConnectAuthorizeUrl).not.toHaveBeenCalled();
     expect(successSpy).toHaveBeenCalledWith(
@@ -499,7 +496,7 @@ describe('runConnect — member repo prompt (redacted repository list)', () => {
     expect(mockText).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'Repository (owner/repo):' }),
     );
-    const textOptions = mockText.mock.calls[0]![0] as {
+    const textOptions = mockText.mock.calls[0][0] as {
       validate: (value?: string) => string | undefined;
     };
     expect(textOptions.validate('not-a-repo')).toBe('Enter the repository as owner/repo.');
@@ -507,7 +504,7 @@ describe('runConnect — member repo prompt (redacted repository list)', () => {
     expect(textOptions.validate('octocat/hello-world')).toBeUndefined();
     expect(textOptions.validate(' octocat/hello-world ')).toBeUndefined();
     expect(connectGithub).toHaveBeenCalledTimes(1);
-    const body = connectGithub.mock.calls[0]![1] as { repoFullName: string };
+    const body = connectGithub.mock.calls[0][1] as { repoFullName: string };
     expect(body.repoFullName).toBe(repoFullName);
   });
 
@@ -533,7 +530,7 @@ describe('runConnect — member repo prompt (redacted repository list)', () => {
       });
       await promise;
 
-      const repoPrompt = mockText.mock.calls[0]![0];
+      const repoPrompt = mockText.mock.calls[0][0];
       expect(repoPrompt.validate('')).toBeUndefined();
       expect(repoPrompt.validate(' ')).toBe('Enter the repository as owner/repo.');
       expect(repoPrompt.validate('another/project')).toBeUndefined();
@@ -542,11 +539,11 @@ describe('runConnect — member repo prompt (redacted repository list)', () => {
         [1, 'release'],
         [2, '.github/workflows/bwf-deploy.yml'],
       ] as const) {
-        expect(mockText.mock.calls[index]![0]).toMatchObject({
+        expect(mockText.mock.calls[index][0]).toMatchObject({
           placeholder: suggestion,
           defaultValue: suggestion,
         });
-        expect(mockText.mock.calls[index]![0]).not.toHaveProperty('initialValue');
+        expect(mockText.mock.calls[index][0]).not.toHaveProperty('initialValue');
       }
       expect(connectGithub).toHaveBeenCalledWith(
         projectId,

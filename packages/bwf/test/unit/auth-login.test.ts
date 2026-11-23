@@ -107,7 +107,7 @@ describe('runPlatformLogin', () => {
         code_verifier: expect.any(String),
       }),
     );
-    const codeVerifier = (exchange!.body as { code_verifier: string }).code_verifier;
+    const codeVerifier = (exchange.body as { code_verifier: string }).code_verifier;
 
     expect(exchangeRequests).toEqual([
       {

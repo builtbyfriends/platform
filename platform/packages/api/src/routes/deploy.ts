@@ -1,15 +1,17 @@
 import { sql as drizzleSql } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { getUser, getDeployment, updateDeploymentStatus, type Db } from '../db.ts';
+import { getUser, getDeployment, updateDeploymentStatus } from '../db.ts';
+import type { Db } from '../db.ts';
 import { handleManifestOnlyDeploy } from '../deploy/execute.ts';
 import {
   appendDeploymentEvent,
   assertDeploymentExecutionAuthority,
   deploymentInputModule,
-  type DeploymentOperation,
 } from '../deployment-execution.ts';
+import type { DeploymentOperation } from '../deployment-execution.ts';
 import type { ApiEnv } from '../env.ts';
-import { listR2Objects, type WorkerModule } from '../worker-upload.ts';
+import { listR2Objects } from '../worker-upload.ts';
+import type { WorkerModule } from '../worker-upload.ts';
 
 export { MAX_ROUTING_RULES, validateManifestShape } from '@builtbyfriends/deploy-core';
 

@@ -14,9 +14,11 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
-  type ResourceOwnership,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResourceKind,
+  PlatformInstallationManifest,
+  ResourceOwnership,
 } from '@builtbyfriends/platform';
 import { note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -391,7 +393,7 @@ describe('uninstall with project Zero Trust', () => {
         projectZeroTrustUninstallState(zeroTrustSetting(), [
           projectApplications('proj_public', 'platform-example-public-proj_public', null),
         ]),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
 
     expect(error).toBeInstanceOf(Error);
     expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
@@ -440,7 +442,7 @@ describe('uninstall with project Zero Trust', () => {
           }),
           [],
         ),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
     expect(error!.message).toContain(`shared project application: ${wildcardName}`);
     expectNothingChanged(fake);
@@ -456,7 +458,7 @@ describe('uninstall with project Zero Trust', () => {
         projectZeroTrustUninstallState(disabledZeroTrust, [
           projectApplications('proj_skipped', 'platform-example-public-proj_skipped', null),
         ]),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain(
       'Refusing to uninstall while Platform-managed Access applications from project Zero Trust remain',
     );
@@ -476,7 +478,7 @@ describe('uninstall with project Zero Trust', () => {
         interactive: false,
         ...unlockedProjectZeroTrust,
         readProjectZeroTrust: async () => projectZeroTrustUninstallState(disabledZeroTrust, rows),
-      }).catch((reason: unknown) => reason as Error);
+      }).catch((error: unknown) => error as Error);
     const deleting = {
       ...projectApplications('proj_gone', 'platform-example-public-proj_gone', null),
       project_slug: 'gone-app',
@@ -514,7 +516,7 @@ describe('uninstall with project Zero Trust', () => {
       readProjectZeroTrust: async () => {
         throw new Error('platform: connect ECONNREFUSED');
       },
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain(
       'Refusing to uninstall because the project Zero Trust state could not be read from the platform database: connect ECONNREFUSED',
     );
@@ -815,7 +817,7 @@ describe('uninstall with project Zero Trust', () => {
         interactive: false,
         ...unlockedProjectZeroTrust,
         readProjectZeroTrust: async () => noUser(),
-      }).catch((reason: unknown) => reason as Error);
+      }).catch((error_: unknown) => error_ as Error);
       expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
       expect(error!.message).toContain(
         'No platform user exists yet. Run this command on the computer that installed the platform',
@@ -1272,7 +1274,7 @@ describe('platform lifecycle management', () => {
     expect(fake.disabledWrites).toEqual([PLATFORM_DISABLED_VALUE]);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]?.status).toBe('disabled');
-    expect(JSON.parse(fake.remoteWrites[0]!)).toMatchObject({ status: 'disabling' });
+    expect(JSON.parse(fake.remoteWrites[0])).toMatchObject({ status: 'disabling' });
     expect(JSON.parse(fake.remoteWrites.at(-1)!)).toMatchObject({ status: 'disabled' });
     expect(databaseCheckpoints.at(-1)?.status).toBe('disabled');
   });
@@ -1314,7 +1316,7 @@ describe('platform lifecycle management', () => {
     const first = client(manifest);
     await disablePlatform(first, manifest, false);
 
-    let reenabled = listInstallationManifests()[0]!;
+    let reenabled = listInstallationManifests()[0];
     reenabled = recordInstallationStep(
       reenabled,
       {
@@ -1428,7 +1430,7 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.deleted).toEqual([]);
     expect(fake.remoteWrites.map((value) => JSON.parse(value).status)).toContain('uninstalled');
-    const result = listInstallationManifests()[0]!;
+    const result = listInstallationManifests()[0];
     expect(result.status).toBe('uninstalled');
     expect(result.resources.filter((resource) => resource.state === 'retained')).toHaveLength(15);
     expect(readInstallationRecoverySecrets(result)).toEqual({
@@ -1648,7 +1650,7 @@ describe('platform lifecycle management', () => {
     expect(fake.deleted).toHaveLength(5);
     expect(fake.deleted).not.toContainEqual(['ai-gateway', 'ai-gateway-id']);
     expect(fake.deleted.some(([kind]) => kind === 'zone')).toBe(false);
-    expect(readInstallationRecoverySecrets(listInstallationManifests()[0]!)).toBeNull();
+    expect(readInstallationRecoverySecrets(listInstallationManifests()[0])).toBeNull();
   });
 
   it('refuses every mutation when the remote installation identity changed', async () => {
@@ -1704,7 +1706,7 @@ describe('platform lifecycle management', () => {
     expect(fake.emptiedBuckets).toEqual([]);
     expect(fake.deletedBucketMarkers).toEqual([]);
     expect(fake.deleted).not.toContainEqual(['r2-bucket', 'assets-bucket-id']);
-    const result = listInstallationManifests()[0]!;
+    const result = listInstallationManifests()[0];
     expect(result.status).toBe('uninstalled');
     expect(result.resources.find((resource) => resource.key === 'assets-bucket')?.state).toBe(
       'retained',
@@ -1730,7 +1732,7 @@ describe('platform lifecycle management', () => {
         uninstallDependencies,
       ),
     ).rejects.toThrow('temporary deletion failure');
-    const checkpoint = listInstallationManifests()[0]!;
+    const checkpoint = listInstallationManifests()[0];
     expect(checkpoint.status).toBe('failed');
     expect(checkpoint.resources.filter((resource) => resource.state === 'deleted')).toHaveLength(0);
 
@@ -1758,7 +1760,7 @@ describe('platform lifecycle management', () => {
     );
 
     expect(fake.deleted.some(([kind]) => kind === 'queue')).toBe(false);
-    const result = listInstallationManifests()[0]!;
+    const result = listInstallationManifests()[0];
     expect(result.status).toBe('uninstalled');
     expect(
       result.resources
@@ -1795,7 +1797,7 @@ describe('platform lifecycle management', () => {
     );
 
     expect(fake.deleted.some(([kind]) => kind === 'queue')).toBe(false);
-    const result = listInstallationManifests()[0]!;
+    const result = listInstallationManifests()[0];
     expect(result.status).toBe('uninstalled');
     expect(
       result.resources
@@ -1841,7 +1843,7 @@ describe('platform lifecycle management', () => {
         uninstallDependencies,
       ),
     ).rejects.toThrow('connection closed after routing deletion');
-    const checkpoint = listInstallationManifests()[0]!;
+    const checkpoint = listInstallationManifests()[0];
     expect(checkpoint.status).toBe('failed');
     expect(checkpoint.resources.find((resource) => resource.key === 'routing-kv')?.state).toBe(
       'ready',
@@ -1898,7 +1900,7 @@ describe('platform lifecycle management', () => {
     await uninstallPlatform(fake, manifest, uninstallArgs, uninstallDependencies);
     expect(fake.deleted).toEqual([]);
     expect(listInstallationManifests()[0]).toMatchObject({ status: 'uninstalled' });
-    expect(listInstallationManifests()[0]!.resources[0]).toMatchObject({ state: 'retained' });
+    expect(listInstallationManifests()[0].resources[0]).toMatchObject({ state: 'retained' });
   });
 
   it('resumes after routes were removed but remote disable checkpointing failed', async () => {
@@ -1911,7 +1913,7 @@ describe('platform lifecycle management', () => {
     await expect(disablePlatform(first, manifest, false)).rejects.toThrow('temporary KV failure');
     expect(listInstallationManifests()[0]?.status).toBe('failed');
 
-    const failed = listInstallationManifests()[0]!;
+    const failed = listInstallationManifests()[0];
     const second = client(failed);
     await disablePlatform(second, failed, false);
     expect(trafficRetentionSteps()).toEqual(['disable:0:routes']);
@@ -1924,7 +1926,7 @@ describe('platform lifecycle management', () => {
     const first = client(manifest);
     await disablePlatform(first, manifest, false);
 
-    const disabled = listInstallationManifests()[0]!;
+    const disabled = listInstallationManifests()[0];
     const second = client(disabled);
     await disablePlatform(second, disabled, false);
 

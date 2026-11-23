@@ -12,11 +12,13 @@ import {
   parsePlatformResourceOwnershipMarker,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
-  type InstallationResource,
-  type InstallationResourceKind,
-  type PlatformAppAccess,
-  type PlatformDeploymentManifest,
-  type PlatformInstallationManifest,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResource,
+  InstallationResourceKind,
+  PlatformAppAccess,
+  PlatformDeploymentManifest,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { pc } from './output.ts';
 import {
@@ -532,7 +534,7 @@ export async function createPlatformInstallPlan(
         expectedPatterns.has(route.pattern) && (route.script !== expectedWorker || !ownedWorker),
     );
     if (conflicts.length > 0) {
-      const conflict = conflicts[0]!;
+      const conflict = conflicts[0];
       throw new Error(
         `platform: Application route ${JSON.stringify(conflict.pattern)} is already assigned to ${JSON.stringify(conflict.script ?? 'no Worker')}. Choose another application domain.`,
       );
@@ -997,7 +999,7 @@ function resolveAccount(
         : 'platform: Select a Cloudflare account with --account <id>.',
     );
   }
-  return matches[0]!;
+  return matches[0];
 }
 
 type NamedPlanContext = Readonly<{

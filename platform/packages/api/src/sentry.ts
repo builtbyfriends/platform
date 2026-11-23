@@ -19,6 +19,7 @@ type Handler = Record<string, unknown>;
  * without nodejs_compat, which Sentry needs. Those Workers carry app traffic, so they're watched from outside instead.
  */
 export function withOptionalSentry<T extends Handler>(worker: string, handler: T): T {
+  // oxlint-disable-next-line quality/no-chained-type-assertions
   const wrapped = withSentry(
     (env: SentryEnv) => ({
       dsn: env.SENTRY_DSN,

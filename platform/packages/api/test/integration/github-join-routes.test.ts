@@ -23,14 +23,8 @@ import {
 import type { ApiEnv } from '../../src/env.ts';
 import { githubRoutes } from '../../src/routes/github.ts';
 import { githubInstallationMembers } from '../../src/schema.ts';
-import {
-  JWT_SECRET,
-  clearTables,
-  createTestUser,
-  setupEnv,
-  teardownEnv,
-  type TestEnv,
-} from './helpers.ts';
+import { JWT_SECRET, clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -180,7 +174,7 @@ async function mintJoinCode(payload: {
 // mangles `Location: http://localhost:*` headers. The target carries the signed `join_code`.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runJoinCallback(opts: {

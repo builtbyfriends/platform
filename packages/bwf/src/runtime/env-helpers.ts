@@ -43,6 +43,7 @@ function build<T>(parse: Parser<T>, state: BuilderState<T>): EnvSchema<T> {
             return { value: state.defaultValue };
           }
           if (state.optional) {
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- optional value is undefined by contract
             return { value: undefined as T };
           }
           return { issues: [{ message: 'Required' }] };
@@ -56,12 +57,13 @@ function build<T>(parse: Parser<T>, state: BuilderState<T>): EnvSchema<T> {
       },
     },
     optional() {
-      return build<T | undefined>(parse as Parser<T | undefined>, {
+      return build<T | undefined>(parse, {
         optional: true,
         defaultValue: state.defaultValue,
       });
     },
     default(value: NonNullable<T>): EnvSchema<NonNullable<T>> {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- default() narrows the parser output
       return build<NonNullable<T>>(parse as Parser<NonNullable<T>>, {
         optional: false,
         defaultValue: value,
@@ -135,7 +137,7 @@ export function oneOf<const Values extends Array<string>>(
 ): EnvSchema<Values[number]> {
   return build<Values[number]>((raw) => {
     if ((values as Array<string>).includes(raw)) {
-      return { ok: true, value: raw as Values[number] };
+      return { ok: true, value: raw };
     }
     return {
       ok: false,
@@ -148,9 +150,13 @@ export function oneOf<const Values extends Array<string>>(
 export function json<T = unknown>(): EnvSchema<T> {
   return build<T>((raw) => {
     try {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- JSON.parse result is typed by the caller
       return { ok: true, value: JSON.parse(raw) as T };
-    } catch (e) {
-      return { ok: false, message: `Invalid JSON: ${(e as Error).message}` };
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }, empty());
 }

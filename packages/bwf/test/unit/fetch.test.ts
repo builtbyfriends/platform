@@ -93,7 +93,7 @@ describe('typed fetch client', () => {
     const init = call[1] as RequestInit;
     expect(init.method).toBe('POST');
     expect(init.body).toBe(JSON.stringify({ name: 'Alice' }));
-    expect(new Headers(init.headers!).get('Content-Type')).toBe('application/json');
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
   });
 
   it('throws FetchError on non-OK response', async () => {
@@ -101,7 +101,7 @@ describe('typed fetch client', () => {
       new Response('Not Found', { status: 404, statusText: 'Not Found' }),
     );
 
-    const err = await typedFetch('/api/hello', { retry: 0 }).catch((e: Error) => e);
+    const err = await typedFetch('/api/hello', { retry: 0 }).catch((error: Error) => error);
 
     expect(err).toBeInstanceOf(FetchError);
     expect((err as FetchError).status).toBe(404);

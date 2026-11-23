@@ -52,10 +52,10 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -164,7 +164,7 @@ async function getEvents(
     new Request(`https://api.test/rpc/deployments.events`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: targetProject, deploymentId: id, since: since }),
+      body: JSON.stringify({ projectId: targetProject, deploymentId: id, since }),
     }),
     queuedEnv,
   );
@@ -209,10 +209,10 @@ describe('durable deployment admission and observation', () => {
         env.db,
         response.headers.get('x-platform-deployment-id')!,
       );
-      const staged = await env.STATIC_ASSETS_R2.list({ prefix: operation!.input_prefix });
+      const staged = await env.STATIC_ASSETS_R2.list({ prefix: operation.input_prefix });
       expect(
         staged.objects.filter(({ key }) => key.includes('/receipt')).map(({ key }) => key),
-      ).toEqual([`${operation!.input_prefix}receipt-platform-${kind}`]);
+      ).toEqual([`${operation.input_prefix}receipt-platform-${kind}`]);
     },
   );
 
@@ -491,7 +491,7 @@ describe('durable deployment admission and observation', () => {
         cron: FAST_CRON,
         scheduledTime: Date.now(),
         noRetry() {},
-      } as ScheduledController,
+      },
       queuedEnv,
       {} as ExecutionContext,
     );
@@ -674,8 +674,8 @@ describe('durable execution claim and revocation', () => {
     expect(first.ack).not.toHaveBeenCalled();
     const operation = await getDeploymentOperation(env.db, id);
     expect(operation).toMatchObject({ status: 'recovering', inputs_deleted: false });
-    expect(Date.parse(operation!.lease_expires_at!)).toBeGreaterThan(Date.now());
-    expect(Date.parse(operation!.lease_expires_at!)).toBeLessThan(Date.now() + 2 * 60_000);
+    expect(Date.parse(operation.lease_expires_at!)).toBeGreaterThan(Date.now());
+    expect(Date.parse(operation.lease_expires_at!)).toBeLessThan(Date.now() + 2 * 60_000);
     expect((await env.db.select().from(deployments))[0]?.status).toBe('canceling');
     expect(log).toHaveBeenCalledWith(
       '[deployment-execution] execution/reconciliation interrupted',
@@ -718,7 +718,7 @@ describe('durable execution claim and revocation', () => {
     expect((await run(id)).retry).toHaveBeenCalledOnce();
     const operation = await getDeploymentOperation(env.db, id);
     expect(operation?.owner_id).toBe('replacement-owner');
-    expect(Date.parse(operation!.lease_expires_at!)).toBeGreaterThan(Date.now() + 4 * 60_000);
+    expect(Date.parse(operation.lease_expires_at!)).toBeGreaterThan(Date.now() + 4 * 60_000);
   });
 
   it('rejects admitted work from a collaborator suspended before queued execution', async () => {
@@ -731,7 +731,7 @@ describe('durable execution claim and revocation', () => {
     });
     const id = await admit(crypto.randomUUID(), collaborator.jwt);
     const stagedOperation = await getDeploymentOperation(env.db, id);
-    const receiptKey = `${stagedOperation!.input_prefix}receipt-platform-spa`;
+    const receiptKey = `${stagedOperation.input_prefix}receipt-platform-spa`;
     expect(await env.STATIC_ASSETS_R2.get(receiptKey)).not.toBeNull();
     expect(await getDeploymentOperation(env.db, id)).toMatchObject({ actor_id: collaborator.id });
     await env.db
@@ -770,7 +770,7 @@ describe('durable execution claim and revocation', () => {
     expect(await env.db.select().from(deployments)).toMatchObject([{ id, status: 'live' }]);
     const interrupted = await getDeploymentOperation(env.db, id);
     expect(interrupted).toMatchObject({ status: 'running', inputs_deleted: false });
-    expect(Date.parse(interrupted!.lease_expires_at!)).toBeGreaterThan(Date.now() + 17 * 60_000);
+    expect(Date.parse(interrupted.lease_expires_at!)).toBeGreaterThan(Date.now() + 17 * 60_000);
     expect(
       interrupted?.events.some(({ event }) => event.event === 'done' || event.event === 'error'),
     ).toBe(false);
@@ -1013,7 +1013,7 @@ describe('durable execution claim and revocation', () => {
     const operation = await getDeploymentOperation(env.db, id);
     expect(operation?.payload.body).not.toHaveProperty('workerFiles');
     expect(operation?.payload.modules).toMatchObject([{ name: 'index.js' }]);
-    const moduleKey = operation!.payload.modules[0]!.key;
+    const moduleKey = operation.payload.modules[0].key;
     const staged = await env.STATIC_ASSETS_R2.get(moduleKey);
     expect(new TextDecoder().decode(await staged!.arrayBuffer())).toBe(worker);
     const message = await run(id);
@@ -1037,7 +1037,7 @@ describe('durable execution claim and revocation', () => {
     });
     const id = response.headers.get('x-platform-deployment-id')!;
     const operation = await getDeploymentOperation(env.db, id);
-    await env.STATIC_ASSETS_R2.put(operation!.payload.modules[0]!.key, 'corrupted module');
+    await env.STATIC_ASSETS_R2.put(operation.payload.modules[0].key, 'corrupted module');
     const message = await run(id);
     expect(message.ack).not.toHaveBeenCalled();
     expect(message.retry).toHaveBeenCalledExactlyOnceWith({ delaySeconds: 60 });
@@ -1265,9 +1265,9 @@ describe('durable execution of directly uploaded Worker modules', () => {
       {
         name: 'index.js',
         key: `${prefix}0`,
-        digest: workerInput.modules[0]!.sha256,
+        digest: workerInput.modules[0].sha256,
         type: 'application/javascript+module',
-        size: workerInput.modules[0]!.size,
+        size: workerInput.modules[0].size,
       },
     ]);
     expect(await keys(prefix)).toEqual([`${prefix}0`, `${prefix}receipt-platform-worker`]);
@@ -1364,7 +1364,7 @@ describe('durable execution of directly uploaded Worker modules', () => {
       env.STATIC_ASSETS_R2 as unknown as { setUploadedAt(key: string, uploaded: Date): void }
     ).setUploadedAt(stale, new Date(Date.now() - 25 * 60 * 60 * 1000));
     await app.scheduled(
-      { cron: FAST_CRON, scheduledTime: Date.now(), noRetry() {} } as ScheduledController,
+      { cron: FAST_CRON, scheduledTime: Date.now(), noRetry() {} },
       env as unknown as ApiEnv['Bindings'],
       {} as ExecutionContext,
     );
@@ -1394,8 +1394,8 @@ describe('durable execution of directly uploaded Worker modules', () => {
       .update(deploymentOperations)
       .set({
         payload: {
-          ...operation!.payload,
-          modules: operation!.payload.modules.map(({ size: _size, ...module }) => module),
+          ...operation.payload,
+          modules: operation.payload.modules.map(({ size: _size, ...module }) => module),
         },
       })
       .where(eq(deploymentOperations.id, id));

@@ -51,6 +51,8 @@ jobs:
           cache: true
           node-version-file: .node-version
       - run: vp fmt --check
+      # The type-aware lint reads each app's generated `.bwf/tsconfig.json`.
+      - run: node scripts/lint-prepare.mjs
       - run: vp lint
       - run: vp run build
       - run: vp run --filter './platform/packages/**' build

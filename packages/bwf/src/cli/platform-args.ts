@@ -1,18 +1,13 @@
-import {
-  normalizePlatformDashboardUrl,
-  PLATFORM_LOGIN_KINDS,
-  type PlatformLoginKind,
-  type PlatformAppAccess,
-} from '@builtbyfriends/platform';
-import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
-import {
-  parsePlatformBillingArgs,
-  parsePlatformConfigArgs,
-  type PlatformBillingArgs,
-  type PlatformConfigArgs,
-} from './platform-config-args.ts';
-import { parsePlatformPlansArgs, type PlatformPlansArgs } from './platform-plans-args.ts';
-import { parsePlatformStorageLocation, type PlatformStorageLocation } from './platform-storage.ts';
+import { normalizePlatformDashboardUrl, PLATFORM_LOGIN_KINDS } from '@builtbyfriends/platform';
+import type { PlatformLoginKind, PlatformAppAccess } from '@builtbyfriends/platform';
+import { operatorGroups, parseOperatorArgs } from './operator-args.ts';
+import type { OperatorArgs } from './operator-args.ts';
+import { parsePlatformBillingArgs, parsePlatformConfigArgs } from './platform-config-args.ts';
+import type { PlatformBillingArgs, PlatformConfigArgs } from './platform-config-args.ts';
+import { parsePlatformPlansArgs } from './platform-plans-args.ts';
+import type { PlatformPlansArgs } from './platform-plans-args.ts';
+import { parsePlatformStorageLocation } from './platform-storage.ts';
+import type { PlatformStorageLocation } from './platform-storage.ts';
 import type { SubcommandDef } from './subcommand-prompt.ts';
 
 export const platformSubcommands: Array<SubcommandDef> = [
@@ -223,7 +218,7 @@ function parseLifecycleSelector(
   let dashboardUrl: string | undefined;
   let customDomains = false;
   for (let index = 0; index < rest.length; index++) {
-    const arg = rest[index]!;
+    const arg = rest[index];
     if (arg === '--runtime') {
       if (subcommand === 'disable') {
         throw new Error("platform: Unknown flag '--runtime'.");
@@ -328,7 +323,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let yes = false;
     let dedicatedZone = false;
     for (let index = 1; index < rest.length; index++) {
-      const arg = rest[index]!;
+      const arg = rest[index];
       if (arg === '--installation' || arg === '--zone') {
         const [value, next] = readValue(rest, index, arg);
         index = next;
@@ -373,7 +368,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let account = '';
     let selector = '';
     for (let index = 0; index < rest.length; index++) {
-      const arg = rest[index]!;
+      const arg = rest[index];
       if (arg === '--account' || arg === '--installation') {
         const [value, next] = readValue(rest, index, arg);
         if (arg === '--account') {
@@ -472,7 +467,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let workersDev = false;
     let customDomains = false;
     for (let i = 0; i < rest.length; i++) {
-      const arg = rest[i]!;
+      const arg = rest[i];
       if (valueFlags.has(arg)) {
         const [value, next] = readValue(rest, i, arg);
         values.set(arg, value);
