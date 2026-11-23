@@ -921,7 +921,6 @@ export function routingPlugin(
             writeRouteTypes();
             writeQueueTypes();
             writeProcedureTypes();
-            writeProcedureTypes();
 
             writeWorkerEntry();
           }
