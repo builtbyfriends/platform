@@ -7,7 +7,6 @@ import { TextArea } from '@astryxdesign/core/TextArea';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -43,7 +42,11 @@ export function FormTextInput({
   width?: number;
 }) {
   const [value, setValue] = useState(initialValue);
-  useEffect(() => setValue(initialValue), [initialValue]);
+  const [seen, setSeen] = useState(initialValue);
+  if (seen !== initialValue) {
+    setSeen(initialValue);
+    setValue(initialValue);
+  }
   return (
     <TextInput
       label={label}
@@ -80,7 +83,11 @@ export function FormTextArea({
 }) {
   const [value, setValue] = useState(initialValue);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => setValue(initialValue), [initialValue]);
+  const [seen, setSeen] = useState(initialValue);
+  if (seen !== initialValue) {
+    setSeen(initialValue);
+    setValue(initialValue);
+  }
   const resizeToFit = useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -139,7 +146,11 @@ export function FormSelector({
   hasSearch?: boolean;
 }) {
   const [value, setValue] = useState(initialValue);
-  useEffect(() => setValue(initialValue), [initialValue]);
+  const [seen, setSeen] = useState(initialValue);
+  if (seen !== initialValue) {
+    setSeen(initialValue);
+    setValue(initialValue);
+  }
   return (
     <Selector
       label={label}
@@ -165,7 +176,11 @@ export function FormCheckbox({
   initialValue?: boolean;
 }) {
   const [checked, setChecked] = useState(initialValue);
-  useEffect(() => setChecked(initialValue), [initialValue]);
+  const [seen, setSeen] = useState(initialValue);
+  if (seen !== initialValue) {
+    setSeen(initialValue);
+    setChecked(initialValue);
+  }
   return (
     <>
       <CheckboxInput label={label} value={checked} onChange={setChecked} />
@@ -192,7 +207,11 @@ export function FormNumberInput({
   required?: boolean;
 }) {
   const [value, setValue] = useState<number | null>(initialValue);
-  useEffect(() => setValue(initialValue), [initialValue]);
+  const [seen, setSeen] = useState(initialValue);
+  if (seen !== initialValue) {
+    setSeen(initialValue);
+    setValue(initialValue);
+  }
   return (
     <NumberInput
       label={label}

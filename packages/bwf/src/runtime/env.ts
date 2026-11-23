@@ -28,6 +28,7 @@ const runtimeRequestContext = shared[REQUEST_SCOPE_SYMBOL];
 
 /** @internal Reuse a resource only within the current runtime request. */
 export function getRuntimeRequestResource<T>(
+  // oxlint-disable-next-line anti-slop/no-object-parameters
   key: object,
   initialize: () => T,
   outsideScope?: () => T,

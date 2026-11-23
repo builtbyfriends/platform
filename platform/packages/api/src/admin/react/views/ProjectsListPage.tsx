@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { ProjectsPageView, projectsPageRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
@@ -20,7 +20,11 @@ export function ProjectsListPage({ path, platformName, username }: AdminPageProp
   }
   const { projects, search, page, totalPages, siteDomain, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
-  useEffect(() => setFilter(search ?? ''), [search]);
+  const [seen, setSeen] = useState(search);
+  if (seen !== search) {
+    setSeen(search);
+    setFilter(search ?? '');
+  }
   const selectedProject = pageData.suggestions.find((item) => item.id === search);
   return (
     <Layout platformName={platformName} title="Projects" username={username}>

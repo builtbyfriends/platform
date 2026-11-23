@@ -3,7 +3,7 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
 import { Text } from '@astryxdesign/core/Text';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import type { AdminUsersPage } from '../../fate/server.ts';
 import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
@@ -25,7 +25,11 @@ export function UsersListPage({ path, platformName, username }: AdminPageProps) 
   }
   const { users, search, page, totalPages, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
-  useEffect(() => setFilter(search ?? ''), [search]);
+  const [seen, setSeen] = useState(search);
+  if (seen !== search) {
+    setSeen(search);
+    setFilter(search ?? '');
+  }
   const selectedUser = pageData.suggestions.find((item) => item.id === search);
   const columns: Array<TableColumn<UserRow>> = [
     {

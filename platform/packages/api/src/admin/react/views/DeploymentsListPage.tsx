@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import { DeploymentsPageView, deploymentsPageRequest } from '../../fate/views.ts';
 import { type AdminPageProps } from '../page-utils.ts';
@@ -20,7 +20,11 @@ export function DeploymentsListPage({ path, platformName, username }: AdminPageP
   }
   const { deployments, search, page, totalPages, tz } = pageData;
   const [filter, setFilter] = useState(search ?? '');
-  useEffect(() => setFilter(search ?? ''), [search]);
+  const [seen, setSeen] = useState(search);
+  if (seen !== search) {
+    setSeen(search);
+    setFilter(search ?? '');
+  }
   const selectedDeployment = pageData.suggestions.find((item) => item.id === search);
   return (
     <Layout platformName={platformName} title="Deployments" username={username}>

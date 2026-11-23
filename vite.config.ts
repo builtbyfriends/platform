@@ -140,6 +140,11 @@ export default defineConfig({
         name: 'bwf',
         specifier: './scripts/lint-plugin.mjs',
       },
+      {
+        name: 'anti-slop',
+        specifier: 'oxlint-anti-slop',
+      },
+      'eslint-plugin-react-you-might-not-need-an-effect',
     ],
     plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc', 'oxc'],
     ignorePatterns: [
@@ -227,6 +232,10 @@ export default defineConfig({
       {
         files: ['**/test/**/*.{js,jsx,ts,tsx,mjs,cjs}'],
         rules: {
+          // Decision: Tests reach into mocks and pass loose fixtures.
+          'anti-slop/no-chained-type-assertions': 'off',
+          'anti-slop/no-object-parameters': 'off',
+          'anti-slop/no-narrowing-after-widening': 'off',
           // Decision: Tests derive expected paths independently of production's forward-slash wrapper, including on
           // Windows.
           'no-restricted-imports': [
@@ -255,6 +264,23 @@ export default defineConfig({
     ],
     rules: {
       'bwf/no-comments': 'error',
+      // Decision: A rule here that is 'warn' still has older code to work through. It moves to 'error' when that code
+      // is fixed.
+      'anti-slop/no-chained-type-assertions': 'warn',
+      'anti-slop/no-object-parameters': 'error',
+      'anti-slop/no-reduce-accumulator-copy': 'error',
+      'anti-slop/no-meaningless-unknown-aliases': 'error',
+      'anti-slop/no-unsafe-dictionary-values': 'error',
+      'anti-slop/no-narrowing-after-widening': 'error',
+      'react-you-might-not-need-an-effect/no-derived-state': 'error',
+      'react-you-might-not-need-an-effect/no-chain-state-updates': 'error',
+      'react-you-might-not-need-an-effect/no-event-handler': 'error',
+      'react-you-might-not-need-an-effect/no-adjust-state-on-prop-change': 'warn',
+      'react-you-might-not-need-an-effect/no-reset-all-state-on-prop-change': 'warn',
+      'react-you-might-not-need-an-effect/no-pass-live-state-to-parent': 'error',
+      'react-you-might-not-need-an-effect/no-pass-data-to-parent': 'error',
+      'react-you-might-not-need-an-effect/no-external-store-subscription': 'warn',
+      'react-you-might-not-need-an-effect/no-initialize-state': 'error',
       '@typescript-eslint/array-type': [
         'error',
         {

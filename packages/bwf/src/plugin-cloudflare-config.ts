@@ -24,6 +24,7 @@ export type AuxiliaryWorkerConfig = (
 };
 
 /** Match the old plugin's patch semantics, including its array concatenation. */
+// oxlint-disable-next-line anti-slop/no-object-parameters
 export function mergeCloudflareConfig(patch: object, fallback: object): Record<string, unknown> {
   const result: Record<string, unknown> = { ...fallback };
   for (const [key, value] of Object.entries(patch)) {
