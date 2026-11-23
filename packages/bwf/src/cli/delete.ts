@@ -1,5 +1,5 @@
 import { log, text, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
-import { getToken } from './auth.ts';
+import { getApiUrl, getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { printSuccess, createSpinner, note } from './output.ts';
 import { readProjectConfig, removeProjectConfig } from './project.ts';
@@ -36,6 +36,14 @@ export async function runDeleteCommand(
     const config = readProjectConfig(root);
     if (!config) {
       log.error('No linked project found. Pass a project name: bwf project delete <name>');
+      process.exit(1);
+    }
+    // Decision: A project id belongs to the platform that issued it, the same as in deploy.
+    const apiUrl = getApiUrl(root);
+    if (config.platformUrl !== apiUrl) {
+      log.error(
+        `project: This project is linked to ${config.platformUrl}. Pass a project name to delete one on ${apiUrl}: bwf project delete <name>`,
+      );
       process.exit(1);
     }
     projectId = config.projectId;

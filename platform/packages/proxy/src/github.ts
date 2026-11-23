@@ -1,3 +1,4 @@
+import { githubRepoApiTarget } from '@platform-service/api/github-repo-path';
 import {
   deriveProxyInternalAuth,
   PROXY_INTERNAL_AUTH_HEADER,
@@ -6,7 +7,6 @@ import { Hono } from 'hono';
 import { asRecord, asString } from './body.ts';
 import type { ProxyEnv } from './types.ts';
 
-const GITHUB_API = 'https://api.github.com';
 const METHODS = new Set(['GET', 'POST', 'PATCH', 'PUT', 'DELETE']);
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
@@ -19,34 +19,18 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
  */
 const github = new Hono<ProxyEnv>();
 
-/** `/repos/owner/name/...` → `owner/name`, or null for any other path. */
-function repositoryOf(path: string): string | null {
-  const match = /^\/repos\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\/|$)/.exec(path);
-  return match ? `${match[1]}/${match[2]}`.toLowerCase() : null;
-}
-
 github.post('/request', async (context) => {
   const body = context.get('body');
   const projectId = context.get('projectId');
   const method = (asString(body.method) ?? 'GET').toUpperCase();
-  const path = asString(body.path);
   if (!METHODS.has(method)) {
     return context.json({ error: 'unsupported method' }, 400);
   }
-  if (
-    !path ||
-    !path.startsWith('/repos/') ||
-    path.includes('..') ||
-    path.includes('\\') ||
-    path.includes('//') ||
-    /[\s#]/.test(path)
-  ) {
+  const target = githubRepoApiTarget(asString(body.path));
+  if (!target) {
     return context.json({ error: 'path must be a /repos/owner/name/... GitHub API path' }, 400);
   }
-  const repository = repositoryOf(path.split('?', 1)[0]);
-  if (!repository) {
-    return context.json({ error: 'path must name a repository' }, 400);
-  }
+  const { repository } = target;
   const scope = body.scope === undefined ? undefined : asString(body.scope);
   if (body.scope !== undefined && !scope) {
     return context.json({ error: 'scope must be a string' }, 400);
@@ -91,7 +75,7 @@ github.post('/request', async (context) => {
   }
 
   const payload = body.body === undefined ? undefined : JSON.stringify(asRecord(body.body));
-  const upstream = await fetch(`${GITHUB_API}${path}`, {
+  const upstream = await fetch(target.url, {
     method,
     headers: {
       authorization: `Bearer ${credential.token}`,

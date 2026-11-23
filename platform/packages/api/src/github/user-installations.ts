@@ -326,7 +326,10 @@ export async function verifyUserRepoAccess(
     const data = (await res.json()) as InstallationRepositoriesResponse;
     const repositories = data.repositories ?? [];
     for (const repo of repositories) {
-      if (repo.full_name === repoFullName && typeof repo.id === 'number') {
+      if (
+        repo.full_name?.toLowerCase() === repoFullName.toLowerCase() &&
+        typeof repo.id === 'number'
+      ) {
         repositoryId = repo.id;
         break;
       }

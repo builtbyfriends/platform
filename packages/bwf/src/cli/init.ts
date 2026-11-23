@@ -2,10 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import type { PlatformDiscoveryDocument } from '@builtbyfriends/platform';
 import { log, confirm, isCancel, cancel, select, text } from '@voidzero-dev/vite-plus-prompts';
-import { parse } from 'jsonc-parser';
-import type { ParseError } from 'jsonc-parser';
+import { applyEdits, modify, parse, type FormattingOptions, type ParseError } from 'jsonc-parser';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
@@ -16,15 +16,18 @@ import {
   getDatabaseCasing,
   getDatabaseDialect,
   readConfig,
+  type DatabaseDialect,
+  type BwfConfig,
 } from '../config.ts';
-import type { DatabaseDialect, BwfConfig } from '../config.ts';
 import { PLACEHOLDER_DB_URL, writeDrizzleConfig } from '../drizzle/config.ts';
 import { snapshotDrizzleOutputs } from '../drizzle/generate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { ensureGitignoreLines } from '../shared/gitignore.ts';
-import { hasPackageDependency, readPackageJson } from '../shared/package-json.ts';
-import type { PackageJson } from '../shared/package-json.ts';
-import type { PackageDependencyField } from '../shared/package-json.ts';
+import {
+  hasPackageDependency,
+  readPackageJson,
+  type PackageDependencyField,
+} from '../shared/package-json.ts';
 import { detectAgents, getOwnVersion, getPackageDir } from './agents.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
 import { maybeSetupDeployProject } from './deploy-setup.ts';
@@ -32,14 +35,17 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { commandInProject } from './init-shell.ts';
 import { configureVitePlusScaffold } from './init-vite-plus.ts';
-import { isJsonArray, isJsonObject } from './json-value.ts';
-import type { JsonObject } from './json-value.ts';
 import { migrateLegacyBwfConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
-import { readDeploymentPlatform, readProjectConfig, writeDeploymentPlatform } from './project.ts';
-import type { DeploymentPlatform } from './project.ts';
+import { validateProjectSlug } from './project-slug.ts';
+import {
+  readDeploymentPlatform,
+  readProjectConfig,
+  writeDeploymentPlatform,
+  type DeploymentPlatform,
+} from './project.ts';
 import {
   createSpaStarterTemplate,
   detectScaffoldFrameworkFromDependencies,
@@ -50,8 +56,10 @@ import {
   SCAFFOLD_GITIGNORE_LINES,
   SCAFFOLD_TOOLCHAIN_OPTIONS,
   SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES,
+  type ScaffoldFramework,
+  type ScaffoldStarterMode,
+  type ScaffoldToolchain,
 } from './template.ts';
-import type { ScaffoldFramework, ScaffoldStarterMode, ScaffoldToolchain } from './template.ts';
 import { patchViteConfigWithBwfPlugin } from './vite-config-patch.ts';
 import { LATEST_KNOWN_COMPAT_DATE, writeProvisionedWranglerConfig } from './wrangler.ts';
 import {
@@ -87,11 +95,10 @@ function parseChoice<T extends string>(
   if (value === undefined) {
     return undefined;
   }
-  const choice = choices.find((candidate) => candidate === value);
-  if (choice === undefined) {
+  if (typeof value !== 'string' || !choices.includes(value as T)) {
     throw new Error(`init: --${flag} must be one of ${choices.join(', ')}.`);
   }
-  return choice;
+  return value as T;
 }
 
 export function parseInitArgs(args: Array<string>): InitArgs {
@@ -113,13 +120,13 @@ export function parseInitArgs(args: Array<string>): InitArgs {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`init: ${message}.`, { cause: error });
+    throw new Error(`init: ${message}.`);
   }
 
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    git: typeof parsed.values.git === 'boolean' ? parsed.values.git : undefined,
+    git: parsed.values.git as boolean | undefined,
     toolchain: parseChoice(
       'toolchain',
       parsed.values.toolchain,
@@ -211,17 +218,15 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
 
 // Decision: scaffoldSpaApp() replaces these starter scripts; custom scripts make the package an existing
 // project.
-const EMPTY_PROJECT_ALLOWED_SCRIPTS = new Map(
-  Object.entries({
-    test: undefined,
-    dev: new Set(['vite', 'vp dev']),
-    build: new Set(['vite build', 'vp build']),
-    preview: new Set(['vite preview', 'vp preview']),
-    postinstall: new Set(['bwf prepare']),
-  } satisfies Record<string, Set<string> | undefined>),
-);
+const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
+  test: undefined,
+  dev: new Set(['vite', 'vp dev']),
+  build: new Set(['vite build', 'vp build']),
+  preview: new Set(['vite preview', 'vp preview']),
+  postinstall: new Set(['bwf prepare']),
+};
 const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
-  [...EMPTY_PROJECT_ALLOWED_SCRIPTS.values()].flatMap((commands) =>
+  Object.values(EMPTY_PROJECT_ALLOWED_SCRIPTS).flatMap((commands) =>
     commands ? Array.from(commands) : [],
   ),
 );
@@ -257,18 +262,19 @@ const VITE_CONFIG_FILES = [
 const BWF_CONFIG_FILE = 'bwf.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type InitLocationChoice = 'subfolder' | 'current';
+type JsonObject = Record<string, unknown>;
 type TsconfigInheritancePatch = {
   files: Array<string>;
   paths: Record<string, Array<string>>;
 };
 
 function asRecord(value: unknown): JsonObject | null {
-  return isJsonObject(value) ? value : null;
+  return isRecord(value) ? value : null;
 }
 
 function parseJsoncFile(path: string): JsonObject | null {
   const errors: Array<ParseError> = [];
-  const parsed = asRecord(parse(readFileSync(path, 'utf8'), errors));
+  const parsed = asRecord(parse(readFileSync(path, 'utf-8'), errors));
   return errors.length === 0 ? parsed : null;
 }
 
@@ -366,7 +372,7 @@ function readStringArray(value: unknown): Array<string> {
     : [];
 }
 
-function readPaths(value: unknown) {
+function readPaths(value: unknown): Record<string, Array<string>> {
   const paths = asRecord(value);
   if (!paths) {
     return {};
@@ -473,7 +479,7 @@ function createBwfTsconfigPatch(root: string, outputBaseDir: string): TsconfigIn
   const hasSchema = hasDrizzleSchema(root);
   const bwfConfig = createProjectTsconfig(root, undefined, hasSchema, hasSchema);
   return collectTsconfigPatchFromConfig(
-    bwfConfig,
+    bwfConfig as unknown as JsonObject,
     join(root, '.bwf', 'tsconfig.json'),
     root,
     outputBaseDir,
@@ -482,7 +488,7 @@ function createBwfTsconfigPatch(root: string, outputBaseDir: string): TsconfigIn
 }
 
 function hasTopLevelYamlKey(yaml: string, key: string): boolean {
-  const keyPattern = new RegExp(`^${key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}\\s*:`);
+  const keyPattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`);
   return yaml.split(/\r?\n/).some((rawLine) => {
     const line = stripYamlLineComment(rawLine);
     return keyPattern.test(line);
@@ -491,7 +497,7 @@ function hasTopLevelYamlKey(yaml: string, key: string): boolean {
 
 function isEmptyProjectAllowedPnpmWorkspaceFile(root: string): boolean {
   try {
-    const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');
+    const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
     return !hasTopLevelYamlKey(yaml, 'packages');
   } catch {
     return false;
@@ -533,7 +539,7 @@ export function isScaffoldableEmptyProject(root: string): boolean {
 
   let pkgRaw: unknown;
   try {
-    pkgRaw = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    pkgRaw = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   } catch {
     return false;
   }
@@ -552,10 +558,10 @@ export function isScaffoldableEmptyProject(root: string): boolean {
 
   const scripts = asRecord(pkg.scripts) ?? {};
   for (const [name, command] of Object.entries(scripts)) {
-    if (!EMPTY_PROJECT_ALLOWED_SCRIPTS.has(name)) {
+    if (!(name in EMPTY_PROJECT_ALLOWED_SCRIPTS)) {
       return false;
     }
-    const allowed = EMPTY_PROJECT_ALLOWED_SCRIPTS.get(name);
+    const allowed = EMPTY_PROJECT_ALLOWED_SCRIPTS[name];
     if (allowed === undefined) {
       continue;
     }
@@ -599,7 +605,7 @@ async function resolveInitRoot(root: string): Promise<string> {
     return root;
   }
 
-  const choice = await select<InitLocationChoice>({
+  const choice = await select({
     message: 'This folder is not empty. Where should bwf initialize?',
     initialValue: 'subfolder',
     options: [
@@ -621,7 +627,7 @@ async function resolveInitRoot(root: string): Promise<string> {
     process.exit(0);
   }
 
-  if (choice === 'current') {
+  if ((choice as InitLocationChoice) === 'current') {
     return root;
   }
 
@@ -674,7 +680,7 @@ function parsePackageManagerField(pkg: unknown): ProjectState['packageManager'] 
  * workspace root, so a member without local markers inherits them, but a local
  * lockfile or pin for another manager always wins.
  */
-function isPnpmProject(root: string, pkg: PackageJson): boolean {
+function isPnpmProject(root: string, pkg: JsonObject): boolean {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return true;
   }
@@ -717,7 +723,7 @@ function hasAncestorPnpmMarkers(start: string): boolean {
   const pkgPath = join(workspaceRoot, 'package.json');
   if (existsSync(pkgPath)) {
     try {
-      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (parsePackageManagerField(pkg) === 'pnpm') {
         return true;
       }
@@ -770,8 +776,8 @@ function findWorkspaceRoot(start: string): string | undefined {
     const pkgPath = join(dir, 'package.json');
     if (existsSync(pkgPath)) {
       try {
-        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
-        if (isJsonObject(pkg) && 'workspaces' in pkg) {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+        if (pkg && typeof pkg === 'object' && 'workspaces' in pkg) {
           return dir;
         }
       } catch {}
@@ -795,7 +801,7 @@ function readWorkspacePatterns(workspaceRoot: string): Array<string> {
   const pnpmWorkspacePath = join(workspaceRoot, 'pnpm-workspace.yaml');
   if (existsSync(pnpmWorkspacePath)) {
     try {
-      const yaml = readFileSync(pnpmWorkspacePath, 'utf8');
+      const yaml = readFileSync(pnpmWorkspacePath, 'utf-8');
       return extractPnpmWorkspacePackages(yaml);
     } catch {
       return [];
@@ -804,14 +810,14 @@ function readWorkspacePatterns(workspaceRoot: string): Array<string> {
   const pkgPath = join(workspaceRoot, 'package.json');
   if (existsSync(pkgPath)) {
     try {
-      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
-      const workspaces = isJsonObject(pkg) ? pkg.workspaces : undefined;
-      if (isJsonArray(workspaces)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+      const workspaces = (pkg as { workspaces?: unknown }).workspaces;
+      if (Array.isArray(workspaces)) {
         return workspaces.filter((x): x is string => typeof x === 'string');
       }
-      if (isJsonObject(workspaces)) {
-        const packages = workspaces.packages;
-        if (isJsonArray(packages)) {
+      if (workspaces && typeof workspaces === 'object') {
+        const packages = (workspaces as { packages?: unknown }).packages;
+        if (Array.isArray(packages)) {
           return packages.filter((x): x is string => typeof x === 'string');
         }
       }
@@ -932,11 +938,11 @@ function matchesWorkspacePattern(relPath: string, pattern: string): boolean {
 function matchesSingleWorkspacePattern(relPath: string, pattern: string): boolean {
   const normalizedPattern = pattern.replace(/^\.\/+/, '');
   const pathSegs = relPath
-    .replaceAll(/^\/+|\/+$/g, '')
+    .replace(/^\/+|\/+$/g, '')
     .split('/')
     .filter(Boolean);
   const patSegs = normalizedPattern
-    .replaceAll(/^\/+|\/+$/g, '')
+    .replace(/^\/+|\/+$/g, '')
     .split('/')
     .filter(Boolean);
   const compiled = patSegs.map(compilePatternSegment);
@@ -960,7 +966,7 @@ function compilePatternSegment(seg: string): CompiledSegment {
     '^' +
       seg
         .split('*')
-        .map((part) => part.replaceAll(/[.+?^${}()|[\]\\]/g, String.raw`\$&`))
+        .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
         .join('[^/]*') +
       '$',
   );
@@ -1046,7 +1052,7 @@ function isInsideWorkspaceSubpackage(root: string): boolean {
  */
 function resolveWorkspaceDeferral(
   root: string,
-  pkg: PackageJson | null,
+  pkg: JsonObject | null,
 ): { workspaceRoot: string } | undefined {
   const workspaceRoot = findWorkspaceRoot(root);
   if (workspaceRoot === undefined) {
@@ -1069,7 +1075,7 @@ export function detectProjectState(root: string): ProjectState {
   let hasTypescript = false;
   let pkg: unknown;
   try {
-    pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
     const pkgRecord = (pkg ?? {}) as { dependencies?: unknown; devDependencies?: unknown };
     const allDeps = {
       ...(asRecord(pkgRecord.dependencies) ?? {}),
@@ -1155,9 +1161,11 @@ function defaultPackageName(root: string): string {
   return (
     basename(root)
       .toLowerCase()
-      .replaceAll(/[^a-z0-9-]/g, '-') || 'my-app'
+      .replace(/[^a-z0-9-]/g, '-') || 'my-app'
   );
 }
+
+const TSCONFIG_FORMATTING: FormattingOptions = { tabSize: 2, insertSpaces: true, eol: '\n' };
 
 function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFramework): void {
   const tsconfigPath = join(root, 'tsconfig.json');
@@ -1189,12 +1197,12 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     const extendsValue = tsconfig.extends;
     const target = './.bwf/tsconfig.json';
     const hasCorrectExtends =
-      extendsValue === target || (isJsonArray(extendsValue) && extendsValue.includes(target));
+      extendsValue === target || (Array.isArray(extendsValue) && extendsValue.includes(target));
 
     if (!hasCorrectExtends) {
       if (typeof extendsValue === 'string') {
         tsconfig.extends = [extendsValue, target];
-      } else if (isJsonArray(extendsValue)) {
+      } else if (Array.isArray(extendsValue)) {
         tsconfig.extends = [...extendsValue, target];
       } else {
         tsconfig.extends = target;
@@ -1205,6 +1213,8 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
 
     const compilerOptions = asRecord(tsconfig.compilerOptions) ?? {};
     tsconfig.compilerOptions = compilerOptions;
+    const originalFiles = tsconfig.files;
+    const originalPaths = compilerOptions.paths;
     const types = Array.isArray(compilerOptions.types)
       ? compilerOptions.types.filter((value): value is string => typeof value === 'string')
       : [];
@@ -1246,10 +1256,25 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     }
 
     if (updated) {
-      // Decision: Rebuild with extends first so it appears at the top of the file.
-      const { extends: ext, ...rest } = tsconfig;
-      const ordered = { extends: ext, ...rest };
-      writeFileSync(tsconfigPath, JSON.stringify(ordered, null, 2) + '\n');
+      const options = { formattingOptions: TSCONFIG_FORMATTING };
+      let text = readFileSync(tsconfigPath, 'utf-8');
+      const set = (path: Array<string>, value: unknown, extra: object = {}): void => {
+        text = applyEdits(text, modify(text, path, value, { ...options, ...extra }));
+      };
+      // Decision: A newly added extends goes first in the file; an existing one keeps its place.
+      set(
+        ['extends'],
+        tsconfig.extends,
+        extendsValue === undefined ? { getInsertionIndex: () => 0 } : {},
+      );
+      set(['compilerOptions', 'types'], compilerOptions.types);
+      if (tsconfig.files !== originalFiles) {
+        set(['files'], tsconfig.files);
+      }
+      if (compilerOptions.paths !== originalPaths) {
+        set(['compilerOptions', 'paths'], compilerOptions.paths);
+      }
+      writeFileSync(tsconfigPath, text.endsWith('\n') ? text : text + '\n');
     } else {
       log.step('tsconfig.json looks good');
     }
@@ -1257,16 +1282,15 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     // Decision: Remove @cloudflare/workers-types from package.json: bwf/env includes it.
     try {
       const pkgPath = join(root, 'package.json');
-      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       let pkgUpdated = false;
-      if (isJsonObject(pkg)) {
-        for (const field of ['dependencies', 'devDependencies'] as const) {
-          const dependencies = pkg[field];
-          if (isJsonObject(dependencies) && dependencies['@cloudflare/workers-types']) {
-            delete dependencies['@cloudflare/workers-types'];
-            pkgUpdated = true;
-          }
-        }
+      if (pkg.dependencies?.['@cloudflare/workers-types']) {
+        delete pkg.dependencies['@cloudflare/workers-types'];
+        pkgUpdated = true;
+      }
+      if (pkg.devDependencies?.['@cloudflare/workers-types']) {
+        delete pkg.devDependencies['@cloudflare/workers-types'];
+        pkgUpdated = true;
       }
       if (pkgUpdated) {
         writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
@@ -1305,12 +1329,8 @@ function readProjectWranglerCompatDate(root: string): string | undefined {
   }
   try {
     const errors: Array<ParseError> = [];
-    const parsed: unknown = parse(readFileSync(configPath, 'utf8'), errors);
-    if (
-      errors.length === 0 &&
-      isJsonObject(parsed) &&
-      typeof parsed.compatibility_date === 'string'
-    ) {
+    const parsed = parse(readFileSync(configPath, 'utf-8'), errors);
+    if (errors.length === 0 && typeof parsed?.compatibility_date === 'string') {
       return parsed.compatibility_date;
     }
   } catch {}
@@ -1318,10 +1338,10 @@ function readProjectWranglerCompatDate(root: string): string | undefined {
 }
 
 export function ensureBwfWorkerCompatibilityDate(root: string): void {
-  const config = readConfig(root);
+  const config = readConfig(root) as Record<string, unknown>;
 
-  const worker = config.worker;
-  if (typeof worker?.compatibility_date === 'string' && worker.compatibility_date.length > 0) {
+  const worker = asRecord(config.worker) ?? {};
+  if (typeof worker.compatibility_date === 'string' && worker.compatibility_date.length > 0) {
     return;
   }
 
@@ -1506,7 +1526,7 @@ async function promptStarterMode(starter?: ScaffoldStarterMode): Promise<Scaffol
     process.exit(0);
   }
 
-  return choice;
+  return choice as ScaffoldStarterMode;
 }
 
 async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<ScaffoldToolchain> {
@@ -1517,7 +1537,7 @@ async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<S
     'toolchain',
     SCAFFOLD_TOOLCHAIN_OPTIONS.map((option) => option.value),
   );
-  const choice = await select<ScaffoldToolchain>({
+  const choice = await select({
     message: 'Choose a scaffold toolchain:',
     initialValue: 'vite-plus',
     options: [...SCAFFOLD_TOOLCHAIN_OPTIONS],
@@ -1528,7 +1548,7 @@ async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<S
     process.exit(0);
   }
 
-  return choice;
+  return choice as ScaffoldToolchain;
 }
 
 async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
@@ -1567,7 +1587,7 @@ async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
     process.exit(0);
   }
 
-  return choice;
+  return choice as DatabaseSetupChoice;
 }
 
 /** Ask where the project deploys, unless `deploy` answers it. The caller saves the answer. */
@@ -1607,7 +1627,7 @@ async function askDeploymentPlatform(
     process.exit(0);
   }
 
-  return choice;
+  return choice as DeploymentPlatform;
 }
 
 export async function ensureBwfPlatformConnection(
@@ -1672,14 +1692,12 @@ function getNodeVersionLine(root: string): string {
   return `${version}\n          check-latest: true`;
 }
 
-type WorkflowSetupSteps = { setup: string; install: string; runner: string };
-
 // Decision: Per-package-manager install and setup steps. `bwf deploy` runs through the package manager's own
 // runner in the deploy step below.
 function getWorkflowSetupSteps(
   root: string,
   pm: ProjectState['packageManager'],
-): WorkflowSetupSteps {
+): { setup: string; install: string; runner: string } {
   const nodeVersion = getNodeVersionLine(root);
   switch (pm) {
     case 'pnpm':
@@ -1778,9 +1796,10 @@ ${install}
   // Decision: When the slug is unknown, fall back to a repository variable and prefix the `BWF_PROJECT` line
   // with a comment (each comment line indented 2 spaces so it stays inside the `env:` mapping and the
   // YAML stays valid).
-  const projectLine = slug
-    ? `BWF_PROJECT: ${slug}`
-    : `# Set a BWF_PROJECT repository variable to your project slug
+  const projectLine =
+    slug && validateProjectSlug(slug) === undefined
+      ? `BWF_PROJECT: ${slug}`
+      : `# Set a BWF_PROJECT repository variable to your project slug
   # (Settings → Secrets and variables → Actions → Variables).
   BWF_PROJECT: \${{ vars.BWF_PROJECT }}`;
   return `name: Deploy to bwf
@@ -1873,11 +1892,14 @@ function setupGithubActions(
  * linked after the workflow was written. Returns false when there is none.
  */
 function patchWorkflowProjectSlug(root: string, slug: string): boolean {
+  if (validateProjectSlug(slug) !== undefined) {
+    return false;
+  }
   const workflowPath = join(root, '.github', 'workflows', 'bwf-deploy.yml');
   if (!existsSync(workflowPath)) {
     return false;
   }
-  const yaml = readFileSync(workflowPath, 'utf8');
+  const yaml = readFileSync(workflowPath, 'utf-8');
   // Decision: The placeholder block that `getWorkflowYaml` emits; keep the two in sync.
   const placeholderBlock =
     '  # Set a BWF_PROJECT repository variable to your project slug\n' +
@@ -1908,10 +1930,11 @@ function ensureGitignore(root: string): void {
   }
 }
 
-type RemovedYamlBlock = { yaml: string; removed: Array<string> };
-
 /** Removes each block-style top-level `key:` block; `removed` holds its non-blank lines. */
-function removeTopLevelYamlBlock(yaml: string, key: string): RemovedYamlBlock {
+function removeTopLevelYamlBlock(
+  yaml: string,
+  key: string,
+): { yaml: string; removed: Array<string> } {
   const lines = yaml.split(/\r?\n/);
   const next: Array<string> = [];
   const removed: Array<string> = [];
@@ -1988,10 +2011,10 @@ function insertPnpmAllowBuilds(yaml: string, allowBuilds: string): string {
     insertIndex += 1;
   }
   lines.splice(insertIndex, 0, '', ...allowBuilds.split('\n'), '');
-  return `${lines.join('\n').replaceAll(/\n{3,}/g, '\n\n')}\n`;
+  return `${lines.join('\n').replace(/\n{3,}/g, '\n\n')}\n`;
 }
 
-function resolvePnpmConfigRoot(root: string, pkg: PackageJson): string {
+function resolvePnpmConfigRoot(root: string, pkg: JsonObject): string {
   if (
     existsSync(join(root, 'pnpm-workspace.yaml')) ||
     existsSync(join(root, 'pnpm-lock.yaml')) ||
@@ -2009,11 +2032,11 @@ function resolvePnpmConfigRoot(root: string, pkg: PackageJson): string {
   return root;
 }
 
-function ensurePnpmAllowBuilds(root: string, pkg: PackageJson): void {
+function ensurePnpmAllowBuilds(root: string, pkg: JsonObject): void {
   const configRoot = resolvePnpmConfigRoot(root, pkg);
   const workspacePath = join(configRoot, 'pnpm-workspace.yaml');
   const displayPath = configRoot === root ? 'pnpm-workspace.yaml' : relative(root, workspacePath);
-  const before = existsSync(workspacePath) ? readFileSync(workspacePath, 'utf8') : '';
+  const before = existsSync(workspacePath) ? readFileSync(workspacePath, 'utf-8') : '';
   // Decision: A same-line value such as `allowBuilds: {...}` can't be merged line by line, and a second
   // `allowBuilds:` key would make the file invalid.
   const inline = /^allowBuilds:[ \t]*([^\s#].*)$/m.exec(before)?.[1];
@@ -2072,7 +2095,7 @@ export function installProjectDependencies(
         cwd: root,
         stdio: 'ignore',
         shell: process.platform === 'win32',
-        timeout: 5000,
+        timeout: 5_000,
       });
       if (probe.status !== 0) {
         // Decision: npx bwf init has to work without a globally installed vp. Avoid asking an older pnpm to switch
@@ -2120,7 +2143,7 @@ export function generateStarterMigration(
   const result = spawnSync(process.execPath, [drizzleKitBin, 'generate', '--config', configPath], {
     cwd: root,
     stdio: 'pipe',
-    encoding: 'utf8',
+    encoding: 'utf-8',
     env: buildDrizzleKitSpawnEnv(root),
   });
 
@@ -2162,7 +2185,7 @@ function scaffoldSpaApp(
 
   if (existsSync(packageJsonPath)) {
     try {
-      pkg = asRecord(JSON.parse(readFileSync(packageJsonPath, 'utf8'))) ?? {};
+      pkg = asRecord(JSON.parse(readFileSync(packageJsonPath, 'utf-8'))) ?? {};
     } catch {
       throw new Error('Could not parse package.json in empty project');
     }
@@ -2281,7 +2304,7 @@ function ensureExistingProjectPackage(
   if (existsSync(packageJsonPath)) {
     existedBefore = true;
     try {
-      pkg = asRecord(JSON.parse(readFileSync(packageJsonPath, 'utf8'))) ?? {};
+      pkg = asRecord(JSON.parse(readFileSync(packageJsonPath, 'utf-8'))) ?? {};
     } catch {
       throw new Error('Could not parse package.json while configuring bwf');
     }
@@ -2386,7 +2409,7 @@ function ensureExistingProjectViteConfig(root: string): void {
   }
 
   const fullPath = join(root, configPath);
-  const original = readFileSync(fullPath, 'utf8');
+  const original = readFileSync(fullPath, 'utf-8');
   const updated = patchViteConfigWithBwfPlugin(configPath, original);
   if (updated === undefined) {
     noteManualViteConfigSetup(configPath);
@@ -2448,9 +2471,7 @@ export const posts = sqliteTable("posts", {
 `;
 }
 
-type DemoFiles = { schema: string; route: string; client: string };
-
-function demoFiles(root: string): DemoFiles {
+function demoFiles(root: string): { schema: string; route: string; client: string } {
   const paths = readProjectPaths(root);
   return {
     schema: paths.schemaFile,
@@ -2527,10 +2548,10 @@ async function injectAgentBlock(root: string, newProject: boolean): Promise<void
   const filePath = 'AGENTS.md';
   const fullPath = join(root, filePath);
   const version = getOwnVersion();
-  const template = readFileSync(join(getPackageDir(), 'AGENTS_TEMPLATE.md'), 'utf8');
+  const template = readFileSync(join(getPackageDir(), 'AGENTS_TEMPLATE.md'), 'utf-8');
   const openMarker = `<!--injected-by-platform-v${version}-->`;
   const block = `${openMarker}\n${template}\n${MARKER_CLOSE}`;
-  const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf8') : null;
+  const existing = existsSync(fullPath) ? readFileSync(fullPath, 'utf-8') : null;
   const managedBlock = existing?.match(MARKER_BLOCK_RE);
   if (managedBlock?.[0] === block) {
     log.info(`${filePath} already has bwf instructions (v${version})`);

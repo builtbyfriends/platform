@@ -315,6 +315,38 @@ describe('project team API', () => {
     });
   });
 
+  it("ends an admin's pending invitations when the admin is removed", async () => {
+    const owner = await createTestUser(env.db, 'inviter-owner');
+    const admin = await createTestUser(env.db, 'inviter-admin');
+    const target = await createTestUser(env.db, 'inviter-target');
+    await setEmail(target.id, 'inviter-target@example.com');
+    const project = await createTestProject(env.db, owner.id, 'inviter-app');
+    await env.db.insert(projectMembers).values({
+      project_id: project.id,
+      user_id: admin.id,
+      role: 'admin',
+      added_by_user_id: owner.id,
+    });
+    const created = await invite(project.id, admin.jwt, 'inviter-target@example.com', 'admin');
+
+    const removed = await api.fetch(
+      request(`/projects/${project.id}/members/${admin.id}`, owner.jwt, { method: 'DELETE' }),
+      env,
+    );
+    expect(removed.status).toBe(204);
+
+    const accepted = await api.fetch(
+      request(`/project-invitations/${created.id}/accept`, target.jwt, { method: 'POST' }),
+      env,
+    );
+    expect(accepted.status).not.toBe(200);
+    const members = await env.db
+      .select()
+      .from(projectMembers)
+      .where(eq(projectMembers.project_id, project.id));
+    expect(members).toEqual([]);
+  });
+
   it('rejects invitation acceptance while the project owner is manually suspended', async () => {
     const owner = await createTestUser(env.db, 'accept-suspended-owner');
     const target = await createTestUser(env.db, 'accept-suspended-target');

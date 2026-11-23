@@ -789,7 +789,7 @@ export const githubRoutes = new Hono<ApiEnv>()
     }
     const installationId = context.req.query('installationId');
     const repoFullName = context.req.query('repoFullName');
-    if (!installationId) {
+    if (!installationId || !/^\d{1,20}$/.test(installationId)) {
       return context.json({ error: 'installationId is required' }, 400);
     }
     if (!repoFullName) {

@@ -57,6 +57,11 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
         .values({ ...key, ...row })
         .onConflictDoUpdate({ target: [appPeople.client_id, appPeople.person_id], set: row });
     } else if (event.type === 'customer.subscription.deleted') {
+      if (!object.id) {
+        return context.json({ ok: true, ignored: true });
+      }
+      // Decision: Only the subscription on the row ends the plan. A person who checked out twice has an
+      // older subscription too, and its end must not take the plan the newer one pays for.
       await db
         .update(appPeople)
         .set({
@@ -64,7 +69,13 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
           stripe_subscription_id: null,
           updated_at: new Date().toISOString(),
         })
-        .where(and(eq(appPeople.client_id, key.client_id), eq(appPeople.person_id, key.person_id)));
+        .where(
+          and(
+            eq(appPeople.client_id, key.client_id),
+            eq(appPeople.person_id, key.person_id),
+            eq(appPeople.stripe_subscription_id, object.id),
+          ),
+        );
     } else {
       return context.json({ ok: true, ignored: true });
     }

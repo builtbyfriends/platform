@@ -51,8 +51,8 @@ import {
   getOpenProjectOwnershipPeriodsByProjectIds,
   getProjectsByIds,
   getUsersByIds,
+  type Db,
 } from './db.ts';
-import type { Db } from './db.ts';
 import {
   deploymentExecutionStatus,
   dispatchPendingDeployments,
@@ -70,8 +70,7 @@ import { isValidEmailDomain, MAX_DOMAIN_LENGTH } from './email/domain-name.ts';
 import emailIngressResolution from './email/ingress-resolution.ts';
 import { repairEmailRecipientPolicyMirror } from './email/settings.ts';
 import { reconcileSharedEmailRecipients } from './email/shared-recipient-service.ts';
-import { isDevBypass } from './env.ts';
-import type { ApiEnv } from './env.ts';
+import { isDevBypass, type ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
 import { armFastMaintenance, fastMaintenanceArmedAt } from './fast-maintenance.ts';
 import { cancelContainerBuildDos } from './github/cancel-builds.ts';
@@ -783,8 +782,8 @@ async function runScheduledMaintenance(
     }
     // Decision: The fast tier doesn't re-trigger HTTP DCV through PATCH; only the hourly tier does (see the hourly
     // call below and tryActivateDomain).
-    await reconcilePendingDomains(env, db, young, false).catch((error) =>
-      console.error('[scheduled] fast pending-domain reconcile failed:', error),
+    await reconcilePendingDomains(env, db, young, false).catch((err) =>
+      console.error('[scheduled] fast pending-domain reconcile failed:', err),
     );
     return;
   }
@@ -809,7 +808,7 @@ async function runScheduledMaintenance(
         console.log(`[scheduled] auto-failed ${n} stale deployment(s)`);
       }
     })
-    .catch((error) => console.error('[scheduled] failed to clean up stale deployments:', error));
+    .catch((err) => console.error('[scheduled] failed to clean up stale deployments:', err));
 
   if (capabilities.managedBuilds) {
     await failStaleActiveGithubActionsBuilds(db, STALE_ACTIONS_BUILD_MAX_AGE_MINUTES)
@@ -818,8 +817,8 @@ async function runScheduledMaintenance(
           console.log(`[scheduled] auto-failed ${n} stale github_actions build(s)`);
         }
       })
-      .catch((error) =>
-        console.error('[scheduled] failed to clean up stale github_actions builds:', error),
+      .catch((err) =>
+        console.error('[scheduled] failed to clean up stale github_actions builds:', err),
       );
   }
 
@@ -844,9 +843,7 @@ async function runScheduledMaintenance(
           );
         }
       })
-      .catch((error) =>
-        console.error('[scheduled] failed to clean up stale container builds:', error),
-      );
+      .catch((err) => console.error('[scheduled] failed to clean up stale container builds:', err));
   }
 
   // Decision: Re-arm the build scheduler if container builds are still queued. The push handler pokes
@@ -861,33 +858,31 @@ async function runScheduledMaintenance(
           await scheduler.fetch('https://scheduler/poke', { method: 'POST' });
         }
       })
-      .catch((error) => console.error('[scheduled] failed to re-arm build scheduler:', error));
+      .catch((err) => console.error('[scheduled] failed to re-arm build scheduler:', err));
   }
 
-  await purgeExpiredOAuthRequests(db).catch((error) =>
-    console.error('[scheduled] failed to purge expired connected-app grants:', error),
+  await purgeExpiredOAuthRequests(db).catch((err) =>
+    console.error('[scheduled] failed to purge expired connected-app grants:', err),
   );
-  await reapExpiredPreviews(db, env).catch((error) =>
-    console.error('[scheduled] preview teardown failed:', error),
+  await reapExpiredPreviews(db, env).catch((err) =>
+    console.error('[scheduled] preview teardown failed:', err),
   );
-  await purgeExpiredOAuthNonces(db).catch((error) =>
-    console.error('[scheduled] failed to purge expired OAuth nonces:', error),
+  await purgeExpiredOAuthNonces(db).catch((err) =>
+    console.error('[scheduled] failed to purge expired OAuth nonces:', err),
   );
-  await purgeExpiredAuthCodes(db).catch((error) =>
-    console.error('[scheduled] failed to purge expired auth codes:', error),
+  await purgeExpiredAuthCodes(db).catch((err) =>
+    console.error('[scheduled] failed to purge expired auth codes:', err),
   );
   await db
     .delete(operatorSessions)
     .where(lt(operatorSessions.expires_at, new Date().toISOString()))
-    .catch((error) =>
-      console.error('[scheduled] failed to purge expired operator sessions:', error),
-    );
+    .catch((err) => console.error('[scheduled] failed to purge expired operator sessions:', err));
   for (const table of [platformAuthAttempts, platformLoginTests, platformHumanSessions]) {
     await db
       .delete(table)
       .where(lt(table.expires_at, new Date().toISOString()))
-      .catch((error) =>
-        console.error('[scheduled] failed to purge expired authentication state:', error),
+      .catch((err) =>
+        console.error('[scheduled] failed to purge expired authentication state:', err),
       );
   }
 
@@ -902,8 +897,8 @@ async function runScheduledMaintenance(
           `[scheduled] webhook-replay redelivered ${r.redelivered}/${r.scanned} failed deliveries`,
         );
       }
-    } catch (error) {
-      console.warn('[scheduled] webhook-replay failed', error);
+    } catch (err) {
+      console.warn('[scheduled] webhook-replay failed', err);
     }
   }
 
@@ -922,16 +917,16 @@ async function runScheduledMaintenance(
     // custom-hostname API load (the 2-minute tier would multiply PATCH volume under a burst of young
     // domains and could 429 other tenants' hostname calls), while still re-triggering the long tail
     // and resetting CF's decaying 7-day validation backoff once an hour.
-    await reconcilePendingDomains(env, db, allPending, true).catch((error) =>
-      console.error('[scheduled] hourly pending-domain reconcile failed:', error),
+    await reconcilePendingDomains(env, db, allPending, true).catch((err) =>
+      console.error('[scheduled] hourly pending-domain reconcile failed:', err),
     );
 
     // Decision: Cleanup janitor: custom hostnames pending for more than 7 days never finished ownership or cert
     // validation. Their CF cert order is still open (CT-log noise), and under a wildcard-CNAME hijack
     // attempt CF's own "Moved, then Deleted after 7 days" sweep may not fire. Delete the CF hostname
     // (revoking the cert order) and drop the DB row. Only `status === 'pending'` rows qualify.
-    await cleanupStalePendingDomains(env, db, controller.scheduledTime).catch((error) =>
-      console.error('[scheduled] failed to clean up stale pending domains:', error),
+    await cleanupStalePendingDomains(env, db, controller.scheduledTime).catch((err) =>
+      console.error('[scheduled] failed to clean up stale pending domains:', err),
     );
   }
 
@@ -940,8 +935,8 @@ async function runScheduledMaintenance(
     let batch;
     try {
       batch = await getUsersWithProjectsBatch(db, BATCH_SIZE, offset);
-    } catch (error) {
-      console.error('[scheduled] failed to fetch user batch at offset', offset, error);
+    } catch (err) {
+      console.error('[scheduled] failed to fetch user batch at offset', offset, err);
       break;
     }
     if (batch.length === 0) {
@@ -1004,11 +999,8 @@ async function reconcilePendingDomains(
       if (result.activated) {
         activated += 1;
       }
-    } catch (error) {
-      console.error(
-        '[scheduled] failed to reconcile pending domain ' + domain.hostname + ':',
-        error,
-      );
+    } catch (err) {
+      console.error('[scheduled] failed to reconcile pending domain ' + domain.hostname + ':', err);
     }
   }
 
@@ -1069,10 +1061,10 @@ export async function cleanupStalePendingDomains(
     let live;
     try {
       live = await getCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
-    } catch (error) {
+    } catch (err) {
       // Decision: CF already removed the hostname (for example its own 7-day validation cleanup). Nothing to revoke;
       // drop the orphaned DB row and any stray KV so the customer can add the hostname again.
-      if (error instanceof CloudflareApiError && error.status === 404) {
+      if (err instanceof CloudflareApiError && err.status === 404) {
         if (!(await cleanupPendingDomainUnderProjectFence(env, db, domain))) {
           continue;
         }
@@ -1085,7 +1077,7 @@ export async function cleanupStalePendingDomains(
         );
         continue;
       }
-      console.error(`[scheduled] failed to read stale CF hostname for ${domain.hostname}:`, error);
+      console.error(`[scheduled] failed to read stale CF hostname for ${domain.hostname}:`, err);
       continue;
     }
 
@@ -1108,10 +1100,10 @@ export async function cleanupStalePendingDomains(
       }
       try {
         await tryActivateDomain(env, db, domain, project);
-      } catch (error) {
+      } catch (err) {
         console.error(
           `[scheduled] failed to activate verified stale domain ${domain.hostname}:`,
-          error,
+          err,
         );
       }
       continue;
@@ -1119,23 +1111,33 @@ export async function cleanupStalePendingDomains(
 
     // Decision: Keep the row visible until provider and routing cleanup finish so a concurrent add can't publish a
     // replacement that this run then removes.
+    // Decision: The row is the only record of the Cloudflare hostname id. When the provider delete fails twice,
+    // the row stays so the next run can try again.
+    let providerDeleteFailed = false;
     const claimed = await cleanupPendingDomainUnderProjectFence(env, db, domain, async () => {
       try {
         await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
-      } catch (error) {
-        if (!(error instanceof CloudflareApiError && error.status === 404)) {
+      } catch (err) {
+        if (!(err instanceof CloudflareApiError && err.status === 404)) {
           try {
             await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
-          } catch (error) {
-            if (!(error instanceof CloudflareApiError && error.status === 404)) {
-              console.error(
-                `[scheduled] failed to delete stale CF hostname for ${domain.hostname} after retry — CF hostname ${domain.cf_hostname_id} is ORPHANED:`,
-                error,
-              );
+          } catch (retryErr) {
+            if (!(retryErr instanceof CloudflareApiError && retryErr.status === 404)) {
+              providerDeleteFailed = true;
+              throw retryErr;
             }
           }
         }
       }
+    }).catch((error: unknown) => {
+      if (!providerDeleteFailed) {
+        throw error;
+      }
+      console.error(
+        `[scheduled] failed to delete stale CF hostname for ${domain.hostname}; keeping the row for the next run:`,
+        error,
+      );
+      return false;
     });
     if (!claimed) {
       continue;
@@ -1198,8 +1200,8 @@ async function processUserRollover(
         }
       });
     }
-  } catch (error) {
-    console.error(`[backfill] userId backfill failed for user ${user.id}:`, error);
+  } catch (err) {
+    console.error(`[backfill] userId backfill failed for user ${user.id}:`, err);
   }
 
   if (!needsUsageReconciliation) {

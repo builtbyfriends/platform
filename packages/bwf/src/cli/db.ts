@@ -499,8 +499,9 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
           applied_at: '',
         }));
       }
-    } catch {
+    } catch (error) {
       // Decision: Local migration status stays useful offline, so a remote failure isn't fatal.
+      log.warn(`Remote migration status is unavailable: ${getErrorMessage(error)}`);
     }
   } else {
     const token = getToken(root);
@@ -510,7 +511,9 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
         const client = new PlatformClient(token, { root });
         const result = await client.getMigrationStatus(config.projectId, dialect);
         remoteApplied = result.applied;
-      } catch {}
+      } catch (error) {
+        log.warn(`Remote migration status is unavailable: ${getErrorMessage(error)}`);
+      }
     }
   }
 

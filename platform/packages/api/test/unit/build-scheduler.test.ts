@@ -616,23 +616,25 @@ describe('BuildScheduler.alarm', () => {
     expect(db.failed.some((f) => f.id === 'b1' && /connection/.test(f.error))).toBe(true);
   });
 
-  it('leaves a build queued (never claimed or failed) when a pre-claim lookup throws transiently', async () => {
+  it('leaves a build queued, keeps scanning and re-arms the alarm when a pre-claim lookup throws transiently', async () => {
     // Decision: getGitHubConnection and getProject run before the claim, so a transient DB throw leaves the
     // build queued. A claimed build with no BuildManager yet has nothing to own its timeout, and the
     // stale reaper only covers github_actions builds, so it would stay `starting` and block its project.
     db.users.set('u1', { plan: 'free', login: 'octocat' });
-    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1' });
+    enqueue({ id: 'b1', user_id: 'u1', project_id: 'p1', age: 2 });
+    enqueue({ id: 'b2', user_id: 'u1', project_id: 'p2', age: 1 });
     vi.mocked(getGitHubConnection).mockRejectedValueOnce(new Error('hyperdrive timeout'));
     const startBuild = vi.fn(async () => {});
     const ctx = makeStubCtx();
     const env = makeEnv(startBuild);
     const s = makeScheduler(ctx, env);
 
-    await expect(s.alarm()).rejects.toThrow('hyperdrive timeout');
+    await s.alarm();
 
-    expect(db.claimArgs).toHaveLength(0);
-    expect(startBuild).not.toHaveBeenCalled();
+    expect(db.claimArgs.map((c) => c.buildId)).toEqual(['b2']);
+    expect(startBuild).toHaveBeenCalledOnce();
     expect(db.failed).toHaveLength(0);
+    expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
   });
 
   it('excludes a capped owner from the scan so an under-cap owner is not starved', async () => {

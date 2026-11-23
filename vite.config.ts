@@ -71,6 +71,17 @@ const platformAlias = {
 // Decision: These rules still have reports in older code, so they warn until the count reaches zero. Fix the
 // warnings in the files you touch, and move a rule back to the preset's error once it's clean.
 const unfinishedRules = {
+  'import/consistent-type-specifier-style': 'warn',
+  'object-shorthand': 'warn',
+  'preserve-caught-error': 'warn',
+  'quality/no-chained-type-assertions': 'warn',
+  'unicorn/catch-error-name': 'warn',
+  'unicorn/no-hex-escape': 'warn',
+  'unicorn/numeric-separators-style': 'warn',
+  'unicorn/prefer-at': 'warn',
+  'unicorn/prefer-string-raw': 'warn',
+  'unicorn/prefer-string-replace-all': 'warn',
+  'unicorn/text-encoding-identifier-case': 'warn',
   '@nkzw/require-use-effect-arguments': 'warn',
   eqeqeq: 'warn',
   'no-promise-executor-return': 'warn',

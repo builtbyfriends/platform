@@ -12,7 +12,7 @@ import {
   notInArray,
 } from 'drizzle-orm';
 import { Context } from 'hono';
-import { aiLoggingKey } from '../ai-logging-policy.ts';
+import { aiLoggingClearedKey, aiLoggingKey } from '../ai-logging-policy.ts';
 import { deleteProjectAssets, deleteWorkerBundle } from '../assets.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
@@ -49,6 +49,7 @@ import {
   projectOwnershipPeriods,
   projects as projectsTable,
 } from '../schema.ts';
+import { projectSuspensionKey } from '../suspension.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectOwnershipPeriod, Resource } from '../types.ts';
 import { cleanupProjectZeroTrust } from '../zero-trust/project.ts';
@@ -908,6 +909,12 @@ export async function teardownProject(
   // that the hourly sweep removes.
   const aiLogging = await runCleanupBatch(context.env, [
     cleanupJob(projectId, 'routing-key', aiLoggingKey(projectId), { key: aiLoggingKey(projectId) }),
+    cleanupJob(projectId, 'routing-key', aiLoggingClearedKey(projectId), {
+      key: aiLoggingClearedKey(projectId),
+    }),
+    cleanupJob(projectId, 'routing-key', projectSuspensionKey(projectId), {
+      key: projectSuspensionKey(projectId),
+    }),
   ]);
   return { warnings: [...bestEffortWarnings, ...orphanWarnings, ...aiLogging.warnings] };
 }
@@ -923,6 +930,7 @@ export async function reapExpiredPreviews(db: Db, env: ApiEnv['Bindings']): Prom
         lte(projectsTable.preview_expires_at, drizzleSql`now()`),
       ),
     )
+    .orderBy(asc(projectsTable.preview_expires_at))
     .limit(3);
   for (const project of candidates) {
     const claimed = await db

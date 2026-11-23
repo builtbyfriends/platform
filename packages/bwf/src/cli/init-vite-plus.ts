@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'pathslash';
 import { parseDocument } from 'yaml';
-import { isJsonObject } from './json-value.ts';
-import type { JsonObject } from './json-value.ts';
 import { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from './template.ts';
+
+type JsonObject = Record<string, unknown>;
 
 /** Keep every Vite consumer on the core used by the selected Vite+ toolchain. */
 export function configureVitePlusScaffold(
@@ -21,16 +21,15 @@ export function configureVitePlusScaffold(
       document.setIn(['peerDependencyRules', 'allowedVersions', 'vite'], '*');
     });
   } else if (packageManager === 'yarn') {
-    const resolutions: JsonObject = isJsonObject(pkg.resolutions) ? { ...pkg.resolutions } : {};
-    resolutions.vite = core;
-    pkg.resolutions = resolutions;
+    pkg.resolutions = { ...(pkg.resolutions as JsonObject | undefined), vite: core };
     editYaml(root, '.yarnrc.yml', (document) => {
       document.set('nodeLinker', 'node-modules');
     });
   } else {
-    const overrides: JsonObject = isJsonObject(pkg.overrides) ? { ...pkg.overrides } : {};
-    overrides.vite = packageManager === 'npm' ? '$vite' : core;
-    pkg.overrides = overrides;
+    pkg.overrides = {
+      ...(pkg.overrides as JsonObject | undefined),
+      vite: packageManager === 'npm' ? '$vite' : core,
+    };
   }
 }
 

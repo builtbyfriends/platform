@@ -9,7 +9,7 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
-import { aiLoggingKey } from '../../src/ai-logging-policy.ts';
+import { aiLoggingClearedKey, aiLoggingKey } from '../../src/ai-logging-policy.ts';
 import * as db from '../../src/db.ts';
 import app, { FAST_CRON, scheduled } from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
@@ -31,6 +31,7 @@ import {
   projectMembers,
   projectOwnershipPeriods,
 } from '../../src/schema.ts';
+import { projectSuspensionKey } from '../../src/suspension.ts';
 import * as zeroTrustService from '../../src/zero-trust/project.ts';
 import {
   createTestBuild,
@@ -213,6 +214,8 @@ describe('DELETE /projects/:id', () => {
       .where(eq(projectOwnershipPeriods.project_id, project.id));
     await env.ROUTING.put(`ai-block:${project.id}`, '1');
     await env.ROUTING.put(aiLoggingKey(project.id), 'off', { metadata: { mode: 'off', at: 1 } });
+    await env.ROUTING.put(aiLoggingClearedKey(project.id), '1');
+    await env.ROUTING.put(projectSuspensionKey(project.id), '1');
     mockCfApi();
     const usageCalls: Array<{ ownerId: string; path: string; body: unknown }> = [];
     const usageCounter = {
@@ -244,6 +247,8 @@ describe('DELETE /projects/:id', () => {
     expect(dbProject).toBeUndefined();
     expect(await env.ROUTING.get(`ai-block:${project.id}`)).toBeNull();
     expect(await env.ROUTING.get(aiLoggingKey(project.id))).toBeNull();
+    expect(await env.ROUTING.get(aiLoggingClearedKey(project.id))).toBeNull();
+    expect(await env.ROUTING.get(projectSuspensionKey(project.id))).toBeNull();
     expect(usageCalls).toEqual([
       {
         ownerId: user.id,

@@ -1,6 +1,6 @@
 import { platformProjectHostnames, readPlatformApplication } from '@builtbyfriends/platform';
 import { and, eq, or, sql as drizzleSql } from 'drizzle-orm';
-import type { Context } from 'hono';
+import { type Context } from 'hono';
 import { findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
   computeAssetHash,
@@ -8,17 +8,21 @@ import {
   deleteWorkerBundle,
   scanProjectAssetOrphanCandidates,
   deleteUnreferencedAssets,
+  type AssetEntry,
+  type AssetManifestEntry,
 } from '../assets.ts';
-import type { AssetEntry, AssetManifestEntry } from '../assets.ts';
 import { activeOAuthApproval } from '../auth/oauth.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
-import { restoreCronScheduler, snapshotCronScheduler } from '../cron-scheduler-client.ts';
-import type { CronSyncState } from '../cron-scheduler-client.ts';
-import type { createDeployment } from '../db.ts';
+import {
+  restoreCronScheduler,
+  snapshotCronScheduler,
+  type CronSyncState,
+} from '../cron-scheduler-client.ts';
 import {
   getProject,
   getUser,
   getDeployment,
+  createDeployment,
   updateDeploymentManifest,
   updateDeploymentStatus,
   updateProjectWebSocketVersion,
@@ -26,29 +30,32 @@ import {
   countUserDeploymentsToday,
   getActiveDeployment,
   getInFlightDeploymentsExcluding,
+  type Db,
 } from '../db.ts';
-import type { Db } from '../db.ts';
 import {
   appendDeploymentEvent,
   assertDeploymentExecutionAuthority,
 } from '../deployment-execution.ts';
 import type { ApiEnv } from '../env.ts';
-import type { DeployLogger } from '../observability/logger.ts';
+import { type DeployLogger } from '../observability/logger.ts';
 import { PLAN_CATALOG_SETTING, resolvePlanLimits } from '../plans.ts';
 import { getPlatformSetting } from '../platform-settings.ts';
 import { ensureProjectIngress } from '../project-ingress.ts';
-import { restoreQueueConsumer, snapshotQueueConsumer } from '../provisioning/cloudflare-api.ts';
-import type { QueueConsumerInfo } from '../provisioning/cloudflare-api.ts';
-import { computeDispatchLimits, resolveRoutingUndo } from '../routing.ts';
+import {
+  restoreQueueConsumer,
+  snapshotQueueConsumer,
+  type QueueConsumerInfo,
+} from '../provisioning/cloudflare-api.ts';
+import { computeDispatchLimits, projectRouteKey, resolveRoutingUndo } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { routingSuspensionReason } from '../suspension.ts';
 import { isWithinLimit } from '../tiers.ts';
-import type {
-  DeployManifest,
-  DeployEvent,
-  Deployment,
-  Project,
-  DeploymentStatus,
+import {
+  type DeployManifest,
+  type DeployEvent,
+  type Deployment,
+  type Project,
+  type DeploymentStatus,
 } from '../types.ts';
 import type { WorkerModule } from '../worker-upload.ts';
 import {
@@ -169,13 +176,13 @@ export async function runDeploymentPipeline(input: {
       });
       return;
     }
-    logger.info('emit', 'ndjson_event', event);
+    logger.info('emit', 'ndjson_event', event as unknown as Record<string, unknown>);
     if (!streamOpen) {
       return;
     }
-    writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((error) => {
+    writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((err) => {
       streamOpen = false;
-      logger.warn('emit', 'stream_closed', { event: event.event, err: String(error) });
+      logger.warn('emit', 'stream_closed', { event: event.event, err: String(err) });
     });
   };
   const heartbeatOverride = context.env.DEPLOY_HEARTBEAT_INTERVAL_MS;
@@ -462,7 +469,7 @@ export async function runDeploymentPipeline(input: {
               await context.env.ROUTING.delete(key);
             } else {
               let value = undo.value;
-              if (key === project.slug || key.startsWith('domain:')) {
+              if (key === projectRouteKey(project) || key.startsWith('domain:')) {
                 value = refreshPolicy
                   ? rewriteProjectRouteMetadata(JSON.parse(value) as Record<string, unknown>, {
                       projectId,
@@ -715,7 +722,7 @@ export async function runDeploymentPipeline(input: {
           emit({
             event: 'done',
             deployment: currentLiveDeployment.id,
-            url: urls[0],
+            url: urls[0]!,
             urls,
             assets: 0,
             workers: 0,
@@ -833,7 +840,7 @@ export async function runDeploymentPipeline(input: {
           // routing entry under `project.slug`.
           return await publishStaticDeployment({
             get currentStep() {
-              return currentStep;
+              return currentStep!;
             },
             set currentStep(value: string) {
               currentStep = value;
@@ -848,13 +855,13 @@ export async function runDeploymentPipeline(input: {
             cutoverOwnerId,
             deployBuild,
             get cutoverProtected() {
-              return cutoverProtected;
+              return cutoverProtected!;
             },
             set cutoverProtected(value: boolean) {
               cutoverProtected = value;
             },
             get currentStatus() {
-              return currentStatus;
+              return currentStatus!;
             },
             set currentStatus(value: DeploymentStatus) {
               currentStatus = value;
@@ -868,26 +875,26 @@ export async function runDeploymentPipeline(input: {
             project,
             putTrackedRouting,
             get routingSwitched() {
-              return routingSwitched;
+              return routingSwitched!;
             },
             set routingSwitched(value: boolean) {
               routingSwitched = value;
             },
             get logger() {
-              return logger;
+              return logger!;
             },
             set logger(value: DeployLogger) {
               logger = value;
             },
             get cronSchedulerWriteAttempted() {
-              return cronSchedulerWriteAttempted;
+              return cronSchedulerWriteAttempted!;
             },
             set cronSchedulerWriteAttempted(value: boolean) {
               cronSchedulerWriteAttempted = value;
             },
             actor,
             get cutoverCommitted() {
-              return cutoverCommitted;
+              return cutoverCommitted!;
             },
             set cutoverCommitted(value: boolean) {
               cutoverCommitted = value;
@@ -912,7 +919,7 @@ export async function runDeploymentPipeline(input: {
         // The fetch concurrency matches the R2 head verify pool.
         const uploadDeploymentWorkerResult = await uploadDeploymentWorker({
           get currentStep() {
-            return currentStep;
+            return currentStep!;
           },
           set currentStep(value: string) {
             currentStep = value;
@@ -940,7 +947,7 @@ export async function runDeploymentPipeline(input: {
           },
           workerFiles,
           get sandboxControllerAttempted() {
-            return sandboxControllerAttempted;
+            return sandboxControllerAttempted!;
           },
           set sandboxControllerAttempted(value: boolean) {
             sandboxControllerAttempted = value;
@@ -953,7 +960,7 @@ export async function runDeploymentPipeline(input: {
             workerUploadUrl = value;
           },
           get workerUploaded() {
-            return workerUploaded;
+            return workerUploaded!;
           },
           set workerUploaded(value: boolean) {
             workerUploaded = value;
@@ -966,7 +973,7 @@ export async function runDeploymentPipeline(input: {
         const migrateDeploymentWorkerResult = await migrateDeploymentWorker({
           manifest,
           get currentStep() {
-            return currentStep;
+            return currentStep!;
           },
           set currentStep(value: string) {
             currentStep = value;
@@ -974,7 +981,7 @@ export async function runDeploymentPipeline(input: {
           markPhase,
           logger,
           get currentStatus() {
-            return currentStatus;
+            return currentStatus!;
           },
           set currentStatus(value: DeploymentStatus) {
             currentStatus = value;
@@ -994,7 +1001,7 @@ export async function runDeploymentPipeline(input: {
         // intent before it so no reaper can end a request whose queue or routing cutover may have landed.
         await publishWorkerDeployment({
           get currentStep() {
-            return currentStep;
+            return currentStep!;
           },
           set currentStep(value: string) {
             currentStep = value;
@@ -1005,13 +1012,13 @@ export async function runDeploymentPipeline(input: {
           context,
           deployment,
           get cutoverProtected() {
-            return cutoverProtected;
+            return cutoverProtected!;
           },
           set cutoverProtected(value: boolean) {
             cutoverProtected = value;
           },
           get currentStatus() {
-            return currentStatus;
+            return currentStatus!;
           },
           set currentStatus(value: DeploymentStatus) {
             currentStatus = value;
@@ -1027,7 +1034,7 @@ export async function runDeploymentPipeline(input: {
           previousManifest,
           deleteTrackedRouting,
           get logger() {
-            return logger;
+            return logger!;
           },
           set logger(value: DeployLogger) {
             logger = value;
@@ -1038,20 +1045,20 @@ export async function runDeploymentPipeline(input: {
           deployedAssetCount,
           assetConfig,
           get routingSwitched() {
-            return routingSwitched;
+            return routingSwitched!;
           },
           set routingSwitched(value: boolean) {
             routingSwitched = value;
           },
           get cronSchedulerWriteAttempted() {
-            return cronSchedulerWriteAttempted;
+            return cronSchedulerWriteAttempted!;
           },
           set cronSchedulerWriteAttempted(value: boolean) {
             cronSchedulerWriteAttempted = value;
           },
           actor,
           get cutoverCommitted() {
-            return cutoverCommitted;
+            return cutoverCommitted!;
           },
           set cutoverCommitted(value: boolean) {
             cutoverCommitted = value;
@@ -1074,9 +1081,9 @@ export async function runDeploymentPipeline(input: {
           finishOrphanSweep,
           deadline: execution?.deadline,
         });
-      } catch (error) {
+      } catch (err) {
         return await recoverFailedDeployment({
-          err: error,
+          err,
           logger,
           workerName,
           currentStep,
@@ -1098,7 +1105,7 @@ export async function runDeploymentPipeline(input: {
           cutoverProtected,
           writtenRoutingKeys,
           get currentStatus() {
-            return currentStatus;
+            return currentStatus!;
           },
           set currentStatus(value: DeploymentStatus) {
             currentStatus = value;
@@ -1113,8 +1120,8 @@ export async function runDeploymentPipeline(input: {
           owner,
         });
       }
-    } catch (error) {
-      logger.error('catch', 'unhandled_pipeline_error', error, { currentPhase: currentStep });
+    } catch (err) {
+      logger.error('catch', 'unhandled_pipeline_error', err, { currentPhase: currentStep });
       emit({
         event: 'error',
         message: 'deploy failed due to an internal error',
@@ -1146,17 +1153,17 @@ export async function runDeploymentPipeline(input: {
             hasManifest: latest.manifest !== null,
           });
         }
-      } catch (error) {
+      } catch (err) {
         logger.warn('placeholder_reap', 'reap_failed', {
           placeholderId: preDeployment.id,
-          err: error instanceof Error ? error.message : String(error),
+          err: err instanceof Error ? err.message : String(err),
         });
       }
       if (input.releaseWorkerInput) {
         // Decision: Do this before the stream closes: closing the response can end the request.
-        await input.releaseWorkerInput().catch((error) =>
+        await input.releaseWorkerInput().catch((err) =>
           logger.warn('worker_input', 'delete_failed', {
-            err: error instanceof Error ? error.message : String(error),
+            err: err instanceof Error ? err.message : String(err),
           }),
         );
       }

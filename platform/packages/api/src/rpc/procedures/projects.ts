@@ -50,7 +50,7 @@ export const create = procedure('projects.create')
           db: ctx.db,
           user: ctx.user,
           // Decision: Unlike Hono's executionCtx, this waitUntil doesn't throw, so there's no inline fallback.
-          schedule: async (work) => waitUntil(work),
+          schedule: async (work) => waitUntil(work(ctx.db)),
         },
         input.slug,
       );

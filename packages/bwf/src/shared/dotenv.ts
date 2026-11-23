@@ -61,7 +61,7 @@ export function parseDotenvFile(
   if (!existsSync(filePath)) {
     return {};
   }
-  return parseDotenv(readFileSync(filePath, 'utf8'), options);
+  return parseDotenv(readFileSync(filePath, 'utf-8'), options);
 }
 
 /**
@@ -89,11 +89,11 @@ export function expandDotenv(
   const warned = new Set<string>();
 
   function resolveKey(key: string): string {
-    if (!(key in input)) {
+    if (!Object.hasOwn(input, key)) {
       return '';
     }
-    if (key in out) {
-      return out[key];
+    if (Object.hasOwn(out, key)) {
+      return out[key]!;
     }
     if (resolving.has(key)) {
       if (!warned.has(key) && options.onWarn) {
@@ -102,10 +102,10 @@ export function expandDotenv(
       }
       // Decision: Return the raw literal so the cycle short-circuits instead of
       // looping; callers see the un-expanded `${...}` text.
-      return input[key];
+      return input[key]!;
     }
     resolving.add(key);
-    const expanded = expandValue(input[key], resolveKey);
+    const expanded = expandValue(input[key]!, resolveKey);
     resolving.delete(key);
     out[key] = expanded;
     return expanded;
@@ -114,7 +114,7 @@ export function expandDotenv(
   for (const key of Object.keys(input)) {
     resolveKey(key);
   }
-  return Object.assign({}, out);
+  return out;
 }
 
 /**
@@ -126,7 +126,7 @@ function expandValue(value: string, resolve: (key: string) => string): string {
   let result = '';
   let cursor = 0;
   while (cursor < value.length) {
-    const character = value[cursor];
+    const character = value[cursor]!;
     if (character === '\\' && cursor + 1 < value.length && value[cursor + 1] === '$') {
       result += '$';
       cursor += 2;
@@ -156,7 +156,7 @@ function expandValue(value: string, resolve: (key: string) => string): string {
     }
     if (next && /[A-Za-z_]/.test(next)) {
       let keyEndIndex = cursor + 1;
-      while (keyEndIndex < value.length && /[A-Za-z0-9_]/.test(value[keyEndIndex])) {
+      while (keyEndIndex < value.length && /[A-Za-z0-9_]/.test(value[keyEndIndex]!)) {
         keyEndIndex++;
       }
       const key = value.slice(cursor + 1, keyEndIndex);
@@ -188,7 +188,7 @@ export function scanWranglerDotenvKeys(filePath: string): Set<string> {
   if (!existsSync(filePath)) {
     return keys;
   }
-  const content = readFileSync(filePath, 'utf8');
+  const content = readFileSync(filePath, 'utf-8');
   WRANGLER_DOTENV_LINE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = WRANGLER_DOTENV_LINE.exec(content)) !== null) {

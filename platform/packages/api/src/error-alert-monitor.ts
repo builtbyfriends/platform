@@ -6,6 +6,7 @@ import type { ApiEnv } from './env.ts';
 const DEBOUNCE_MS = 120_000;
 const COUNT_CAP = 100;
 const COOLDOWN_MS = 86_400_000;
+const MAX_SEND_FAILURES = 5;
 
 type ErrorAlertState = {
   count: number;
@@ -17,6 +18,7 @@ type ErrorAlertState = {
   // whose tail piled up while suppressed still reports its real start time in the alert email.
   firstErrorAt: number | null;
   lastErrorAt: number | null;
+  failedSends: number;
 };
 
 export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
@@ -36,6 +38,7 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
       lastAlertAt: null,
       firstErrorAt: null,
       lastErrorAt: null,
+      failedSends: 0,
       ...stored,
     };
     return this.state;
@@ -150,11 +153,23 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
           : null;
       await sendErrorAlertEmail(this.env, user.email, slug, state.count, errorWindow);
       state.lastAlertAt = Date.now();
+      state.failedSends = 0;
       this.resetWindow(state);
       await this.ctx.storage.deleteAlarm();
       await this.saveState(state);
-    } catch (error) {
-      console.error('[error-alert-monitor] failed to send alert:', error);
+    } catch (err) {
+      console.error('[error-alert-monitor] failed to send alert:', err);
+      state.failedSends += 1;
+      if (state.failedSends >= MAX_SEND_FAILURES) {
+        console.error(
+          `[error-alert-monitor] dropping alert for project ${state.projectId} after ${state.failedSends} failed sends`,
+        );
+        state.failedSends = 0;
+        this.resetWindow(state);
+        await this.ctx.storage.deleteAlarm();
+        await this.saveState(state);
+        return;
+      }
       await this.ctx.storage.setAlarm(Date.now() + DEBOUNCE_MS);
       await this.saveState(state);
     }

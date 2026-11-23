@@ -63,7 +63,11 @@ function detailLocation(path: string, prefix: string): { id: string; url: URL } 
   if (!encodedId || encodedId.includes('/')) {
     throw new OperatorError(400, 'Invalid admin page request.');
   }
-  return { id: decodeURIComponent(encodedId), url };
+  try {
+    return { id: decodeURIComponent(encodedId), url };
+  } catch {
+    throw new OperatorError(400, 'Invalid admin page request.');
+  }
 }
 
 export function requestTimezone(context: AdminContext): string | undefined {

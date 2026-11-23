@@ -7,6 +7,7 @@ import {
   readFileSync,
   statSync,
   writeSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'pathslash';
 import type { Plugin, PluginOption, ViteDevServer } from 'vite';
@@ -149,9 +150,10 @@ export function getOrCreateDevTriggerToken(root: string): string {
     if (winner) {
       return winner;
     }
-    // Decision: EEXIST but file is empty — extreme edge case (interrupted writer).
-    // Fall through and accept the fresh UUID; subsequent reads will win.
-    return fresh;
+    // Decision: EEXIST but the file is empty (an interrupted writer). Fill it in, so later starts and the child
+    // process read one token and don't each make their own.
+    writeFileSync(tokenPath, fresh, { mode: DEV_TRIGGER_TOKEN_FILE_MODE });
+    return readExisting() ?? fresh;
   }
 }
 

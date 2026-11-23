@@ -575,6 +575,20 @@ describe('POST /projects/:id/domains', () => {
     expect(rpcError(await res.json())).toBe('cannot use buildwf.dev subdomains');
   });
 
+  it('rejects the platform domain itself', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reject-apex');
+    mockCfApi();
+
+    const res = await app.fetch(
+      rpcRequest('domains.add', user.jwt, { projectId: project.id, hostname: 'buildwf.dev' }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(rpcError(await res.json())).toBe('cannot use buildwf.dev subdomains');
+  });
+
   it('uses the installation domain for the CNAME target and reserved suffix', async () => {
     const user = await createTestUser(env.db);
     const project = await createTestProject(env.db, user.id, 'self-hosted-domain');
@@ -1996,7 +2010,36 @@ describe('scheduled() — stale pending domain janitor', () => {
     const errMessages = errSpy.mock.calls.map((call) =>
       call.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' '),
     );
-    expect(errMessages.some((msg) => msg.includes('ORPHANED'))).toBe(false);
+    expect(errMessages.some((msg) => msg.includes('keeping the row'))).toBe(false);
+  });
+
+  it('keeps the row when the CF delete fails twice, so the next run can try again', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'janitor-delete-fails');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-del-fails',
+          hostname: 'del-fails.example.com',
+          status: 'pending',
+          ssl: { status: 'pending_validation', method: 'http', type: 'dv' },
+        }),
+      deleteCustomHostname: () => cfError('internal server error', 500),
+    });
+    await env.db.insert(domains).values({
+      id: 'dom_del_fails',
+      project_id: project.id,
+      hostname: 'del-fails.example.com',
+      cf_hostname_id: 'ch-del-fails',
+      status: 'pending',
+      created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    await cleanupStalePendingDomains(makeBindings(env), env.db, Date.now());
+
+    const [row] = await env.db.select().from(domains).where(eq(domains.id, 'dom_del_fails'));
+    expect(row?.cf_hostname_id).toBe('ch-del-fails');
   });
 });
 

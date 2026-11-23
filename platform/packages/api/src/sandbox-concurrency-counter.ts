@@ -270,7 +270,14 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
       const entries = await this.getEntries();
       for (const [id, entry] of Object.entries(entries)) {
         if (entry.stoppedAt !== undefined) {
-          await this.finishStopped(entries, id);
+          try {
+            await this.finishStopped(entries, id);
+          } catch (error) {
+            // Decision: A stopped sandbox holds its slot until this succeeds, so keep an alarm set. The platform's own
+            // alarm retries run out, and nothing else comes back for the entry.
+            console.error('[sandbox-concurrency] could not finish a stopped sandbox:', error);
+            await this.ctx.storage.setAlarm(Date.now() + RECONCILE_INTERVAL_MS);
+          }
         }
       }
       // Decision: Don't infer a stop from age or meter time that isn't verified. The controller's own alarm checks

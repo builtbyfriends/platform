@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -18,9 +17,8 @@ import { createRequire } from 'node:module';
 import { resolve as resolvePosixPath } from 'node:path/posix';
 import { resolve as resolveWindowsPath } from 'node:path/win32';
 import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
-import type { R2LocationHint } from '@builtbyfriends/deploy-core';
-import { parse } from 'jsonc-parser';
-import type { ParseError } from 'jsonc-parser';
+import { isRecord, type R2LocationHint } from '@builtbyfriends/deploy-core';
+import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
 import { bwfLog, bwfWarn } from '../log.ts';
@@ -30,18 +28,14 @@ import {
   encodeCloudflareOperation,
   decodeCloudflareOperationResult,
 } from './cloudflare-process.ts';
-import { errorCode } from './error-code.ts';
-import { isJsonObject } from './json-value.ts';
-import type { JsonObject } from './json-value.ts';
-import { getErrorMessage } from './output.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
 import {
   assertNoDuplicateMembers,
   persistMaterializedWranglerConfig,
   readProvisionedBindingEntry,
   writeProvisionedWranglerConfig,
+  type WriteProvisionedWranglerResult,
 } from './wrangler.ts';
-import type { WriteProvisionedWranglerResult } from './wrangler.ts';
 
 /** The Cloudflare resources an app needs, computed by the deploy orchestrator. */
 export interface DesiredResourceSet {
@@ -86,7 +80,7 @@ export function checkCloudflareProvisionDrift(
   const isProvisioned = (
     field: string,
     binding: string,
-    hasRealId: (entry: JsonObject) => boolean,
+    hasRealId: (entry: Record<string, unknown>) => boolean,
   ): boolean => {
     const entry = readProvisionedBindingEntry(config, field, binding, configPath);
     return entry !== undefined && hasRealId(entry);
@@ -537,15 +531,15 @@ const COMMAND_TIMEOUT_MS = 120_000;
  * After a SIGKILL, how long to wait for both `close` and the whole process group to be gone.
  * If that cannot be confirmed, the runner rejects with {@link WranglerQuarantineError}.
  */
-const CONFIRM_KILL_GRACE_MS = 5000;
+const CONFIRM_KILL_GRACE_MS = 5_000;
 /** The pid-poll interval while confirming post-SIGKILL termination. */
 const CONFIRM_KILL_POLL_MS = 20;
 /** Extra time a signal teardown allows beyond a runner's confirmation window. */
-const SIGNAL_TEARDOWN_DEADLINE_MARGIN_MS = 5000;
+const SIGNAL_TEARDOWN_DEADLINE_MARGIN_MS = 5_000;
 
 /** ESRCH means the group already exited; any other kill error is a real failure. */
 export function isAlreadyGoneKillError(error: unknown): boolean {
-  return errorCode(error) === 'ESRCH';
+  return (error as NodeJS.ErrnoException | null)?.code === 'ESRCH';
 }
 
 /**
@@ -621,10 +615,7 @@ let activeProvisionQuarantineHook: ((info: QuarantineInfo) => void) | undefined;
 function isQuarantineError(error: unknown): error is WranglerQuarantineError {
   return (
     error instanceof WranglerQuarantineError ||
-    (typeof error === 'object' &&
-      error !== null &&
-      'quarantine' in error &&
-      error.quarantine === true)
+    (error as { quarantine?: boolean } | null)?.quarantine === true
   );
 }
 
@@ -816,10 +807,10 @@ function coordinatorTearDownRegistrant(
             `the spawned Cloudflare operation process could not be confirmed terminated after a forwarded ` +
             `${teardown.signal} — ${detail}`,
         });
-      } catch (error) {
+      } catch (failure) {
         // Decision: Not durable: the watchdog now owns the lock, so the finish must not re-raise.
         teardown.persistFailed = true;
-        process.stderr.write(`provision: ${getErrorMessage(error)}\n`);
+        process.stderr.write(`provision: ${(failure as Error).message}\n`);
       }
     }
     const pid = registrant.pid();
@@ -879,7 +870,7 @@ function finishCoordinatorTeardown(teardown: CoordinatorTeardown): void {
   reRaisedOnce = true;
   process.kill(process.pid, teardown.signal);
   // Decision: Signals arrive asynchronously; keep the loop alive so the process cannot exit 0 first.
-  setTimeout(() => {}, 2000);
+  setTimeout(() => {}, 2_000);
 }
 
 // Decision: Retention watchdog for a quarantine that could not be persisted. The lock stays tracked,
@@ -887,7 +878,7 @@ function finishCoordinatorTeardown(teardown: CoordinatorTeardown): void {
 // alive. Each tick releases normally if the group is gone, else retries persisting the sidecar.
 
 const RETENTION_RETRY_MIN_MS = 250;
-const RETENTION_RETRY_MAX_MS = 5000;
+const RETENTION_RETRY_MAX_MS = 5_000;
 
 interface RetentionWatchdogState {
   lock: ProvisionLock;
@@ -943,7 +934,7 @@ function armRetentionWatchdog(lock: ProvisionLock, info: QuarantineInfo): void {
           (error: unknown) => {
             process.stderr.write(
               `provision: the retained provision lock could not be released after the ` +
-                `child's death was confirmed (${getErrorMessage(error)}); the mutex ` +
+                `child's death was confirmed (${(error as Error).message}); the mutex ` +
                 `self-heals once stale.\n`,
             );
             resolveWatchdog();
@@ -1033,18 +1024,17 @@ export function createDefaultRunWrangler(
         );
         return;
       }
-      const childEnv: NodeJS.ProcessEnv = provisionEnv({
-        accountId: opts.accountId,
-        apiBaseUrl: opts.apiBaseUrl,
-        apiToken: opts.apiToken,
-      });
-      if (opts.suppressLogs) {
-        childEnv.WRANGLER_WRITE_LOGS = 'false';
-      }
       const child = spawn(command, [...prefix, ...encodeCloudflareOperation(args)], {
         cwd: opts.cwd ?? root,
         shell: false,
-        env: childEnv,
+        env: {
+          ...provisionEnv({
+            accountId: opts.accountId,
+            apiBaseUrl: opts.apiBaseUrl,
+            apiToken: opts.apiToken,
+          }),
+          ...(opts.suppressLogs ? { WRANGLER_WRITE_LOGS: 'false' } : {}),
+        },
         stdio: interactive
           ? 'inherit'
           : [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -1064,8 +1054,8 @@ export function createDefaultRunWrangler(
       child.once('spawn', () => {
         spawned = true;
       });
-      child.stdout?.setEncoding('utf8');
-      child.stderr?.setEncoding('utf8');
+      child.stdout?.setEncoding('utf-8');
+      child.stderr?.setEncoding('utf-8');
       child.stdout?.on('data', (chunk: string) => {
         stdout += chunk;
       });
@@ -1100,9 +1090,7 @@ export function createDefaultRunWrangler(
             error: new Error(`child.kill(${signal}) returned false (signal not delivered)`),
           };
         } catch (error) {
-          return isAlreadyGoneKillError(error)
-            ? 'gone'
-            : { error: error instanceof Error ? error : new Error(String(error)) };
+          return isAlreadyGoneKillError(error) ? 'gone' : { error: error as Error };
         }
       };
 
@@ -1371,27 +1359,24 @@ export function normalizeRunWranglerResult(result: {
 }): RunWranglerResult {
   const stdout = result.stdout ?? '';
   const notes: Array<string> = [];
-  const hasSignal = result.signal !== null && result.signal !== undefined;
-  const hasSpawnError = result.error !== null && result.error !== undefined;
-  if (hasSignal) {
+  if (result.signal != null) {
     notes.push(
       `provision: the Cloudflare operation process was terminated by signal ${result.signal}`,
     );
   }
-  if (result.error !== null && result.error !== undefined) {
+  if (result.error != null) {
     notes.push(
       `provision: the Cloudflare operation process could not be spawned: ${result.error.message}`,
     );
   }
-  const failed = typeof result.status !== 'number' || hasSignal || hasSpawnError;
+  const failed = typeof result.status !== 'number' || result.signal != null || result.error != null;
   // Decision: A failure must be non-zero. Keep a genuine non-zero exit code when present;
   // otherwise synthesize `1` (a null/absent status under a signal/spawn error).
-  const exitStatus = typeof result.status === 'number' ? result.status : undefined;
   const status = failed
-    ? exitStatus !== undefined && exitStatus !== 0
-      ? exitStatus
+    ? typeof result.status === 'number' && result.status !== 0
+      ? result.status
       : 1
-    : (exitStatus ?? 1);
+    : (result.status as number);
   const baseStderr = result.stderr ?? '';
   const stderr = notes.length > 0 ? [baseStderr, ...notes].filter(Boolean).join('\n') : baseStderr;
   // Decision: Keep provenance structured so classifiers can tell a clean failure from a kill.
@@ -1400,16 +1385,13 @@ export function normalizeRunWranglerResult(result: {
     stderr,
     status,
     signal: result.signal ?? null,
-    error: result.error !== null && result.error !== undefined ? result.error.message : null,
+    error: result.error != null ? result.error.message : null,
   };
 }
 
 /** A signal-killed or unspawned child: its output is never read as success or absence. */
 function isHardFailure(result: RunWranglerResult): boolean {
-  return (
-    (result.signal !== null && result.signal !== undefined) ||
-    (result.error !== null && result.error !== undefined)
-  );
+  return result.signal != null || result.error != null;
 }
 
 /** The child ran to completion and reported SUCCESS (a clean numeric exit 0). */
@@ -1443,7 +1425,7 @@ function withListerDeadline<T>(start: (signal: AbortSignal) => Promise<T>, ms: n
           clearTimeout(timer);
           resolve(value);
         },
-        (error: unknown) => {
+        (error) => {
           clearTimeout(timer);
           reject(error);
         },
@@ -1486,17 +1468,15 @@ function createDefaultListHyperdriveConfigs(apiToken?: string): ListHyperdriveCo
       if (!res.ok) {
         throw new Error(`Cloudflare API returned HTTP ${res.status} listing Hyperdrive configs`);
       }
-      const body: unknown = await res.json();
-      if (!isJsonObject(body) || body.success !== true || !Array.isArray(body.result)) {
+      const body = (await res.json()) as Record<string, unknown>;
+      if (!isRecord(body) || body.success !== true || !Array.isArray(body.result)) {
         throw new Error(
           'Cloudflare API returned an unsuccessful or malformed Hyperdrive configs payload',
         );
       }
       const info = body.result_info;
       const totalCount =
-        isJsonObject(info) &&
-        typeof info.total_count === 'number' &&
-        Number.isInteger(info.total_count)
+        isRecord(info) && typeof info.total_count === 'number' && Number.isInteger(info.total_count)
           ? info.total_count
           : undefined;
       if (totalCount === undefined || totalCount < 0) {
@@ -1521,7 +1501,7 @@ function createDefaultListHyperdriveConfigs(apiToken?: string): ListHyperdriveCo
       }
       for (const entry of body.result) {
         if (
-          !isJsonObject(entry) ||
+          !isRecord(entry) ||
           typeof entry.id !== 'string' ||
           entry.id.length === 0 ||
           typeof entry.name !== 'string' ||
@@ -1567,7 +1547,7 @@ function selectHyperdriveMatch(
   const validated: Array<HyperdriveConfig> = [];
   for (const config of configs) {
     if (
-      !isJsonObject(config) ||
+      !isRecord(config) ||
       typeof config.id !== 'string' ||
       config.id.length === 0 ||
       typeof config.name !== 'string' ||
@@ -1682,7 +1662,7 @@ function writeQuarantineSidecar(
       dirClose(dirFd);
     }
   } catch (error) {
-    const code = errorCode(error) ?? '';
+    const code = (error as NodeJS.ErrnoException).code ?? '';
     if (!['EISDIR', 'EPERM', 'EINVAL', 'ENOTSUP', 'ENOSYS'].includes(code)) {
       try {
         unlinkSync(sidecarPath);
@@ -1693,9 +1673,9 @@ function writeQuarantineSidecar(
     }
     // Decision: Platform-unsupported directory fsync — the read-back below is still required.
   }
-  const readBack: unknown = JSON.parse(readFileSync(sidecarPath, 'utf8'));
+  const readBack: unknown = JSON.parse(readFileSync(sidecarPath, 'utf-8'));
   if (
-    !isJsonObject(readBack) ||
+    !isRecord(readBack) ||
     readBack.pid !== (info.pid ?? null) ||
     readBack.reason !== info.reason
   ) {
@@ -1719,10 +1699,10 @@ function assertQuarantineClearedOrClear(lockTarget: string, onBeforeClear?: () =
   if (!existsSync(sidecarPath)) {
     return;
   }
-  let recorded: JsonObject | undefined;
+  let recorded: Record<string, unknown> | undefined;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(sidecarPath, 'utf8'));
-    recorded = isJsonObject(parsed) ? parsed : undefined;
+    const parsed: unknown = JSON.parse(readFileSync(sidecarPath, 'utf-8'));
+    recorded = isRecord(parsed) ? parsed : undefined;
   } catch {
     recorded = undefined;
   }
@@ -1765,12 +1745,12 @@ function assertQuarantineClearedOrClear(lockTarget: string, onBeforeClear?: () =
   const inspectedGeneration =
     typeof recorded?.generation === 'string' ? recorded.generation : undefined;
   onBeforeClear?.();
-  let current: JsonObject | undefined;
+  let current: Record<string, unknown> | undefined;
   try {
-    const reread: unknown = JSON.parse(readFileSync(sidecarPath, 'utf8'));
-    current = isJsonObject(reread) ? reread : undefined;
+    const reread: unknown = JSON.parse(readFileSync(sidecarPath, 'utf-8'));
+    current = isRecord(reread) ? reread : undefined;
   } catch (error) {
-    if (errorCode(error) === 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // Decision: Concurrently cleared — nothing left to remove; proceed to normal acquisition.
       return;
     }
@@ -1789,7 +1769,7 @@ function assertQuarantineClearedOrClear(lockTarget: string, onBeforeClear?: () =
   try {
     unlinkSync(sidecarPath);
   } catch (error) {
-    if (errorCode(error) !== 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
     // Decision: Another acquirer cleared it concurrently — proceed to normal acquisition.
@@ -1807,18 +1787,11 @@ type ProperLockfileInternals = {
   >;
 };
 
-function isProperLockfileInternals(value: unknown): value is ProperLockfileInternals {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (!('getLocks' in value) || value.getLocks === undefined || typeof value.getLocks === 'function')
-  );
-}
-
 function loadProperLockfileInternals(): ProperLockfileInternals | undefined {
   try {
-    const loaded: unknown = createRequire(import.meta.url)('proper-lockfile/lib/lockfile.js');
-    return isProperLockfileInternals(loaded) ? loaded : undefined;
+    return createRequire(import.meta.url)(
+      'proper-lockfile/lib/lockfile.js',
+    ) as ProperLockfileInternals;
   } catch {
     return undefined;
   }
@@ -1837,7 +1810,7 @@ function canonicalizeConfigPath(absoluteConfigPath: string, depth = 0): string {
   try {
     return toPosixConfigPath(realpathSync(absoluteConfigPath));
   } catch (error) {
-    if (errorCode(error) !== 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
   }
@@ -1861,7 +1834,7 @@ function canonicalizeConfigPath(absoluteConfigPath: string, depth = 0): string {
   try {
     return join(realpathSync(dir), basename(absoluteConfigPath));
   } catch (error) {
-    if (errorCode(error) !== 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
     return absoluteConfigPath;
@@ -1892,24 +1865,18 @@ const LOCK_STALE_MS = 120_000;
 /** Refresh interval keeping a live owner's lock fresh (must be < {@link LOCK_STALE_MS}). */
 const LOCK_UPDATE_MS = 20_000;
 /** Backoff while waiting for a held lock (about a minute). */
-const LOCK_RETRIES = { retries: 100, factor: 1.5, minTimeout: 200, maxTimeout: 2000 } as const;
+const LOCK_RETRIES = { retries: 100, factor: 1.5, minTimeout: 200, maxTimeout: 2_000 } as const;
 
 /** Stale window of the short-lived recovery mutex. */
-const RECOVERY_LOCK_STALE_MS = 6000;
+const RECOVERY_LOCK_STALE_MS = 6_000;
 
-type LockRetries = {
+/** Backoff schedule for our own retry loop (proper-lockfile runs with `retries: 0`). */
+function normalizeLockRetries(retries: ProvisionLockOptions['retries']): {
   retries: number;
   factor: number;
   minTimeout: number;
   maxTimeout: number;
-};
-
-function isElockedError(error: unknown): boolean {
-  return errorCode(error) === 'ELOCKED';
-}
-
-/** Backoff schedule for our own retry loop (proper-lockfile runs with `retries: 0`). */
-function normalizeLockRetries(retries: ProvisionLockOptions['retries']): LockRetries {
+} {
   if (typeof retries === 'number') {
     return { ...LOCK_RETRIES, retries };
   }
@@ -1946,28 +1913,26 @@ export async function acquireProvisionLock(
   const recoveryTarget = `${lockTarget}.recovery`;
   const staleMs = lockOptions?.stale ?? LOCK_STALE_MS;
   const retryCfg = normalizeLockRetries(lockOptions?.retries);
+  const isElocked = (error: unknown): boolean =>
+    (error as { code?: string } | null)?.code === 'ELOCKED';
   const backoffDelay = (attempt: number): Promise<void> =>
-    new Promise((resolveSleep) => {
+    new Promise((resolveSleep) =>
       setTimeout(
         resolveSleep,
         Math.min(retryCfg.minTimeout * retryCfg.factor ** attempt, retryCfg.maxTimeout),
-      );
-    });
-  const acquireOnce = (): ReturnType<typeof lockfile.lock> => {
-    const lockCall: NonNullable<Parameters<typeof lockfile.lock>[1]> = {
+      ),
+    );
+  const acquireOnce = (): ReturnType<typeof lockfile.lock> =>
+    lockfile.lock(lockTarget, {
       stale: staleMs,
       update: lockOptions?.update ?? LOCK_UPDATE_MS,
       retries: 0,
       realpath: false,
+      ...(lockOptions?.fs !== undefined ? { fs: lockOptions.fs as never } : {}),
       onCompromised: (error) => {
         throw error;
       },
-    };
-    if (lockOptions?.fs !== undefined) {
-      lockCall.fs = lockOptions.fs;
-    }
-    return lockfile.lock(lockTarget, lockCall);
-  };
+    });
   // Decision: The recovery mutex always uses the default fs, never the test seam.
   const acquireRecoveryOnce = (): ReturnType<typeof lockfile.lock> =>
     lockfile.lock(recoveryTarget, {
@@ -1984,7 +1949,7 @@ export async function acquireProvisionLock(
     try {
       releaseRecovery = await acquireRecoveryOnce();
     } catch (error) {
-      if (isElockedError(error) && attempt < retryCfg.retries) {
+      if (isElocked(error) && attempt < retryCfg.retries) {
         await backoffDelay(attempt);
         continue;
       }
@@ -1996,13 +1961,13 @@ export async function acquireProvisionLock(
       try {
         release = await acquireOnce();
       } catch (error) {
-        if (isElockedError(error) && attempt < retryCfg.retries) {
+        if (isElocked(error) && attempt < retryCfg.retries) {
           mainHeldByOther = true; /* Decision: back off AFTER releasing the recovery mutex */
         } else {
           throw error;
         }
       }
-      if (release !== undefined) {
+      if (!mainHeldByOther) {
         // Decision: (3) Revalidate under ownership: the previous holder may have quarantined after
         // the gate ran.
         try {
@@ -2010,7 +1975,7 @@ export async function acquireProvisionLock(
         } catch (gateError) {
           let revalidateReleaseError: unknown;
           try {
-            await release();
+            await release!();
           } catch (error) {
             revalidateReleaseError = error;
           }
@@ -2020,8 +1985,8 @@ export async function acquireProvisionLock(
               [gateError, revalidateReleaseError],
               `provision: a quarantine was found right after acquiring the provision lock AND the ` +
                 `fresh lock could not be released afterward. Quarantine: ` +
-                `${getErrorMessage(gateError)}; release error: ` +
-                `${getErrorMessage(revalidateReleaseError)}`,
+                `${(gateError as Error).message}; release error: ` +
+                `${(revalidateReleaseError as Error).message}`,
               { cause: gateError },
             );
           }
@@ -2042,24 +2007,20 @@ export async function acquireProvisionLock(
   }
   // Decision: One shared release promise. A real unlock failure is surfaced, because the mutex
   // directory may remain; ERELEASED means it was already dropped and counts as success.
-  if (release === undefined) {
-    throw new Error('provision: lock acquisition finished without a held lock');
-  }
-  const acquiredRelease = release;
+  const acquiredRelease = release!;
   let releasePromise: Promise<void> | undefined;
   const doRelease = async (): Promise<void> => {
     try {
       await acquiredRelease();
     } catch (error) {
-      if (errorCode(error) === 'ERELEASED') {
+      if ((error as { code?: string } | null)?.code === 'ERELEASED') {
         return;
       }
       throw new Error(
         `provision: failed to release the cross-process provision lock "${lockTarget}.lock" ` +
-          `(${getErrorMessage(error)}). The mutex directory may still exist and will block ` +
+          `(${(error as Error).message}). The mutex directory may still exist and will block ` +
           `future provisions until it goes stale (~${Math.round(staleMs / 1000)}s). Remove it ` +
           `manually if it persists, then retry.`,
-        { cause: error },
       );
     }
   };
@@ -2078,7 +2039,7 @@ export async function acquireProvisionLock(
       } catch (error) {
         throw new Error(
           `provision: could not persist quarantine metadata to ` +
-            `"${quarantineSidecarPath(lockTarget)}" (${getErrorMessage(error)}). The ` +
+            `"${quarantineSidecarPath(lockTarget)}" (${(error as Error).message}). The ` +
             `cross-process provision lock "${lockTarget}.lock" is intentionally STILL HELD by ` +
             `this process (tracked, heartbeat running) so it cannot go stale and be stolen ` +
             `while the unconfirmed Cloudflare operation process` +
@@ -2087,7 +2048,6 @@ export async function acquireProvisionLock(
             `${info.pid !== undefined ? ` (e.g. \`kill -0 ${info.pid}\`)` : ''} and terminate ` +
             `it if not; the lock is freed when this process exits — remove the ` +
             `"${lockTarget}.lock" directory if it persists, then re-run.`,
-          { cause: error },
         );
       }
       releasePromise = Promise.resolve(); /* Decision: any later release() is a settled no-op */
@@ -2117,7 +2077,7 @@ function readBindingEntry(
   configPath: string,
   field: string,
   binding: string,
-): JsonObject | undefined {
+): Record<string, unknown> | undefined {
   return readProvisionedBindingEntry(readRootConfig(configPath), field, binding, configPath);
 }
 
@@ -2125,20 +2085,20 @@ function readBindingEntry(
  * Read the root config fresh (wrangler edits it), without a BOM. A parse error or a non-object
  * fails; a missing file reads as `{}`.
  */
-function readRootConfig(configPath: string): JsonObject {
+function readRootConfig(configPath: string): Record<string, unknown> {
   if (!existsSync(configPath)) {
     return {};
   }
-  const raw = readFileSync(configPath, 'utf8');
+  const raw = readFileSync(configPath, 'utf-8');
   const content = raw.startsWith(UTF8_BOM) ? raw.slice(UTF8_BOM.length) : raw;
   const errors: Array<ParseError> = [];
-  const parsed: unknown = parse(content, errors, { allowTrailingComma: true });
+  const parsed = parse(content, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
     throw new Error(
       `provision: cannot read "${configPath}" — it is not valid JSON/JSONC. Fix the file and retry.`,
     );
   }
-  if (!isJsonObject(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error(`provision: "${configPath}" must be a JSON object.`);
   }
   return parsed;
@@ -2162,7 +2122,7 @@ interface ResourceListSpec {
   /** Operation label for messages, e.g. `Cloudflare kv namespace list`. */
   command: string;
   /** Identity check for every member, before name filtering. */
-  hasValidId: (member: JsonObject) => boolean;
+  hasValidId: (member: Record<string, unknown>) => boolean;
   /** Human description of the id requirement for the whole-list rejection message. */
   idRule: string;
   /** The member field carrying the account-matched name/title. */
@@ -2175,10 +2135,13 @@ interface ResourceListSpec {
  * Reject the whole list if any member lacks a non-empty name or a valid id. A malformed member
  * could be the target, so it is never filtered out as "absent".
  */
-function validateResourceList(list: Array<unknown>, spec: ResourceListSpec): Array<JsonObject> {
-  const validated: Array<JsonObject> = [];
+function validateResourceList(
+  list: Array<unknown>,
+  spec: ResourceListSpec,
+): Array<Record<string, unknown>> {
+  const validated: Array<Record<string, unknown>> = [];
   for (const member of list) {
-    if (!isJsonObject(member)) {
+    if (!isRecord(member)) {
       throw new Error(
         `provision: ${spec.command} returned a malformed ${spec.resource} entry (not an object). ` +
           `Cannot verify existing resources; refusing to create a possible duplicate.`,
@@ -2214,7 +2177,7 @@ type D1Match = { kind: 'match'; id: string } | { kind: 'claimed-but-invalid' } |
  */
 type D1ReconciledId = { kind: 'id'; id: string } | { kind: 'absent' } | { kind: 'invalid' };
 
-function reconcileD1IdAliases(entry: JsonObject): D1ReconciledId {
+function reconcileD1IdAliases(entry: Record<string, unknown>): D1ReconciledId {
   const present = [entry.database_id, entry.uuid].filter(
     (value) => value !== undefined && value !== '',
   );
@@ -2239,7 +2202,7 @@ function reconcileD1IdAliases(entry: JsonObject): D1ReconciledId {
  * (`name`, `database_name`) equals `requestedName`; `claimed-but-invalid` when one does but the
  * name or id aliases conflict; otherwise `match`.
  */
-function normalizeD1(entry: JsonObject | undefined, requestedName: string): D1Match {
+function normalizeD1(entry: Record<string, unknown> | undefined, requestedName: string): D1Match {
   if (entry === undefined) {
     return { kind: 'other' };
   }
@@ -2271,7 +2234,7 @@ function isAlreadyExistsError(result: RunWranglerResult): boolean {
 function isConfirmedAbsent(result: RunWranglerResult, kind: 'r2' | 'queue'): boolean {
   return (
     isCleanFailure(result) &&
-    (kind === 'r2' ? result.errorCode === 10_006 : result.failure === 'not-found')
+    (kind === 'r2' ? result.errorCode === 10006 : result.failure === 'not-found')
   );
 }
 
@@ -2282,7 +2245,7 @@ export function isQueueConfirmedAbsent(result: RunWranglerResult): boolean {
 
 /** Reuse and post-create verification require clean success and the exact returned name. */
 function queueInfoConfirmsExists(result: RunWranglerResult, name: string): boolean {
-  return isCleanSuccess(result) && isJsonObject(result.data) && result.data.name === name;
+  return isCleanSuccess(result) && isRecord(result.data) && result.data.name === name;
 }
 
 /** Throw when the writer found no D1 entry to attach `migrations_dir` to. */
@@ -2425,7 +2388,7 @@ function createSecretRedactor(connectionString?: string): (text: string) => stri
     if (typeof connectionString === 'string' && connectionString.length > 0) {
       out = out.split(connectionString).join('[REDACTED]');
     }
-    out = out.replaceAll(/(\w[\w+.-]*:\/\/[^\s/@:]+:)[^\s@/]+(@)/g, '$1[REDACTED]$2');
+    out = out.replace(/(\w[\w+.-]*:\/\/[^\s/@:]+:)[^\s@/]+(@)/g, '$1[REDACTED]$2');
     return out;
   };
 }
@@ -2495,16 +2458,12 @@ async function provisionWithProcessSlot(
   if (threw) {
     // Decision: An unconfirmed child may still be running, so keep the lock.
     if (isQuarantineError(bodyError)) {
-      let quarantineError: unknown;
       try {
         retainQuarantinedLock(lock, {
           pid: typeof bodyError.pid === 'number' ? bodyError.pid : undefined,
           reason: typeof bodyError.message === 'string' ? bodyError.message : String(bodyError),
         });
-      } catch (error) {
-        quarantineError = error;
-      }
-      if (quarantineError !== undefined) {
+      } catch (quarantineError) {
         // Decision: Not persisted: the watchdog keeps the lock held. Surface both errors.
         throw new AggregateError(
           [bodyError, quarantineError],
@@ -2541,10 +2500,7 @@ async function provisionWithProcessSlot(
   }
   // Decision: Body succeeded: a genuine unlock failure (leaked mutex) rejects the provision.
   await lock.release();
-  if (result === undefined) {
-    throw new Error('provision: the provision body finished without a result');
-  }
-  return result;
+  return result as ProvisionResult;
 }
 
 /** Injectable seams + settings for {@link provisionCloudflareResources}. */
@@ -2585,8 +2541,8 @@ export async function setD1ReadReplicationViaApi(
       signal: AbortSignal.timeout(15_000),
     },
   );
-  const envelope: unknown = await response.json().catch(() => null);
-  if (!response.ok || !isJsonObject(envelope) || envelope.success !== true) {
+  const envelope = (await response.json().catch(() => null)) as { success?: unknown } | null;
+  if (!response.ok || envelope?.success !== true) {
     throw new Error(
       `provision: could not ${context.readReplication ? 'enable' : 'disable'} D1 read replication for database ${context.databaseId} ` +
         `(Cloudflare API status ${response.status}). The credential needs D1 Edit permission.`,
@@ -2678,7 +2634,7 @@ async function reconcileD1(
         assertD1MigrationsDirApplied(res, binding, configPath);
         resources.push({ kind: 'd1', binding, name, action: 'adopted', id: existing.id });
       } else {
-        const created = await runWrangler({ type: 'd1.create', name, binding, configPath });
+        const created = await runWrangler({ type: 'd1.create', name: name, binding, configPath });
         if (isCleanSuccess(created)) {
           assertCreateWroteRealId(
             configPath,
@@ -2699,12 +2655,9 @@ async function reconcileD1(
           resources.push({ kind: 'd1', binding, name, action: 'created' });
         } else if (isCleanFailure(created) && isAlreadyExistsError(created)) {
           // Decision: Created between list and create (code 7502): adopt only an exact `d1 info` match.
-          const infoResult = await runWrangler({ type: 'd1.info', name, configPath }, {});
+          const infoResult = await runWrangler({ type: 'd1.info', name: name, configPath }, {});
           assertDiscoverySucceeded(infoResult, `Cloudflare d1 info ${name}`);
-          const info = normalizeD1(
-            isJsonObject(infoResult.data) ? infoResult.data : undefined,
-            name,
-          );
+          const info = normalizeD1(isRecord(infoResult.data) ? infoResult.data : undefined, name);
           if (info.kind !== 'match') {
             throw new Error(
               `provision: Cloudflare d1 create ${name} reported the database already exists, ` +
@@ -2748,7 +2701,7 @@ async function reconcileD1(
       let token = opts?.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
       if (!token) {
         const auth = await runWrangler({ type: 'auth.token', configPath }, { suppressLogs: true });
-        const parsed = isCleanSuccess(auth) && isJsonObject(auth.data) ? auth.data : undefined;
+        const parsed = isCleanSuccess(auth) && isRecord(auth.data) ? auth.data : undefined;
         if (
           (parsed?.type === 'oauth' || parsed?.type === 'api_token') &&
           typeof parsed.token === 'string'
@@ -2801,9 +2754,9 @@ async function reconcileKv(
       nameLabel: 'titled',
     });
     // Decision: validateResourceList already required a real KV id on every member.
-    const matches = namespaces.flatMap((ns) =>
-      ns.title === title && typeof ns.id === 'string' ? [{ id: ns.id }] : [],
-    );
+    const matches = namespaces
+      .filter((ns) => ns.title === title)
+      .map((ns) => ({ id: ns.id as string }));
     if (matches.length > 0) {
       // Decision: Pick the smallest id so re-runs adopt the same namespace.
       const chosen = matches.reduce((min, ns) => (ns.id < min.id ? ns : min));
@@ -2878,7 +2831,7 @@ async function reconcileR2(
       const info = await runWrangler({ type: 'r2.bucket.info', name: bucketName, configPath }, {});
       if (isCleanSuccess(info)) {
         const payload = info.data;
-        if (!isJsonObject(payload) || payload.name !== bucketName) {
+        if (!isRecord(payload) || payload.name !== bucketName) {
           throw new Error(
             `provision: Cloudflare r2 bucket info ${bucketName} exited 0 but did not identify ` +
               `the requested bucket (expected name ${JSON.stringify(bucketName)}). Refusing to adopt an ` +
@@ -2889,16 +2842,13 @@ async function reconcileR2(
         write({ r2: { binding, bucketName } });
         resources.push({ kind: 'r2', binding, name: bucketName, action: 'adopted' });
       } else if (isConfirmedAbsent(info, 'r2')) {
-        const createBucket: Extract<CloudflareOperation, { type: 'r2.bucket.create' }> = {
+        const created = await runWrangler({
           type: 'r2.bucket.create',
+          ...(desired.r2.locationHint ? { locationHint: desired.r2.locationHint } : {}),
           name: bucketName,
           binding,
           configPath,
-        };
-        if (desired.r2.locationHint) {
-          createBucket.locationHint = desired.r2.locationHint;
-        }
-        const created = await runWrangler(createBucket);
+        });
         if (!isCleanSuccess(created)) {
           throw new Error(
             `provision: Cloudflare r2 bucket create ${bucketName} failed: ${created.stderr || created.stdout}`,
@@ -2927,7 +2877,7 @@ async function reconcileR2(
           );
           if (
             !isCleanSuccess(verify) ||
-            !isJsonObject(verify.data) ||
+            !isRecord(verify.data) ||
             verify.data.name !== bucketName
           ) {
             throw new Error(
@@ -3030,7 +2980,7 @@ async function reconcileHyperdrive(
         );
       } else {
         const created = await runWrangler(
-          { type: 'hyperdrive.create', name, binding, configPath },
+          { type: 'hyperdrive.create', name: name, binding, configPath },
           { input: connectionString },
         );
         if (!isCleanSuccess(created)) {
@@ -3065,7 +3015,7 @@ async function reconcileQueues(
 ): Promise<void> {
   // Decision: Only ensures each queue exists; the deploy orchestrator writes the queue bindings.
   for (const name of desired.queues) {
-    const info = await runWrangler({ type: 'queues.info', name, configPath });
+    const info = await runWrangler({ type: 'queues.info', name: name, configPath });
     // Decision: Reuse only when the probe names this queue; a bare exit 0 is not trusted.
     if (queueInfoConfirmsExists(info, name)) {
       resources.push({ kind: 'queue', name, action: 'reused' });
@@ -3078,14 +3028,14 @@ async function reconcileQueues(
           `${info.stderr || info.stdout || 'no output'}`,
       );
     }
-    const created = await runWrangler({ type: 'queues.create', name, configPath });
+    const created = await runWrangler({ type: 'queues.create', name: name, configPath });
     if (!isCleanSuccess(created)) {
       throw new Error(
         `provision: Cloudflare queues create ${name} failed: ${created.stderr || created.stdout}`,
       );
     }
     // Decision: Queue creates write no config, so re-probe to confirm.
-    const verify = await runWrangler({ type: 'queues.info', name, configPath });
+    const verify = await runWrangler({ type: 'queues.info', name: name, configPath });
     if (!queueInfoConfirmsExists(verify, name)) {
       throw new Error(
         `provision: Cloudflare queues create ${name} reported success but Cloudflare queues info ` +
@@ -3106,7 +3056,7 @@ async function provisionCloudflareResourcesLocked(
 ): Promise<ProvisionResult> {
   // Decision: jsonc-parser accepts duplicate members, so reject them before any remote work.
   if (existsSync(configPath)) {
-    const raw = readFileSync(configPath, 'utf8');
+    const raw = readFileSync(configPath, 'utf-8');
     const content = raw.startsWith(UTF8_BOM) ? raw.slice(UTF8_BOM.length) : raw;
     assertNoDuplicateMembers(content, configPath);
   }
@@ -3237,7 +3187,7 @@ async function provisionCloudflareResourcesLocked(
   }
 
   // Decision: The account fence above guarantees a value whenever a runner is called.
-  const transportAccountId = effectiveAccountId ?? '';
+  const transportAccountId = effectiveAccountId!;
   // Decision: One API base for the runner and the Hyperdrive REST lister.
   const transportApiBaseUrl = resolvePinnedApiBaseUrl(process.env, configComplianceRegion);
 
@@ -3249,10 +3199,7 @@ async function provisionCloudflareResourcesLocked(
     ...result,
     stdout: redactSecrets(result.stdout),
     stderr: redactSecrets(result.stderr),
-    error:
-      result.error !== null && result.error !== undefined
-        ? redactSecrets(result.error)
-        : result.error,
+    error: result.error != null ? redactSecrets(result.error) : result.error,
   });
   // Decision: Every call gets the pinned account and API base.
   const runWrangler = (

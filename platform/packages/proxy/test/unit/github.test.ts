@@ -97,6 +97,9 @@ describe('POST /github/request', () => {
   it.each([
     '/user',
     '/repos/acme/widgets/../../user',
+    '/repos/acme/widgets/%2e%2e/%2e%2e/user',
+    '/repos/acme/widgets/%2E./%2e%2E/orgs/acme/repos',
+    '/repos/acme/widgets/./pulls',
     '/repos//x/y',
     'https://evil.test/repos/a/b',
   ])('refuses path %s', async (path) => {

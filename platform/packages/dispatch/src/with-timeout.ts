@@ -213,10 +213,13 @@ export async function withDelayedHedge<T>(
     return peerResult.outcome.value;
   }
   finish();
-  if (winner.outcome.ok || peerResult.outcome.ok) {
-    return null;
+  if (!winner.outcome.ok) {
+    throw winner.outcome.error;
   }
-  throw winner.outcome.error;
+  if (!peerResult.outcome.ok) {
+    throw peerResult.outcome.error;
+  }
+  return null;
 }
 
 /**

@@ -159,10 +159,11 @@ export async function getD1DatabaseByName(
     `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((database) => database.name === name);
+  if (!match) {
     throw new Error(`D1 database not found: ${name}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function getKVNamespaceByTitle(
@@ -174,10 +175,11 @@ export async function getKVNamespaceByTitle(
     `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((namespace) => namespace.title === title);
+  if (!match) {
     throw new Error(`KV namespace not found: ${title}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function getQueueByName(
@@ -189,10 +191,11 @@ export async function getQueueByName(
     `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((queue) => queue.queue_name === name);
+  if (!match) {
     throw new Error(`Queue not found: ${name}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function deleteD1Database(

@@ -1092,7 +1092,7 @@ async function secrets(): Promise<Result> {
     case 'secret.list':
       return runCf(['workers', 'secrets', 'list', '--worker', worker]);
     case 'secret.put': {
-      const value = readFileSync(0, 'utf8').replace(/\n$/, '');
+      const value = readFileSync(0, 'utf8').replace(/\r?\n$/, '');
       const name = operation.name;
       return withSecretFile(JSON.stringify({ name, text: value, type: 'secret_text' }), (path) =>
         apply({ [name]: value }, () =>

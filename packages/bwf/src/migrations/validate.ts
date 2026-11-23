@@ -23,6 +23,7 @@ const DESTRUCTIVE_PATTERNS = [
   /\bALTER\s+TABLE\b[\s\S]*\bRENAME\b[\s\S]*\bTO\b/i,
   /\bTRUNCATE\b/i,
   /\bINSERT\s+OR\s+REPLACE\b/i,
+  /\bREPLACE\s+INTO\b/i,
 ];
 
 function splitExecutableStatements(sql: string): Array<string> {

@@ -29,6 +29,7 @@ import {
   markSharedCachePolicy,
   SHARED_CACHE_POLICY_HEADER,
 } from './shared-cache.ts';
+import { dropParentDomainCookies } from './shared-domain-cookies.ts';
 import { resolveStaticPath, resolveAssetContentType, safeDecodePathname } from './static.ts';
 import type { AssetConfig } from './static.ts';
 import {
@@ -141,12 +142,6 @@ function staticAssetFailureResponse(kind: FailureKind): Response {
       'Retry-After': '5',
     },
   });
-}
-
-export function isHtmlResponse(response: Response): boolean {
-  return (
-    response.headers.get('content-type')?.toLowerCase().split(';', 1)[0]?.trim() === 'text/html'
-  );
 }
 
 async function applyWorkerFallbackRules(opts: {
@@ -715,6 +710,8 @@ const dispatcher = {
             responseBytes,
             ...(response.status >= 500 && { status: response.status }),
             ...(failureKind && { failureKind }),
+          }).catch((error: unknown) => {
+            console.error(`[usage] dropped a usage event for project ${routing.projectId}:`, error);
           }),
         );
       }
@@ -723,6 +720,9 @@ const dispatcher = {
       // Decision: Cache API and upstream responses have immutable headers, so the internal cache marker is only
       // stripped from this writable client response.
       res.headers.delete(SHARED_CACHE_POLICY_HEADER);
+      if (slug) {
+        dropParentDomainCookies(res.headers, url.hostname);
+      }
       res.headers.set('X-Hosted-By', 'void.cloud');
       return res;
     };

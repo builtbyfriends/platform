@@ -4,19 +4,16 @@ import { Hono } from 'hono';
 import { oauthBearer, OAuthError } from '../auth/oauth.ts';
 import type { ApiEnv } from '../env.ts';
 import { rememberAppCaller } from './app-procedure.ts';
-import {
-  create as previewsCreate,
-  deploy as previewsDeploy,
-  launch as previewsLaunch,
-} from './procedures/previews.ts';
-import { request as publishRequest } from './procedures/publish.ts';
+import * as previews from './procedures/previews.ts';
+import * as publish from './procedures/publish.ts';
+import { withBackgroundWork } from './route.ts';
 
 /** Procedures for OAuth-connected applications such as a bot platform's workspaces. */
 const appRegistry = defineRegistry([
-  previewsCreate,
-  previewsDeploy,
-  previewsLaunch,
-  publishRequest,
+  previews.create,
+  previews.deploy,
+  previews.launch,
+  publish.request,
 ]);
 
 const rpc = rpcHandler(appRegistry, {
@@ -40,13 +37,14 @@ export const appRpcRoutes = new Hono<ApiEnv>().all('/*', async (context) => {
     }
     throw error;
   }
-  return rpc(request, context.env, {
-    waitUntil: (work) => {
-      try {
-        context.executionCtx.waitUntil(work);
-      } catch {
-        void work;
-      }
-    },
-  });
+  return withBackgroundWork(context, (waitUntil) =>
+    rpc(request, context.env, {
+      waitUntil: (work) =>
+        waitUntil(
+          work.catch((error: unknown) => {
+            console.error('[app-rpc] background task failed:', error);
+          }),
+        ),
+    }),
+  );
 });

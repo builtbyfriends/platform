@@ -31,7 +31,7 @@ function rememberRequestCaller(context: Context<ApiEnv>): void {
 }
 
 /** Runs `handle`, finishing any background work first when there is no execution context. */
-async function withBackgroundWork(
+export async function withBackgroundWork(
   context: Context<ApiEnv>,
   handle: (waitUntil: (work: Promise<unknown>) => void) => Promise<Response>,
 ): Promise<Response> {

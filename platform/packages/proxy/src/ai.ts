@@ -434,11 +434,14 @@ ai.post('/run', async (context) => {
       ...options,
       signal: context.req.raw.signal,
     });
-    return responseFromAiResult(result, hasStreamFlag(body.inputs) && body.inputs.stream === true);
-  } catch (error) {
-    const message = messageFromThrown(error);
+    return await responseFromAiResult(
+      result,
+      hasStreamFlag(body.inputs) && body.inputs.stream === true,
+    );
+  } catch (err) {
+    const message = messageFromThrown(err);
     console.error('AI inference error:', message);
-    return responseFromAiError(error);
+    return responseFromAiError(err);
   }
 });
 
@@ -503,11 +506,11 @@ ai.post('/provider', async (context) => {
     }
 
     return responseFromGateway(response, false);
-  } catch (error) {
-    if (error instanceof BadRequestError) {
-      return context.json({ error: error.message }, 400);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return context.json({ error: err.message }, 400);
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = err instanceof Error ? err.message : String(err);
     console.error('AI Gateway error:', message);
     return context.json({ error: 'gateway error' }, 502);
   }
@@ -518,8 +521,8 @@ ai.post('/models', async (context) => {
   try {
     const result = await context.env.AI.models(body.inputs);
     return context.json(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('AI inference error:', message);
     return context.json({ error: 'inference error' }, 502);
   }
@@ -542,8 +545,8 @@ ai.post('/toMarkdown', async (context) => {
   try {
     const result = await context.env.AI.toMarkdown(body.inputs, options);
     return context.json(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('AI inference error:', message);
     return context.json({ error: 'inference error' }, 502);
   }
