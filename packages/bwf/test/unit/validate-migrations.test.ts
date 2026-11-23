@@ -91,6 +91,11 @@ describe('isDestructive', () => {
     expect(isDestructive('TRUNCATE users;')).toBe(true);
     expect(isDestructive('truncate users, posts;')).toBe(true);
   });
+
+  it('detects REPLACE INTO, the short form of INSERT OR REPLACE', () => {
+    expect(isDestructive("REPLACE INTO users (id, email) VALUES (1, 'x');")).toBe(true);
+    expect(isDestructive("SELECT replace(email, 'a', 'b') FROM users;")).toBe(false);
+  });
 });
 
 describe('validateMigrations', () => {

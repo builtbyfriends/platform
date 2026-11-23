@@ -47,7 +47,7 @@ import {
   snapshotQueueConsumer,
   type QueueConsumerInfo,
 } from '../provisioning/cloudflare-api.ts';
-import { computeDispatchLimits, resolveRoutingUndo } from '../routing.ts';
+import { computeDispatchLimits, projectRouteKey, resolveRoutingUndo } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { projectRoutingSuspensionReason } from '../suspension.ts';
 import { isWithinLimit } from '../tiers.ts';
@@ -471,7 +471,7 @@ export async function runDeploymentPipeline(input: {
               await context.env.ROUTING.delete(key);
             } else {
               let value = undo.value;
-              if (key === project.slug || key.startsWith('domain:')) {
+              if (key === projectRouteKey(project) || key.startsWith('domain:')) {
                 value = refreshPolicy
                   ? rewriteProjectRouteMetadata(JSON.parse(value) as Record<string, unknown>, {
                       projectId,

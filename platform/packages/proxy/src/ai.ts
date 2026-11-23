@@ -434,7 +434,10 @@ ai.post('/run', async (context) => {
       ...options,
       signal: context.req.raw.signal,
     });
-    return responseFromAiResult(result, hasStreamFlag(body.inputs) && body.inputs.stream === true);
+    return await responseFromAiResult(
+      result,
+      hasStreamFlag(body.inputs) && body.inputs.stream === true,
+    );
   } catch (err) {
     const message = messageFromThrown(err);
     console.error('AI inference error:', message);

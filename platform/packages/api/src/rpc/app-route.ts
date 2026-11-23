@@ -6,6 +6,7 @@ import type { ApiEnv } from '../env.ts';
 import { rememberAppCaller } from './app-procedure.ts';
 import * as previews from './procedures/previews.ts';
 import * as publish from './procedures/publish.ts';
+import { withBackgroundWork } from './route.ts';
 
 /** Procedures for OAuth-connected applications such as a bot platform's workspaces. */
 const appRegistry = defineRegistry([
@@ -36,13 +37,14 @@ export const appRpcRoutes = new Hono<ApiEnv>().all('/*', async (context) => {
     }
     throw error;
   }
-  return rpc(request, context.env, {
-    waitUntil: (work) => {
-      try {
-        context.executionCtx.waitUntil(work);
-      } catch {
-        void work;
-      }
-    },
-  });
+  return withBackgroundWork(context, (waitUntil) =>
+    rpc(request, context.env, {
+      waitUntil: (work) =>
+        waitUntil(
+          work.catch((error: unknown) => {
+            console.error('[app-rpc] background task failed:', error);
+          }),
+        ),
+    }),
+  );
 });

@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { isRecord } from '@builtbyfriends/deploy-core';
 import type { PlatformDiscoveryDocument } from '@builtbyfriends/platform';
 import { log, confirm, isCancel, cancel, select, text } from '@voidzero-dev/vite-plus-prompts';
-import { parse, type ParseError } from 'jsonc-parser';
+import { applyEdits, modify, parse, type FormattingOptions, type ParseError } from 'jsonc-parser';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
@@ -39,6 +39,7 @@ import { migrateLegacyBwfConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
+import { validateProjectSlug } from './project-slug.ts';
 import {
   readDeploymentPlatform,
   readProjectConfig,
@@ -1164,6 +1165,8 @@ function defaultPackageName(root: string): string {
   );
 }
 
+const TSCONFIG_FORMATTING: FormattingOptions = { tabSize: 2, insertSpaces: true, eol: '\n' };
+
 function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFramework): void {
   const tsconfigPath = join(root, 'tsconfig.json');
 
@@ -1210,6 +1213,8 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
 
     const compilerOptions = asRecord(tsconfig.compilerOptions) ?? {};
     tsconfig.compilerOptions = compilerOptions;
+    const originalFiles = tsconfig.files;
+    const originalPaths = compilerOptions.paths;
     const types = Array.isArray(compilerOptions.types)
       ? compilerOptions.types.filter((value): value is string => typeof value === 'string')
       : [];
@@ -1251,10 +1256,25 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     }
 
     if (updated) {
-      // Decision: Rebuild with extends first so it appears at the top of the file.
-      const { extends: ext, ...rest } = tsconfig;
-      const ordered = { extends: ext, ...rest };
-      writeFileSync(tsconfigPath, JSON.stringify(ordered, null, 2) + '\n');
+      const options = { formattingOptions: TSCONFIG_FORMATTING };
+      let text = readFileSync(tsconfigPath, 'utf-8');
+      const set = (path: Array<string>, value: unknown, extra: object = {}): void => {
+        text = applyEdits(text, modify(text, path, value, { ...options, ...extra }));
+      };
+      // Decision: A newly added extends goes first in the file; an existing one keeps its place.
+      set(
+        ['extends'],
+        tsconfig.extends,
+        extendsValue === undefined ? { getInsertionIndex: () => 0 } : {},
+      );
+      set(['compilerOptions', 'types'], compilerOptions.types);
+      if (tsconfig.files !== originalFiles) {
+        set(['files'], tsconfig.files);
+      }
+      if (compilerOptions.paths !== originalPaths) {
+        set(['compilerOptions', 'paths'], compilerOptions.paths);
+      }
+      writeFileSync(tsconfigPath, text.endsWith('\n') ? text : text + '\n');
     } else {
       log.step('tsconfig.json looks good');
     }
@@ -1776,9 +1796,10 @@ ${install}
   // Decision: When the slug is unknown, fall back to a repository variable and prefix the `BWF_PROJECT` line
   // with a comment (each comment line indented 2 spaces so it stays inside the `env:` mapping and the
   // YAML stays valid).
-  const projectLine = slug
-    ? `BWF_PROJECT: ${slug}`
-    : `# Set a BWF_PROJECT repository variable to your project slug
+  const projectLine =
+    slug && validateProjectSlug(slug) === undefined
+      ? `BWF_PROJECT: ${slug}`
+      : `# Set a BWF_PROJECT repository variable to your project slug
   # (Settings → Secrets and variables → Actions → Variables).
   BWF_PROJECT: \${{ vars.BWF_PROJECT }}`;
   return `name: Deploy to bwf
@@ -1871,6 +1892,9 @@ function setupGithubActions(
  * linked after the workflow was written. Returns false when there is none.
  */
 function patchWorkflowProjectSlug(root: string, slug: string): boolean {
+  if (validateProjectSlug(slug) !== undefined) {
+    return false;
+  }
   const workflowPath = join(root, '.github', 'workflows', 'bwf-deploy.yml');
   if (!existsSync(workflowPath)) {
     return false;

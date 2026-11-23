@@ -186,7 +186,7 @@ export async function addDomain(
     return refuse('HOSTNAME_INVALID');
   }
   const siteDomain = env.SITE_DOMAIN ?? SITE_DOMAIN;
-  if (hostname.endsWith(`.${siteDomain}`)) {
+  if (hostname === siteDomain || hostname.endsWith(`.${siteDomain}`)) {
     return refuse('HOSTNAME_RESERVED', `cannot use ${siteDomain} subdomains`);
   }
   if (await getDomainByHostname(ctx.db, hostname)) {

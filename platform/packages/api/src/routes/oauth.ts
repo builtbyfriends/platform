@@ -34,7 +34,12 @@ import { oauthClients, oauthGrants, oauthRefreshTokens, oauthRequests } from '..
 import { isAdminSuspended } from '../suspension.ts';
 import { APP_PERSON_GRANT, appPersonToken } from './oauth-app-person.ts';
 import previews from './previews.ts';
-import { createProjectForUser, ProjectCreateError, scheduleAfterResponse } from './projects.ts';
+import {
+  createProjectForUser,
+  ProjectCreateError,
+  runScheduledAfterCommit,
+  scheduleAfterCommit,
+} from './projects.ts';
 
 const app = new Hono<ApiEnv>();
 const FLOW_SECONDS = 300;
@@ -438,7 +443,8 @@ async function publishProject(
           env: context.env,
           db: tx,
           user,
-          schedule: (work) => scheduleAfterResponse(context, work),
+          // Decision: `tx` belongs to the caller's transaction, so the work waits for its commit.
+          schedule: async (work) => scheduleAfterCommit(context, work),
         },
         slug,
       )) as NonNullable<typeof project>;
@@ -567,6 +573,7 @@ app.post('/approve', async (context) => {
       })
       .where(eq(oauthRequests.id, request.id));
   });
+  await runScheduledAfterCommit(context);
   const redirect = new URL(request.data.redirectUri);
   redirect.searchParams.set('state', request.data.state);
   if (body.decision === 'approve') {

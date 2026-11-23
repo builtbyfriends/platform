@@ -111,26 +111,48 @@ function renameText(line: string): string {
   return textRenames.reduce((value, [from, to]) => value.replace(from, to), line);
 }
 
-function isRemovedHere(path: string): boolean {
+function packageRoot(path: string): string | null {
   const parts = path.split('/');
   if (['packages', 'playground'].includes(parts[0]) && parts.length > 2) {
-    return !existsSync(`${parts[0]}/${parts[1]}`);
+    return `${parts[0]}/${parts[1]}`;
   }
   if (parts[0] === 'platform' && parts[1] === 'packages' && parts.length > 3) {
-    return !existsSync(parts.slice(0, 3).join('/'));
+    return parts.slice(0, 3).join('/');
   }
-  return false;
+  return null;
+}
+
+// Decision: A package folder this fork doesn't have was removed here on purpose, unless the commit
+// adds the package's own package.json. Then upstream is starting a new package, and it needs a look.
+function newPackageRoots(added: Iterable<string>): Set<string> {
+  const roots = new Set<string>();
+  for (const path of added) {
+    const root = packageRoot(path);
+    if (root !== null && path === `${root}/package.json` && !existsSync(root)) {
+      roots.add(root);
+    }
+  }
+  return roots;
+}
+
+function isRemovedHere(path: string, newPackages: Set<string>): boolean {
+  const root = packageRoot(path);
+  return root !== null && !newPackages.has(root) && !existsSync(root);
 }
 
 // Decision: Used by status only: a file upstream changed that this fork doesn't have was most likely
 // removed here on purpose, along with its feature.
 function isGoneHere(path: string, added: Set<string>): boolean {
-  return isRemovedHere(path) || (!added.has(path) && !existsSync(path));
+  return isRemovedHere(path, newPackageRoots(added)) || (!added.has(path) && !existsSync(path));
 }
 
 function classify(files: Array<string>, added: Set<string>): string {
   const mapped = files.map(renamePath);
   const gone = (file: string) => isGoneHere(file, added);
+  const newPackages = [...newPackageRoots(added)];
+  if (newPackages.length > 0) {
+    return `review: adds a package this fork doesn't have (${newPackages.join(', ')})`;
+  }
   if (mapped.every(gone)) {
     return "skip: only touches code this fork doesn't have";
   }
@@ -211,6 +233,9 @@ function apply(sha: string): void {
       .filter((line) => line.startsWith('-\t-\t'))
       .map((line) => line.split('\t').at(-1)),
   );
+  const newPackages = newPackageRoots(
+    changes.filter(([code]) => code === 'A').map((change) => renamePath(change.at(-1)!)),
+  );
   const tmp = `${WORK_DIR}/${full.slice(0, 9)}`;
   mkdirSync(tmp, { recursive: true });
   const report: Record<string, Array<string>> = {
@@ -226,7 +251,10 @@ function apply(sha: string): void {
     const after = paths.at(-1)!;
     const oursBefore = renamePath(before);
     const ours = renamePath(after);
-    if ((isRemovedHere(oursBefore) && isRemovedHere(ours)) || ours === 'pnpm-lock.yaml') {
+    if (
+      (isRemovedHere(oursBefore, newPackages) && isRemovedHere(ours, newPackages)) ||
+      ours === 'pnpm-lock.yaml'
+    ) {
       report['left out (removed here, or the lockfile)'].push(after);
       continue;
     }

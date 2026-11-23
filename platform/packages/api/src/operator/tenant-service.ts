@@ -717,7 +717,10 @@ async function republishProjectOwnerState(
       manifest?.limits,
     );
     const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);
-    for (const key of [project.slug, ...domains.map((domain) => `domain:${domain.hostname}`)]) {
+    for (const key of [
+      projectRouteKey(project),
+      ...domains.map((domain) => `domain:${domain.hostname}`),
+    ]) {
       const raw = await context.env.ROUTING.get(key);
       if (!raw) {
         continue;

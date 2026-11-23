@@ -126,6 +126,11 @@ function buildWebSocketRoute(
     info?.name === undefined
       ? deriveWebSocketClassName(filePath)
       : deriveWebSocketClassNameFromName(info.name);
+  if (!/^[A-Za-z]/.test(className)) {
+    throw new Error(
+      `WebSocket route "${filePath}" needs a name that starts with a letter. Rename the file, or set \`name\` in its definition.`,
+    );
+  }
 
   return {
     ...parsed,

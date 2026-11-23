@@ -8,6 +8,7 @@ import type { ApiEnv } from '../env.ts';
 import { projectUrl } from '../project-url.ts';
 import { oauthGrants, oauthRequests, projects, users } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
+import { runScheduledAfterCommit } from './projects.ts';
 
 /**
  * An extension grant (RFC 6749, section 4.5) for an application that is the front door to this
@@ -157,7 +158,7 @@ export async function appPersonToken(
     appPerson: true,
     ...(actingPerson && group ? { actingPerson } : {}),
   };
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await activeOAuthClient(tx, client.id, true);
     // Decision: Each token is its own grant, so the app can hold several at once (two bots of one person).
     // Grants that can't be used any more are removed as new ones are made.
@@ -244,4 +245,6 @@ export async function appPersonToken(
       scope: scopes.join(' '),
     };
   });
+  await runScheduledAfterCommit(context);
+  return result;
 }

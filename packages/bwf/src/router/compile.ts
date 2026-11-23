@@ -560,7 +560,10 @@ export function compileRouteTable(
       lines.push(
         `        const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
       );
-      lines.push("        if (typeof mod.default === 'function') await mod.default(batch, env);");
+      lines.push(
+        `        if (typeof mod.default !== 'function') throw new Error(${JSON.stringify(`Queue file ${q.filePath} has no default export.`)});`,
+      );
+      lines.push('        await mod.default(batch, env);');
       lines.push('        break;');
       lines.push('      }');
     }

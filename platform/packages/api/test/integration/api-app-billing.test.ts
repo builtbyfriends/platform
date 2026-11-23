@@ -379,6 +379,15 @@ describe('app billing', () => {
 
     await webhook({
       type: 'customer.subscription.deleted',
+      data: { object: { id: 'sub_older', metadata } },
+    });
+    expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+      plan: 'solo',
+      subscribed: true,
+    });
+
+    await webhook({
+      type: 'customer.subscription.deleted',
       data: { object: { id: 'sub_1', metadata } },
     });
     const ended = await dataOf(call('/usage.status', { person: 'p1' }));
