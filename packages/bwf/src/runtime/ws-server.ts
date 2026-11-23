@@ -284,7 +284,11 @@ function createRoomController<ServerEvent>(
         if (excludeIds.includes(stored.id)) {
           continue;
         }
-        socket.send(payload);
+        // Decision: One socket that can't take the message, such as one that is closing, doesn't stop the
+        // rest of the room from getting it.
+        try {
+          socket.send(payload);
+        } catch {}
       }
     },
     getConnections() {
@@ -421,7 +425,14 @@ export function createWebSocketDurableObject(
         this.state.acceptWebSocket(server);
 
         const connectCtx = this.#context(request, server, stored);
-        await withAuthState(authState, () => definition.onConnect?.(connectCtx as never));
+        // Decision: The socket is already accepted here, so a throw from onConnect would leave it in the room
+        // with no client on the other end. Close it before the error goes on.
+        try {
+          await withAuthState(authState, () => definition.onConnect?.(connectCtx as never));
+        } catch (error) {
+          server.close(1011, 'connect failed');
+          throw error;
+        }
 
         return new Response(null, { status: 101, webSocket: client });
       }
