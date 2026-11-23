@@ -187,6 +187,21 @@ export async function cancelSubscription(
   }
 }
 
+/** Deletes a customer and their saved cards. Stripe keeps the invoices and payments. A customer already gone counts as done. */
+export async function deleteCustomer(
+  env: StripeEnv,
+  customerId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetcher(
+    `https://api.stripe.com/v1/customers/${encodeURIComponent(customerId)}`,
+    { method: 'DELETE', headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
+  );
+  if (!response.ok && response.status !== 404) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+}
+
 /**
  * The payment intent that paid an invoice. Newer Stripe API versions leave it off the invoice and
  * list it under the invoice's payments, which have to be asked for.

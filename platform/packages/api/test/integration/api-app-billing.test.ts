@@ -25,6 +25,7 @@ import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { setProjectAiBlock } from '../../src/routing.ts';
 import {
+  appCreditGrants,
   appPayers,
   appPeople,
   oauthClients,
@@ -1106,6 +1107,149 @@ describe('app billing', () => {
       expect((await dataOf(call('/usage.status', { person: 'p2' }))).credits).toMatchObject({
         balanceMicros: 0,
       });
+    });
+  });
+
+  describe('deleting a person', () => {
+    let stripeCalls: Array<string>;
+    let stripe: ReturnType<typeof subscription>;
+    const forget = async (body: object = {}, authorization?: string) =>
+      call('/people.delete', { person: 'p1', ...body }, authorization);
+
+    beforeEach(async () => {
+      await savePlans(20_000_000);
+      stripeCalls = [];
+      stripe = subscription({ status: 'active' });
+      const real = globalThis.fetch;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        if (!String(input).startsWith('https://api.stripe.com/')) {
+          return real(input, init);
+        }
+        stripeCalls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+        return String(input).includes('/subscriptions/')
+          ? Response.json(stripe)
+          : Response.json({ id: 'cus_1', deleted: true });
+      });
+      await sellCredits('p1', 'solo', 20_000_000);
+      await call('/usage.record', { person: 'p1', sandboxSeconds: 36_000, breakdown: [] });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('cancels the subscription, removes the apps and answers like a new person after', async () => {
+      const own = await preview('p1', { workspace: 'w1' });
+      await call('/usage.record', { person: 'boss', aiNeurons: 1 });
+      const paid = await preview('p2', { workspace: 'w2', payer: 'p1' });
+      const preview_ = await dataOf(forget({ dryRun: true }));
+      expect(stripeCalls).toEqual([]);
+      expect(preview_).toEqual({
+        dryRun: true,
+        subscription: 'sub_p1',
+        stripeCustomer: true,
+        plan: 'solo',
+        unspentMicros: 19_000_000,
+        grants: [expect.objectContaining({ source: 'plan', remainingMicros: 19_000_000 })],
+        projects: [{ id: own.project!.id, slug: own.project!.slug }],
+        payerCleared: [{ id: paid.project!.id, slug: paid.project!.slug }],
+      });
+
+      const { dryRun: _, ...removes } = preview_ as unknown as Record<string, unknown>;
+      const deleted = await forget();
+      expect(deleted.status).toBe(200);
+      expect(await dataOf(deleted)).toEqual({ deleted: true, ...removes });
+      expect(stripeCalls).toEqual([
+        'DELETE https://api.stripe.com/v1/subscriptions/sub_p1',
+        'DELETE https://api.stripe.com/v1/customers/cus_1',
+      ]);
+      expect(await env.db.select().from(projects).where(eq(projects.id, own.project!.id))).toEqual(
+        [],
+      );
+      const [kept] = await env.db.select().from(projects).where(eq(projects.id, paid.project!.id));
+      expect(kept!.payer_person_id).toBeNull();
+      expect(await env.db.select().from(users).where(eq(users.id, own.owner!.id))).toEqual([]);
+
+      const fresh = await dataOf(call('/usage.status', { person: 'p1', daily: true }));
+      const stranger = await dataOf(call('/usage.status', { person: 'never-seen', daily: true }));
+      expect(fresh).toEqual(stranger);
+      const grants = await env.db.select().from(appCreditGrants);
+      expect(grants).toEqual([
+        expect.objectContaining({
+          payer_id: expect.stringMatching(/^deleted_/),
+          void_reason: 'account_deleted',
+          voided_remaining_micros: 19_000_000,
+          stripe_payment_intent_id: expect.any(String),
+        }),
+      ]);
+
+      stripeCalls = [];
+      const again = await forget();
+      expect(await dataOf(again)).toMatchObject({
+        deleted: true,
+        subscription: null,
+        stripeCustomer: false,
+        projects: [],
+        payerCleared: [],
+        unspentMicros: 0,
+      });
+      expect(stripeCalls).toEqual([]);
+      expect(await env.db.select().from(appCreditGrants)).toEqual(grants);
+    });
+
+    it('keeps a late subscription event from bringing the person back', async () => {
+      await forget();
+      stripe = subscription({ id: 'sub_p1', status: 'canceled' });
+      const metadata = { clientId: registration.client.id, personId: 'p1', plan: 'solo' };
+      for (const type of ['customer.subscription.updated', 'customer.subscription.deleted']) {
+        await webhook({ type, data: { object: { id: 'sub_p1', metadata } } });
+      }
+      expect(await env.db.select().from(appPeople)).toEqual([]);
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'free',
+        subscribed: false,
+        credits: null,
+      });
+    });
+
+    it('leaves another application’s person with the same id alone', async () => {
+      const second = await registerOAuthClient(env.db, {
+        name: 'Other',
+        operator: 'Other Co',
+        redirectUris: ['https://other.example/callback'],
+        scopes: ['profile'],
+      });
+      const asOther = 'Basic ' + btoa(second.client.id + ':' + second.clientSecret);
+      expect(await dataOf(forget({}, asOther))).toMatchObject({ subscription: null, plan: null });
+      expect(stripeCalls).toEqual([]);
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'solo',
+        subscribed: true,
+        credits: { remainingMicros: 19_000_000 },
+      });
+    });
+
+    it('keeps a dispute block on the person id, and reports what is left when Stripe fails', async () => {
+      await env.db
+        .update(appPayers)
+        .set({ blocked_at: new Date().toISOString(), blocked_reason: 'dispute' });
+      stripe = subscription({ status: 'active' });
+      vi.restoreAllMocks();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+        Response.json({ error: {} }, { status: 500 }),
+      );
+      const failed = await forget();
+      expect(failed.status).toBe(503);
+      expect(await failed.json()).toMatchObject({
+        error: 'partial_failure',
+        step: 'subscription',
+        left: { subscription: 'sub_p1', unspentMicros: 19_000_000 },
+      });
+      vi.restoreAllMocks();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({}));
+      expect((await forget()).status).toBe(200);
+      const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
+      expect(await (await call('/billing.checkout', order)).json()).toEqual({ error: 'blocked' });
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).credits).toBeNull();
     });
   });
 

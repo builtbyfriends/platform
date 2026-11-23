@@ -1,6 +1,7 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
+  APP,
   addUse,
   applyCredits,
   clientPlans,
@@ -18,14 +19,29 @@ import {
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import {
   BillingUnavailableError,
+  cancelSubscription,
   createCheckoutSession,
   createPortalSession,
+  deleteCustomer,
+  fetchSubscription,
   stripeLiveMode,
 } from '../billing/stripe.ts';
-import { grantCredits, payerBlocked } from '../credit-ledger.ts';
+import { creditBalance, forgetPayer, grantCredits, payerBlocked } from '../credit-ledger.ts';
+import { getOwnedProjectsByUserId } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
+import { generateId } from '../id.ts';
+import { deleteOperatorUser, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
 import { resolvePlanLimits } from '../plans.ts';
-import { appPeople, appUsage, appUsageEvents, appUsageSources, oauthClients } from '../schema.ts';
+import {
+  appPeople,
+  appUsage,
+  appUsageDaily,
+  appUsageEvents,
+  appUsageSources,
+  oauthClients,
+  projects,
+  users,
+} from '../schema.ts';
 
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
@@ -198,6 +214,162 @@ async function standing(context: BillingContext, person: string) {
   };
 }
 
+const ENDED = new Set(['canceled', 'incomplete_expired']);
+
+/** What deleting a person removes. The preview and the deletion both answer this, read before anything changes. */
+async function removal(context: BillingContext, person: string) {
+  const db = context.get('db');
+  const clientId = context.get('billingClient');
+  const ofThisApp = db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.provider, APP + clientId));
+  const [[row], [user], balance, payerCleared] = await Promise.all([
+    db
+      .select()
+      .from(appPeople)
+      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
+    db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.provider, APP + clientId), eq(users.provider_id, person))),
+    creditBalance(db, { clientId, payer: person }),
+    db
+      .select({ id: projects.id, slug: projects.slug, userId: projects.user_id })
+      .from(projects)
+      .innerJoin(users, eq(users.id, projects.user_id))
+      .where(
+        and(
+          eq(projects.payer_person_id, person),
+          inArray(projects.user_id, ofThisApp),
+          ne(users.provider_id, person),
+        ),
+      ),
+  ]);
+  const owned = user ? await getOwnedProjectsByUserId(db, user.id) : [];
+  const subscription =
+    row?.stripe_subscription_id && !ENDED.has(row.subscription_status ?? '')
+      ? row.stripe_subscription_id
+      : null;
+  return {
+    userId: user?.id ?? null,
+    removes: {
+      subscription,
+      stripeCustomer: Boolean(row?.stripe_customer_id),
+      plan: row?.plan ?? null,
+      // Decision: Unspent credits, bought ones included, are given up and not refunded (draft refund policy), so the
+      // application can show the amount before the person confirms.
+      unspentMicros: Math.max(0, balance?.balanceMicros ?? 0),
+      grants: (balance?.grants ?? []).map(({ id, source, remainingMicros }) => ({
+        id,
+        source,
+        remainingMicros,
+      })),
+      projects: owned.map((project) => ({ id: project.id, slug: project.slug })),
+      payerCleared: payerCleared.map(({ id, slug }) => ({ id, slug })),
+    },
+    row,
+    clearedOwners: [...new Set(payerCleared.map((project) => project.userId))],
+  };
+}
+
+/**
+ * Deletes a person in the order that stops charges first: the Stripe subscription and customer,
+ * then the grants, the projects they pay for but don't own, their own projects, and last their
+ * rows. Each step is safe to repeat, so a failed call is retried from the start. Answers the step
+ * that failed, or null.
+ */
+async function forgetPerson(
+  context: BillingContext,
+  person: string,
+  plan: Awaited<ReturnType<typeof removal>>,
+) {
+  const db = context.get('db');
+  const clientId = context.get('billingClient');
+  const thisPerson = and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person));
+  const steps: Array<[string, () => Promise<unknown>]> = [
+    [
+      'subscription',
+      async () => {
+        const subscription = plan.removes.subscription;
+        if (!subscription) {
+          return;
+        }
+        await cancelSubscription(context.env, subscription).catch(async (error: unknown) => {
+          if (!ENDED.has((await fetchSubscription(context.env, subscription)).status)) {
+            throw error;
+          }
+        });
+        await db
+          .update(appPeople)
+          .set({ subscription_status: 'canceled', cancel_at_period_end: false })
+          .where(thisPerson);
+      },
+    ],
+    [
+      'stripe_customer',
+      async () => {
+        if (plan.row?.stripe_customer_id) {
+          await deleteCustomer(context.env, plan.row.stripe_customer_id);
+          await db.update(appPeople).set({ stripe_customer_id: null }).where(thisPerson);
+        }
+      },
+    ],
+    ['credits', () => forgetPayer(db, { clientId, payer: person })],
+    [
+      'payer',
+      async () => {
+        const ids = plan.removes.payerCleared.map((project) => project.id);
+        if (ids.length === 0) {
+          return;
+        }
+        await db
+          .update(projects)
+          .set({ payer_person_id: null })
+          .where(and(inArray(projects.id, ids), eq(projects.payer_person_id, person)));
+        for (const owner of plan.clearedOwners) {
+          // Decision: The owner pays from here. The scheduled reconciliation applies their plan if this fails.
+          await reconcileOperatorUserPlan(context, owner).catch((error: unknown) => {
+            console.error('[billing] payer plan reconcile failed', { userId: owner, error });
+          });
+        }
+      },
+    ],
+    ['projects', async () => plan.userId && deleteOperatorUser(context, plan.userId)],
+    [
+      'rows',
+      async () => {
+        const gone = { person_id: generateId('deleted') };
+        await db.transaction(async (tx) => {
+          await tx.delete(appPeople).where(thisPerson);
+          await tx
+            .delete(appUsage)
+            .where(and(eq(appUsage.client_id, clientId), eq(appUsage.person_id, person)));
+          await tx
+            .delete(appUsageSources)
+            .where(
+              and(eq(appUsageSources.client_id, clientId), eq(appUsageSources.person_id, person)),
+            );
+          // Decision: Daily use and its cost stay for the books under an id that names no one.
+          await tx
+            .update(appUsageDaily)
+            .set(gone)
+            .where(and(eq(appUsageDaily.client_id, clientId), eq(appUsageDaily.person_id, person)));
+        });
+      },
+    ],
+  ];
+  for (const [step, run] of steps) {
+    try {
+      await run();
+    } catch (error) {
+      console.error('[billing] person delete step failed', { clientId, step, error });
+      return step;
+    }
+  }
+  return null;
+}
+
 /**
  * Billing for the people of a connected application. The application signs in with its client
  * credentials and names each person by its own id (`person`); the platform keeps that person's
@@ -364,6 +536,32 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     return context.json({
       data: { granted: Boolean(grant), amountMicros: grant ? client.amount : 0 },
     });
+  })
+  .post('/people.delete', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.person)) {
+      return context.json({ error: 'bad_person' }, 400);
+    }
+    if (body.dryRun !== undefined && typeof body.dryRun !== 'boolean') {
+      return context.json({ error: 'bad_dry_run' }, 400);
+    }
+    const plan = await removal(context, body.person);
+    if (body.dryRun) {
+      return context.json({ data: { dryRun: true, ...plan.removes } });
+    }
+    const failed = await forgetPerson(context, body.person, plan);
+    if (failed) {
+      return context.json(
+        {
+          error: 'partial_failure',
+          step: failed,
+          message: 'The person is partly deleted. Call again to finish.',
+          left: (await removal(context, body.person)).removes,
+        },
+        503,
+      );
+    }
+    return context.json({ data: { deleted: true, ...plan.removes } });
   })
   .post('/plans.list', async (context) => {
     const plans = await clientPlans(context.get('db'), context.get('billingClient'));

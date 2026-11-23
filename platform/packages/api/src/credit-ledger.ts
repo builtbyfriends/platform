@@ -302,3 +302,37 @@ export async function payerBlocked(db: DbOrTx, payer: Payer): Promise<boolean> {
     .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
   return Boolean(row?.blocked);
 }
+
+/**
+ * Ends a deleted person's grants and keeps them for the books under a new id that names no one, with
+ * what they owed. A dispute block stays on the person's id, so a new account with that id still
+ * can't buy. Safe to repeat.
+ */
+export async function forgetPayer(db: DbOrTx, payer: Payer, now = new Date()): Promise<void> {
+  const gone = generateId('deleted');
+  const same = and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer));
+  await db.transaction(async (tx) => {
+    const [row] = await tx.select().from(appPayers).where(same).for('update');
+    await tx
+      .update(appCreditGrants)
+      .set({
+        voided_at: now.toISOString(),
+        void_reason: 'account_deleted',
+        voided_remaining_micros: sql`${appCreditGrants.remaining_micros}`,
+        remaining_micros: 0,
+      })
+      .where(and(payerGrants(payer), isNull(appCreditGrants.voided_at)));
+    await tx.update(appCreditGrants).set({ payer_id: gone }).where(payerGrants(payer));
+    if (!row) {
+      return;
+    }
+    if (row.owed_micros > 0) {
+      await tx
+        .insert(appPayers)
+        .values({ client_id: payer.clientId, payer_id: gone, owed_micros: row.owed_micros });
+    }
+    await (row.blocked_at
+      ? tx.update(appPayers).set({ owed_micros: 0, out_since: null }).where(same)
+      : tx.delete(appPayers).where(same));
+  });
+}
