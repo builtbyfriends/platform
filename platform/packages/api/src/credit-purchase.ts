@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { queueBillingEvent } from './billing-events.ts';
 import {
   chargeSavedCard,
   MICROS_PER_CENT,
@@ -123,7 +124,7 @@ export async function setAutoTopUp(db: DbOrTx, payer: Payer, settings: AutoTopUp
     .onConflictDoUpdate({ target: [appPayers.client_id, appPayers.payer_id], set });
 }
 
-/** Adds an auto top-up's credits once, and ends the wait on its charge. */
+/** Adds an auto top-up's credits once, and ends the wait on its charge. Answers the grant, or null when it was already added. */
 export async function grantTopUp(
   db: DbOrTx,
   grant: Payer & {
@@ -135,8 +136,8 @@ export async function grantTopUp(
   },
   now = new Date(),
 ) {
-  await db.transaction(async (tx) => {
-    await grantCredits(
+  return db.transaction(async (tx) => {
+    const added = await grantCredits(
       tx,
       {
         ...grant,
@@ -148,15 +149,16 @@ export async function grantTopUp(
       now,
     );
     await tx.update(appPayers).set({ top_up_started_at: null }).where(payerRow(grant));
+    return added;
   });
 }
 
 /**
  * A declined auto top-up turns it off with the reason, and gives its amount back to the month. Only
- * the first answer about a charge gives it back, whether that's Stripe's reply or its event.
+ * the first answer about a charge gives it back, whether that's Stripe's reply or its event. True for that first answer.
  */
 export async function topUpFailed(db: DbOrTx, payer: Payer, amountMicros: number, reason: string) {
-  await db
+  const first = await db
     .update(appPayers)
     .set({
       top_up_enabled: false,
@@ -164,18 +166,55 @@ export async function topUpFailed(db: DbOrTx, payer: Payer, amountMicros: number
       top_up_started_at: null,
       top_up_month_micros: sql`greatest(0, ${appPayers.top_up_month_micros} - ${amountMicros})`,
     })
-    .where(and(payerRow(payer), isNotNull(appPayers.top_up_started_at)));
+    .where(and(payerRow(payer), isNotNull(appPayers.top_up_started_at)))
+    .returning({ id: appPayers.payer_id });
   await db
     .update(appPayers)
     .set({ top_up_enabled: false, top_up_off_reason: reason })
     .where(payerRow(payer));
+  return first.length > 0;
 }
+
+/** The billing event for credits a person bought, whether at Checkout or by auto top-up. */
+export const boughtEvent = (
+  grant: {
+    client_id: string;
+    payer_id: string;
+    amount_micros: number;
+    giver_id: string | null;
+    expires_at: string | null;
+  },
+  autoTopUp: boolean,
+) => ({
+  clientId: grant.client_id,
+  type: 'credits.bought' as const,
+  person: grant.payer_id,
+  data: {
+    amountMicros: grant.amount_micros,
+    buyer: grant.giver_id,
+    expiresAt: grant.expires_at ? new Date(grant.expires_at).toISOString() : null,
+    autoTopUp,
+  },
+});
+
+/** The billing event for an auto top-up the card refused. */
+export const topUpFailedEvent = (payer: Payer, amountMicros: number, reason: string) => ({
+  clientId: payer.clientId,
+  type: 'payment.failed' as const,
+  person: payer.payer,
+  data: { for: 'auto_top_up', amountMicros, reason },
+});
 
 /**
  * Charges the buyer's saved card when the payer's balance is under their threshold. The payer's row
  * is locked while the charge is claimed, so two debits at once make one charge.
  */
-export async function topUpIfLow(env: StripeEnv, db: Db, payer: Payer, now = new Date()) {
+export async function topUpIfLow(
+  env: StripeEnv & { ROUTING: KVNamespace },
+  db: Db,
+  payer: Payer,
+  now = new Date(),
+) {
   const [on] = await db
     .select({ enabled: appPayers.top_up_enabled })
     .from(appPayers)
@@ -273,9 +312,11 @@ export async function topUpIfLow(env: StripeEnv, db: Db, payer: Payer, now = new
     return;
   }
   if (result.status === 'failed') {
-    await topUpFailed(db, payer, amountMicros, result.reason);
+    if (await topUpFailed(db, payer, amountMicros, result.reason)) {
+      await queueBillingEvent(db, env, topUpFailedEvent(payer, amountMicros, result.reason), now);
+    }
   } else if (result.status === 'succeeded') {
-    await grantTopUp(
+    const added = await grantTopUp(
       db,
       {
         ...payer,
@@ -287,5 +328,8 @@ export async function topUpIfLow(env: StripeEnv, db: Db, payer: Payer, now = new
       },
       now,
     );
+    if (added) {
+      await queueBillingEvent(db, env, boughtEvent(added, true), now);
+    }
   }
 }

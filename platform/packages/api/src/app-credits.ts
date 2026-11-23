@@ -1,6 +1,7 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
+import { queueBillingEvent } from './billing-events.ts';
 import { stripeLiveMode, type StripeEnv } from './billing/stripe.ts';
-import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
+import { creditBalance, markLow, markOut, spendCredits } from './credit-ledger.ts';
 import { topUpIfLow } from './credit-purchase.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
@@ -184,6 +185,7 @@ export function creditStanding(
           owedMicros: balance.owedMicros,
           out: balance.balanceMicros <= 0,
           outSince: balance.outSince,
+          lowSince: balance.lowSince,
           starterMicros: balance.grants
             .filter((grant) => grant.source === 'starter')
             .reduce((sum, grant) => sum + grant.remainingMicros, 0),
@@ -403,7 +405,7 @@ export async function dropTestPlans(
  * the accounts they pay for stamp or lift the AI pause on their hosted projects.
  */
 export async function applyCredits(
-  env: StripeEnv & Pick<Bindings, 'USAGE_COUNTER' | 'PLATFORM_INSTALLATION_ID'>,
+  env: StripeEnv & Pick<Bindings, 'USAGE_COUNTER' | 'PLATFORM_INSTALLATION_ID' | 'ROUTING'>,
   db: Db,
   clientId: string,
   person: string,
@@ -411,7 +413,7 @@ export async function applyCredits(
   const period = currentPeriod();
   const payer = { clientId, payer: person };
   await topUpIfLow(env, db, payer);
-  const [[stored], plans, prices, use, balance, defaultPlan] = await Promise.all([
+  const [[stored], plans, prices, use, balance, defaultPlan, [client]] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -421,6 +423,10 @@ export async function applyCredits(
     payerUse(db, clientId, person, period),
     creditBalance(db, payer),
     installationDefaultPlan(db, env),
+    db
+      .select({ lowMark: oauthClients.low_balance_micros })
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId)),
   ]);
   const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
   // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
@@ -428,7 +434,24 @@ export async function applyCredits(
   const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
   const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0, balance);
   // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide.
-  if (balance && (await markOut(db, payer, standing.credits!.out))) {
+  if (!balance) {
+    return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
+  }
+  const out = standing.credits!.out;
+  const low = balance.balanceMicros < (client?.lowMark ?? 0);
+  const event = (type: 'credits.low' | 'credits.out' | 'credits.restored') =>
+    queueBillingEvent(db, env, {
+      clientId,
+      type,
+      person,
+      data: { balanceMicros: balance.balanceMicros },
+    });
+  // Decision: Low and out are each sent once for each crossing. A balance that drops straight to zero sends only out.
+  if ((await markLow(db, payer, low)) && low && !out) {
+    await event('credits.low');
+  }
+  if (await markOut(db, payer, out)) {
+    await event(out ? 'credits.out' : 'credits.restored');
     for (const id of await paidOwnerIds(db, clientId, person)) {
       await env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(id))
         .fetch(

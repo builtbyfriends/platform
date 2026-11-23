@@ -401,6 +401,12 @@ export async function verifyStripeSignature(
   if (Math.abs(now / 1000 - Number(timestamp)) > TOLERANCE_SECONDS) {
     return false;
   }
+  const expected = await hmacHex(secret, `${timestamp}.${body}`);
+  return signatures.some((s) => sameText(s, expected));
+}
+
+/** HMAC-SHA256 of the text, as hex. Stripe signs its events this way, and Platform signs its own the same way. */
+export async function hmacHex(secret: string, text: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
@@ -408,8 +414,5 @@ export async function verifyStripeSignature(
     false,
     ['sign'],
   );
-  const expected = hex(
-    await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}.${body}`)),
-  );
-  return signatures.some((s) => sameText(s, expected));
+  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)));
 }

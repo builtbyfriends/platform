@@ -84,6 +84,12 @@ export const oauthClients = pgTable('oauth_clients', {
   starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
   /** How people buy credits once: the smallest amount, the step above it, and how many days bought credits last. Null sells none. */
   credit_purchase: jsonb('credit_purchase').$type<CreditPurchase>(),
+  /** Where Platform sends this application's billing events. Null sends none. */
+  events_url: text('events_url'),
+  /** Signs each billing event. Kept as is, unlike the client secret, so Platform can sign with it. */
+  events_secret: text('events_secret'),
+  /** A payer's balance under this many micros is low. 0 sends no low-balance event. */
+  low_balance_micros: bigint('low_balance_micros', { mode: 'number' }).notNull().default(2_000_000),
   created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -276,6 +282,8 @@ export const appPayers = pgTable(
     payer_id: text('payer_id').notNull(),
     owed_micros: bigint('owed_micros', { mode: 'number' }).notNull().default(0),
     out_since: timestamp('out_since', { mode: 'string', withTimezone: true }),
+    /** Since when the balance has been under the application's low mark, so the low event is sent once a crossing. */
+    low_since: timestamp('low_since', { mode: 'string', withTimezone: true }),
     /** Set by a card dispute. A blocked payer can't buy until an operator clears it. */
     blocked_at: timestamp('blocked_at', { mode: 'string', withTimezone: true }),
     blocked_reason: text('blocked_reason'),
@@ -292,6 +300,34 @@ export const appPayers = pgTable(
     top_up_month_micros: bigint('top_up_month_micros', { mode: 'number' }).notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
+);
+
+/** Billing events waiting to reach an application, or sent. A failed delivery is tried again later. */
+export const appBillingEvents = pgTable(
+  'app_billing_events',
+  {
+    id: text('id').primaryKey(),
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    type: text('type').notNull(),
+    /** The event as it's sent, so each attempt sends the same bytes. */
+    body: text('body').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    next_attempt_at: timestamp('next_attempt_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sent_at: timestamp('sent_at', { mode: 'string', withTimezone: true }),
+    gave_up_at: timestamp('gave_up_at', { mode: 'string', withTimezone: true }),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('idx_app_billing_events_due')
+      .on(table.next_attempt_at)
+      .where(sql`${table.sent_at} IS NULL AND ${table.gave_up_at} IS NULL`),
+  ],
 );
 
 /** The Stripe customer and saved card of a person who buys credits, apart from whoever the credits are for. */

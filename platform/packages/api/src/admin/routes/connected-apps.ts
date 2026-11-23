@@ -14,6 +14,7 @@ import {
   setOAuthPreviewPermission,
   OAuthError,
 } from '../../auth/oauth.ts';
+import { newEventsSecret } from '../../billing-events.ts';
 import { parseCreditPurchase } from '../../credit-purchase.ts';
 import { isDevBypass, type ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
@@ -118,6 +119,62 @@ app.post('/:id/plans', async (context) => {
         })
         .where(eq(oauthClients.id, input.id));
       return { succeeded: true, response: context.redirect('/admin/connected-apps') };
+    },
+  );
+});
+app.post('/:id/events', async (context) => {
+  const db = context.get('db');
+  const body = await context.req.parseBody();
+  const url = String(body.eventsUrl ?? '').trim();
+  const lowText = String(body.lowBalanceMicros ?? '').trim();
+  const low = lowText ? Number(lowText) : 0;
+  if (url && (!URL.canParse(url) || new URL(url).protocol !== 'https:')) {
+    throw new OAuthError('invalid_request', 'Give an HTTPS address for billing events.');
+  }
+  if (!Number.isSafeInteger(low) || low < 0) {
+    throw new OAuthError(
+      'invalid_request',
+      'Give the low mark in micros, a whole number from 0 up.',
+    );
+  }
+  const input = {
+    id: context.req.param('id'),
+    eventsUrl: url || null,
+    lowBalanceMicros: low,
+    newSecret: body.newSecret === 'true',
+  };
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('oauth/clients/events', input),
+    async () => {
+      const [client] = await db.select().from(oauthClients).where(eq(oauthClients.id, input.id));
+      if (!client) {
+        throw new OAuthError('invalid_client', 'Application not found.', 404);
+      }
+      // Decision: The secret is shown once, when it's made: for a first address, or when the operator asks for a new one.
+      const secret =
+        input.eventsUrl && (input.newSecret || !client.events_secret) ? newEventsSecret() : null;
+      const [saved] = await db
+        .update(oauthClients)
+        .set({
+          events_url: input.eventsUrl,
+          low_balance_micros: input.lowBalanceMicros,
+          ...(secret ? { events_secret: secret } : {}),
+        })
+        .where(eq(oauthClients.id, input.id))
+        .returning();
+      if (!secret) {
+        return { succeeded: true, response: context.redirect('/admin/connected-apps') };
+      }
+      return {
+        succeeded: true,
+        response: await renderAdminPage(context, 'connectedApps', 'Connected apps', {
+          clients: [publicOAuthClient(saved!)],
+          eventsSecret: { clientId: input.id, secret },
+          platformName: getPlatformDisplayName(context.env, context.req.url),
+          username: context.get('user').login,
+        }),
+      };
     },
   );
 });

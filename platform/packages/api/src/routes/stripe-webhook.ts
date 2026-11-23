@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { applyCredits, clientPlans, dropTestPlans, paidOwnerIds } from '../app-credits.ts';
+import { queueBillingEvent, type BillingEventType } from '../billing-events.ts';
 import {
   cancelSubscription,
   fetchSubscription,
@@ -20,7 +21,14 @@ import {
   refundGrant,
   restoreDisputedGrant,
 } from '../credit-ledger.ts';
-import { boughtUntil, grantTopUp, saveBuyer, topUpFailed } from '../credit-purchase.ts';
+import {
+  boughtEvent,
+  boughtUntil,
+  grantTopUp,
+  saveBuyer,
+  topUpFailed,
+  topUpFailedEvent,
+} from '../credit-purchase.ts';
 import type { Tx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
@@ -364,6 +372,20 @@ async function applyAppPersonEvent(
   return false;
 }
 
+/** What an applied subscription event tells the application, if anything. */
+function subscriptionNews(event: StripeEvent): { type: BillingEventType; data: object } | null {
+  if (event.type === 'invoice.payment_failed') {
+    return { type: 'payment.failed', data: { for: 'subscription' } };
+  }
+  if (event.type === 'customer.subscription.deleted') {
+    return { type: 'subscription.ended', data: {} };
+  }
+  if (checkoutPaid(event)) {
+    return { type: 'subscription.started', data: { plan: event.data.object.metadata?.plan } };
+  }
+  return null;
+}
+
 /** Metadata on a credits Checkout and an auto top-up charge: who pays, who the credits are for, and how long they last. */
 type CreditMetadata = Metadata & {
   kind: 'credits' | 'top_up';
@@ -407,7 +429,7 @@ async function applyCreditEvent(
     if (amountMicros <= 0 || !paymentIntentId) {
       return null;
     }
-    await grantCredits(tx, {
+    const added = await grantCredits(tx, {
       ...payer,
       source: 'bought',
       amountMicros,
@@ -416,10 +438,13 @@ async function applyCreditEvent(
       stripePaymentIntentId: paymentIntentId,
       expiresAt: boughtUntil(new Date(), Number(metadata.lifeDays)),
     });
+    if (added) {
+      await queueBillingEvent(tx, context.env, boughtEvent(added, false));
+    }
     return payer;
   }
   if (metadata.kind === 'top_up' && object.id && event.type === 'payment_intent.succeeded') {
-    await grantTopUp(tx, {
+    const added = await grantTopUp(tx, {
       ...payer,
       buyer: metadata.buyerId,
       amountMicros: (object.amount ?? 0) * MICROS_PER_CENT,
@@ -427,17 +452,20 @@ async function applyCreditEvent(
       lifeDays: Number(metadata.lifeDays),
       livemode: event.livemode,
     });
+    if (added) {
+      await queueBillingEvent(tx, context.env, boughtEvent(added, true));
+    }
     return payer;
   }
   if (metadata.kind === 'top_up' && event.type === 'payment_intent.payment_failed') {
-    await topUpFailed(
-      tx,
-      payer,
-      (object.amount ?? 0) * MICROS_PER_CENT,
+    const amountMicros = (object.amount ?? 0) * MICROS_PER_CENT;
+    const reason =
       object.last_payment_error?.code === 'authentication_required'
         ? 'authentication_required'
-        : 'card_declined',
-    );
+        : 'card_declined';
+    if (await topUpFailed(tx, payer, amountMicros, reason)) {
+      await queueBillingEvent(tx, context.env, topUpFailedEvent(payer, amountMicros, reason));
+    }
     return payer;
   }
   return null;
@@ -533,9 +561,18 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
       if (fresh.length === 0) {
         return 'duplicate';
       }
-      return (await applyAppPersonEvent(context, tx, event, key, subscription, paymentIntentId))
-        ? 'applied'
-        : 'ignored';
+      if (!(await applyAppPersonEvent(context, tx, event, key, subscription, paymentIntentId))) {
+        return 'ignored';
+      }
+      const news = subscriptionNews(event);
+      if (news) {
+        await queueBillingEvent(tx, context.env, {
+          ...news,
+          clientId: key.client_id,
+          person: key.person_id,
+        });
+      }
+      return 'applied';
     });
     if (outcome === 'applied') {
       await reconcilePaidProjects(context, key.client_id, key.person_id);

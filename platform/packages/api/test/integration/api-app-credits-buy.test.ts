@@ -12,7 +12,7 @@ import {
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import { spendCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
-import { appCreditGrants, oauthClients } from '../../src/schema.ts';
+import { appBillingEvents, appCreditGrants, oauthClients } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -262,7 +262,11 @@ describe('buying credits', () => {
       });
     });
 
-    it('turns itself off on a declined card and adds no credits', async () => {
+    it('turns itself off on a declined card, adds no credits, and tells the application once', async () => {
+      await env.db
+        .update(oauthClients)
+        .set({ events_url: 'https://app.example.com/events', events_secret: 'whsec_x' })
+        .where(eq(oauthClients.id, registration.client.id));
       await webhook(paidSession(2000, { saveCard: 'true' }));
       await call('/credits.autoTopUp', settings);
       charge = () =>
@@ -287,6 +291,33 @@ describe('buying credits', () => {
       expect(now.credits?.grants).toHaveLength(1);
       await spend(DOLLAR);
       expect(charges()).toHaveLength(1);
+      await webhook({
+        type: 'payment_intent.payment_failed',
+        data: {
+          object: {
+            id: 'pi_declined',
+            amount: 2000,
+            last_payment_error: { code: 'card_declined' },
+            metadata: {
+              kind: 'top_up',
+              clientId: registration.client.id,
+              buyerId: 'p1',
+              payerId: 'p1',
+              lifeDays: '365',
+            },
+          },
+        },
+      });
+      const failed = (await env.db.select().from(appBillingEvents))
+        .filter((event) => event.type === 'payment.failed')
+        .map((event) => JSON.parse(event.body));
+      expect(failed).toEqual([
+        expect.objectContaining({
+          person: 'p1',
+          data: { for: 'auto_top_up', amountMicros: 20 * DOLLAR, reason: 'card_declined' },
+        }),
+      ]);
+      expect((await status()).autoTopUp).toMatchObject({ chargedThisMonthMicros: 0 });
     });
 
     it('grants a charge that Stripe confirms later, once', async () => {

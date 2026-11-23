@@ -140,6 +140,58 @@ Send it to `POST /app-billing/credits.autoTopUp`, or send `{ payer, enabled: fal
 
 In Stripe, send `payment_intent.succeeded` and `payment_intent.payment_failed` to the webhook as well as the Checkout events.
 
+## Billing events
+
+Platform can tell an application when something changes for a person who pays, so the application doesn't have to ask at the right moment. Under **Admin → Connected apps**, fill in the application's **Address for billing events** with an HTTPS URL. The first time you save an address, Platform shows a signing secret once. Save it on the application's server. Tick **Make a new signing secret** to replace it.
+
+Platform sends each event as a `POST` with a JSON body:
+
+```json
+{
+  "id": "evt_…",
+  "type": "credits.low",
+  "person": "<the application's id for the payer>",
+  "occurredAt": "2026-11-22T18:00:00.000Z",
+  "data": { "balanceMicros": 1500000 }
+}
+```
+
+| Type                   | When                                                   | `data`                                                                                   |
+| ---------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `credits.low`          | The balance went under the low mark                    | `balanceMicros`                                                                          |
+| `credits.out`          | The balance reached zero                               | `balanceMicros`                                                                          |
+| `credits.restored`     | The balance went back above zero                       | `balanceMicros`                                                                          |
+| `credits.bought`       | Credits were bought at Checkout or by auto top-up      | `amountMicros`, `buyer`, `expiresAt`, `autoTopUp`                                        |
+| `payment.failed`       | A subscription renewal or an auto top-up charge failed | `for` (`subscription` or `auto_top_up`), and for auto top-up `amountMicros` and `reason` |
+| `subscription.started` | A plan was bought                                      | `plan`                                                                                   |
+| `subscription.ended`   | The subscription ended                                 | none                                                                                     |
+
+Amounts are in millionths of a dollar. Low and out are sent once each time the balance crosses the line. The low mark is $2 unless you set **A balance under this many micros is low**; 0 sends no low event. Hosted use is read once an hour, so an event caused by a hosted project can come up to an hour late.
+
+Answer with any 2xx status. Platform tries a failed delivery again, waiting longer each time, for about a day and a half, and then stops. The same event keeps its `id`, so use it to skip one you've already handled. `usage.status` always has the same facts (`credits.outSince`, `credits.lowSince`, `autoTopUp`, `subscriptionStatus`), so read it to catch up after your address was down.
+
+Each request carries a `Billing-Signature` header in the form `t=<unix seconds>,v1=<hex>`, where the hex is the HMAC-SHA256 of `<t>.<body>` with the signing secret. Check it against the raw body and refuse an old timestamp:
+
+```ts
+async function verify(body: string, header: string, secret: string): Promise<boolean> {
+  const parts = new Map(header.split(',').map((part) => part.split('=') as [string, string]));
+  const t = parts.get('t') ?? '';
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) {
+    return false;
+  }
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  );
+  const hex = parts.get('v1') ?? '';
+  const signature = new Uint8Array(hex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? []);
+  return crypto.subtle.verify('HMAC', key, signature, new TextEncoder().encode(`${t}.${body}`));
+}
+```
+
 ## Charge for use
 
 Platform counts what an application reports for its people (AI and sandbox time) and what the hosted projects they pay for use. Once an hour it reads each project's use from Cloudflare's analytics for today and yesterday and stores it under the project's payer. If one reading fails, Platform keeps the numbers it stored before for that reading and stores the others.
