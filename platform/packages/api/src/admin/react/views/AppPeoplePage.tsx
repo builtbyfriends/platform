@@ -92,7 +92,7 @@ export function AppPeoplePage({
 }
 
 export type PersonPreview = {
-  kind: 'grants' | 'refunds' | 'unblock';
+  kind: 'grants' | 'invoices' | 'refunds' | 'unblock';
   fields: Record<string, string>;
   lines: Array<[string, string]>;
 };
@@ -190,6 +190,30 @@ export function AppPersonPage({
             <Button type="submit" label="Preview" />
           </SectionStack>
         </AdminCard>
+        <AdminCard
+          title="Invoice a block of credits"
+          description="Sends a Stripe invoice payable by bank transfer or card. The credits come when it's paid, or now if you grant early, and a voided invoice takes early credits back."
+        >
+          <SectionStack as="form" method="post" action={`${base}/invoices/preview`}>
+            <FormTextInput label="Dollars" name="dollars" required placeholder="10000" />
+            <FormTextInput
+              label="Ends on (the contract's end)"
+              name="expires"
+              required
+              placeholder="2027-11-30"
+            />
+            <FormTextInput
+              label="Billing email"
+              name="email"
+              required
+              placeholder="ap@example.com"
+            />
+            <FormTextInput label="Days to pay" name="days" placeholder="30" />
+            <FormTextInput label="Grant before payment (yes or no)" name="early" placeholder="no" />
+            <FormTextInput label="Note" name="note" placeholder="Order form reference" />
+            <Button type="submit" label="Preview" />
+          </SectionStack>
+        </AdminCard>
         <AdminCard title="Grants">
           <Table>
             <TableHeader>
@@ -208,6 +232,8 @@ export function AppPersonPage({
                 <TableRow key={grant.id}>
                   <TableCell>
                     {grant.source}
+                    {grant.invoice ? ` ${grant.invoice}` : ''}
+                    {grant.unpaid ? ' (unpaid)' : ''}
                     {grant.voidReason ? ` (ended: ${grant.voidReason})` : ''}
                   </TableCell>
                   <TableCell>{dollars(grant.amountMicros)}</TableCell>
