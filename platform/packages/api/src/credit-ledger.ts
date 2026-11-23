@@ -304,77 +304,108 @@ export async function markOverCaps(
   return true;
 }
 
-async function grantByPayment(tx: Tx, paymentIntentId: string) {
-  const [grant] = await tx
+/** Every grant a payment made: the one it bought first, then the ones moved from it, all locked. */
+async function grantsByPayment(tx: Tx, paymentIntentId: string) {
+  return tx
     .select()
     .from(appCreditGrants)
     .where(eq(appCreditGrants.stripe_payment_intent_id, paymentIntentId))
+    .orderBy(sql`${appCreditGrants.moved_from} is not null`, ...spendOrder)
     .for('update');
-  return grant;
 }
 
+type GrantRow = typeof appCreditGrants.$inferSelect;
+
+const spentOf = (grant: GrantRow) =>
+  grant.amount_micros - grant.taken_micros - grant.remaining_micros - grant.moved_out_micros;
+
+const payersOf = (grants: ReadonlyArray<GrantRow>): Array<Payer> =>
+  [...new Set(grants.map((grant) => grant.payer_id))]
+    .sort()
+    .map((payer) => ({ clientId: grants[0]!.client_id, payer }));
+
 /**
- * Takes back the refunded share of a grant from what's left of it. Stripe sends the running total
- * refunded, so a second partial refund or a resent event works from the total and takes no more.
+ * Takes back the refunded share of a payment from what's left of it, first from the buyer's own
+ * grant and then from the wallets it was moved to. Stripe sends the running total refunded, so a
+ * second partial refund or a resent event works from the total and takes no more. Answers the
+ * payers whose balance changed.
  */
 export async function refundGrant(
   tx: Tx,
   paymentIntentId: string,
   refunded: { amount: number; charged: number },
-): Promise<Payer | null> {
-  const grant = await grantByPayment(tx, paymentIntentId);
-  if (!grant || grant.voided_at || refunded.charged <= 0) {
-    return null;
+): Promise<Array<Payer>> {
+  const grants = await grantsByPayment(tx, paymentIntentId);
+  const first = grants.find((grant) => grant.moved_from === null);
+  if (!first || first.voided_at || refunded.charged <= 0) {
+    return [];
   }
-  const share = Math.floor((grant.amount_micros * refunded.amount) / refunded.charged);
-  const taken = Math.min(share, grant.taken_micros + grant.remaining_micros);
-  if (taken <= grant.taken_micros) {
-    return null;
+  const live = grants.filter((grant) => !grant.voided_at);
+  const share = Math.floor((first.amount_micros * refunded.amount) / refunded.charged);
+  let need = share - live.reduce((sum, grant) => sum + grant.taken_micros, 0);
+  const touched: Array<GrantRow> = [];
+  for (const grant of live) {
+    const take = Math.min(need, grant.remaining_micros);
+    if (take <= 0) {
+      continue;
+    }
+    need -= take;
+    touched.push(grant);
+    await tx
+      .update(appCreditGrants)
+      .set({
+        remaining_micros: grant.remaining_micros - take,
+        taken_micros: grant.taken_micros + take,
+      })
+      .where(eq(appCreditGrants.id, grant.id));
   }
-  await tx
-    .update(appCreditGrants)
-    .set({
-      remaining_micros: grant.remaining_micros - (taken - grant.taken_micros),
-      taken_micros: taken,
-    })
-    .where(eq(appCreditGrants.id, grant.id));
-  return { clientId: grant.client_id, payer: grant.payer_id };
+  return touched.length > 0 ? payersOf(touched) : [];
 }
 
 /**
- * A card dispute takes back the whole grant. What was already spent becomes owed by the payer, so the
- * balance can go below zero. The buyer who paid is blocked from buying until an operator clears it,
- * and `buyer` in the answer names them.
+ * A card dispute takes back the whole payment, from each wallet it was moved to as well. What each
+ * one already spent becomes owed there, so a balance can go below zero. The buyer who paid is
+ * blocked from buying until an operator clears it, and `buyer` in the answer names them.
  */
 export async function disputeGrant(
   tx: Tx,
   paymentIntentId: string,
   now = new Date(),
-): Promise<(Payer & { buyer: string }) | null> {
-  const grant = await grantByPayment(tx, paymentIntentId);
-  if (!grant || grant.voided_at) {
+): Promise<{ payers: Array<Payer>; buyer: string } | null> {
+  const grants = await grantsByPayment(tx, paymentIntentId);
+  const first = grants.find((grant) => grant.moved_from === null);
+  if (!first || first.voided_at) {
     return null;
   }
-  const payer = { clientId: grant.client_id, payer: grant.payer_id };
-  const row = await lockPayer(tx, payer);
-  const spent = grant.amount_micros - grant.taken_micros - grant.remaining_micros;
-  await tx
-    .update(appCreditGrants)
-    .set({
-      remaining_micros: 0,
-      voided_at: now.toISOString(),
-      void_reason: 'dispute',
-      voided_remaining_micros: grant.remaining_micros,
-      voided_owed_micros: spent,
-    })
-    .where(eq(appCreditGrants.id, grant.id));
-  await tx
-    .update(appPayers)
-    .set({ owed_micros: row.owed_micros + spent })
-    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
-  const buyer = grant.giver_id ?? grant.payer_id;
-  await blockPayer(tx, { clientId: grant.client_id, payer: buyer }, now);
-  return { ...payer, buyer };
+  const live = grants.filter((grant) => !grant.voided_at);
+  const payers = payersOf(live);
+  const owed = new Map<string, number>();
+  for (const payer of payers) {
+    owed.set(payer.payer, (await lockPayer(tx, payer)).owed_micros);
+  }
+  for (const grant of live) {
+    const spent = spentOf(grant);
+    owed.set(grant.payer_id, owed.get(grant.payer_id)! + spent);
+    await tx
+      .update(appCreditGrants)
+      .set({
+        remaining_micros: 0,
+        voided_at: now.toISOString(),
+        void_reason: 'dispute',
+        voided_remaining_micros: grant.remaining_micros,
+        voided_owed_micros: spent,
+      })
+      .where(eq(appCreditGrants.id, grant.id));
+  }
+  for (const payer of payers) {
+    await tx
+      .update(appPayers)
+      .set({ owed_micros: owed.get(payer.payer)! })
+      .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  }
+  const buyer = first.giver_id ?? first.payer_id;
+  await blockPayer(tx, { clientId: first.client_id, payer: buyer }, now);
+  return { payers, buyer };
 }
 
 async function blockPayer(tx: Tx, payer: Payer, now: Date) {
@@ -389,33 +420,149 @@ async function blockPayer(tx: Tx, payer: Payer, now: Date) {
 }
 
 /**
- * A won dispute gives back exactly what the dispute took, with the grant's old end date. Owed
- * that a later grant already settled comes back on this grant instead. The block stays for an
+ * A won dispute gives back exactly what the dispute took from each grant, with its old end date.
+ * Owed that a later grant already settled comes back on this grant instead. The block stays for an
  * operator to clear.
  */
-export async function restoreDisputedGrant(tx: Tx, paymentIntentId: string): Promise<Payer | null> {
-  const grant = await grantByPayment(tx, paymentIntentId);
-  if (!grant || grant.void_reason !== 'dispute') {
-    return null;
+export async function restoreDisputedGrant(tx: Tx, paymentIntentId: string): Promise<Array<Payer>> {
+  const grants = (await grantsByPayment(tx, paymentIntentId)).filter(
+    (grant) => grant.void_reason === 'dispute',
+  );
+  for (const payer of payersOf(grants)) {
+    await lockPayer(tx, payer);
   }
-  const payer = { clientId: grant.client_id, payer: grant.payer_id };
-  const row = await lockPayer(tx, payer);
-  const fromOwed = Math.min(row.owed_micros, grant.voided_owed_micros);
-  await tx
-    .update(appCreditGrants)
-    .set({
-      remaining_micros: grant.voided_remaining_micros + grant.voided_owed_micros - fromOwed,
-      voided_at: null,
-      void_reason: null,
-      voided_remaining_micros: 0,
-      voided_owed_micros: 0,
-    })
-    .where(eq(appCreditGrants.id, grant.id));
-  await tx
-    .update(appPayers)
-    .set({ owed_micros: row.owed_micros - fromOwed })
-    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
-  return payer;
+  for (const grant of grants) {
+    const payer = { clientId: grant.client_id, payer: grant.payer_id };
+    const row = await lockPayer(tx, payer);
+    const fromOwed = Math.min(row.owed_micros, grant.voided_owed_micros);
+    await tx
+      .update(appCreditGrants)
+      .set({
+        remaining_micros: grant.voided_remaining_micros + grant.voided_owed_micros - fromOwed,
+        voided_at: null,
+        void_reason: null,
+        voided_remaining_micros: 0,
+        voided_owed_micros: 0,
+      })
+      .where(eq(appCreditGrants.id, grant.id));
+    await tx
+      .update(appPayers)
+      .set({ owed_micros: row.owed_micros - fromOwed })
+      .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  }
+  return grants.length > 0 ? payersOf(grants) : [];
+}
+
+export type Move = {
+  clientId: string;
+  from: string;
+  to: string;
+  amountMicros: number;
+  moveId: string;
+};
+
+export type MoveResult =
+  | { error: 'owes' | 'not_enough' }
+  | {
+      replayed: boolean;
+      grants: Array<{ id: string; amountMicros: number; expiresAt: string | null; from: string }>;
+    };
+
+const movedGrants = (rows: ReadonlyArray<GrantRow>) =>
+  rows.map((grant) => ({
+    id: grant.id,
+    amountMicros: grant.amount_micros,
+    expiresAt: iso(grant.expires_at),
+    from: grant.moved_from!,
+  }));
+
+/**
+ * Moves bought credits from one payer to another in one transaction. Each grant it takes from gives
+ * one new grant that keeps its end date, payment and buyer, so a refund or dispute still finds it.
+ * The credits that arrive first settle what the payer they move to owes. A move id that already
+ * moved answers what it moved, and moves nothing.
+ */
+export async function moveCredits(db: DbOrTx, move: Move, now = new Date()): Promise<MoveResult> {
+  return db.transaction(async (tx) => {
+    const ends = [move.from, move.to].sort();
+    const rows = new Map<string, typeof appPayers.$inferSelect>();
+    for (const payer of ends) {
+      rows.set(payer, await lockPayer(tx, { clientId: move.clientId, payer }));
+    }
+    const done = await tx
+      .select()
+      .from(appCreditGrants)
+      .where(
+        and(eq(appCreditGrants.client_id, move.clientId), eq(appCreditGrants.move_id, move.moveId)),
+      );
+    if (done.length > 0) {
+      return { replayed: true, grants: movedGrants(done) };
+    }
+    if (rows.get(move.from)!.owed_micros > 0) {
+      return { error: 'owes' };
+    }
+    const sources = await tx
+      .select()
+      .from(appCreditGrants)
+      .where(
+        and(
+          openGrants({ clientId: move.clientId, payer: move.from }, now),
+          inArray(appCreditGrants.source, ['bought', 'moved']),
+        ),
+      )
+      .orderBy(...spendOrder)
+      .for('update');
+    if (sources.reduce((sum, grant) => sum + grant.remaining_micros, 0) < move.amountMicros) {
+      return { error: 'not_enough' };
+    }
+    let left = move.amountMicros;
+    let owed = rows.get(move.to)!.owed_micros;
+    const added: Array<GrantRow> = [];
+    for (const grant of sources) {
+      if (left === 0) {
+        break;
+      }
+      const take = Math.min(left, grant.remaining_micros);
+      left -= take;
+      const settled = Math.min(owed, take);
+      owed -= settled;
+      await tx
+        .update(appCreditGrants)
+        .set({
+          remaining_micros: grant.remaining_micros - take,
+          moved_out_micros: grant.moved_out_micros + take,
+        })
+        .where(eq(appCreditGrants.id, grant.id));
+      const [row] = await tx
+        .insert(appCreditGrants)
+        .values({
+          id: generateId('grant'),
+          client_id: move.clientId,
+          payer_id: move.to,
+          source: 'moved',
+          amount_micros: take,
+          remaining_micros: take - settled,
+          moved_from: grant.id,
+          move_id: move.moveId,
+          giver_id: grant.giver_id,
+          billing_country: grant.billing_country,
+          billing_state: grant.billing_state,
+          stripe_payment_intent_id: grant.stripe_payment_intent_id,
+          stripe_invoice_id: grant.stripe_invoice_id,
+          livemode: grant.livemode,
+          starts_at: grant.starts_at,
+          expires_at: grant.expires_at,
+          created_at: now.toISOString(),
+        })
+        .returning();
+      added.push(row!);
+    }
+    await tx
+      .update(appPayers)
+      .set({ owed_micros: owed })
+      .where(and(eq(appPayers.client_id, move.clientId), eq(appPayers.payer_id, move.to)));
+    return { replayed: false, grants: movedGrants(added) };
+  });
 }
 
 /** True when a dispute has blocked the payer from buying. */

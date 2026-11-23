@@ -204,23 +204,32 @@ async function paidBy(context: Context<ApiEnv>, invoice: StripeObject): Promise<
   return invoicePaymentIntent(context.env, invoice.id);
 }
 
-/** Refunds and disputes find the grant by the payment it came from. Answers the payer, or null when nothing changed. */
-function takeBack(tx: Tx, event: StripeEvent) {
+/**
+ * Refunds and disputes find the grants by the payment they came from. Answers the payers whose
+ * balance changed and, for a new dispute, the buyer it blocked. Null when nothing changed.
+ */
+async function takeBack(
+  tx: Tx,
+  event: StripeEvent,
+): Promise<{ payers: Array<{ clientId: string; payer: string }>; buyer?: string } | null> {
   const object = event.data.object;
   const paymentIntentId = idOf(object.payment_intent);
   if (!paymentIntentId) {
     return null;
   }
-  if (event.type === 'charge.refunded') {
-    return refundGrant(tx, paymentIntentId, {
-      amount: object.amount_refunded ?? 0,
-      charged: object.amount ?? 0,
-    });
-  }
   if (event.type === 'charge.dispute.created') {
     return disputeGrant(tx, paymentIntentId);
   }
-  return object.status === 'won' ? restoreDisputedGrant(tx, paymentIntentId) : null;
+  const payers =
+    event.type === 'charge.refunded'
+      ? await refundGrant(tx, paymentIntentId, {
+          amount: object.amount_refunded ?? 0,
+          charged: object.amount ?? 0,
+        })
+      : object.status === 'won'
+        ? await restoreDisputedGrant(tx, paymentIntentId)
+        : [];
+  return payers.length > 0 ? { payers } : null;
 }
 
 /** A dispute ends the buyer's subscription, so no more invoices are charged to the disputed card. */
@@ -521,10 +530,13 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     if (!outcome) {
       return context.json({ ok: true, ignored: true });
     }
-    if ('buyer' in outcome && typeof outcome.buyer === 'string') {
-      await cancelDisputed(context, { clientId: outcome.clientId, payer: outcome.buyer });
+    const clientId = outcome.payers[0]!.clientId;
+    if (outcome.buyer) {
+      await cancelDisputed(context, { clientId, payer: outcome.buyer });
     }
-    await applyCredits(context.env, db, outcome.clientId, outcome.payer);
+    for (const { payer } of outcome.payers) {
+      await applyCredits(context.env, db, clientId, payer);
+    }
     return context.json({ ok: true });
   }
 

@@ -400,4 +400,88 @@ describe('wallets', () => {
       expect((await status('server:1')).credits?.balanceMicros).toBe(23_500_000);
     });
   });
+
+  describe('moving bought credits', () => {
+    const move = (amountMicros: number, id: string, from = 'ana', to = 'bot:1') =>
+      call('/credits.move', { from, to, amountMicros, id });
+    let purchase: ReturnType<typeof paid>;
+
+    beforeEach(async () => {
+      await buyForOthers(true);
+      await call('/wallets.open', { payer: 'bot:1' });
+      purchase = paid('ana', 'ana', 2000);
+      await webhook(purchase.event);
+    });
+
+    it('moves $10 into a bot’s wallet with the same end date, once for one id', async () => {
+      const first = await (await move(10 * DOLLAR, 'm1')).json();
+      expect(first.data.moved).toBe(true);
+      expect((await (await move(10 * DOLLAR, 'm1')).json()).data.moved).toBe(false);
+      expect((await status('ana')).credits?.balanceMicros).toBe(10 * DOLLAR);
+      expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
+      const grants = await env.db.select().from(appCreditGrants);
+      const original = grants.find((grant) => grant.payer_id === 'ana')!;
+      const moved = grants.find((grant) => grant.payer_id === 'bot:1')!;
+      expect(moved).toMatchObject({
+        source: 'moved',
+        giver_id: 'ana',
+        moved_from: original.id,
+        expires_at: original.expires_at,
+        stripe_payment_intent_id: purchase.paymentIntent,
+      });
+    });
+
+    it('refuses to move moved credits, or to move to a person', async () => {
+      await call('/wallets.open', { payer: 'bot:2' });
+      await move(10 * DOLLAR, 'm1');
+      expect(await (await move(5 * DOLLAR, 'm2', 'bot:1', 'bot:2')).json()).toEqual({
+        error: 'from_is_wallet',
+      });
+      expect(await (await move(5 * DOLLAR, 'm3', 'ana', 'ben')).json()).toEqual({
+        error: 'not_a_wallet',
+      });
+    });
+
+    it('refuses to move starter or plan credits', async () => {
+      await call('/credits.starter', { person: 'ben' });
+      await grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'ben',
+        source: 'plan',
+        amountMicros: 10 * DOLLAR,
+        livemode: false,
+      });
+      expect(await (await move(DOLLAR, 'm1', 'ben')).json()).toEqual({ error: 'not_enough' });
+    });
+
+    it('takes back the unspent part from each wallet on a dispute, and leaves owed where it was spent', async () => {
+      await move(10 * DOLLAR, 'm1');
+      await call('/usage.record', { person: 'bot:1', aiNeurons: 300_000 });
+      await dispute(purchase.paymentIntent);
+      expect((await status('ana')).credits?.balanceMicros).toBe(0);
+      expect((await status('bot:1')).credits?.balanceMicros).toBe(-3_300_000);
+      const rows = await env.db.select().from(appPayers);
+      expect(rows.find((row) => row.payer_id === 'ana')?.blocked_reason).toBe('dispute');
+    });
+
+    it('takes a refund from the buyer’s own credits first, then from the wallet', async () => {
+      await move(15 * DOLLAR, 'm1');
+      const refund = (amount: number) =>
+        webhook({
+          type: 'charge.refunded',
+          data: {
+            object: {
+              payment_intent: purchase.paymentIntent,
+              amount: 2000,
+              amount_refunded: amount,
+            },
+          },
+        });
+      await refund(1000);
+      expect((await status('ana')).credits?.balanceMicros).toBe(0);
+      expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
+      await refund(1000);
+      expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
+    });
+  });
 });

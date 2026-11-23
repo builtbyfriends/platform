@@ -10,6 +10,7 @@ export type BillingEventType =
   | 'credits.out'
   | 'credits.restored'
   | 'credits.bought'
+  | 'credits.moved'
   | 'apps.paused'
   | 'apps.resumed'
   | 'payment.failed'

@@ -247,7 +247,7 @@ export type AutoTopUp = {
   monthlyLimitMicros: number;
 };
 
-export type CreditSource = 'plan' | 'bought' | 'given' | 'starter';
+export type CreditSource = 'plan' | 'bought' | 'given' | 'starter' | 'moved';
 
 /**
  * One grant of credits to a payer of a connected application. The balance is what's left on
@@ -272,6 +272,11 @@ export const appCreditGrants = pgTable(
       .notNull()
       .default(0),
     voided_owed_micros: bigint('voided_owed_micros', { mode: 'number' }).notNull().default(0),
+    /** What was moved out of this grant into a wallet. */
+    moved_out_micros: bigint('moved_out_micros', { mode: 'number' }).notNull().default(0),
+    /** For moved credits: the grant they came from, and the application's id for the move. */
+    moved_from: text('moved_from'),
+    move_id: text('move_id'),
     giver_id: text('giver_id'),
     /** Where the buyer's billing address was, from Checkout, so sales tax can be worked out later. */
     billing_country: text('billing_country'),
@@ -299,7 +304,10 @@ export const appCreditGrants = pgTable(
       .where(sql`${table.source} = 'starter'`),
     uniqueIndex('idx_app_credit_grants_payment')
       .on(table.client_id, table.stripe_payment_intent_id)
-      .where(sql`${table.stripe_payment_intent_id} IS NOT NULL`),
+      .where(sql`${table.stripe_payment_intent_id} IS NOT NULL AND ${table.moved_from} IS NULL`),
+    uniqueIndex('idx_app_credit_grants_move')
+      .on(table.client_id, table.move_id, table.moved_from)
+      .where(sql`${table.move_id} IS NOT NULL`),
   ],
 );
 

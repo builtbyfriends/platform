@@ -17,6 +17,7 @@ import {
   type MeterUse,
 } from '../app-credits.ts';
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
+import { queueBillingEvent } from '../billing-events.ts';
 import {
   BillingUnavailableError,
   cancelSubscription,
@@ -33,6 +34,7 @@ import {
   forgetPayer,
   grantCredits,
   isWallet,
+  moveCredits,
   openWallet,
   payerBlocked,
 } from '../credit-ledger.ts';
@@ -700,6 +702,51 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       return { payer, balanceMicros, personUsedMicros, ...(skipped ? { skipped } : {}) };
     });
     return context.json({ data: { payer: picked, wallets } });
+  })
+  .post('/credits.move', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.from) || !isPersonId(body.to) || body.from === body.to) {
+      return context.json({ error: 'bad_payers' }, 400);
+    }
+    if (!isPersonId(body.id)) {
+      return context.json({ error: 'bad_id' }, 400);
+    }
+    if (!Number.isSafeInteger(body.amountMicros) || body.amountMicros <= 0) {
+      return context.json({ error: 'bad_amount' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    if (!(await creditPurchase(db, clientId))?.buyForOthers) {
+      return context.json({ error: 'buy_for_others_off' }, 403);
+    }
+    // Decision: Credits move one way, from a person into a wallet, so they never pass from one person to another.
+    if (await isWallet(db, { clientId, payer: body.from })) {
+      return context.json({ error: 'from_is_wallet' }, 400);
+    }
+    if (!(await isWallet(db, { clientId, payer: body.to }))) {
+      return context.json({ error: 'not_a_wallet' }, 400);
+    }
+    const moved = await moveCredits(db, {
+      clientId,
+      from: body.from,
+      to: body.to,
+      amountMicros: body.amountMicros,
+      moveId: body.id,
+    });
+    if ('error' in moved) {
+      return context.json({ error: moved.error }, 409);
+    }
+    if (!moved.replayed) {
+      await queueBillingEvent(db, context.env, {
+        clientId,
+        type: 'credits.moved',
+        person: body.to,
+        data: { from: body.from, amountMicros: body.amountMicros, id: body.id },
+      });
+      await applyCredits(context.env, db, clientId, body.from);
+      await applyCredits(context.env, db, clientId, body.to);
+    }
+    return context.json({ data: { moved: !moved.replayed, grants: moved.grants } });
   })
   .post('/wallets.open', async (context) => {
     const body = await context.req.json().catch(() => null);
