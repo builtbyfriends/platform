@@ -1076,7 +1076,7 @@ export async function runDeploymentPipeline(input: {
         });
       } catch (error) {
         return await recoverFailedDeployment({
-          error,
+          err: error,
           logger,
           workerName,
           currentStep,

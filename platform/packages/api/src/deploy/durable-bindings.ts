@@ -45,14 +45,14 @@ export function buildDurableObjectUploadMigrations(
     });
   }
 
-  if (steps.length === 0) {
+  const sortedSteps = [...steps].sort(compareDurableObjectMigrationSteps);
+  const lastStep = sortedSteps.at(-1);
+  if (lastStep === undefined) {
     return undefined;
   }
 
-  const sortedSteps = [...steps].sort(compareDurableObjectMigrationSteps);
-
   return {
-    new_tag: sortedSteps.at(-1).tag,
+    new_tag: lastStep.tag,
     steps: sortedSteps.map(({ tag: _tag, index: _index, ...step }) => step),
   };
 }

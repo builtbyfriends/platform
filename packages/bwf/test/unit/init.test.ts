@@ -3400,7 +3400,7 @@ export default config;
 
       const outroCalls = mockOutro.mock.calls;
       expect(outroCalls.length).toBeGreaterThan(0);
-      const outroText = String(outroCalls.at(-1)[0]);
+      const outroText = String(outroCalls.at(-1)?.[0]);
       expect(outroText).not.toMatch(/bwf db generate/);
       expect(outroText).toMatch(/Run your workspace install/);
 

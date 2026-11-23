@@ -65,7 +65,7 @@ export async function verifyPlatformCloudflareCredential(
               : 'Retry the command after Cloudflare connectivity is restored.';
       throw new Error(
         `platform: ${label} is unavailable${status === null ? '' : ` (HTTP ${status})`} using the ${source}. ${detail}`,
-        { error },
+        { cause: error },
       );
     }
   };

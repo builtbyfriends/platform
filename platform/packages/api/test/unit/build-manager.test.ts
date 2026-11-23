@@ -6469,7 +6469,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // advances its cursor only after a successful parse, so a body too large to read inside
     // LOG_PULL_TIMEOUT_MS is a livelock, not a slow transfer.
     const before = getBufferedLogLines();
-    const since = before.length > 0 ? before.at(-1).seq : 0;
+    const since = before.at(-1)?.seq ?? 0;
 
     // Decision: Each NUL serializes as `\\u0000` (six bytes), so these 2000 x 1048-char lines make a body of
     // about 12.6 MB, though their code units fit one page.
@@ -6505,14 +6505,14 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // successful parse, so an oversized body is a livelock: each retry asks for the same backlog until
     // the drain barrier expires and the tail is lost.
     const before = getBufferedLogLines();
-    let since = before.length > 0 ? before.at(-1).seq : 0;
+    let since = before.at(-1)?.seq ?? 0;
     const start = since;
 
     const big = 'x'.repeat(128 * 1024);
     for (let i = 0; i < 40; i++) {
       record(big, 'stdout');
     }
-    const finalSeq = getBufferedLogLines().at(-1).seq;
+    const finalSeq = getBufferedLogLines().at(-1)?.seq ?? 0;
 
     server = await startControlServer(0);
     const address = server.address();
@@ -6530,7 +6530,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     const first = await pull(since);
     expect(JSON.stringify(first.lines).length).toBeLessThanOrEqual(MAX_LOG_RESPONSE_BYTES * 1.1);
     expect(first.lastSeq).toBeLessThan(finalSeq);
-    expect(first.lastSeq).toBe(first.lines.at(-1).seq);
+    expect(first.lastSeq).toBe(first.lines.at(-1)?.seq);
 
     let rounds = 0;
     since = first.lastSeq;
@@ -6548,7 +6548,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // Decision: The module-level ring is shared across this file's suites, so poll from the current high-water
     // mark instead of 0.
     const before = getBufferedLogLines();
-    const since = before.length > 0 ? before.at(-1).seq : 0;
+    const since = before.at(-1)?.seq ?? 0;
 
     // Decision: Ephemeral port: the container's fixed 4000 could collide in CI.
     server = await startControlServer(0);

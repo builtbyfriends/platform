@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, resolve } from 'pathslash';
 import {
   isRecord,

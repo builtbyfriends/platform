@@ -1849,6 +1849,9 @@ function applyMemberEdit(
   // Decision: jsonc-parser appends both new object properties and new array elements after
   // the container's current last member, so that member is the preceding sibling.
   const last = members.at(-1);
+  if (last === undefined) {
+    return plain();
+  }
   const trailing = readTrailingComment(text, last.offset + last.length);
   if (!trailing) {
     return plain();
@@ -1867,6 +1870,9 @@ function applyMemberEdit(
   }
   // Decision: The appended member is last; its predecessor is the sibling we relocate onto.
   const sibling = newMembers.at(-2);
+  if (sibling === undefined) {
+    return plain();
+  }
   const commaPos = rewritten.indexOf(',', sibling.offset + sibling.length);
   if (commaPos === -1) {
     return plain();

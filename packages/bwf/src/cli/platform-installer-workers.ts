@@ -846,7 +846,7 @@ export async function deployPlatformWorker(
         activatedVersionId = null;
         throw new PlatformWorkerRecoveryIncompleteError(
           `platform: could not confirm activation of ${workerName} because rereading its deployment history failed: ${getErrorMessage(error)}`,
-          { error },
+          { cause: error },
         );
       }
     }

@@ -70,7 +70,7 @@ export const PLATFORM_SECRET_DRAFT_SOURCE =
 export const PLATFORM_SECRET_DRAFT_MESSAGE = 'platform:secret-draft';
 
 // Decision: Placeholders that earlier releases deployed carry these messages.
-const LEGACY_SECRET_DRAFT_MESSAGES: ReadonlyArray<unknown> = new Set([
+const LEGACY_SECRET_DRAFT_MESSAGES: ReadonlySet<unknown> = new Set([
   'nosam:secret-draft',
   'void:secret-draft',
 ]);

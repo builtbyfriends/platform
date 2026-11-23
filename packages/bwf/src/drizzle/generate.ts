@@ -82,7 +82,7 @@ export async function generateValidatedSqliteMigrations(
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
         'Repair the unapplied migration before generating again. Drizzle diffs snapshots; rerunning generation does not repair existing SQL.',
-      { error },
+      { cause: error },
     );
   }
 
@@ -108,7 +108,7 @@ export async function generateValidatedSqliteMigrations(
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
         'Migration generation failed; previous SQL, snapshots and journal were restored. Review the schema change before retrying. For additive changes, use an additive migration rather than rebuilding existing tables.',
-      { error },
+      { cause: error },
     );
   }
 }

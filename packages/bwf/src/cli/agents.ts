@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { join } from 'pathslash';
 
 export function getPackageDir(): string {

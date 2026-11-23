@@ -939,7 +939,7 @@ describe('platform credential onboarding', () => {
         await client.request('/zones/zone/dns_records?private=query-value');
       } catch (error) {
         throw new Error('Add Zone → DNS → Edit for example.com to the management token.', {
-          error,
+          cause: error,
         });
       }
     });

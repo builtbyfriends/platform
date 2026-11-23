@@ -44,7 +44,7 @@ app.onError((error, context) => {
   throw error;
 });
 
-const actions: Array<PlanCatalogAction> = new Set([
+const actions: ReadonlySet<string> = new Set<PlanCatalogAction>([
   'add',
   'set',
   'archive',

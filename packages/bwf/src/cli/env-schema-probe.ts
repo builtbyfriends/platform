@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 import { writeSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { findEnvFile } from '../codegen/env-types.ts';
 import type { SelfHostSchemaFacts, SelfHostSchemaFailureReason } from './env-validation.ts';
 

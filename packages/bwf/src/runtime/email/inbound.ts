@@ -152,7 +152,7 @@ export async function parseEmail(message: ForwardableEmailMessage): Promise<Pars
     throw new ParseEmailError(
       'PARSE_FAILED',
       `parseEmail: could not parse the message body. ${error instanceof Error ? error.message : String(error)}`,
-      { error },
+      { cause: error },
     );
   }
 }

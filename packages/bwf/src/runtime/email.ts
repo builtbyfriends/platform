@@ -649,7 +649,7 @@ async function postToDevInbox(
       }),
     ).then(
       (res) => ({ kind: 'response' as const, res }),
-      (error: unknown) => ({ kind: 'error' as const, error }),
+      (error: unknown) => ({ kind: 'error' as const, cause: error }),
     );
     const settled = await Promise.race([
       attempt,
