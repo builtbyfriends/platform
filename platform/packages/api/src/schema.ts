@@ -294,6 +294,8 @@ export const appCreditGrants = pgTable(
     note: text('note'),
     stripe_invoice_id: text('stripe_invoice_id'),
     stripe_payment_intent_id: text('stripe_payment_intent_id'),
+    /** Which month of a longer paid period, such as a year, the grant is. 0 for a grant that isn't one. */
+    month_index: integer('month_index').notNull().default(0),
     livemode: boolean('livemode').notNull().default(false),
     starts_at: timestamp('starts_at', { mode: 'string', withTimezone: true }).notNull(),
     expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }),
@@ -306,13 +308,13 @@ export const appCreditGrants = pgTable(
   (table) => [
     index('idx_app_credit_grants_payer').on(table.client_id, table.payer_id),
     uniqueIndex('idx_app_credit_grants_invoice')
-      .on(table.client_id, table.stripe_invoice_id)
+      .on(table.client_id, table.stripe_invoice_id, table.month_index)
       .where(sql`${table.stripe_invoice_id} IS NOT NULL`),
     uniqueIndex('idx_app_credit_grants_starter')
       .on(table.client_id, table.payer_id, table.livemode)
       .where(sql`${table.source} = 'starter'`),
     uniqueIndex('idx_app_credit_grants_payment')
-      .on(table.client_id, table.stripe_payment_intent_id)
+      .on(table.client_id, table.stripe_payment_intent_id, table.month_index)
       .where(sql`${table.stripe_payment_intent_id} IS NOT NULL AND ${table.moved_from} IS NULL`),
     uniqueIndex('idx_app_credit_grants_move')
       .on(table.client_id, table.move_id, table.moved_from)

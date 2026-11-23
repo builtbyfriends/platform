@@ -1793,6 +1793,134 @@ describe('app billing', () => {
       expect((await dataOf(call('/usage.status', { person: 'p1' }))).seats).toBeNull();
     });
 
+    describe('yearly seats', () => {
+      const now = Math.floor(Date.now() / 1000);
+      const monthsBack = (seconds: number, months: number) => {
+        const date = new Date(seconds * 1000);
+        date.setUTCMonth(date.getUTCMonth() - months);
+        return Math.floor(date.getTime() / 1000);
+      };
+      const yearLine = (
+        amount: number,
+        quantity: number,
+        start: number,
+        end: number,
+        proration = false,
+      ) => ({
+        amount,
+        quantity,
+        period: { start, end },
+        pricing: { price_details: { price: 'price_app_team_year' }, unit_amount_decimal: '30000' },
+        parent: { subscription_item_details: { proration } },
+      });
+      const yearInvoice = (
+        id: string,
+        lines: Array<ReturnType<typeof yearLine>>,
+        reason = 'subscription_create',
+      ) => ({
+        type: 'invoice.paid',
+        data: {
+          object: {
+            id,
+            billing_reason: reason,
+            payment_intent: `pi_${id}`,
+            amount_paid: lines.reduce((sum, line) => sum + line.amount, 0),
+            lines: { data: lines },
+            parent: {
+              subscription_details: { metadata: { ...seatMetadata('p1'), plan: 'team-year' } },
+            },
+          },
+        },
+      });
+      const grants = () =>
+        env.db
+          .select()
+          .from(appCreditGrants)
+          .where(eq(appCreditGrants.payer_id, 'p1'))
+          .orderBy(appCreditGrants.starts_at);
+      const balance = async () =>
+        (await dataOf(call('/usage.status', { person: 'p1' }))).credits as unknown as {
+          balanceMicros: number;
+          pendingMicros: number;
+        };
+
+      beforeEach(async () => {
+        await env.db
+          .update(oauthClients)
+          .set({
+            plans: {
+              'team-year': {
+                stripePriceId: 'price_app_team_year',
+                creditMicros: 20_000_000,
+                perSeat: true,
+              },
+            },
+          })
+          .where(eq(oauthClients.id, registration.client.id));
+      });
+
+      it('grants 3 seats $60 now and $60 on each of the next 11 monthly dates, once', async () => {
+        const start = now - 60;
+        const end = monthsBack(start, -12);
+        const event = {
+          id: 'evt_year',
+          ...yearInvoice('in_year', [yearLine(90_000, 3, start, end)]),
+        };
+        await webhook(event);
+        await webhook(event);
+        await webhook({ ...yearInvoice('in_year', [yearLine(90_000, 3, start, end)]) });
+        const rows = await grants();
+        expect(rows).toHaveLength(12);
+        expect(rows.every((row) => row.amount_micros === 60_000_000)).toBe(true);
+        expect(rows.map((row) => row.month_index)).toEqual([...Array(12).keys()]);
+        for (const [index, row] of rows.entries()) {
+          expect(new Date(row.starts_at).getTime() / 1000).toBe(
+            index === 0 ? start : monthsBack(start, -index),
+          );
+          expect(Date.parse(row.expires_at!)).toBe(
+            Date.parse(rows[index + 1]?.starts_at ?? new Date(end * 1000).toISOString()),
+          );
+        }
+        expect(await balance()).toMatchObject({ balanceMicros: 60_000_000 });
+      });
+
+      it('ends each month’s credits with the month, and a refund in month 4 stops months 5 to 12', async () => {
+        const start = monthsBack(now, 3) - 3600;
+        const end = monthsBack(start, -12);
+        await webhook(yearInvoice('in_y4', [yearLine(90_000, 3, start, end)]));
+        expect((await balance()).balanceMicros).toBe(60_000_000);
+        await webhook({
+          type: 'charge.refunded',
+          data: { object: { payment_intent: 'pi_in_y4', amount: 90_000, amount_refunded: 90_000 } },
+        });
+        expect((await balance()).balanceMicros).toBe(0);
+        const rows = await grants();
+        expect(rows.slice(4).every((row) => row.remaining_micros === 0)).toBe(true);
+      });
+
+      it('gives a seat added mid-year its share of this month and a full month after', async () => {
+        const start = monthsBack(now, 6) + 10 * 86_400;
+        const end = monthsBack(start, -12);
+        await webhook(yearInvoice('in_y', [yearLine(90_000, 3, start, end)]));
+        const from = now - 60;
+        await webhook(
+          yearInvoice(
+            'in_y_add',
+            [yearLine(-40_000, 3, from, end, true), yearLine(53_333, 4, from, end, true)],
+            'subscription_update',
+          ),
+        );
+        const added = (await grants()).filter((row) => row.stripe_invoice_id === 'in_y_add');
+        expect(added.length).toBeGreaterThanOrEqual(6);
+        expect(added.slice(1).every((row) => row.amount_micros === 20_000_000)).toBe(true);
+        expect(added[0]!.amount_micros).toBeGreaterThan(0);
+        expect(added[0]!.amount_micros).toBeLessThan(20_000_000);
+        expect(added[0]!.amount_micros % 10_000).toBe(0);
+        expect(Date.parse(added.at(-1)!.expires_at!)).toBe(end * 1000);
+        expect((await balance()).balanceMicros).toBe(60_000_000 + added[0]!.amount_micros);
+      });
+    });
+
     describe('seat credits', () => {
       const start = Math.floor(Date.now() / 1000) - DAY;
       const end = start + 30 * DAY;

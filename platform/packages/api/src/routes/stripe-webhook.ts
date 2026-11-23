@@ -167,6 +167,51 @@ function seatCredits(
   return Math.floor((plan.creditMicros * charged) / unit / MICROS_PER_CENT) * MICROS_PER_CENT;
 }
 
+const DAY_SECONDS = 86_400;
+
+/** A time in seconds moved by whole calendar months, kept on the same day or the month's last day. */
+function addMonths(seconds: number, months: number): number {
+  const date = new Date(seconds * 1000);
+  const moved = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + months,
+      1,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+    ),
+  );
+  const last = new Date(Date.UTC(moved.getUTCFullYear(), moved.getUTCMonth() + 1, 0)).getUTCDate();
+  moved.setUTCDate(Math.min(date.getUTCDate(), last));
+  return moved.getTime() / 1000;
+}
+
+/**
+ * The months a paid period covers, counted back from its end, as [from, to] pairs. The first can be
+ * part of a month, such as the rest of the month a seat was added in. A period of a month or less is one.
+ */
+function monthsOf(start: number, end: number): Array<[number, number]> {
+  if (end - start <= 35 * DAY_SECONDS) {
+    return [[start, end]];
+  }
+  const ends = [end];
+  for (let back = 1; addMonths(end, -back) > start + DAY_SECONDS; back++) {
+    ends.unshift(addMonths(end, -back));
+  }
+  return ends.map((to, index) => [index === 0 ? start : ends[index - 1]!, to]);
+}
+
+/** How many seats a seat change added: the new count's proration line less the old count's. */
+function addedSeats(lines: ReadonlyArray<InvoiceLine>, plan: ClientPlan): number {
+  const seat = lines.filter((line) => priceOf(line) === plan.stripePriceId && isProration(line));
+  const added = seat.reduce(
+    (sum, line) => sum + Math.sign(line.amount ?? 0) * (line.quantity ?? 1),
+    0,
+  );
+  return Math.max(0, added);
+}
+
 /**
  * A paid subscription invoice grants the plan's monthly credits, which end with the paid period. The plan comes
  * from the invoice's price, since a plan changed in Stripe's portal keeps the old plan in the metadata.
@@ -223,18 +268,38 @@ async function grantPlanCredits(
   if (credits <= 0 || !start || !end) {
     return false;
   }
-  await grantCredits(tx, {
-    clientId: key.client_id,
-    payer: key.person_id,
-    source: 'plan',
-    amountMicros: credits,
-    livemode: event.livemode,
-    giverId: eventMetadata(invoice).buyerId ?? null,
-    stripeInvoiceId: invoice.id,
-    stripePaymentIntentId: paymentIntentId,
-    startsAt: new Date(start * 1000),
-    expiresAt: new Date(end * 1000),
-  });
+  const months = monthsOf(start, end);
+  // Decision: A period longer than a month, such as a year, brings the monthly credits once a month. Each month
+  // is written now with its own start, so nothing has to run on a schedule, and a refund or dispute of the
+  // payment finds the months still to come.
+  const monthly =
+    months.length === 1
+      ? credits
+      : change && bought?.perSeat
+        ? bought.creditMicros * addedSeats(invoice.lines?.data ?? [], bought)
+        : credits;
+  for (const [index, [from, to]] of months.entries()) {
+    const share =
+      months.length > 1 && index === 0 && change ? (to - from) / (to - addMonths(to, -1)) : 1;
+    const amountMicros =
+      share === 1 ? monthly : Math.floor((monthly * share) / MICROS_PER_CENT) * MICROS_PER_CENT;
+    if (amountMicros <= 0) {
+      continue;
+    }
+    await grantCredits(tx, {
+      clientId: key.client_id,
+      payer: key.person_id,
+      source: 'plan',
+      amountMicros,
+      livemode: event.livemode,
+      giverId: eventMetadata(invoice).buyerId ?? null,
+      stripeInvoiceId: invoice.id,
+      stripePaymentIntentId: paymentIntentId,
+      monthIndex: index,
+      startsAt: new Date(from * 1000),
+      expiresAt: new Date(to * 1000),
+    });
+  }
   return true;
 }
 

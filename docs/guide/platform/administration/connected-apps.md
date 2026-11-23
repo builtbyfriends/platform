@@ -125,6 +125,8 @@ To change the count, send `POST /app-billing/billing.seats` with `{ payer, quant
 
 Each paid invoice puts each seat's credits in the payer's balance, until the end of the paid period. A seat added partway through brings the same share of a seat's credits as the share of the price Stripe charged, rounded down to the cent: with $20 of credits on a $30 seat, a seat added halfway through charges $15 and brings $10. A removed seat brings nothing and takes nothing back. A refund or dispute of a seat change takes back that change's credits only. A dispute also cancels the seat subscription and blocks the person who paid.
 
+A plan billed yearly, such as a seat at $300 a year, still brings `creditMicros` once a month. When the yearly invoice is paid, Platform adds one grant for each month of the year, each starting on its monthly date and ending a month later, so credits left at the end of a month don't carry over. A seat added partway through the year brings its share of the current month and a full month for each month after. A removed seat keeps the months already paid for. A refund takes back the months still to come first, so a full refund in month 4 stops months 5 to 12. A dispute takes back the whole year. Platform doesn't refund the months not yet used by itself. To do that, refund the payment from the person's page in the operator view.
+
 ## Sell credits
 
 People can also buy credits once, with or without a plan. Fill in **Credits people can buy once** for the application, with amounts in millionths of a dollar:

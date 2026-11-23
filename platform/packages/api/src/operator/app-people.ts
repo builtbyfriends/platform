@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, not, like, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, isNull, not, like, sql, type SQL } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import {
   APP,
@@ -309,8 +309,25 @@ export async function refundAppPerson(
     throw error;
   }
   const refundableCents = paid.receivedCents - paid.refundedCents;
+  // Decision: A yearly payment brings one grant a month, so what's unspent counts every month it paid for.
+  const [payment] = await db
+    .select({
+      amount: sql<string>`sum(${appCreditGrants.amount_micros})`,
+      remaining: sql<string>`sum(${appCreditGrants.remaining_micros})`,
+    })
+    .from(appCreditGrants)
+    .where(
+      and(
+        eq(appCreditGrants.client_id, clientId),
+        eq(appCreditGrants.stripe_payment_intent_id, paymentIntentId),
+        isNull(appCreditGrants.moved_from),
+        isNull(appCreditGrants.voided_at),
+      ),
+    );
+  const unspentMicros = Number(payment?.remaining ?? grant.remaining_micros);
   const unspentCents = Math.floor(
-    (paid.receivedCents * grant.remaining_micros) / Math.max(1, grant.amount_micros),
+    (paid.receivedCents * unspentMicros) /
+      Math.max(1, Number(payment?.amount ?? grant.amount_micros)),
   );
   const asked =
     input.dollars === undefined || input.dollars === '' ? null : dollarsToMicros(input.dollars);
@@ -332,7 +349,7 @@ export async function refundAppPerson(
     currency: paid.currency,
     receivedCents: paid.receivedCents,
     refundedCents: paid.refundedCents,
-    unspentMicros: grant.remaining_micros,
+    unspentMicros,
     unspentCents,
     amountCents,
     effect: "Credits come off the person's balance when Stripe's refund event arrives.",

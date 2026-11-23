@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
 import { appCreditGrants, appPayers, type CreditSource, type PayerCap } from './schema.ts';
@@ -125,6 +125,8 @@ export type NewGrant = Payer & {
   note?: string | null;
   stripeInvoiceId?: string | null;
   stripePaymentIntentId?: string | null;
+  /** Which month of a longer paid period the grant is, so one payment can bring one grant a month. */
+  monthIndex?: number;
   startsAt?: Date;
   expiresAt?: Date | null;
 };
@@ -163,6 +165,7 @@ export async function grantCredits(
         note: grant.note ?? null,
         stripe_invoice_id: grant.stripeInvoiceId ?? null,
         stripe_payment_intent_id: grant.stripePaymentIntentId ?? null,
+        month_index: grant.monthIndex ?? 0,
         livemode: grant.livemode,
         starts_at: (grant.startsAt ?? now).toISOString(),
         expires_at: grant.expiresAt?.toISOString() ?? null,
@@ -202,7 +205,12 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
       .select({ micros: sql<string>`coalesce(sum(${appCreditGrants.remaining_micros}), 0)` })
       .from(appCreditGrants)
       .where(
-        and(payerGrants(payer), unended(now), gt(appCreditGrants.starts_at, now.toISOString())),
+        and(
+          payerGrants(payer),
+          unended(now),
+          gt(appCreditGrants.starts_at, now.toISOString()),
+          ne(appCreditGrants.source, 'plan'),
+        ),
       ),
   ]);
   const owedMicros = row?.owed_micros ?? 0;
@@ -325,13 +333,21 @@ export async function markOverCaps(
   return true;
 }
 
-/** Every grant a payment made: the one it bought first, then the ones moved from it, all locked. */
+/**
+ * Every grant a payment made: the ones it bought first, from the month that ends last, then the
+ * ones moved from them, all locked. A refund takes back months still to come before this month's.
+ */
 async function grantsByPayment(tx: Tx, paymentIntentId: string) {
   return tx
     .select()
     .from(appCreditGrants)
     .where(eq(appCreditGrants.stripe_payment_intent_id, paymentIntentId))
-    .orderBy(sql`${appCreditGrants.moved_from} is not null`, ...spendOrder)
+    .orderBy(
+      sql`${appCreditGrants.moved_from} is not null`,
+      sql`${appCreditGrants.expires_at} desc nulls first`,
+      asc(appCreditGrants.created_at),
+      asc(appCreditGrants.id),
+    )
     .for('update');
 }
 
@@ -357,12 +373,13 @@ export async function refundGrant(
   refunded: { amount: number; charged: number },
 ): Promise<Array<Payer>> {
   const grants = await grantsByPayment(tx, paymentIntentId);
-  const first = grants.find((grant) => grant.moved_from === null);
-  if (!first || first.voided_at || refunded.charged <= 0) {
+  const bought = grants.filter((grant) => grant.moved_from === null);
+  if (bought.length === 0 || bought.some((grant) => grant.voided_at) || refunded.charged <= 0) {
     return [];
   }
   const live = grants.filter((grant) => !grant.voided_at);
-  const share = Math.floor((first.amount_micros * refunded.amount) / refunded.charged);
+  const paid = bought.reduce((sum, grant) => sum + grant.amount_micros, 0);
+  const share = Math.floor((paid * refunded.amount) / refunded.charged);
   let need = share - live.reduce((sum, grant) => sum + grant.taken_micros, 0);
   const touched: Array<GrantRow> = [];
   for (const grant of live) {
