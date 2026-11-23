@@ -1604,6 +1604,195 @@ describe('app billing', () => {
     });
   });
 
+  describe('seats', () => {
+    const seatMetadata = (payer: string) => ({
+      clientId: registration.client.id,
+      personId: payer,
+      plan: 'team',
+    });
+    let stripe: ReturnType<typeof subscription>;
+    let calls: Array<[string, RequestInit | undefined]>;
+    let pending: object | null;
+    const seatSubscription = (quantity: number) =>
+      subscription({
+        items: {
+          data: [
+            {
+              id: 'si_1',
+              quantity,
+              current_period_end: 1_900_000_000,
+              price: { id: 'price_app_team', unit_amount: 3000 },
+            },
+          ],
+        },
+      });
+    const form = (index: number) => new URLSearchParams(String(calls[index]![1]!.body));
+    const startSeats = async (payer: string, quantity: number) => {
+      stripe = seatSubscription(quantity);
+      await webhook({
+        type: 'checkout.session.completed',
+        data: { object: { ...paidCheckout, metadata: seatMetadata(payer) } },
+      });
+      await webhook({
+        type: 'customer.subscription.created',
+        data: { object: { id: 'sub_1', metadata: seatMetadata(payer) } },
+      });
+      calls = [];
+    };
+
+    beforeEach(async () => {
+      await env.db
+        .update(oauthClients)
+        .set({
+          plans: {
+            solo: { stripePriceId: 'price_app_solo', creditMicros: 1_000_000 },
+            team: { stripePriceId: 'price_app_team', creditMicros: 20_000_000, perSeat: true },
+          },
+        })
+        .where(eq(oauthClients.id, registration.client.id));
+      calls = [];
+      pending = null;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        calls.push([String(input), init]);
+        if (String(input).includes('/subscriptions/')) {
+          if (init?.method === 'POST') {
+            const quantity = Number(
+              new URLSearchParams(String(init.body)).get('items[0][quantity]'),
+            );
+            if (!pending) {
+              stripe = seatSubscription(quantity);
+            }
+            return Response.json({ ...stripe, pending_update: pending });
+          }
+          return Response.json(stripe);
+        }
+        return Response.json({ url: 'https://stripe.example/session' });
+      });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('sells 5 seats in one Checkout and shows the count, the price and the next bill', async () => {
+      const order = { person: 'p1', plan: 'team', quantity: 5, returnUrl: 'https://example.com/b' };
+      expect((await call('/billing.checkout', order)).status).toBe(200);
+      expect(form(0).get('line_items[0][quantity]')).toBe('5');
+      expect(form(0).get('line_items[0][price]')).toBe('price_app_team');
+      await startSeats('p1', 5);
+      expect(await dataOf(call('/usage.status', { person: 'p1' }))).toMatchObject({
+        plan: 'team',
+        seats: {
+          count: 5,
+          priceCents: 3000,
+          nextBillCents: 15_000,
+          nextBillAt: new Date(1_900_000_000_000).toISOString(),
+        },
+      });
+    });
+
+    it('lets a person buy seats for a wallet, kept apart from the buyer', async () => {
+      const order = {
+        person: 'p1',
+        payer: 'server-1',
+        plan: 'team',
+        quantity: 3,
+        returnUrl: 'https://example.com/b',
+      };
+      expect(await (await call('/billing.checkout', order)).json()).toEqual({
+        error: 'not_a_wallet',
+      });
+      await call('/wallets.open', { payer: 'server-1' });
+      expect((await call('/billing.checkout', order)).status).toBe(200);
+      expect(form(0).get('metadata[personId]')).toBe('server-1');
+      expect(form(0).get('metadata[buyerId]')).toBe('p1');
+      expect(
+        await (await call('/billing.checkout', { ...order, plan: 'solo', quantity: 1 })).json(),
+      ).toEqual({ error: 'payer_must_be_buyer' });
+      expect(
+        await (await call('/billing.checkout', { ...order, person: 'server-1' })).json(),
+      ).toMatchObject({ error: 'payer_is_wallet' });
+      await startSeats('server-1', 3);
+      expect(await dataOf(call('/usage.status', { person: 'server-1' }))).toMatchObject({
+        wallet: true,
+        plan: 'team',
+        caps: null,
+        seats: { count: 3 },
+      });
+    });
+
+    it('charges an added seat at once and lowers the next bill for a removed one', async () => {
+      await startSeats('p1', 5);
+      expect(await dataOf(call('/billing.seats', { payer: 'p1', quantity: 6 }))).toEqual({
+        seats: 6,
+        before: 5,
+        changed: true,
+        paymentNeeded: false,
+      });
+      const up = calls.find(([, init]) => init?.method === 'POST')!;
+      expect(up[0]).toBe('https://api.stripe.com/v1/subscriptions/sub_1');
+      expect(Object.fromEntries(new URLSearchParams(String(up[1]!.body)))).toEqual({
+        'items[0][id]': 'si_1',
+        'items[0][quantity]': '6',
+        proration_behavior: 'always_invoice',
+        payment_behavior: 'pending_if_incomplete',
+      });
+
+      calls = [];
+      expect(await dataOf(call('/billing.seats', { payer: 'p1', quantity: 4 }))).toMatchObject({
+        seats: 4,
+        changed: true,
+      });
+      const down = calls.find(([, init]) => init?.method === 'POST')!;
+      expect(new URLSearchParams(String(down[1]!.body)).get('proration_behavior')).toBe('none');
+      expect(new URLSearchParams(String(down[1]!.body)).has('payment_behavior')).toBe(false);
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).seats).toMatchObject({
+        count: 4,
+        nextBillCents: 12_000,
+      });
+
+      calls = [];
+      expect(await dataOf(call('/billing.seats', { payer: 'p1', quantity: 4 }))).toMatchObject({
+        changed: false,
+      });
+      expect(calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    });
+
+    it('keeps the old count when the charge for a new seat fails', async () => {
+      await startSeats('p1', 5);
+      pending = { subscription_items: [{ id: 'si_1', quantity: 6 }] };
+      expect(await dataOf(call('/billing.seats', { payer: 'p1', quantity: 6 }))).toMatchObject({
+        seats: 5,
+        changed: false,
+        paymentNeeded: true,
+      });
+    });
+
+    it('refuses a seat count on a plan that is not sold by the seat', async () => {
+      const order = { person: 'p1', plan: 'solo', quantity: 2, returnUrl: 'https://example.com/b' };
+      expect(await (await call('/billing.checkout', order)).json()).toEqual({
+        error: 'not_per_seat',
+      });
+      expect((await call('/billing.checkout', { ...order, quantity: 0 })).status).toBe(400);
+      expect((await call('/billing.checkout', { ...order, quantity: 1 })).status).toBe(200);
+      expect(await (await call('/billing.seats', { payer: 'p1', quantity: 2 })).json()).toEqual({
+        error: 'no_subscription',
+      });
+      stripe = subscription({
+        items: { data: [{ id: 'si_1', quantity: 1, price: { id: 'price_app_solo' } }] },
+      });
+      await webhook({
+        type: 'checkout.session.completed',
+        data: {
+          object: { ...paidCheckout, metadata: { ...seatMetadata('p1'), plan: 'solo' } },
+        },
+      });
+      expect(await (await call('/billing.seats', { payer: 'p1', quantity: 2 })).json()).toEqual({
+        error: 'not_per_seat',
+      });
+      expect((await dataOf(call('/usage.status', { person: 'p1' }))).seats).toBeNull();
+    });
+  });
+
   it('refuses an unsigned webhook', async () => {
     const response = await app.fetch(
       new Request(origin + '/billing/stripe', { method: 'POST', body: '{}' }),

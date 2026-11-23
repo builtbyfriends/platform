@@ -111,6 +111,18 @@ An application with no plan list has nothing on sale. Its plan list answers an e
 
 If you remove a plan from the list later, people who hold it keep their Stripe subscription, and Stripe keeps charging them. They get no credits, and only the plan's limits in the catalog hold their use, until you move them to a plan in the list or cancel the subscription in Stripe.
 
+### Sell a plan by the seat
+
+Add `"perSeat": true` to a plan to sell it by the seat. `creditMicros` is then what each seat brings a month:
+
+```json
+{ "team": { "stripePriceId": "price_…", "creditMicros": 20000000, "perSeat": true } }
+```
+
+Checkout takes `quantity` (1 to 500) for such a plan. Any other plan answers `not_per_seat` for a count above 1. A seat plan can be held by a wallet: send `payer` with the wallet's id and `person` with the person who pays. `payer` has to be an opened wallet (`not_a_wallet`), and only a seat plan can be bought for someone else (`payer_must_be_buyer`).
+
+To change the count, send `POST /app-billing/billing.seats` with `{ payer, quantity }`. More seats are charged at once for the share of the period that's left, and the count changes once that's paid. If the card fails, the answer has `paymentNeeded: true` and the old count stays. Fewer seats take effect at once, with no refund for the days left, and the next bill is lower. `usage.status` answers `seats: { count, priceCents, nextBillCents, nextBillAt }` for a seat plan, and `null` otherwise. Platform doesn't know who holds a seat, so the application checks that before it lowers the count.
+
 ## Sell credits
 
 People can also buy credits once, with or without a plan. Fill in **Credits people can buy once** for the application, with amounts in millionths of a dollar:

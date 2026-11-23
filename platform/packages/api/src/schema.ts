@@ -79,7 +79,10 @@ export const oauthClients = pgTable('oauth_clients', {
   secret_hash: text('secret_hash').notNull(),
   enabled: boolean('enabled').notNull().default(true),
   /** The plans this application's people can buy: each one's Stripe price and monthly credits. */
-  plans: jsonb('plans').$type<Record<string, { stripePriceId: string; creditMicros: number }>>(),
+  plans:
+    jsonb('plans').$type<
+      Record<string, { stripePriceId: string; creditMicros: number; perSeat?: boolean }>
+    >(),
   /** The one-time credit each person can be given once, set by an operator. Null gives none. */
   starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
   /** How people buy credits once: the smallest amount, the step above it, and how many days bought credits last. Null sells none. */
@@ -113,6 +116,9 @@ export const appPeople = pgTable(
     subscription_status: text('subscription_status'),
     current_period_end: timestamp('current_period_end', { mode: 'string', withTimezone: true }),
     cancel_at_period_end: boolean('cancel_at_period_end').notNull().default(false),
+    /** For a plan sold by the seat: how many seats the subscription holds, and one seat's price in cents. */
+    seats: integer('seats'),
+    seat_price_cents: integer('seat_price_cents'),
     /** No longer read: app_payers.out_since took its place. Kept for the previous Worker during a rollout. */
     out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })

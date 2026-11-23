@@ -23,6 +23,7 @@ import { queueBillingEvent } from '../billing-events.ts';
 import {
   BillingUnavailableError,
   cancelSubscription,
+  changeSubscriptionQuantity,
   createCheckoutSession,
   createCreditCheckoutSession,
   createPortalSession,
@@ -37,6 +38,7 @@ import {
   forgetPayer,
   grantCredits,
   isWallet,
+  lockPayer,
   moveCredits,
   openWallet,
   payerBlocked,
@@ -244,8 +246,9 @@ async function standing(context: BillingContext, person: string) {
     clientId,
     person,
   );
-  const plan = wallet ? null : (row?.plan ?? defaultPlanId);
-  const limits = plan ? await resolvePlanLimits(db, plan) : null;
+  // Decision: A wallet has a plan only while it holds a subscription, such as seats, and is still held to its balance alone.
+  const plan = wallet && !row?.stripe_subscription_id ? null : (row?.plan ?? defaultPlanId);
+  const limits = plan && !wallet ? await resolvePlanLimits(db, plan) : null;
   const period = currentPeriod();
   const quantity = (meter: Meter) => meters.find((entry) => entry.meter === meter)!.quantity;
   const usedNow = { aiNeurons: quantity('aiNeurons'), sandboxSeconds: quantity('sandboxSeconds') };
@@ -301,8 +304,23 @@ async function standing(context: BillingContext, person: string) {
       row?.stripe_subscription_id && row.current_period_end
         ? new Date(row.current_period_end).toISOString()
         : null,
+    seats: row?.stripe_subscription_id && row.seats !== null ? seatsOf(row) : null,
   };
 }
+
+/** A plan sold by the seat: how many, one seat's price, and the next bill before tax and discounts. */
+const seatsOf = (row: typeof appPeople.$inferSelect) => ({
+  count: row.seats!,
+  priceCents: row.seat_price_cents,
+  nextBillCents: row.seat_price_cents === null ? null : row.seats! * row.seat_price_cents,
+  nextBillAt: row.cancel_at_period_end
+    ? null
+    : row.current_period_end && new Date(row.current_period_end).toISOString(),
+});
+
+const MAX_SEATS = 500;
+const isSeatCount = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= MAX_SEATS;
 
 const ENDED = new Set(['canceled', 'incomplete_expired']);
 
@@ -918,9 +936,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
     }
-    const refused = await walletRefused(context, body.person);
-    if (refused) {
-      return refused;
+    const payer: unknown = body.payer ?? body.person;
+    if (!isPersonId(payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
     }
     const plans = await clientPlans(context.get('db'), context.get('billingClient'));
     if (Object.keys(plans).length === 0) {
@@ -929,25 +947,44 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (typeof body?.plan !== 'string' || !Object.hasOwn(plans, body.plan)) {
       return context.json({ error: 'bad_plan' }, 400);
     }
+    const perSeat = plans[body.plan]!.perSeat === true;
+    const quantity: unknown = body.quantity ?? 1;
+    if (!isSeatCount(quantity)) {
+      return context.json({ error: 'bad_quantity', max: MAX_SEATS }, 400);
+    }
+    if (quantity > 1 && !perSeat) {
+      return context.json({ error: 'not_per_seat' }, 400);
+    }
+    // Decision: A wallet can hold a plan sold by the seat, bought by one of the application's people. Any other
+    // plan stays a person's own.
+    if (payer === body.person) {
+      const refused = await walletRefused(context, payer);
+      if (refused) {
+        return refused;
+      }
+    } else if (!perSeat) {
+      return context.json({ error: 'payer_must_be_buyer' }, 400);
+    } else if (
+      !(await isWallet(context.get('db'), { clientId: context.get('billingClient'), payer }))
+    ) {
+      return context.json({ error: 'not_a_wallet' }, 400);
+    }
     if (!isReturnUrl(body?.returnUrl)) {
       return context.json({ error: 'bad_return_url' }, 400);
     }
-    const [stored] = await context
-      .get('db')
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    if (await payerClosed(db, { clientId, payer })) {
+      return context.json({ error: 'closed' }, 409);
+    }
+    const [stored] = await db
       .select()
       .from(appPeople)
-      .where(
-        and(
-          eq(appPeople.client_id, context.get('billingClient')),
-          eq(appPeople.person_id, body.person),
-        ),
-      );
+      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, payer)));
     const row = stored?.livemode === stripeLiveMode(context.env) ? stored : undefined;
     if (
-      await payerBlocked(context.get('db'), {
-        clientId: context.get('billingClient'),
-        payer: body.person,
-      })
+      (await payerBlocked(db, { clientId, payer })) ||
+      (await payerBlocked(db, { clientId, payer: body.person }))
     ) {
       return context.json({ error: 'blocked' }, 403);
     }
@@ -960,27 +997,92 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     ) {
       return context.json({ error: 'already_subscribed' }, 409);
     }
+    const buyer = payer === body.person ? row : undefined;
     try {
       const url = await createCheckoutSession(context.env, {
         customerId:
-          row?.stripe_customer_id ??
-          (
-            await buyerOf(
-              context.get('db'),
-              context.get('billingClient'),
-              body.person,
-              stripeLiveMode(context.env),
-            )
-          )?.stripe_customer_id ??
+          buyer?.stripe_customer_id ??
+          (await buyerOf(db, clientId, body.person, stripeLiveMode(context.env)))
+            ?.stripe_customer_id ??
           null,
-        reference: `${context.get('billingClient')}:${body.person}`,
-        metadata: { clientId: context.get('billingClient'), personId: body.person },
+        reference: `${clientId}:${payer}`,
+        metadata: {
+          clientId,
+          personId: payer,
+          ...(payer === body.person ? {} : { buyerId: body.person }),
+        },
         email: typeof body.email === 'string' ? body.email : null,
         plan: body.plan,
         priceId: plans[body.plan]!.stripePriceId,
+        quantity,
         returnUrl: body.returnUrl,
       });
       return context.json({ data: { url } });
+    } catch (error) {
+      if (error instanceof BillingUnavailableError) {
+        return context.json({ error: 'billing_unavailable' }, 503);
+      }
+      throw error;
+    }
+  })
+  .post('/billing.seats', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    if (!isSeatCount(body.quantity)) {
+      return context.json({ error: 'bad_quantity', max: MAX_SEATS }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const plans = await clientPlans(db, clientId);
+    const live = stripeLiveMode(context.env);
+    try {
+      // Decision: The payer's row stays locked through Stripe's answer, so two seat changes run one after the other.
+      const answer = await db.transaction(async (tx) => {
+        await lockPayer(tx, { clientId, payer: body.payer });
+        const [row] = await tx
+          .select()
+          .from(appPeople)
+          .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, body.payer)));
+        if (
+          !row?.stripe_subscription_id ||
+          row.livemode !== live ||
+          ENDED.has(row.subscription_status ?? '')
+        ) {
+          return { error: 'no_subscription', status: 404 } as const;
+        }
+        if (!plans[row.plan]?.perSeat) {
+          return { error: 'not_per_seat', status: 409 } as const;
+        }
+        const subscription = await fetchSubscription(context.env, row.stripe_subscription_id);
+        if (!subscription.itemId) {
+          return { error: 'no_subscription', status: 404 } as const;
+        }
+        const before = subscription.quantity;
+        const changed =
+          before !== body.quantity &&
+          (await changeSubscriptionQuantity(context.env, {
+            subscriptionId: subscription.id,
+            itemId: subscription.itemId,
+            quantity: body.quantity,
+            more: body.quantity > before,
+          }));
+        const seats = changed ? body.quantity : before;
+        await tx
+          .update(appPeople)
+          .set({
+            seats,
+            seat_price_cents: subscription.unitAmountCents ?? row.seat_price_cents,
+            updated_at: new Date().toISOString(),
+          })
+          .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, body.payer)));
+        return { seats, before, changed, paymentNeeded: before !== body.quantity && !changed };
+      });
+      if ('error' in answer) {
+        return context.json({ error: answer.error }, answer.status);
+      }
+      return context.json({ data: answer });
     } catch (error) {
       if (error instanceof BillingUnavailableError) {
         return context.json({ error: 'billing_unavailable' }, 503);

@@ -303,8 +303,11 @@ async function saveSubscription(
   if (!row && !holds) {
     return false;
   }
+  const perSeat = Boolean(plan && plans[plan]?.perSeat);
   const set = {
     ...(holds ? { plan } : {}),
+    seats: perSeat ? subscription.quantity : null,
+    seat_price_cents: perSeat ? subscription.unitAmountCents : null,
     stripe_subscription_id: subscription.id,
     stripe_customer_id: subscription.customerId ?? row?.stripe_customer_id ?? null,
     subscription_status: subscription.status,

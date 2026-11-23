@@ -84,7 +84,13 @@ export function costMicros(meter: Meter, quantity: number, prices: MeterPrices):
   return Math.round((quantity / METERS[meter].unit) * prices[meter] * 1e6);
 }
 
-export type ClientPlans = Record<string, { stripePriceId: string; creditMicros: number }>;
+/**
+ * One plan an application sells. creditMicros is what one unit brings each month. A plan sold by
+ * the seat is bought in any count, and each seat brings creditMicros. A plan billed for longer
+ * than a month still brings creditMicros once a month.
+ */
+export type ClientPlan = { stripePriceId: string; creditMicros: number; perSeat?: boolean };
+export type ClientPlans = Record<string, ClientPlan>;
 
 /** Reads the plans an operator typed in for an application. Null when the shape is wrong. */
 export function parseClientPlans(value: unknown): ClientPlans | null {
@@ -97,11 +103,16 @@ export function parseClientPlans(value: unknown): ClientPlans | null {
       !/^[a-z0-9-]{1,64}$/.test(id) ||
       typeof plan?.stripePriceId !== 'string' ||
       !Number.isSafeInteger(plan.creditMicros) ||
-      (plan.creditMicros as number) < 0
+      (plan.creditMicros as number) < 0 ||
+      (plan.perSeat !== undefined && typeof plan.perSeat !== 'boolean')
     ) {
       return null;
     }
-    plans[id] = { stripePriceId: plan.stripePriceId, creditMicros: plan.creditMicros as number };
+    plans[id] = {
+      stripePriceId: plan.stripePriceId,
+      creditMicros: plan.creditMicros as number,
+      ...(plan.perSeat ? { perSeat: true } : {}),
+    };
   }
   return plans;
 }
@@ -114,6 +125,10 @@ export async function clientPlans(db: DbOrTx, clientId: string): Promise<ClientP
     .where(eq(oauthClients.id, clientId));
   return client?.plans ?? {};
 }
+
+/** What a payer's plan brings each month: one unit's credits, or each seat's. */
+export const monthlyCredits = (plan: ClientPlan, row: { seats: number | null }) =>
+  plan.creditMicros * (plan.perSeat ? (row.seats ?? 1) : 1);
 
 /** First day of this calendar month in UTC, as `YYYY-MM-01`. */
 export const currentPeriod = (now = new Date()) => `${now.toISOString().slice(0, 7)}-01`;
@@ -451,7 +466,12 @@ export async function applyCredits(
   // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
   // that ends writes the default plan on the row.
   const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
-  const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0, balance);
+  const standing = creditStanding(
+    use,
+    prices,
+    paid ? monthlyCredits(plans[row!.plan]!, row!) : 0,
+    balance,
+  );
   const event = (type: BillingEventType, data: object) =>
     queueBillingEvent(db, env, { clientId, type, person, data });
   // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide. They are

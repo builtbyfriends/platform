@@ -65,6 +65,8 @@ export async function createCheckoutSession(
     plan: string;
     /** The Stripe price to charge. Without it, the plan's price from the environment. */
     priceId?: string;
+    /** How many of the plan, for a plan sold by the seat. */
+    quantity?: number;
     returnUrl: string;
   },
   fetcher: typeof fetch = fetch,
@@ -72,7 +74,7 @@ export async function createCheckoutSession(
   const form = new URLSearchParams({
     mode: 'subscription',
     'line_items[0][price]': input.priceId || priceFor(env, input.plan),
-    'line_items[0][quantity]': '1',
+    'line_items[0][quantity]': String(input.quantity ?? 1),
     client_reference_id: input.reference,
     success_url: input.returnUrl,
     cancel_url: input.returnUrl,
@@ -258,6 +260,11 @@ export type StripeSubscription = {
   status: string;
   customerId: string | null;
   priceId: string | null;
+  /** The subscription's one item, which a seat change updates. */
+  itemId: string | null;
+  quantity: number;
+  /** The price of one unit, in cents, when Stripe gives it. */
+  unitAmountCents: number | null;
   /** The end of the current billing period, as an ISO string, or null when Stripe doesn't give one. */
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
@@ -282,7 +289,14 @@ export async function fetchSubscription(
     customer?: string | { id?: string };
     cancel_at_period_end?: boolean;
     current_period_end?: unknown;
-    items?: { data?: Array<{ current_period_end?: unknown; price?: { id?: string } }> };
+    items?: {
+      data?: Array<{
+        id?: string;
+        quantity?: number;
+        current_period_end?: unknown;
+        price?: { id?: string; unit_amount?: number | null };
+      }>;
+    };
   } | null;
   if (!response.ok || !body?.id || !body.status) {
     throw new BillingUnavailableError('Stripe refused the request.');
@@ -294,12 +308,55 @@ export async function fetchSubscription(
     status: body.status,
     customerId: typeof body.customer === 'string' ? body.customer : (body.customer?.id ?? null),
     priceId: item?.price?.id ?? null,
+    itemId: item?.id ?? null,
+    quantity: item?.quantity ?? 1,
+    unitAmountCents: item?.price?.unit_amount ?? null,
     currentPeriodEnd:
       typeof end === 'number' && Number.isFinite(end) && end > 0
         ? new Date(end * 1000).toISOString()
         : null,
     cancelAtPeriodEnd: body.cancel_at_period_end === true,
   };
+}
+
+/**
+ * Changes how many of a plan a subscription holds. More are charged at once for the share of the
+ * period that's left, and only take effect once that's paid. Fewer take effect at once, and the
+ * next bill is lower, with no credit for the days left. Answers false when Stripe kept the old
+ * count because the charge failed or needs the buyer.
+ */
+export async function changeSubscriptionQuantity(
+  env: StripeEnv,
+  change: { subscriptionId: string; itemId: string; quantity: number; more: boolean },
+  fetcher: typeof fetch = fetch,
+): Promise<boolean> {
+  const form = new URLSearchParams({
+    'items[0][id]': change.itemId,
+    'items[0][quantity]': String(change.quantity),
+    proration_behavior: change.more ? 'always_invoice' : 'none',
+  });
+  if (change.more) {
+    form.set('payment_behavior', 'pending_if_incomplete');
+  }
+  const response = await fetcher(
+    `https://api.stripe.com/v1/subscriptions/${encodeURIComponent(change.subscriptionId)}`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${stripeSecretKey(env)}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: form,
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    id?: string;
+    pending_update?: object | null;
+  } | null;
+  if (!response.ok || !body?.id) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+  return !body.pending_update;
 }
 
 /** Ends a subscription now. Used after a card dispute. */
