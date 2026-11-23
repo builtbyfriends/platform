@@ -6,6 +6,7 @@ import {
   type AstExportAllDeclaration,
   type AstExportNamedDeclaration,
   type AstNode,
+  isAstProgram,
   type AstProgram,
   type AstVariableDeclaration,
 } from './ast.ts';
@@ -131,7 +132,10 @@ export function readStaticExports(
   source: string,
   names: ReadonlySet<string>,
 ): StaticExports {
-  return staticExports(parseSync(filename, source).program as unknown as AstProgram, names);
+  const { program } = parseSync(filename, source);
+  return isAstProgram(program)
+    ? staticExports(program, names)
+    : staticExports({ type: 'Program' }, names);
 }
 
 export function unwrapStaticExpression(node: AstNode | undefined): AstNode | undefined {

@@ -8,6 +8,7 @@ import {
   type AstImportNamespaceSpecifier,
   type AstImportSpecifier,
   type AstNode,
+  isAstProgram,
   type AstProgram,
   type AstVariableDeclaration,
 } from './ast.ts';
@@ -22,7 +23,11 @@ export function readResourceDefinition(
 ): { helper: string; options?: AstNode; name?: string } | null {
   let program: AstProgram;
   try {
-    program = parseSync(filename, source).program as unknown as AstProgram;
+    const parsed = parseSync(filename, source).program;
+    if (!isAstProgram(parsed)) {
+      return null;
+    }
+    program = parsed;
   } catch {
     return null;
   }

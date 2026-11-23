@@ -464,8 +464,7 @@ export function createHttpRouteHandler(
   load: () => Promise<Record<string, (c: CloudContext) => unknown>>,
   method: string,
 ): (c: Context) => Promise<Response> {
-  return async (c: Context) =>
-    convertReturnValue(await (await load())[method](c as unknown as CloudContext));
+  return async (c: Context) => convertReturnValue(await (await load())[method](c as CloudContext));
 }
 
 export function createModuleLoader<T>(load: () => Promise<T>, cache = true): () => Promise<T> {

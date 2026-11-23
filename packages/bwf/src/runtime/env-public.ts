@@ -86,7 +86,7 @@ function getValidatedCache(rawEnv: object): Map<string, unknown> {
 
 /** Vite embeds the same public build inputs into server and browser bundles. */
 function getClientEnvValues(): Record<string, unknown> {
-  const values = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+  const values = (import.meta as { env?: Record<string, unknown> }).env;
   return Object.fromEntries(
     Object.entries(values ?? {}).filter(([key]) => key.startsWith('VITE_')),
   );
@@ -126,7 +126,7 @@ export function defineEnv<S extends AnySchema>(schema: S): InferEnv<S> {
   validatedCache = new WeakMap();
   // Decision: Reset boot-time validation state so a re-imported schema is re-checked.
   registry.validation = null;
-  return env as unknown as InferEnv<S>;
+  return env as InferEnv<S>;
 }
 
 /**

@@ -473,7 +473,7 @@ function createRelayedMessage(envelope: EmailEnvelope): {
 } {
   let reason: string | null = null;
 
-  const message = {
+  const message: ForwardableEmailMessage = {
     from: envelope.from,
     to: envelope.to,
     rawSize: envelope.rawSize,
@@ -482,12 +482,16 @@ function createRelayedMessage(envelope: EmailEnvelope): {
     setReject(r: string) {
       reason = r;
     },
+    canBeForwarded: false,
     async forward(_to: string, _headers?: Headers) {
       throw new DefinitiveEmailActionError('relayed forward requires a native email event');
     },
+    async reply(_message: EmailMessage | EmailReplyMessageBuilder) {
+      throw new DefinitiveEmailActionError('relayed reply requires a native email event');
+    },
   };
   return {
-    message: message as unknown as ForwardableEmailMessage,
+    message,
     rejectedReason: () => reason,
   };
 }

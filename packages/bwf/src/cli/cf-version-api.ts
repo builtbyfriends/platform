@@ -367,13 +367,12 @@ export function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json
     }
   }
   // Decision: The converter reads only `worker.exports` for this field.
-  const converted =
-    object(
-      convertToWranglerConfig({
-        worker: { exports: entries },
-        containers: [],
-      } as unknown as ParsedCloudflareConfig).exports,
-    ) ?? {};
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+  const workerExportsOnly = {
+    worker: { exports: entries },
+    containers: [],
+  } as unknown as ParsedCloudflareConfig;
+  const converted = object(convertToWranglerConfig(workerExportsOnly).exports) ?? {};
   const result: Json = {};
   for (const type of ['worker', 'durable-object', 'workflow']) {
     for (const [name, value] of Object.entries(converted)) {

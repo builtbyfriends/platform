@@ -325,6 +325,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       { slug },
     );
 
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     const ctx = {
       waitUntil() {
         // Decision: Nothing to extend: the harness has no request lifetime.

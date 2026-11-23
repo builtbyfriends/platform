@@ -478,7 +478,7 @@ function createBwfTsconfigPatch(root: string, outputBaseDir: string): TsconfigIn
   const hasSchema = hasDrizzleSchema(root);
   const bwfConfig = createProjectTsconfig(root, undefined, hasSchema, hasSchema);
   return collectTsconfigPatchFromConfig(
-    bwfConfig as unknown as JsonObject,
+    bwfConfig as JsonObject,
     join(root, '.bwf', 'tsconfig.json'),
     root,
     outputBaseDir,

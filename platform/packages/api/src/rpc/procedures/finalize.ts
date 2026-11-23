@@ -126,7 +126,7 @@ export const finalize = procedure('deploy.finalize')
         body: JSON.stringify(input.body),
       }),
       env,
-      { waitUntil, passThroughOnException() {} } as unknown as ExecutionContext,
+      { waitUntil, passThroughOnException() {}, props: {} },
     );
     if (!response.ok) {
       const text = await response.text();

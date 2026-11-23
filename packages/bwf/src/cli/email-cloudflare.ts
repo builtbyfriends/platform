@@ -274,16 +274,16 @@ export interface WhoamiJson {
   tokenPermissions?: Array<string>;
 }
 
-export function parseWhoamiJson(data: unknown): WhoamiJson | null {
+function isWhoamiJson(data: unknown): data is WhoamiJson {
   if (!isRecord(data) || typeof data.loggedIn !== 'boolean') {
-    return null;
+    return false;
   }
   if (
     data.tokenPermissions !== undefined &&
     (!Array.isArray(data.tokenPermissions) ||
       data.tokenPermissions.some((scope) => typeof scope !== 'string'))
   ) {
-    return null;
+    return false;
   }
   if (
     data.accounts !== undefined &&
@@ -293,9 +293,13 @@ export function parseWhoamiJson(data: unknown): WhoamiJson | null {
           !isRecord(account) || typeof account.id !== 'string' || typeof account.name !== 'string',
       ))
   ) {
-    return null;
+    return false;
   }
-  return data as unknown as WhoamiJson;
+  return true;
+}
+
+export function parseWhoamiJson(data: unknown): WhoamiJson | null {
+  return isWhoamiJson(data) ? data : null;
 }
 
 export interface RoutingSettings {

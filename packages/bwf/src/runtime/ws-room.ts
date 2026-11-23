@@ -62,14 +62,15 @@ type RoomActionRequest = {
   params: Record<string, string>;
 };
 
-type RoomActionStub = {
+type RoomActionTarget = Rpc.DurableObjectBranded & {
   __platformRoomAction(request: RoomActionRequest): Promise<unknown>;
 };
+type RoomActionStub = DurableObjectStub<RoomActionTarget>;
 
 function resolveRoomBinding(
   route: WebSocketRouteMeta,
   explicitEnv: RuntimeEnv | undefined,
-): DurableObjectNamespace {
+): DurableObjectNamespace<RoomActionTarget> {
   let env: RuntimeEnv;
   if (explicitEnv) {
     env = explicitEnv;
@@ -82,7 +83,7 @@ function resolveRoomBinding(
       );
     }
   }
-  const binding = env[route.bindingName] as DurableObjectNamespace | undefined;
+  const binding = env[route.bindingName] as DurableObjectNamespace<RoomActionTarget> | undefined;
   if (!binding) {
     throw new Error(`ws: Missing Durable Object binding "${route.bindingName}".`);
   }
@@ -138,6 +139,6 @@ export function getRoom(
   }
   const binding = resolveRoomBinding(route, options.env);
   const id = buildWebSocketInstanceId(route, params);
-  const stub = binding.get(binding.idFromName(id)) as unknown as RoomActionStub;
+  const stub = binding.get(binding.idFromName(id));
   return { actions: createActionProxy(stub, id, params) } as RoomHandle<RoomPath & string>;
 }

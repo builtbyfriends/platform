@@ -84,7 +84,7 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
 
   let program: Node;
   try {
-    program = parseSync(filePath, code).program as unknown as Node;
+    program = parseSync(filePath, code).program as Node;
   } catch {
     return undefined;
   }

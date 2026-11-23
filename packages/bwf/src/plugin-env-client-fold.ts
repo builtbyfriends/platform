@@ -10,6 +10,7 @@ import {
   isIdentifier,
   isLiteral,
   type AstMemberExpression,
+  isAstProgram,
   type AstProgram,
 } from './shared/ast.ts';
 import { isClientEnvKey } from './shared/env.ts';
@@ -98,7 +99,10 @@ export function envClientFoldPlugin(): Plugin {
         return;
       }
 
-      const program = parsed.program as unknown as AstProgram;
+      if (!isAstProgram(parsed.program)) {
+        return;
+      }
+      const program: AstProgram = parsed.program;
       const bindings = extractEnvBindings(program);
       if (!bindings) {
         return;

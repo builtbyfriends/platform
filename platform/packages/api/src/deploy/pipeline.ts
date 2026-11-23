@@ -176,7 +176,7 @@ export async function runDeploymentPipeline(input: {
       });
       return;
     }
-    logger.info('emit', 'ndjson_event', event as unknown as Record<string, unknown>);
+    logger.info('emit', 'ndjson_event', event);
     if (!streamOpen) {
       return;
     }

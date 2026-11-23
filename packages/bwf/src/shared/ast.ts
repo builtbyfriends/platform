@@ -9,6 +9,10 @@ export type AstProgram = AstNode & {
   body?: Array<AstNode>;
 };
 
+export function isAstProgram(value: unknown): value is AstProgram {
+  return typeof value === 'object' && value !== null && 'type' in value && value.type === 'Program';
+}
+
 export type AstIdentifier = AstNode & {
   type: 'Identifier';
   name: string;

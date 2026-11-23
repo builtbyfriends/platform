@@ -1,8 +1,35 @@
 /** @jsxImportSource react */
 
 import { Activity, CircleCheck, CircleHelp, CircleX, Clock } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import { AdminCard } from './AdminCard.tsx';
+
+const clockListeners = new Set<() => void>();
+let clockNow = Date.now();
+let clockInterval: ReturnType<typeof setInterval> | undefined;
+
+function subscribeToClock(listener: () => void) {
+  if (clockListeners.size === 0) {
+    clockNow = Date.now();
+    clockInterval = setInterval(() => {
+      clockNow = Date.now();
+      for (const notify of clockListeners) {
+        notify();
+      }
+    }, 5_000);
+  }
+  clockListeners.add(listener);
+  return () => {
+    clockListeners.delete(listener);
+    if (clockListeners.size === 0) {
+      clearInterval(clockInterval);
+    }
+  };
+}
+
+function readClock() {
+  return clockNow;
+}
 
 export function LastCheckedTime({
   checkedAt,
@@ -11,15 +38,7 @@ export function LastCheckedTime({
   checkedAt?: number;
   unavailable: boolean;
 }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (checkedAt === undefined) {
-      return;
-    }
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), 5_000);
-    return () => clearInterval(interval);
-  }, [checkedAt]);
+  const now = useSyncExternalStore(subscribeToClock, readClock, readClock);
   const seconds = checkedAt === undefined ? 0 : Math.max(0, Math.floor((now - checkedAt) / 1000));
   const age =
     seconds < 5

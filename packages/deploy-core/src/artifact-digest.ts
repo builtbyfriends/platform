@@ -5,6 +5,7 @@ import { canonicalJson } from './canonical-json.ts';
 export async function deployArtifactDigest(artifact: DeployArtifact): Promise<string> {
   // Decision: Describe only the standard host capabilities we need, without bringing DOM declarations into
   // Node or Workers consumers of this shared package.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   const host = globalThis as unknown as {
     crypto: { subtle: { digest(algorithm: string, data: Uint8Array): Promise<ArrayBuffer> } };
     TextEncoder: new () => { encode(value: string): Uint8Array };

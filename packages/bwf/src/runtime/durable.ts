@@ -355,6 +355,7 @@ export function defineDurableState<
   }
 
   return {
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     class: BwfDurableState as unknown as DurableStateClass<TMethods>,
     __bind(name, resourceName) {
       if (definition.name !== resourceName) {

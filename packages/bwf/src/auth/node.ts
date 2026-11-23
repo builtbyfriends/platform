@@ -50,7 +50,7 @@ export async function runLocalBwfAuthMigrations(
     ...localEnv,
     ...process.env,
     ...(connectionString !== undefined ? { DATABASE_URL: connectionString } : {}),
-  } as unknown as BwfAuthEnv;
+  } as BwfAuthEnv;
   const migrationSchema = resolveBwfAuthMigrationSchema(runtime, env);
 
   if (dialect === 'sqlite') {

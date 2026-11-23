@@ -144,7 +144,7 @@ async function uploadOne(
     try {
       res = await fetchImpl(item.url, {
         method: 'PUT',
-        body: new Uint8Array(body) as unknown as BodyInit,
+        body: new Uint8Array(body) as BodyInit,
         headers: item.headers,
       });
     } catch (err) {

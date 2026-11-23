@@ -9,7 +9,7 @@ import {
 import { discoverSchema } from '../drizzle/discover.ts';
 import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
 import type { BwfAuthConfig } from '../runtime/auth.ts';
-import type { AstNode, AstProgram } from '../shared/ast.ts';
+import { isAstProgram, type AstNode, type AstProgram } from '../shared/ast.ts';
 
 function isBwfAuthConfigSource(code: string, filename: string): boolean {
   if (!code.includes('@builtbyfriends/bwf/auth')) {
@@ -17,7 +17,11 @@ function isBwfAuthConfigSource(code: string, filename: string): boolean {
   }
   let program: AstProgram;
   try {
-    program = parseSync(filename, code).program as unknown as AstProgram;
+    const parsed = parseSync(filename, code).program;
+    if (!isAstProgram(parsed)) {
+      return false;
+    }
+    program = parsed;
   } catch {
     return false;
   }

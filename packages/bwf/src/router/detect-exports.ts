@@ -7,6 +7,7 @@ import {
   moduleExportName,
   type AstExportNamedDeclaration,
   type AstFunctionDeclaration,
+  isAstProgram,
   type AstProgram,
   type AstVariableDeclaration,
 } from '../shared/ast.ts';
@@ -28,7 +29,10 @@ export function detectHttpExports(absPath: string): Array<string> {
   }
 
   const methods: Array<string> = [];
-  const program = parsed.program as unknown as AstProgram;
+  if (!isAstProgram(parsed.program)) {
+    return [];
+  }
+  const program: AstProgram = parsed.program;
 
   for (const node of program.body ?? []) {
     if (node.type === 'ExportNamedDeclaration') {

@@ -584,7 +584,7 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
           400,
         );
       }
-      let decoded: Uint8Array;
+      let decoded: Uint8Array<ArrayBuffer>;
       try {
         decoded = decodeBase64ToBytes(raw);
       } catch (err) {
@@ -609,7 +609,7 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       }
       // Decision: Hand the bytes straight to a `Blob` so the `Uint8Array` isn't kept past this scope; memory stays
       // at one decoded module at a time.
-      const content = new Blob([decoded as unknown as BlobPart], {
+      const content = new Blob([decoded], {
         type: moduleContentType(filePath),
       });
       inlineFiles.push({ name: filePath, content });

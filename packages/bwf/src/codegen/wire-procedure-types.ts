@@ -8,6 +8,7 @@ import { writeFileIfChanged } from './write-if-changed.ts';
 type TypeScriptApi = typeof import('typescript/unstable/sync');
 type Checker = import('typescript/unstable/sync').Checker;
 type Type = import('typescript/unstable/sync').Type;
+type TypeReference = import('typescript/unstable/sync').TypeReference;
 
 /** One procedure as its wire types, each printed as TypeScript with no imports. */
 export type WireProcedureEntry = {
@@ -172,26 +173,22 @@ function createPrinter(ts: TypeScriptApi, checker: Checker, problems: Array<stri
     return args.length === 0 ? name : `${name}<${joinTypes(args, ', ', stack, depth)}>`;
   }
 
-  function printTuple(type: Type, stack: Set<number>, depth: number): string {
-    const target = (type as unknown as { getTarget(): Type }).getTarget() as unknown as {
-      elementFlags?: ReadonlyArray<number>;
-      readonly?: boolean;
-    };
-    const flags = target.elementFlags ?? [];
-    const elements = checker
-      .getTypeArguments(type as import('typescript/unstable/sync').TypeReference)
-      .map((element, index) => {
-        const text = print(element, stack, depth + 1, true);
-        const flag = flags[index] ?? ElementFlags.Required;
-        if (flag & ElementFlags.Variadic) {
-          return `...${text}`;
-        }
-        if (flag & ElementFlags.Rest) {
-          return `...${text}[]`;
-        }
-        return flag & ElementFlags.Optional ? `${text}?` : text;
-      });
-    return `${target.readonly ? 'readonly ' : ''}[${elements.join(', ')}]`;
+  function printTuple(type: TypeReference, stack: Set<number>, depth: number): string {
+    const target = type.getTarget();
+    const tupleTarget = target.isTupleType() ? target : undefined;
+    const flags = tupleTarget?.elementFlags ?? [];
+    const elements = checker.getTypeArguments(type).map((element, index) => {
+      const text = print(element, stack, depth + 1, true);
+      const flag = flags[index] ?? ElementFlags.Required;
+      if (flag & ElementFlags.Variadic) {
+        return `...${text}`;
+      }
+      if (flag & ElementFlags.Rest) {
+        return `...${text}[]`;
+      }
+      return flag & ElementFlags.Optional ? `${text}?` : text;
+    });
+    return `${tupleTarget?.readonly ? 'readonly ' : ''}[${elements.join(', ')}]`;
   }
 
   function print(type: Type, stack: Set<number>, depth: number, nested = false): string {
@@ -229,8 +226,8 @@ function createPrinter(ts: TypeScriptApi, checker: Checker, problems: Array<stri
         return nested ? `(${text})` : text;
       }
       if (type.isObjectType()) {
-        if (checker.isTupleType(type)) {
-          return printTuple(type as Type & { flags: number }, stack, depth);
+        if (checker.isTupleType(type) && type.isTypeReference()) {
+          return printTuple(type, stack, depth);
         }
         return printReference(type, stack, depth) ?? printObject(type, stack, depth);
       }

@@ -136,6 +136,7 @@ export function note(...args: Parameters<typeof promptsNote>): void {
   }
   // Decision: The box renderer only reads `columns` and calls `write()`.
   let header = true;
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   const sized = {
     columns: needsWidthFallback ? (columns > 0 ? MIN_NOTE_COLUMNS : 80) : columns,
     write(chunk: string) {

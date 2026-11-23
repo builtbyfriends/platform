@@ -1131,6 +1131,16 @@ type ContainerPortSurface = {
   getTcpPort(port: number): { fetch(url: string, init?: RequestInit): Promise<Response> };
 };
 
+function isContainerPortSurface(value: unknown): value is ContainerPortSurface {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'running' in value &&
+    'getTcpPort' in value &&
+    typeof value.getTcpPort === 'function'
+  );
+}
+
 /**
  * Per-build DO (keyed by build id) that runs one build inside a Cloudflare
  * Container, streams the container's logs to attached WebSocket consumers,
@@ -3170,7 +3180,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    * `getTcpPort` for the NON-starting fetch.
    */
   private rawContainer(): ContainerPortSurface | undefined {
-    return (this as unknown as { container?: ContainerPortSurface }).container;
+    const container: unknown = Reflect.get(this, 'container');
+    return isContainerPortSurface(container) ? container : undefined;
   }
 
   /**

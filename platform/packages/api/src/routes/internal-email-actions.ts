@@ -12,7 +12,44 @@ import {
 import type { EmailAdmissionInput } from '../email/admission.ts';
 import type { ApiEnv } from '../env.ts';
 
-const app = new Hono<ApiEnv>();
+type EmailActionEnv = {
+  Bindings: ApiEnv['Bindings'];
+  Variables: ApiEnv['Variables'] & { emailActionBody: unknown };
+};
+
+const app = new Hono<EmailActionEnv>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is Array<string> {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isActionKind(value: unknown): value is EmailAdmissionInput['kind'] {
+  return value === 'direct' || value === 'forward' || value === 'reply';
+}
+
+function isActionTransport(value: unknown): value is EmailAdmissionInput['transport'] {
+  return (
+    value === 'binding' ||
+    value === 'send_raw' ||
+    value === 'native_forward' ||
+    value === 'native_reply'
+  );
+}
+
+type RecipientOutcome = 'provider_accepted' | 'failed' | 'outcome_unknown' | 'cancelled';
+
+function isRecipientOutcome(value: unknown): value is RecipientOutcome {
+  return (
+    value === 'provider_accepted' ||
+    value === 'failed' ||
+    value === 'outcome_unknown' ||
+    value === 'cancelled'
+  );
+}
 
 app.use('*', async (context, next) => {
   const signature = context.req.header('x-platform-internal');
@@ -94,11 +131,11 @@ app.use('*', async (context, next) => {
   } catch {
     return context.json({ error: 'invalid body' }, 400);
   }
-  context.set('emailActionBody' as never, body as never);
+  context.set('emailActionBody', body);
   await next();
 });
 
-function admissionErrorResponse(context: Context<ApiEnv>, error: unknown): Response {
+function admissionErrorResponse(context: Context<EmailActionEnv>, error: unknown): Response {
   if (!(error instanceof EmailAdmissionError)) {
     throw error;
   }
@@ -112,10 +149,10 @@ function admissionErrorResponse(context: Context<ApiEnv>, error: unknown): Respo
 }
 
 function receiptRoute(value: unknown): EmailReceiptRouteFence | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return undefined;
   }
-  const route = value as Record<string, unknown>;
+  const route = value;
   if (
     typeof route.routeId !== 'string' ||
     typeof route.routeGeneration !== 'number' ||
@@ -126,29 +163,42 @@ function receiptRoute(value: unknown): EmailReceiptRouteFence | undefined {
   ) {
     return undefined;
   }
-  return route as EmailReceiptRouteFence;
+  return {
+    routeId: route.routeId,
+    routeGeneration: route.routeGeneration,
+    connectionId: route.connectionId,
+    addressing: route.addressing,
+    domain: route.domain,
+    projectSlug: route.projectSlug,
+  };
 }
 
 app.post('/admit', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as EmailAdmissionInput;
+  const body = context.get('emailActionBody');
   if (
-    !body ||
-    typeof body !== 'object' ||
+    !isRecord(body) ||
     typeof body.projectId !== 'string' ||
     typeof body.key !== 'string' ||
     typeof body.digest !== 'string' ||
     typeof body.from !== 'string' ||
-    !Array.isArray(body.recipients) ||
-    !body.recipients.every((r) => typeof r === 'string') ||
-    !['direct', 'forward', 'reply'].includes(body.kind) ||
-    !['binding', 'send_raw', 'native_forward', 'native_reply'].includes(body.transport)
+    !isStringArray(body.recipients) ||
+    !isActionKind(body.kind) ||
+    !isActionTransport(body.transport) ||
+    (body.receiptId !== undefined && typeof body.receiptId !== 'string')
   ) {
     return context.json({ error: 'invalid admission request' }, 400);
   }
   try {
     return context.json(
       await admitEmailAction(context.get('db'), {
-        ...body,
+        projectId: body.projectId,
+        kind: body.kind,
+        key: body.key,
+        digest: body.digest,
+        from: body.from,
+        recipients: body.recipients,
+        transport: body.transport,
+        ...(body.receiptId === undefined ? {} : { receiptId: body.receiptId }),
         sharedSenderDomain: context.env.EMAIL_SENDER_DOMAIN ?? '',
       }),
     );
@@ -158,14 +208,10 @@ app.post('/admit', async (context) => {
 });
 
 app.post('/receipts', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as {
-    receiptId?: unknown;
-    projectId?: unknown;
-    status?: unknown;
-    route?: unknown;
-  };
+  const body = context.get('emailActionBody');
   if (
-    typeof body?.receiptId !== 'string' ||
+    !isRecord(body) ||
+    typeof body.receiptId !== 'string' ||
     typeof body.projectId !== 'string' ||
     typeof body.status !== 'string'
   ) {
@@ -189,9 +235,10 @@ app.post('/receipts', async (context) => {
 });
 
 app.post('/receipts/claim', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as Record<string, unknown>;
+  const body = context.get('emailActionBody');
   if (
-    typeof body?.receiptId !== 'string' ||
+    !isRecord(body) ||
+    typeof body.receiptId !== 'string' ||
     typeof body.projectId !== 'string' ||
     typeof body.payloadDigest !== 'string'
   ) {
@@ -216,9 +263,10 @@ app.post('/receipts/claim', async (context) => {
 });
 
 app.post('/receipts/complete', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as Record<string, unknown>;
+  const body = context.get('emailActionBody');
   if (
-    typeof body?.receiptId !== 'string' ||
+    !isRecord(body) ||
+    typeof body.receiptId !== 'string' ||
     typeof body.projectId !== 'string' ||
     typeof body.payloadDigest !== 'string' ||
     typeof body.reject !== 'boolean'
@@ -239,8 +287,8 @@ app.post('/receipts/complete', async (context) => {
 });
 
 app.post('/:id/start', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as { recipients?: unknown };
-  if (!Array.isArray(body?.recipients) || !body.recipients.every((r) => typeof r === 'string')) {
+  const body = context.get('emailActionBody');
+  if (!isRecord(body) || !isStringArray(body.recipients)) {
     return context.json({ error: 'invalid recipients' }, 400);
   }
   try {
@@ -258,16 +306,11 @@ app.post('/:id/start', async (context) => {
 });
 
 app.post('/:id/finish', async (context) => {
-  const body = context.get('emailActionBody' as never) as unknown as {
-    recipients?: unknown;
-    state?: unknown;
-    providerReference?: unknown;
-    errorCode?: unknown;
-  };
+  const body = context.get('emailActionBody');
   if (
-    !Array.isArray(body?.recipients) ||
-    !body.recipients.every((r) => typeof r === 'string') ||
-    !['provider_accepted', 'failed', 'outcome_unknown', 'cancelled'].includes(String(body.state)) ||
+    !isRecord(body) ||
+    !isStringArray(body.recipients) ||
+    !isRecipientOutcome(body.state) ||
     (body.providerReference !== undefined && typeof body.providerReference !== 'string') ||
     (body.errorCode !== undefined && typeof body.errorCode !== 'string')
   ) {
@@ -279,10 +322,10 @@ app.post('/:id/finish', async (context) => {
         context.get('db'),
         context.req.param('id'),
         body.recipients,
-        body.state as 'provider_accepted' | 'failed' | 'outcome_unknown' | 'cancelled',
+        body.state,
         {
-          providerReference: body.providerReference as string | undefined,
-          errorCode: body.errorCode as string | undefined,
+          providerReference: body.providerReference,
+          errorCode: body.errorCode,
         },
       ),
     });

@@ -46,6 +46,7 @@ export async function cancelContainerBuildDos(
     }
     try {
       const ns = buildManagerNamespace(env, build.instance_type);
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
       const stub = ns.get(ns.idFromName(build.id)) as unknown as DurableObjectStub<BuildManager>;
       await stub.cancelBuild(reason);
     } catch (err) {

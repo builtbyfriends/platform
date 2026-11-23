@@ -58,6 +58,7 @@ export function createDb(
   options?: { session?: DbSessionStart },
 ): DrizzleD1Database {
   return _drizzle(
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     d1.withSession(
       resolveD1SessionStart(
         options?.session === undefined ? 'first-unconstrained' : options.session,

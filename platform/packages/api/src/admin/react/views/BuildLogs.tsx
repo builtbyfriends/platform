@@ -18,8 +18,6 @@ export function BuildLogs({ build }: { build: Build }) {
     let cursor = 0;
     let polling = false;
     let terminalSince: number | null = null;
-    setLines(null);
-    setError(null);
 
     const pollLogs = async () => {
       if (polling) {

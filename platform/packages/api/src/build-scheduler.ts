@@ -239,6 +239,7 @@ export class BuildScheduler extends DurableObject<ApiEnv['Bindings']> {
 
       // Decision: `ns` (the build's target fleet) was resolved above; address the per-build BuildManager on it,
       // keyed by build id.
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
       const stub = ns.get(ns.idFromName(build.id)) as unknown as DurableObjectStub<BuildManager>;
       try {
         await stub.startBuild(config);

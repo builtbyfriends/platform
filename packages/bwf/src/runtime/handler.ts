@@ -324,7 +324,7 @@ export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHa
     middlewares,
     handler,
   );
-  return composed as unknown as TypedHandler;
+  return composed as TypedHandler;
 }
 
 /**

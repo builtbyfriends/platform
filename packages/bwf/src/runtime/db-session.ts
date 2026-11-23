@@ -57,6 +57,7 @@ export function createD1SessionAccess(bindingName: string): DbSessionAccess {
         // Start each session on primary to preserve fresh reads.
         () => ({ start: 'first-primary' }),
       );
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
       return (current.session ??= requireRuntimeBinding<D1Database>(bindingName).withSession(
         typeof current.start === 'object' ? current.start.bookmark : current.start,
       )) as unknown as D1Database;

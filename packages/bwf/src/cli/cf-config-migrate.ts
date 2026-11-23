@@ -370,10 +370,7 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
   });
 }
 
-const configHelpers = { bindings, exports: workerExports, triggers } as unknown as Record<
-  string,
-  Record<string, (...args: Array<unknown>) => unknown>
->;
+const configHelpers: Record<string, unknown> = { bindings, exports: workerExports, triggers };
 
 /** Build the value that the converter describes, calling cf's config helpers where it names one. */
 function outputValue(value: OutputValue): unknown {
@@ -385,9 +382,9 @@ function outputValue(value: OutputValue): unknown {
   }
   if (value.kind === 'call') {
     const [namespace, name] = value.callee.split('.');
-    const helper = Object.hasOwn(configHelpers, namespace)
-      ? configHelpers[namespace][name]
-      : undefined;
+    const helpers = Object.hasOwn(configHelpers, namespace) ? configHelpers[namespace] : undefined;
+    const helper: unknown =
+      typeof helpers === 'object' && helpers !== null ? Reflect.get(helpers, name) : undefined;
     if (typeof helper !== 'function') {
       throw new Error(`cf has no configuration helper ${value.callee}.`);
     }

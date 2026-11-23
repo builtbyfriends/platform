@@ -113,7 +113,7 @@ export function BuildDetailPage({ path, platformName, username }: AdminPageProps
       </SectionStack>
 
       {build.executor === 'container' ? (
-        <BuildLogs build={build} />
+        <BuildLogs key={`${build.id}:${build.status}`} build={build} />
       ) : (
         <SectionStack>
           <h2>Build Logs</h2>

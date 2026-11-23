@@ -10,7 +10,7 @@ import {
   TableRow,
 } from '@astryxdesign/core/Table';
 import { Heading, Text } from '@astryxdesign/core/Text';
-import { Suspense, useSyncExternalStore, type ReactElement, type ReactNode } from 'react';
+import { Suspense, useSyncExternalStore } from 'react';
 import { useListView, useRequest, useView, type Deferred, type ViewRef } from 'react-fate';
 import { DashboardView, dashboardRequest, TopProjectView } from '../../fate/views.ts';
 import { Link } from '../spa.tsx';
@@ -23,10 +23,6 @@ import { ProjectsTable } from './ProjectsTable.tsx';
 import { ProjectUrlLink } from './ProjectUrlLink.tsx';
 import { SystemStatusCard } from './SystemStatusCard.tsx';
 
-const AdminSuspense = Suspense as unknown as (props: {
-  children: ReactNode;
-  fallback: ReactNode;
-}) => ReactElement;
 const subscribeToClientRender = () => () => {};
 const isClientRender = () => true;
 const isServerRender = () => false;
@@ -164,9 +160,9 @@ function DeferredTopProjects({
     return fallback;
   }
   return (
-    <AdminSuspense fallback={fallback}>
+    <Suspense fallback={fallback}>
       <TopProjectsWidget topProjects={topProjects} siteDomain={siteDomain} tz={tz} />
-    </AdminSuspense>
+    </Suspense>
   );
 }
 
