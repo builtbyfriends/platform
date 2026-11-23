@@ -530,3 +530,48 @@ describe('processUsageEventBatch — 5xx alert window', () => {
     expect(batch.calls.ackAll).toBe(1);
   });
 });
+
+describe('processUsageEventBatch — one account fails', () => {
+  beforeEach(() => {
+    getUserMock.mockReset();
+    getProjectsByIdsMock.mockReset();
+    getProjectOwnershipPeriodsByProjectIdsMock.mockReset();
+    getProjectOwnershipPeriodsByProjectIdsMock.mockResolvedValue([]);
+  });
+
+  it("retries only the failed account's messages, so the other account isn't counted twice", async () => {
+    getProjectsByIdsMock.mockResolvedValue([
+      { id: 'p1', user_id: 'u1', slug: 'one', created_at: '2020-01-01T00:00:00.000Z' },
+      { id: 'p2', user_id: 'u2', slug: 'two', created_at: '2020-01-01T00:00:00.000Z' },
+    ]);
+    getUserMock.mockImplementation(async (_db, id: string) => ({ id, plan: 'solo' }));
+    const stubFetch = vi.fn(async (request: Request) => {
+      const body = (await request.json()) as { userId: string };
+      return new Response(null, { status: body.userId === 'u2' ? 500 : 200 });
+    });
+    const errorStub = vi.fn(async () => new Response(null, { status: 200 }));
+    const batch = await makeSignedBatch([
+      { projectId: 'p1', userId: 'u1', slug: 'one', requests: 1, responseBytes: 1, status: 503 },
+      { projectId: 'p2', userId: 'u2', slug: 'two', requests: 1, responseBytes: 1 },
+    ]);
+    const decisions = batch.messages.map(() => '');
+    const messages = batch.messages.map((message, index) => ({
+      ...message,
+      ack: () => {
+        decisions[index] = 'ack';
+      },
+      retry: () => {
+        decisions[index] = 'retry';
+      },
+    }));
+
+    await processUsageEventBatch(
+      { ...batch, messages } as never,
+      makeEnv(stubFetch, errorStub) as never,
+    );
+
+    expect(decisions).toEqual(['ack', 'retry']);
+    expect(batch.calls).toEqual({ retryAll: 0, ackAll: 0 });
+    expect(errorStub).not.toHaveBeenCalled();
+  });
+});
