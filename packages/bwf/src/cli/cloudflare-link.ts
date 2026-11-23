@@ -53,14 +53,12 @@ export function readCloudflareLink(root: string): CloudflareLink | null {
       return {
         accountId: value.accountId,
         workerName: value.workerName,
-        ...(receipt === undefined
-          ? {}
-          : {
-              candidateReceipt: {
-                parentVersionId: receipt.parentVersionId,
-                versionIds: [...receipt.versionIds],
-              },
-            }),
+        ...(receipt !== undefined && {
+          candidateReceipt: {
+            parentVersionId: receipt.parentVersionId,
+            versionIds: [...receipt.versionIds],
+          },
+        }),
       };
     }
   } catch {

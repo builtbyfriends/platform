@@ -30,7 +30,7 @@ function readOriginCredentials(raw: string): Record<string, unknown> {
 function rememberOriginToken(origin: string, token: string): void {
   const raw = process.env.PLATFORM_ACCESS_CREDENTIALS;
   process.env.PLATFORM_ACCESS_CREDENTIALS = JSON.stringify({
-    ...(raw ? readOriginCredentials(raw) : {}),
+    ...(!!raw && readOriginCredentials(raw)),
     [origin]: { CF_ACCESS_TOKEN: token },
   });
 }

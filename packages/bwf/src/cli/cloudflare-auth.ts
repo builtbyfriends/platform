@@ -96,7 +96,7 @@ export async function ensureCloudflareAuthentication(
   };
   const whoami: CloudflareOperation = {
     type: 'auth.whoami',
-    ...(options.configPath ? { configPath: options.configPath } : {}),
+    ...(!!options.configPath && { configPath: options.configPath }),
   };
   const readSession = async (): Promise<CloudflareAuthSession | null> => {
     const result = await run(whoami, true);
@@ -177,10 +177,10 @@ export function parseCloudflareAuthSession(value: unknown): CloudflareAuthSessio
   }
   return {
     accounts,
-    ...(typeof record.email === 'string' && record.email ? { email: record.email } : {}),
-    ...(typeof record.authType === 'string' && record.authType
-      ? { authType: record.authType }
-      : {}),
+    ...(!!(typeof record.email === 'string' && record.email) && { email: record.email }),
+    ...(!!(typeof record.authType === 'string' && record.authType) && {
+      authType: record.authType,
+    }),
   };
 }
 

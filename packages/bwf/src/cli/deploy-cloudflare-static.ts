@@ -365,7 +365,7 @@ export async function runCloudflareStaticDeploy(
       requirePreviewForReadiness: existingWorker !== null && versionMetadataBinding === undefined,
       message: encodeCloudflareVersionMessage([], {
         ...readCloudflareTriggerConfig(staticConfigPath, configPath),
-        ...(existingWorker ? { preserve: true } : {}),
+        ...(!!existingWorker && { preserve: true }),
       }),
       assetsDirectoryOverride: stagedAssetsDirectory,
     },

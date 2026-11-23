@@ -37,7 +37,7 @@ function credentialFailed(
 ): CloudflareCommandResult {
   return {
     status: failure.status,
-    ...(failure.signal ? { signal: failure.signal } : {}),
+    ...(!!failure.signal && { signal: failure.signal }),
     stdout: '',
     stderr: `${header}: ${failure.stderr}`,
   };
@@ -375,11 +375,9 @@ export function createCfCommand(options: {
           status: typeof status === 'number' ? status : 1,
           stdout: output,
           stderr: diagnostic,
-          ...(code ? { errorCode: Number(code) } : {}),
-          ...(missingUploadTarget ? { failure: 'not-found' as const } : {}),
-          ...(completed && status !== 0
-            ? { errors: [{ message: output + '\n' + diagnostic }] }
-            : {}),
+          ...(!!code && { errorCode: Number(code) }),
+          ...(missingUploadTarget && { failure: 'not-found' as const }),
+          ...(completed && status !== 0 && { errors: [{ message: output + '\n' + diagnostic }] }),
           signal,
           error,
         });
@@ -422,8 +420,8 @@ export function createCfVersionRunner(options: {
       data: versionId
         ? {
             versionId,
-            ...(previewUrl ? { previewUrl } : {}),
-            ...(workersDevUrl ? { workersDevUrl } : {}),
+            ...(!!previewUrl && { previewUrl }),
+            ...(!!workersDevUrl && { workersDevUrl }),
           }
         : undefined,
     };
@@ -530,8 +528,8 @@ export function createCfVersionRunner(options: {
         apiBaseUrl: options.pinnedUpload.apiBaseUrl,
         workerName,
         token,
-        ...(operation.message ? { message: operation.message } : {}),
-        ...(operation.secretsFilePath ? { secretsFilePath: operation.secretsFilePath } : {}),
+        ...(!!operation.message && { message: operation.message }),
+        ...(!!operation.secretsFilePath && { secretsFilePath: operation.secretsFilePath }),
         atomic,
         verifyUploader: options.pinnedUpload.verifyUploader,
         runCf,
@@ -540,7 +538,7 @@ export function createCfVersionRunner(options: {
       return {
         status: 0,
         stdout: '',
-        data: { versionId: version.id, ...(preview ? { previewUrl: preview } : {}) },
+        data: { versionId: version.id, ...(!!preview && { previewUrl: preview }) },
         stderr: '',
       };
     } catch (error) {

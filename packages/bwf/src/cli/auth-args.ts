@@ -36,6 +36,6 @@ export function parseAuthArgs(args: Array<string>): AuthArgs {
   }
   return {
     subcommand: subcommand as AuthArgs['subcommand'],
-    ...(platform ? { platform } : {}),
+    ...(!!platform && { platform }),
   };
 }

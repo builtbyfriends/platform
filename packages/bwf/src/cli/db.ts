@@ -159,9 +159,12 @@ async function withMySqlClient<T>(
     uri: getLocalDatabaseUrl(root, 'mysql'),
     multipleStatements: true,
     // Decision: Read dates, JSON and large integers as MySQL's own text, not as JavaScript values.
-    ...(options.textValues
-      ? { dateStrings: true, jsonStrings: true, supportBigNumbers: true, bigNumberStrings: true }
-      : {}),
+    ...(!!options.textValues && {
+      dateStrings: true,
+      jsonStrings: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true,
+    }),
   });
   try {
     return await fn(toMySqlClient(connection));
@@ -2551,8 +2554,8 @@ function getDrizzleSchemaOptions(
   casing: DatabaseCasing | undefined,
 ): { schema?: Record<string, unknown>; casing?: DatabaseCasing } | undefined {
   const options = {
-    ...(Object.keys(schema).length > 0 ? { schema } : {}),
-    ...(casing ? { casing } : {}),
+    ...(Object.keys(schema).length > 0 && { schema }),
+    ...(!!casing && { casing }),
   };
   return Object.keys(options).length > 0 ? options : undefined;
 }

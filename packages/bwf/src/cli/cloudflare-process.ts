@@ -130,8 +130,8 @@ export function createCloudflareProcessRunner(options: {
       cwd: run.cwd ?? options.root,
       env: {
         ...env,
-        ...(options.accountId ? { CLOUDFLARE_ACCOUNT_ID: options.accountId } : {}),
-        ...(options.apiBaseUrl ? { CLOUDFLARE_API_BASE_URL: options.apiBaseUrl } : {}),
+        ...(!!options.accountId && { CLOUDFLARE_ACCOUNT_ID: options.accountId }),
+        ...(!!options.apiBaseUrl && { CLOUDFLARE_API_BASE_URL: options.apiBaseUrl }),
       },
       input: run.input,
       encoding: 'utf8',

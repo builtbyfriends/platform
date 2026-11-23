@@ -82,16 +82,14 @@ export function scrubCloudflareResult<T extends CloudflareCommandResult>(
   return {
     ...result,
     stderr: redactor.redact(result.stderr),
-    ...(isCleanCloudflareExit(result) ? {} : { stdout: redactor.redact(result.stdout) }),
-    ...(result.error ? { error: redactor.redact(result.error) } : {}),
-    ...(result.errors
-      ? {
-          errors: result.errors.map((error) => ({
-            ...error,
-            message: redactor.redact(error.message),
-          })),
-        }
-      : {}),
+    ...(!isCleanCloudflareExit(result) && { stdout: redactor.redact(result.stdout) }),
+    ...(!!result.error && { error: redactor.redact(result.error) }),
+    ...(!!result.errors && {
+      errors: result.errors.map((error) => ({
+        ...error,
+        message: redactor.redact(error.message),
+      })),
+    }),
   };
 }
 
@@ -176,17 +174,15 @@ function logCloudflareOp(
     op,
     ok,
     status: result.status,
-    ...(result.signal ? { signal: result.signal } : {}),
+    ...(!!result.signal && { signal: result.signal }),
     ms,
-    ...(ok
-      ? {}
-      : {
-          diagnostic: cloudflareCommandDiagnostic({
-            ...result,
-            // Decision: auth.token stdout is the credential envelope, so don't format it.
-            stdout: op === 'auth.token' ? '' : result.stdout,
-          }),
-        }),
+    ...(!ok && {
+      diagnostic: cloudflareCommandDiagnostic({
+        ...result,
+        // Decision: auth.token stdout is the credential envelope, so don't format it.
+        stdout: op === 'auth.token' ? '' : result.stdout,
+      }),
+    }),
   });
 }
 

@@ -97,7 +97,7 @@ export async function publishCloudflareWorker(input: {
     output: cfOutput,
     handoffPending: pinnedHandoffLink !== null,
     requiredNames: schemaFacts.requiredKeys,
-    ...(initialAuthSecret ? { explicitNames: [BETTER_AUTH_SECRET_NAME] } : {}),
+    ...(!!initialAuthSecret && { explicitNames: [BETTER_AUTH_SECRET_NAME] }),
   });
   const hasVersionMetadata =
     readVersionMetadataBinding(parseRootWranglerConfig(generatedConfigPath)) !== undefined;
@@ -128,14 +128,14 @@ export async function publishCloudflareWorker(input: {
       requirePreviewForReadiness: existingWorker !== null && !hasVersionMetadata,
       message: encodeCloudflareVersionMessage(input.migration.migrationHistory, {
         ...readCloudflareTriggerConfig(generatedConfigPath, configPath),
-        ...(existingWorker ? { preserve: true } : {}),
+        ...(!!existingWorker && { preserve: true }),
       }),
       allowFirstDeploymentBootstrap: workerWasMissingBeforeSecretProvisioning,
-      ...(pinActiveSecrets ? { pinActiveSecrets } : {}),
+      ...(!!pinActiveSecrets && { pinActiveSecrets }),
       atomic,
-      ...(initialAuthSecret
-        ? { candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret } }
-        : {}),
+      ...(!!initialAuthSecret && {
+        candidateSecrets: { [BETTER_AUTH_SECRET_NAME]: initialAuthSecret },
+      }),
     },
   ).finally(() => cfOutput?.dispose());
   if (!execution.ok) {

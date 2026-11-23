@@ -217,7 +217,7 @@ export async function computeDesiredCloudflareResources(
     desired.r2 = {
       binding,
       bucketName,
-      ...(bwfConfig.storage?.locationHint ? { locationHint: bwfConfig.storage.locationHint } : {}),
+      ...(!!bwfConfig.storage?.locationHint && { locationHint: bwfConfig.storage.locationHint }),
     };
     reasons.set(binding, analysis.reasons.r2[0]);
   }

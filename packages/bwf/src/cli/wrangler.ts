@@ -27,6 +27,9 @@ import type { BwfConfig } from '../config.ts';
 import type { DurableObjectModule } from '../durable/scan.ts';
 import type { InferredBindings } from '../inference/walk.ts';
 import type { WebSocketRouteDefinition } from '../router/websocket.ts';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject, JsonValue } from './json-value.ts';
+import { Buffer } from './node-buffer.ts';
 
 const COMPAT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** UTF-8 byte-order mark. Node's utf-8 read preserves a leading one. */
@@ -54,18 +57,20 @@ function writeProjectWranglerFile(configPath: string, text: string): void {
   persistMaterializedWranglerConfig(configPath);
 }
 
+type ProjectWranglerConfig = {
+  configPath: string;
+  parsed: JsonObject;
+  created: boolean;
+};
+
 /**
  * Read the first existing project Wrangler config. A missing or unparseable one is
  * replaced by the generated config, starting from an empty object.
  */
-function readOrCreateProjectWranglerConfig(root: string): {
-  configPath: string;
-  parsed: Record<string, unknown>;
-  created: boolean;
-} {
+function readOrCreateProjectWranglerConfig(root: string): ProjectWranglerConfig {
   const configPath = projectWranglerPaths(root).find((path) => existsSync(path));
   if (configPath) {
-    let parsed: Record<string, unknown> | undefined;
+    let parsed: JsonObject | undefined;
     try {
       parsed = parseJsonc(readFileSync(configPath, 'utf8'));
     } catch {
@@ -78,15 +83,40 @@ function readOrCreateProjectWranglerConfig(root: string): {
   return { configPath: materializeCloudflareConfig(root), parsed: {}, created: true };
 }
 
-function durableObjectBindingsOf(
-  config: Record<string, unknown>,
-): Array<{ name: string; class_name: string }> {
+function objectEntriesOf(value: JsonValue | undefined): Array<JsonObject> {
+  return arrayOf(value).map((entry) => (isJsonObject(entry) ? entry : {}));
+}
+
+function arrayOf(value: JsonValue | undefined): ReadonlyArray<JsonValue> {
+  return isJsonArray(value) ? value : [];
+}
+
+function hasBinding(entries: ReadonlyArray<JsonValue>, binding: string): boolean {
+  return entries.some((entry) => isJsonObject(entry) && entry.binding === binding);
+}
+
+function isDurableObjectMigrationEntry(value: unknown): value is DurableObjectMigration {
+  return isJsonObject(value);
+}
+
+function migrationsOf(config: JsonObject): Array<DurableObjectMigration> {
+  return arrayOf(config.migrations).filter(isDurableObjectMigrationEntry);
+}
+
+function durableObjectBindingsOf(config: JsonObject): Array<{ name: string; class_name: string }> {
+  const bindings = isJsonObject(config.durable_objects)
+    ? config.durable_objects.bindings
+    : undefined;
+  return Array.isArray(bindings) ? bindings.filter(isDurableObjectBindingEntry) : [];
+}
+
+function isDurableObjectBindingEntry(
+  binding: JsonValue,
+): binding is { name: string; class_name: string } {
   return (
-    (
-      config.durable_objects as
-        | { bindings?: Array<{ name: string; class_name: string }> }
-        | undefined
-    )?.bindings ?? []
+    isJsonObject(binding) &&
+    typeof binding.name === 'string' &&
+    typeof binding.class_name === 'string'
   );
 }
 
@@ -115,7 +145,7 @@ export type WranglerPublishedTrafficSnapshot = {
 
 export type RootWranglerConfig = {
   configPath: string;
-  config: Record<string, unknown>;
+  config: JsonObject;
 };
 
 /** Read the root Wrangler config with the same JSONC parser used by binding sync. */
@@ -124,8 +154,8 @@ export function readRootWranglerConfig(root: string): RootWranglerConfig | undef
     if (!existsSync(configPath)) {
       continue;
     }
-    const parsed = parseJsonc(readFileSync(configPath, 'utf8'));
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const parsed = parseJsoncRoot(readFileSync(configPath, 'utf8'));
+    if (parsed === undefined) {
       throw new SyntaxError(`Failed to parse ${configPath}: expected a JSON object.`);
     }
     return { configPath, config: parsed };
@@ -242,7 +272,12 @@ export function nextDurableObjectMigrationTag(
   migrations: Array<DurableObjectMigration>,
   baseTag: string,
 ): string {
-  const existingTags = new Set(migrations.map((migration) => migration.tag).filter(Boolean));
+  const existingTags = new Set<string>();
+  for (const migration of migrations) {
+    if (migration.tag) {
+      existingTags.add(migration.tag);
+    }
+  }
   if (!existingTags.has(baseTag)) {
     return baseTag;
   }
@@ -296,19 +331,7 @@ function readWranglerDurableObjectBindings(
 ): Array<{ name: string; class_name: string }> {
   for (const path of projectWranglerPaths(root)) {
     try {
-      const parsed = parseJsonc(readFileSync(path, 'utf8'));
-      const bindings = (
-        parsed.durable_objects as
-          | { bindings?: Array<{ name?: unknown; class_name?: unknown }> }
-          | undefined
-      )?.bindings;
-      if (!Array.isArray(bindings)) {
-        return [];
-      }
-      return bindings.filter(
-        (binding): binding is { name: string; class_name: string } =>
-          typeof binding.name === 'string' && typeof binding.class_name === 'string',
-      );
+      return durableObjectBindingsOf(parseJsonc(readFileSync(path, 'utf8')));
     } catch {}
   }
   return [];
@@ -409,10 +432,7 @@ function readWranglerCompatFields(
       validateCompatDate(parsed.compatibility_date, 'wrangler config');
       wranglerDate = parsed.compatibility_date;
     }
-    if (
-      Array.isArray(parsed.compatibility_flags) &&
-      parsed.compatibility_flags.every((f: unknown) => typeof f === 'string')
-    ) {
+    if (isStringArray(parsed.compatibility_flags)) {
       wranglerFlags = parsed.compatibility_flags;
     }
   }
@@ -423,16 +443,15 @@ function readWranglerCompatFields(
   if (buildOutputDir) {
     try {
       const buildRaw = readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf8');
-      const buildParsed = JSON.parse(buildRaw);
-      if (typeof buildParsed.compatibility_date === 'string') {
-        validateCompatDate(buildParsed.compatibility_date, 'build output wrangler.json');
-        buildDate = buildParsed.compatibility_date;
-      }
-      if (
-        Array.isArray(buildParsed.compatibility_flags) &&
-        buildParsed.compatibility_flags.every((f: unknown) => typeof f === 'string')
-      ) {
-        buildFlags = buildParsed.compatibility_flags;
+      const buildParsed: unknown = JSON.parse(buildRaw);
+      if (isRecord(buildParsed)) {
+        if (typeof buildParsed.compatibility_date === 'string') {
+          validateCompatDate(buildParsed.compatibility_date, 'build output wrangler.json');
+          buildDate = buildParsed.compatibility_date;
+        }
+        if (isStringArray(buildParsed.compatibility_flags)) {
+          buildFlags = buildParsed.compatibility_flags;
+        }
       }
     } catch {
       // Decision: No build output wrangler.json: the fallback stays unset.
@@ -447,6 +466,10 @@ function readWranglerCompatFields(
     buildDate,
     buildFlags,
   };
+}
+
+function isStringArray(value: unknown): value is Array<string> {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
 function resolveWranglerCompat(
@@ -509,13 +532,13 @@ function ensureBwfCompatibilityDate(root: string, rootWrangler: boolean): string
     return LATEST_KNOWN_COMPAT_DATE;
   }
 
-  let nextConfig: BwfConfig;
+  let nextConfig: JsonObject;
   try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (!isJsonObject(parsed)) {
       throw new Error(`config: ${BWF_CONFIG_FILE} must be a JSON object.`);
     }
-    nextConfig = parsed as BwfConfig;
+    nextConfig = parsed;
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(`config: Invalid JSON in ${BWF_CONFIG_FILE}.`, { cause: error });
@@ -523,10 +546,9 @@ function ensureBwfCompatibilityDate(root: string, rootWrangler: boolean): string
     throw error;
   }
 
-  nextConfig.worker = {
-    ...(nextConfig.worker ?? {}),
-    compatibility_date: LATEST_KNOWN_COMPAT_DATE,
-  };
+  const worker: JsonObject = isJsonObject(nextConfig.worker) ? { ...nextConfig.worker } : {};
+  worker.compatibility_date = LATEST_KNOWN_COMPAT_DATE;
+  nextConfig.worker = worker;
   writeFileSync(filePath, `${JSON.stringify(nextConfig, null, 2)}\n`);
   return LATEST_KNOWN_COMPAT_DATE;
 }
@@ -550,8 +572,8 @@ export function syncWranglerBindings(
 
   const d1Name = options?.bindingNames?.d1 ?? 'DB';
   if (bindings.needsD1) {
-    const existing = (parsed.d1_databases as Array<{ binding: string }> | undefined) ?? [];
-    if (!existing.some((b) => b.binding === d1Name)) {
+    const existing = arrayOf(parsed.d1_databases);
+    if (!hasBinding(existing, d1Name)) {
       parsed.d1_databases = [
         ...existing,
         { binding: d1Name, database_name: 'default', database_id: 'local' },
@@ -562,8 +584,8 @@ export function syncWranglerBindings(
 
   const kvName = options?.bindingNames?.kv ?? 'KV';
   if (bindings.needsKV) {
-    const existing = (parsed.kv_namespaces as Array<{ binding: string }> | undefined) ?? [];
-    if (!existing.some((b) => b.binding === kvName)) {
+    const existing = arrayOf(parsed.kv_namespaces);
+    if (!hasBinding(existing, kvName)) {
       parsed.kv_namespaces = [...existing, { binding: kvName, id: 'local' }];
       modified = true;
     }
@@ -571,8 +593,8 @@ export function syncWranglerBindings(
 
   const r2Name = options?.bindingNames?.r2 ?? 'STORAGE';
   if (bindings.needsR2) {
-    const existing = (parsed.r2_buckets as Array<{ binding: string }> | undefined) ?? [];
-    if (!existing.some((b) => b.binding === r2Name)) {
+    const existing = arrayOf(parsed.r2_buckets);
+    if (!hasBinding(existing, r2Name)) {
       parsed.r2_buckets = [...existing, { binding: r2Name, bucket_name: 'default' }];
       modified = true;
     }
@@ -581,7 +603,7 @@ export function syncWranglerBindings(
   // Decision: Workers AI has no local simulator, so direct Cloudflare development binds it remotely.
   // Managed projects keep using bwf's proxy and gain no billable binding.
   if (bindings.needsAI && options?.directCloudflareAi) {
-    const existing = parsed.ai as Record<string, unknown> | undefined;
+    const existing = isJsonObject(parsed.ai) ? parsed.ai : undefined;
     const binding =
       typeof existing?.binding === 'string' ? existing.binding : (options.bindingNames?.ai ?? 'AI');
     const nextAi = { ...(existing ?? {}), binding, remote: true };
@@ -590,14 +612,14 @@ export function syncWranglerBindings(
       modified = true;
     }
     if (binding !== 'AI' || options.directCloudflareAi.gateway) {
-      const vars = (parsed.vars as Record<string, unknown> | undefined) ?? {};
-      const nextVars = {
-        ...vars,
-        ...(binding !== 'AI' ? { __PLATFORM_AI_BINDING: binding } : {}),
-        ...(options.directCloudflareAi.gateway
-          ? { __PLATFORM_AI_GATEWAY: options.directCloudflareAi.gateway }
-          : {}),
-      };
+      const vars = isJsonObject(parsed.vars) ? parsed.vars : {};
+      const nextVars: JsonObject = { ...vars };
+      if (binding !== 'AI') {
+        nextVars.__PLATFORM_AI_BINDING = binding;
+      }
+      if (options.directCloudflareAi.gateway) {
+        nextVars.__PLATFORM_AI_GATEWAY = options.directCloudflareAi.gateway;
+      }
       if (JSON.stringify(vars) !== JSON.stringify(nextVars)) {
         parsed.vars = nextVars;
         modified = true;
@@ -609,9 +631,7 @@ export function syncWranglerBindings(
     // Decision: Never remove a binding or emit `deleted_classes` for a removed route: that can break
     // the next upload or destroy the class's SQLite storage. The compiler exports a tombstone.
     const existing = durableObjectBindingsOf(parsed);
-    const migrations = Array.isArray(parsed.migrations)
-      ? (parsed.migrations as Array<DurableObjectMigration>)
-      : [];
+    const migrations = migrationsOf(parsed);
     for (const route of options.websockets) {
       const conflict = existing.find(
         (binding) => binding.name === route.bindingName && binding.class_name !== route.className,
@@ -622,9 +642,12 @@ export function syncWranglerBindings(
         );
       }
     }
-    const additions = options.websockets
-      .filter((route) => !existing.some((binding) => binding.name === route.bindingName))
-      .map((route) => ({ name: route.bindingName, class_name: route.className }));
+    const additions: Array<{ name: string; class_name: string }> = [];
+    for (const route of options.websockets) {
+      if (!existing.some((binding) => binding.name === route.bindingName)) {
+        additions.push({ name: route.bindingName, class_name: route.className });
+      }
+    }
     const nextBindings = [...existing, ...additions];
     if (
       nextBindings.length !== existing.length ||
@@ -634,10 +657,11 @@ export function syncWranglerBindings(
           binding.class_name !== existing[index]?.class_name,
       )
     ) {
-      parsed.durable_objects = {
-        ...(parsed.durable_objects ?? {}),
-        bindings: nextBindings,
-      };
+      const durableObjectsConfig: JsonObject = isJsonObject(parsed.durable_objects)
+        ? { ...parsed.durable_objects }
+        : {};
+      durableObjectsConfig.bindings = nextBindings;
+      parsed.durable_objects = durableObjectsConfig;
       modified = true;
     }
 
@@ -676,9 +700,7 @@ export function syncWranglerBindings(
       modified = true;
     }
 
-    const migrations = Array.isArray(parsed.migrations)
-      ? (parsed.migrations as Array<DurableObjectMigration>)
-      : [];
+    const migrations = migrationsOf(parsed);
     const hasMigration = hasDurableObjectSqliteMigration(migrations, liveConfig.className);
     if (!hasMigration) {
       parsed.migrations = [
@@ -721,17 +743,18 @@ export function syncWranglerDurableObjects(
       );
     }
   }
-  const additions = durableObjects
-    .filter((module) => !existingBindings.some((binding) => binding.name === module.bindingName))
-    .map((module) => ({ name: module.bindingName, class_name: module.className }));
+  const additions: Array<{ name: string; class_name: string }> = [];
+  for (const module of durableObjects) {
+    if (!existingBindings.some((binding) => binding.name === module.bindingName)) {
+      additions.push({ name: module.bindingName, class_name: module.className });
+    }
+  }
   if (additions.length > 0) {
     parsed.durable_objects = { bindings: [...existingBindings, ...additions] };
     modified = true;
   }
 
-  const migrations = Array.isArray(parsed.migrations)
-    ? (parsed.migrations as Array<DurableObjectMigration>)
-    : [];
+  const migrations = migrationsOf(parsed);
   for (const module of durableObjects) {
     const tagConflict = migrations.find(
       (migration) =>
@@ -785,9 +808,7 @@ export function readWranglerWebSocketTombstones(
     return [];
   }
   const parsed = parseJsonc(readFileSync(configPath, 'utf8'));
-  const migrations = Array.isArray(parsed.migrations)
-    ? (parsed.migrations as Array<DurableObjectMigration>)
-    : [];
+  const migrations = migrationsOf(parsed);
   const historicalClasses = new Set(
     migrations.flatMap((migration) =>
       /^(?:platform|void)-ws-v1(?:-\d+)?$/.test(migration.tag ?? '')
@@ -796,12 +817,13 @@ export function readWranglerWebSocketTombstones(
     ),
   );
   const currentClasses = new Set(websockets.map((route) => route.className));
-  const bindings = (
-    parsed.durable_objects as { bindings?: Array<{ class_name?: unknown }> } | undefined
-  )?.bindings;
+  const bindings = isJsonObject(parsed.durable_objects)
+    ? parsed.durable_objects.bindings
+    : undefined;
   return [
     ...new Set(
-      (Array.isArray(bindings) ? bindings : []).flatMap((binding) =>
+      arrayOf(bindings).flatMap((binding) =>
+        isJsonObject(binding) &&
         typeof binding.class_name === 'string' &&
         historicalClasses.has(binding.class_name) &&
         !currentClasses.has(binding.class_name)
@@ -827,9 +849,7 @@ export function ensureWranglerCompatibilityDate(root: string, compatibilityDate:
 /** Add the `nodejs_als` compatibility flag. Returns true if the file was written. */
 export function ensureWranglerNodejsAlsFlag(root: string): boolean {
   const { configPath, parsed } = readOrCreateProjectWranglerConfig(root);
-  const compatibilityFlags = Array.isArray(parsed.compatibility_flags)
-    ? (parsed.compatibility_flags as Array<unknown>)
-    : [];
+  const compatibilityFlags = arrayOf(parsed.compatibility_flags);
   if (compatibilityFlags.includes(NODEJS_ALS_FLAG)) {
     return false;
   }
@@ -913,6 +933,12 @@ type ManagedQueueProvenance = {
   pendingConsumerRemovals: Array<string>;
 };
 
+function stringsOf(value: unknown): Array<string> {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
 function readManagedQueueProvenance(text: string): ManagedQueueProvenance {
   const none: ManagedQueueProvenance = {
     producerBindings: [],
@@ -924,18 +950,16 @@ function readManagedQueueProvenance(text: string): ManagedQueueProvenance {
   if (!encoded) {
     return none;
   }
-  const strings = (value: unknown): Array<string> =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
   try {
     const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as unknown;
     if (!isRecord(parsed)) {
       return none;
     }
     return {
-      producerBindings: strings(parsed.producerBindings),
-      consumerQueues: strings(parsed.consumerQueues),
-      consumerConcurrencyQueues: strings(parsed.consumerConcurrencyQueues),
-      pendingConsumerRemovals: strings(parsed.pendingConsumerRemovals),
+      producerBindings: stringsOf(parsed.producerBindings),
+      consumerQueues: stringsOf(parsed.consumerQueues),
+      consumerConcurrencyQueues: stringsOf(parsed.consumerConcurrencyQueues),
+      pendingConsumerRemovals: stringsOf(parsed.pendingConsumerRemovals),
     };
   } catch {
     // Decision: A malformed marker proves no ownership. Fail safe by retaining every entry.
@@ -1037,14 +1061,14 @@ export function writeProvisionedWranglerConfig(
   const hasBom = rawContent.startsWith(UTF8_BOM);
   const original = hasBom ? rawContent.slice(UTF8_BOM.length) : rawContent;
 
-  let parsed: Record<string, unknown>;
+  let parsed: JsonObject;
   try {
     parsed = parseJsonc(original);
   } catch (error) {
     // Decision: Never treat an unparseable config as `{}`: the only-if-absent upserts would clobber it.
     throw new Error(
       `deploy: cannot update "${configPath}" — it is not valid JSON/JSONC. ` +
-        `Fix the file and retry. (${(error as Error).message})`,
+        `Fix the file and retry. (${error instanceof Error ? error.message : String(error)})`,
       { cause: error },
     );
   }
@@ -1152,9 +1176,7 @@ export function writeProvisionedWranglerConfig(
         continue;
       }
 
-      const owners = collectWorkerBindingNames(
-        configWithoutField(currentConfig, 'durable_objects'),
-      );
+      const owners = collectWorkerBindingNames(currentConfig, 'durable_objects');
       addQueueProducerOwners(owners, currentConfig);
       const owner = owners.get(route.bindingName);
       if (owner) {
@@ -1200,11 +1222,11 @@ export function writeProvisionedWranglerConfig(
     const rawList = currentConfig[field];
     // Decision: The owner collector below excludes this field, so validate its shape here.
     bindingNamesForField(field, rawList);
-    const currentList = Array.isArray(rawList) ? [...rawList] : [];
-    const matches: Array<{ index: number; entry: Record<string, unknown> }> = [];
+    const currentList = arrayOf(rawList);
+    const matches: Array<{ index: number; entry: JsonObject }> = [];
     for (let i = 0; i < currentList.length; i++) {
       const entry = currentList[i];
-      if (isRecord(entry) && entry[identityKey] === binding) {
+      if (isJsonObject(entry) && entry[identityKey] === binding) {
         matches.push({ index: i, entry });
       }
     }
@@ -1216,7 +1238,7 @@ export function writeProvisionedWranglerConfig(
       );
     }
     // Decision: A name shared with another binding type is undeployable, whether this entry is new or not.
-    const owners = collectWorkerBindingNames(configWithoutField(currentConfig, field));
+    const owners = collectWorkerBindingNames(currentConfig, field);
     addQueueProducerOwners(owners, currentConfig);
     const owner = owners.get(binding);
     if (owner !== undefined) {
@@ -1268,19 +1290,13 @@ export function writeProvisionedWranglerConfig(
   let d1MigrationsDirSkipped = false;
   if (patch.d1MigrationsDir) {
     const currentD1 = parseJsonc(text).d1_databases;
-    const d1Entries = Array.isArray(currentD1)
-      ? (currentD1 as Array<{
-          binding?: unknown;
-          migrations_dir?: unknown;
-          migrations_pattern?: unknown;
-        }>)
-      : [];
+    const d1Entries = objectEntriesOf(currentD1);
     const matchIndices: Array<number> = [];
-    d1Entries.forEach((entry, i) => {
-      if (entry.binding === patch.d1MigrationsDir!.binding) {
+    for (const [i, entry] of d1Entries.entries()) {
+      if (entry.binding === patch.d1MigrationsDir.binding) {
         matchIndices.push(i);
       }
-    });
+    }
     if (matchIndices.length > 1) {
       throw new Error(
         `deploy: cannot update "${configPath}" — binding ` +
@@ -1356,7 +1372,7 @@ export function writeProvisionedWranglerConfig(
   const pendingConsumerRemovals = new Set(managedQueueProvenance.pendingConsumerRemovals);
   const upsertQueueEntries = (
     section: 'producers' | 'consumers',
-    entries: Array<Record<string, unknown>> | undefined,
+    entries: Array<JsonObject> | undefined,
   ): void => {
     if (!entries || entries.length === 0) {
       return;
@@ -1366,9 +1382,7 @@ export function writeProvisionedWranglerConfig(
     const currentList =
       section === 'producers'
         ? assertValidQueueProducers(currentQueues?.producers)
-        : Array.isArray(currentQueues?.consumers)
-          ? [...(currentQueues.consumers as Array<Record<string, unknown>>)]
-          : [];
+        : objectEntriesOf(currentQueues?.consumers);
     for (const entry of entries) {
       // Decision: A producer binding maps to exactly one queue, so every producer with the binding is
       // checked: none appends, one must name the same queue, more than one fails closed.
@@ -1420,9 +1434,7 @@ export function writeProvisionedWranglerConfig(
           );
         }
       } else {
-        index = currentList.findIndex(
-          (existing) => isRecord(existing) && existing.queue === entry.queue,
-        );
+        index = currentList.findIndex((existing) => existing.queue === entry.queue);
       }
 
       if (reconcileManagedQueues && section === 'consumers' && typeof entry.queue === 'string') {
@@ -1468,9 +1480,7 @@ export function writeProvisionedWranglerConfig(
     if (patch.queues.reconcileBwfOwned) {
       const queues = assertObjectContainer(parseJsonc(text).queues, 'queues');
       assertValidQueueProducers(queues?.producers);
-      const producers = Array.isArray(queues?.producers)
-        ? (queues.producers as Array<Record<string, unknown>>)
-        : [];
+      const producers = objectEntriesOf(queues?.producers);
       const desiredBindings = new Set(
         (patch.queues.producers ?? []).map((producer) => producer.binding),
       );
@@ -1490,9 +1500,7 @@ export function writeProvisionedWranglerConfig(
         set(['queues', 'producers', index], undefined);
       }
 
-      const consumers = Array.isArray(queues?.consumers)
-        ? (queues.consumers as Array<Record<string, unknown>>)
-        : [];
+      const consumers = objectEntriesOf(queues?.consumers);
       const desiredConsumerQueues = new Set(
         (patch.queues.consumers ?? []).map((consumer) => consumer.queue),
       );
@@ -1524,7 +1532,7 @@ export function writeProvisionedWranglerConfig(
     const currentConfig = parseJsonc(text);
     bindingNamesForField('vars', currentConfig.vars);
     const currentVars = isRecord(currentConfig.vars) ? currentConfig.vars : {};
-    const owners = collectWorkerBindingNames(configWithoutField(currentConfig, 'vars'));
+    const owners = collectWorkerBindingNames(currentConfig, 'vars');
     addQueueProducerOwners(owners, currentConfig);
     for (const [key, value] of Object.entries(patch.vars)) {
       const owner = owners.get(key);
@@ -1651,10 +1659,10 @@ export function updateWranglerCustomDomain(
     );
   }
   const routes = parsed.routes;
-  if (routes !== undefined && !Array.isArray(routes)) {
+  if (routes !== undefined && !isJsonArray(routes)) {
     throw new Error(`domain: "routes" in "${configPath}" must be an array.`);
   }
-  const routeArray = (routes ?? []) as Array<unknown>;
+  const routeArray = routes ?? [];
   const matches: Array<number> = [];
   for (let index = 0; index < routeArray.length; index++) {
     const route = routeArray[index];
@@ -1666,10 +1674,10 @@ export function updateWranglerCustomDomain(
       }
       continue;
     }
-    if (typeof route !== 'object' || route === null || Array.isArray(route)) {
+    if (!isJsonObject(route)) {
       throw new Error(`domain: "routes[${index}]" in "${configPath}" is malformed.`);
     }
-    const entry = route as Record<string, unknown>;
+    const entry = route;
     if (entry.pattern !== hostname) {
       continue;
     }
@@ -1734,15 +1742,16 @@ function parseCustomDomains(value: unknown, configPath: string): Array<WranglerC
     throw new Error(`domain: "routes" in "${configPath}" must be an array.`);
   }
   const domains: Array<WranglerCustomDomain> = [];
-  for (let index = 0; index < value.length; index++) {
-    const route = value[index];
+  const routes: Array<unknown> = value;
+  for (let index = 0; index < routes.length; index++) {
+    const route = routes[index];
     if (typeof route === 'string') {
       continue;
     }
-    if (typeof route !== 'object' || route === null || Array.isArray(route)) {
+    if (!isJsonObject(route)) {
       throw new Error(`domain: "routes[${index}]" in "${configPath}" is malformed.`);
     }
-    const entry = route as Record<string, unknown>;
+    const entry = route;
     if (entry.custom_domain !== true) {
       continue;
     }
@@ -1800,12 +1809,20 @@ function detectFormattingOptions(text: string): FormattingOptions {
   return { tabSize: 2, insertSpaces: true };
 }
 
-function parseJsonc(text: string): Record<string, unknown> {
+function parseJsoncRoot(text: string): JsonObject | undefined {
   const errors: Array<ParseError> = [];
   const source = text.startsWith(UTF8_BOM) ? text.slice(UTF8_BOM.length) : text;
-  const result = parse(source, errors, { allowTrailingComma: true });
+  const result: unknown = parse(source, errors, { allowTrailingComma: true });
   if (errors.length > 0) {
     throw new SyntaxError('Failed to parse JSONC');
+  }
+  return isJsonObject(result) ? result : undefined;
+}
+
+function parseJsonc(text: string): JsonObject {
+  const result = parseJsoncRoot(text);
+  if (result === undefined) {
+    throw new SyntaxError('Failed to parse JSONC: expected a JSON object');
   }
   return result;
 }
@@ -1882,7 +1899,7 @@ function applyMemberEdit(
   // Decision: Relocation may only move a comment. If the result does not parse or its data differs
   // from the plain edit, use the plain edit.
   const plainResult = plain();
-  let relocatedParsed: Record<string, unknown>;
+  let relocatedParsed: JsonObject;
   try {
     relocatedParsed = parseJsonc(relocated);
   } catch {
@@ -1920,11 +1937,6 @@ function removeMember(
   for (let kind = scanner.scan(); kind !== SyntaxKind.EOF; kind = scanner.scan()) {
     tokens.push({ kind, offset: scanner.getTokenOffset(), length: scanner.getTokenLength() });
   }
-  const isTrivia = (kind: SyntaxKind): boolean =>
-    kind === SyntaxKind.Trivia ||
-    kind === SyntaxKind.LineBreakTrivia ||
-    kind === SyntaxKind.LineCommentTrivia ||
-    kind === SyntaxKind.BlockCommentTrivia;
   const following = tokens.find((token) => token.offset >= end && !isTrivia(token.kind));
   const preceding = [...tokens]
     .reverse()
@@ -1964,7 +1976,7 @@ function removeMember(
   }
 
   const plainResult = applyEdits(text, modify(text, path, undefined, options));
-  let splicedParsed: Record<string, unknown>;
+  let splicedParsed: JsonObject;
   try {
     splicedParsed = parseJsonc(spliced);
   } catch {
@@ -1974,6 +1986,15 @@ function removeMember(
     return plainResult;
   }
   return spliced;
+}
+
+function isTrivia(kind: SyntaxKind): boolean {
+  return (
+    kind === SyntaxKind.Trivia ||
+    kind === SyntaxKind.LineBreakTrivia ||
+    kind === SyntaxKind.LineCommentTrivia ||
+    kind === SyntaxKind.BlockCommentTrivia
+  );
 }
 
 /**
@@ -2029,12 +2050,12 @@ export function assertNoDuplicateMembers(text: string, configPath: string): void
       const seen = new Set<string>();
       for (const property of node.children) {
         const keyNode = property.children?.[0];
-        const key = keyNode?.value;
-        if (typeof key !== 'string') {
+        const key: unknown = keyNode?.value;
+        if (keyNode === undefined || typeof key !== 'string') {
           continue;
         }
         if (seen.has(key)) {
-          const { line, column } = offsetToLineColumn(text, keyNode!.offset);
+          const { line, column } = offsetToLineColumn(text, keyNode.offset);
           throw new Error(
             `deploy: cannot update "${configPath}" — duplicate key ${JSON.stringify(key)} ` +
               `at line ${line}, column ${column}. Wrangler reads the last of two duplicate ` +
@@ -2054,8 +2075,10 @@ export function assertNoDuplicateMembers(text: string, configPath: string): void
   walk(root);
 }
 
+type LineColumn = { line: number; column: number };
+
 /** 1-based line and column of an offset. */
-function offsetToLineColumn(text: string, offset: number): { line: number; column: number } {
+function offsetToLineColumn(text: string, offset: number): LineColumn {
   let line = 1;
   let column = 1;
   const limit = Math.min(offset, text.length);
@@ -2136,7 +2159,7 @@ function validateDurableObjectMigrations(
       );
     }
   }
-  return value as Array<DurableObjectMigration>;
+  return value.filter(isDurableObjectMigrationEntry);
 }
 
 /**
@@ -2144,7 +2167,7 @@ function validateDurableObjectMigrations(
  * their labels. `queues` is left out because the producer upsert matches its own entries;
  * including it would make a producer collide with itself.
  */
-export const FRIENDLY_BINDING_NAMES: Record<string, string> = {
+export const FRIENDLY_BINDING_NAMES = {
   data_blobs: 'Data Blob',
   durable_objects: 'Durable Object',
   kv_namespaces: 'KV Namespace',
@@ -2183,10 +2206,13 @@ export const FRIENDLY_BINDING_NAMES: Record<string, string> = {
   worker_loaders: 'Worker Loader',
   vpc_services: 'VPC Service',
   vpc_networks: 'VPC Network',
-};
+} as const;
 
 /** Every binding name in the config, mapped to its owner's label (first one wins). */
-function collectWorkerBindingNames(config: Record<string, unknown>): Map<string, string> {
+function collectWorkerBindingNames<T extends Record<string, unknown>>(
+  config: T,
+  skipField?: string,
+): Map<string, string> {
   const owners = new Map<string, string>();
   const claim = (name: string, friendly: string): void => {
     if (!owners.has(name)) {
@@ -2194,6 +2220,9 @@ function collectWorkerBindingNames(config: Record<string, unknown>): Map<string,
     }
   };
   for (const [field, friendly] of Object.entries(FRIENDLY_BINDING_NAMES)) {
+    if (field === skipField) {
+      continue;
+    }
     for (const name of bindingNamesForField(field, config[field])) {
       claim(name, friendly);
     }
@@ -2220,26 +2249,18 @@ function collectWorkerBindingNames(config: Record<string, unknown>): Map<string,
   return owners;
 }
 
-function configWithoutField(
-  config: Record<string, unknown>,
-  field: string,
-): Record<string, unknown> {
-  const { [field]: _omit, ...rest } = config;
-  return rest;
-}
-
 /** Add queue producer bindings (label "Queue"), which the base collector leaves out. */
-function addQueueProducerOwners(
+function addQueueProducerOwners<T extends Record<string, unknown>>(
   owners: Map<string, string>,
-  config: Record<string, unknown>,
+  config: T,
 ): void {
   const queues = assertObjectContainer(config.queues, 'queues');
   if (!queues || queues.producers === undefined) {
     return;
   }
   for (const producer of assertValidQueueProducers(queues.producers)) {
-    const binding = producer.binding as string;
-    if (!owners.has(binding)) {
+    const binding = producer.binding;
+    if (typeof binding === 'string' && !owners.has(binding)) {
       owners.set(binding, 'Queue');
     }
   }
@@ -2249,7 +2270,7 @@ function addQueueProducerOwners(
  * Validate `queues.producers`: every member needs a non-empty string `binding`. A skipped
  * member could hide a binding collision, so a malformed one throws.
  */
-function assertValidQueueProducers(producers: unknown): Array<Record<string, unknown>> {
+function assertValidQueueProducers(producers: unknown): Array<JsonObject> {
   if (producers === undefined) {
     return [];
   }
@@ -2261,7 +2282,7 @@ function assertValidQueueProducers(producers: unknown): Array<Record<string, unk
   }
   return producers.map((producer, index) => {
     if (
-      !isRecord(producer) ||
+      !isJsonObject(producer) ||
       typeof producer.binding !== 'string' ||
       producer.binding.length === 0
     ) {
@@ -2275,11 +2296,11 @@ function assertValidQueueProducers(producers: unknown): Array<Record<string, unk
 }
 
 /** An object-valued container field (`queues`, `secrets`); any other present value throws. */
-function assertObjectContainer(value: unknown, field: string): Record<string, unknown> | undefined {
+function assertObjectContainer(value: unknown, field: string): JsonObject | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw bindingSetError(`"${field}" must be an object`, 'wrong-shaped container');
   }
   return value;
@@ -2289,13 +2310,13 @@ function assertObjectContainer(value: unknown, field: string): Record<string, un
  * The label of another binding type that already uses `name`, or undefined when only
  * `field` (or nothing) does. Lets a caller refuse a write before its side effects.
  */
-export function findBindingNameOwner(
-  config: Record<string, unknown>,
+export function findBindingNameOwner<T extends Record<string, unknown>>(
+  config: T,
   field: string,
   name: string,
 ): string | undefined {
   bindingNamesForField(field, config[field]);
-  const owners = collectWorkerBindingNames(configWithoutField(config, field));
+  const owners = collectWorkerBindingNames(config, field);
   addQueueProducerOwners(owners, config);
   return owners.get(name);
 }
@@ -2305,17 +2326,16 @@ export function findBindingNameOwner(
  * undefined. Throws on a malformed field, a duplicate entry, or a name another binding
  * type also uses.
  */
-export function readProvisionedBindingEntry(
-  config: Record<string, unknown>,
+export function readProvisionedBindingEntry<T extends Record<string, unknown>>(
+  config: T,
   field: string,
   binding: string,
   configPath: string,
-): Record<string, unknown> | undefined {
+): JsonObject | undefined {
   bindingNamesForField(field, config[field]);
   const rawList = config[field];
-  const list = Array.isArray(rawList) ? rawList : [];
-  const matches = list.filter(
-    (entry): entry is Record<string, unknown> => isRecord(entry) && entry.binding === binding,
+  const matches = arrayOf(Array.isArray(rawList) ? rawList : []).filter(
+    (entry): entry is JsonObject => isJsonObject(entry) && entry.binding === binding,
   );
   if (matches.length > 1) {
     throw new Error(
@@ -2324,7 +2344,7 @@ export function readProvisionedBindingEntry(
         `duplicate binding names. Remove the duplicate and retry.`,
     );
   }
-  const owners = collectWorkerBindingNames(configWithoutField(config, field));
+  const owners = collectWorkerBindingNames(config, field);
   addQueueProducerOwners(owners, config);
   const owner = owners.get(binding);
   if (owner !== undefined) {
@@ -2346,6 +2366,8 @@ export function readProvisionedBindingEntry(
  * - binding-list (`durable_objects`, `logfwdr`, `unsafe`): `{ bindings: [{ name }] }`.
  * - whole-object (`addresses`): not a binding; the deploy check compares the whole value.
  */
+export type BindingEntry = { name: string; entry: JsonObject };
+
 type BindingFieldShape =
   | { kind: 'key-map' }
   | { kind: 'name-keyed-array' }
@@ -2355,35 +2377,37 @@ type BindingFieldShape =
   | { kind: 'whole-object' };
 
 /** Fields that are not a `namespace-array`. */
-const BINDING_FIELD_SHAPES: Record<string, BindingFieldShape> = {
-  vars: { kind: 'key-map' },
-  wasm_modules: { kind: 'key-map' },
-  text_blobs: { kind: 'key-map' },
-  data_blobs: { kind: 'key-map' },
-  send_email: { kind: 'name-keyed-array' },
-  ratelimits: { kind: 'name-keyed-array' },
-  addresses: { kind: 'whole-object' },
-  ai: { kind: 'singleton', bindingRequired: true },
-  browser: { kind: 'singleton', bindingRequired: true },
-  images: { kind: 'singleton', bindingRequired: true },
-  stream: { kind: 'singleton', bindingRequired: true },
-  media: { kind: 'singleton', bindingRequired: true },
-  websearch: { kind: 'singleton', bindingRequired: true },
-  version_metadata: { kind: 'singleton', bindingRequired: true },
-  // Decision: An assets directory without a binding is valid.
-  assets: { kind: 'singleton', bindingRequired: false },
-  durable_objects: { kind: 'binding-list', bindingsRequired: true },
-  logfwdr: { kind: 'binding-list', bindingsRequired: true },
-  // Decision: `unsafe` may carry only `metadata`.
-  unsafe: { kind: 'binding-list', bindingsRequired: false },
-};
+const BINDING_FIELD_SHAPES = new Map<string, BindingFieldShape>(
+  Object.entries({
+    vars: { kind: 'key-map' },
+    wasm_modules: { kind: 'key-map' },
+    text_blobs: { kind: 'key-map' },
+    data_blobs: { kind: 'key-map' },
+    send_email: { kind: 'name-keyed-array' },
+    ratelimits: { kind: 'name-keyed-array' },
+    addresses: { kind: 'whole-object' },
+    ai: { kind: 'singleton', bindingRequired: true },
+    browser: { kind: 'singleton', bindingRequired: true },
+    images: { kind: 'singleton', bindingRequired: true },
+    stream: { kind: 'singleton', bindingRequired: true },
+    media: { kind: 'singleton', bindingRequired: true },
+    websearch: { kind: 'singleton', bindingRequired: true },
+    version_metadata: { kind: 'singleton', bindingRequired: true },
+    // Decision: An assets directory without a binding is valid.
+    assets: { kind: 'singleton', bindingRequired: false },
+    durable_objects: { kind: 'binding-list', bindingsRequired: true },
+    logfwdr: { kind: 'binding-list', bindingsRequired: true },
+    // Decision: `unsafe` may carry only `metadata`.
+    unsafe: { kind: 'binding-list', bindingsRequired: false },
+  } satisfies Record<string, BindingFieldShape>),
+);
 
 /**
  * Binding names in one config field, read by the field's known shape. Throws on a wrong
  * shape or a missing required name, which Wrangler would drop silently.
  */
 export function bindingNamesForField(field: string, value: unknown): Array<string> {
-  if (BINDING_FIELD_SHAPES[field]?.kind === 'key-map') {
+  if (BINDING_FIELD_SHAPES.get(field)?.kind === 'key-map') {
     return keyMapBindingNames(field, value);
   }
   return bindingEntriesForField(field, value).map((entry) => entry.name);
@@ -2393,11 +2417,8 @@ export function bindingNamesForField(field: string, value: unknown): Array<strin
  * Like {@link bindingNamesForField}, but pairs each name with its config entry so a caller
  * can also compare what the binding points at.
  */
-export function bindingEntriesForField(
-  field: string,
-  value: unknown,
-): Array<{ name: string; entry: Record<string, unknown> }> {
-  const shape: BindingFieldShape = BINDING_FIELD_SHAPES[field] ?? { kind: 'namespace-array' };
+export function bindingEntriesForField(field: string, value: unknown): Array<BindingEntry> {
+  const shape = BINDING_FIELD_SHAPES.get(field) ?? ({ kind: 'namespace-array' } as const);
   switch (shape.kind) {
     case 'key-map':
       return keyMapBindingEntries(field);
@@ -2422,10 +2443,7 @@ function keyMapBindingEntries(field: string): never {
   );
 }
 
-function namespaceArrayBindingEntries(
-  field: string,
-  value: unknown,
-): Array<{ name: string; entry: Record<string, unknown> }> {
+function namespaceArrayBindingEntries(field: string, value: unknown): Array<BindingEntry> {
   if (value === undefined) {
     return [];
   }
@@ -2439,10 +2457,7 @@ function namespaceArrayBindingEntries(
  * `send_email` and `ratelimits` are keyed by `.name` only. A `.binding` on such an entry is
  * not an identity Wrangler uses, so reading it would invent a collision.
  */
-function nameKeyedBindingEntries(
-  field: string,
-  value: unknown,
-): Array<{ name: string; entry: Record<string, unknown> }> {
+function nameKeyedBindingEntries(field: string, value: unknown): Array<BindingEntry> {
   if (value === undefined) {
     return [];
   }
@@ -2456,11 +2471,11 @@ function bindingListEntries(
   field: string,
   value: unknown,
   bindingsRequired: boolean,
-): Array<{ name: string; entry: Record<string, unknown> }> {
+): Array<BindingEntry> {
   if (value === undefined) {
     return [];
   }
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw bindingSetError(
       `"${field}" must be an object with a "bindings" array`,
       'wrong-shaped field',
@@ -2482,11 +2497,11 @@ function singletonBindingEntry(
   field: string,
   value: unknown,
   bindingRequired: boolean,
-): Array<{ name: string; entry: Record<string, unknown> }> {
+): Array<BindingEntry> {
   if (value === undefined) {
     return [];
   }
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw bindingSetError(`"${field}" must be an object with a "binding"`, 'wrong-shaped field');
   }
   if (typeof value.binding === 'string' && value.binding.length > 0) {
@@ -2512,7 +2527,7 @@ function keyMapBindingNames(field: string, value: unknown): Array<string> {
   if (value === undefined) {
     return [];
   }
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw bindingSetError(
       `"${field}" must be an object mapping names to values`,
       'wrong-shaped field',
@@ -2529,10 +2544,10 @@ function strictBindingEntries(
   members: Array<unknown>,
   keyField: 'binding' | 'name',
   field: string,
-): Array<{ name: string; entry: Record<string, unknown> }> {
+): Array<BindingEntry> {
   return members.map((member, index) => {
     if (
-      !isRecord(member) ||
+      !isJsonObject(member) ||
       typeof member[keyField] !== 'string' ||
       member[keyField].length === 0
     ) {

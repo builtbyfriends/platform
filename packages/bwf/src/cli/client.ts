@@ -1004,7 +1004,7 @@ export class PlatformClient {
       { projectId },
       { permission: 'read' },
     );
-    return { members: body.members, ...(body.warnings ? { warnings: body.warnings } : {}) };
+    return { members: body.members, ...(!!body.warnings && { warnings: body.warnings }) };
   }
 
   async listProjectInvitations(projectId: string): Promise<Array<ProjectInvitationResponse>> {
@@ -1042,7 +1042,7 @@ export class PlatformClient {
     return this.rpc(
       'tokens.renew',
       'Failed to renew project token',
-      { projectId, credentialId, ...(expiresInDays ? { expiresInDays } : {}) },
+      { projectId, credentialId, ...(!!expiresInDays && { expiresInDays }) },
       { permission: 'owner' },
     );
   }
@@ -1595,7 +1595,7 @@ export class PlatformClient {
     );
     return {
       entries: json.data,
-      ...(json.runtimeLogs === 'minimal' ? { runtimeLogs: 'minimal' as const } : {}),
+      ...(json.runtimeLogs === 'minimal' && { runtimeLogs: 'minimal' as const }),
     };
   }
 
@@ -1850,8 +1850,8 @@ export class PlatformClient {
         method: 'POST',
         body: {
           domain: input.domain,
-          ...(input.apiToken !== undefined ? { apiToken: input.apiToken } : {}),
-          ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
+          ...(input.apiToken !== undefined && { apiToken: input.apiToken }),
+          ...(input.attemptId !== undefined && { attemptId: input.attemptId }),
         },
         permission: 'settings',
       },

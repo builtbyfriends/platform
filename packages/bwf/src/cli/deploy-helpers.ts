@@ -218,7 +218,7 @@ export async function promptDeployProjectConfig(
   }
   const action = await promptProjectSetupAction('Set up a bwf project for deploy:', {
     includeLink: deployableProjects.length > 0,
-    ...(link ? {} : { link: false }),
+    ...(!link && { link: false }),
   });
 
   if (action === 'create') {
@@ -232,7 +232,7 @@ export async function promptDeployProjectConfig(
     deployableProjects,
     'Select a project to deploy to:',
     root,
-    { confirmExisting: true, includeCreate: false, ...(link ? {} : { link: false }) },
+    { confirmExisting: true, includeCreate: false, ...(!link && { link: false }) },
   );
 
   if (result.action === 'create') {

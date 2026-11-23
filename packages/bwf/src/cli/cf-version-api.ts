@@ -93,15 +93,15 @@ async function readPackageDependencies(directory: string) {
   }
 }
 
-const moduleContentTypes: Record<string, string> = {
-  esm: 'application/javascript+module',
-  cjs: 'application/javascript',
-  wasm: 'application/wasm',
-  text: 'text/plain',
-  data: 'application/octet-stream',
-  json: 'text/plain',
-  sourcemap: 'application/source-map',
-};
+const moduleContentTypes = new Map<string, string>([
+  ['esm', 'application/javascript+module'],
+  ['cjs', 'application/javascript'],
+  ['wasm', 'application/wasm'],
+  ['text', 'text/plain'],
+  ['data', 'application/octet-stream'],
+  ['json', 'text/plain'],
+  ['sourcemap', 'application/source-map'],
+]);
 
 function bindingsFromOutput(
   env: Json,
@@ -158,7 +158,7 @@ function bindingsFromOutput(
           name,
           type: 'r2_bucket',
           bucket_name: requiredString(value.name, name),
-          ...(value.jurisdiction ? { jurisdiction: value.jurisdiction } : {}),
+          ...(!!value.jurisdiction && { jurisdiction: value.jurisdiction }),
         });
         break;
       case 'durable-object':
@@ -166,9 +166,7 @@ function bindingsFromOutput(
           name,
           type: 'durable_object_namespace',
           class_name: requiredString(value.exportName, name),
-          ...(value.worker !== workerName
-            ? { script_name: requiredString(value.worker, name) }
-            : {}),
+          ...(value.worker !== workerName && { script_name: requiredString(value.worker, name) }),
         });
         break;
       case 'unsafe:durable_object_namespace':
@@ -188,7 +186,7 @@ function bindingsFromOutput(
           name,
           type: 'queue',
           queue_name: requiredString(value.name, name),
-          ...(value.deliveryDelay === undefined ? {} : { delivery_delay: value.deliveryDelay }),
+          ...(value.deliveryDelay !== undefined && { delivery_delay: value.deliveryDelay }),
         });
         break;
       case 'rate-limit':
@@ -212,8 +210,8 @@ function bindingsFromOutput(
           name,
           type: 'service',
           service: requiredString(value.worker, name),
-          ...(value.exportName === undefined ? {} : { entrypoint: value.exportName }),
-          ...(value.props === undefined ? {} : { props: value.props }),
+          ...(value.exportName !== undefined && { entrypoint: value.exportName }),
+          ...(value.props !== undefined && { props: value.props }),
         });
         break;
       case 'workflow':
@@ -230,22 +228,22 @@ function bindingsFromOutput(
         bindings.push({
           name,
           type: 'send_email',
-          ...(value.destinationAddress === undefined
-            ? {}
-            : { destination_address: value.destinationAddress }),
-          ...(value.allowedDestinationAddresses === undefined
-            ? {}
-            : { allowed_destination_addresses: value.allowedDestinationAddresses }),
-          ...(value.allowedSenderAddresses === undefined
-            ? {}
-            : { allowed_sender_addresses: value.allowedSenderAddresses }),
+          ...(value.destinationAddress !== undefined && {
+            destination_address: value.destinationAddress,
+          }),
+          ...(value.allowedDestinationAddresses !== undefined && {
+            allowed_destination_addresses: value.allowedDestinationAddresses,
+          }),
+          ...(value.allowedSenderAddresses !== undefined && {
+            allowed_sender_addresses: value.allowedSenderAddresses,
+          }),
         });
         break;
       case 'analytics-engine-dataset':
         bindings.push({
           name,
           type: 'analytics_engine',
-          ...(value.name === undefined ? {} : { dataset: value.name }),
+          ...(value.name !== undefined && { dataset: value.name }),
         });
         break;
       case 'vectorize':
@@ -261,16 +259,14 @@ function bindingsFromOutput(
           name,
           type: 'dispatch_namespace',
           namespace: requiredString(value.namespace, name),
-          ...(outbound
-            ? {
-                outbound: {
-                  worker: { service: requiredString(outbound.worker, name) },
-                  ...(Array.isArray(outbound.parameters)
-                    ? { params: outbound.parameters.map((parameter) => ({ name: parameter })) }
-                    : {}),
-                },
-              }
-            : {}),
+          ...(!!outbound && {
+            outbound: {
+              worker: { service: requiredString(outbound.worker, name) },
+              ...(Array.isArray(outbound.parameters) && {
+                params: outbound.parameters.map((parameter: unknown) => ({ name: parameter })),
+              }),
+            },
+          }),
         });
         break;
       }
@@ -364,7 +360,7 @@ export function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json
     }
   }
   // Decision: The converter reads only `worker.exports` for this field.
-  // oxlint-disable-next-line quality/no-chained-type-assertions
+  // oxlint-disable-next-line quality/no-chained-type-assertions, typescript/no-unsafe-type-assertion -- the converter reads only worker.exports; a full parsed config can't be built here
   const workerExportsOnly = {
     worker: { exports: entries },
     containers: [],
@@ -437,12 +433,10 @@ function assetConfigFromOutput(value: unknown): Json | undefined {
     throw new Error('Cloudflare asset configuration has an unsupported setting.');
   }
   return {
-    ...(config.basePath === undefined ? {} : { base_path: config.basePath }),
-    ...(config.htmlHandling === undefined ? {} : { html_handling: config.htmlHandling }),
-    ...(config.notFoundHandling === undefined
-      ? {}
-      : { not_found_handling: config.notFoundHandling }),
-    ...(config.runWorkerFirst === undefined ? {} : { run_worker_first: config.runWorkerFirst }),
+    ...(config.basePath !== undefined && { base_path: config.basePath }),
+    ...(config.htmlHandling !== undefined && { html_handling: config.htmlHandling }),
+    ...(config.notFoundHandling !== undefined && { not_found_handling: config.notFoundHandling }),
+    ...(config.runWorkerFirst !== undefined && { run_worker_first: config.runWorkerFirst }),
   };
 }
 
@@ -455,11 +449,14 @@ function placementTarget(
   if (!placement) {
     return undefined;
   }
-  for (const kind of ['region', 'host', 'hostname'] as const) {
-    const value = (placement as Record<string, unknown>)[kind];
-    if (typeof value === 'string' && value) {
-      return { kind, value };
-    }
+  if ('region' in placement && placement.region) {
+    return { kind: 'region', value: placement.region };
+  }
+  if ('host' in placement && placement.host) {
+    return { kind: 'host', value: placement.host };
+  }
+  if ('hostname' in placement && placement.hostname) {
+    return { kind: 'hostname', value: placement.hostname };
   }
   return undefined;
 }
@@ -473,7 +470,7 @@ function placementFromOutput(
   }
   const hint = 'hint' in placement ? placement.hint : undefined;
   if (hint || placement.mode === 'smart') {
-    return { mode: 'smart', ...(hint ? { hint } : {}) };
+    return { mode: 'smart', ...(!!hint && { hint }) };
   }
   const target = placementTarget(placement);
   return target ? { mode: 'targeted', [target.kind]: target.value } : undefined;
@@ -513,10 +510,10 @@ async function apiResult(
     headers: {
       'User-Agent': getBwfUserAgent(),
       Authorization: `Bearer ${token}`,
-      ...(body && !form ? { 'Content-Type': 'application/json' } : {}),
+      ...(!!(body && !form) && { 'Content-Type': 'application/json' }),
       ...headers,
     },
-    ...(body ? { body: form ? body : JSON.stringify(body) } : {}),
+    ...(!!body && { body: form ? body : JSON.stringify(body) }),
     redirect: 'manual',
     signal: AbortSignal.timeout(timeout),
   });
@@ -524,7 +521,10 @@ async function apiResult(
   const result = object(parsed?.result);
   if (!response.ok || parsed?.success !== true || !result) {
     const error = Array.isArray(parsed?.errors) ? object(parsed.errors[0]) : null;
-    const code = Number.isSafeInteger(error?.code) ? ` [code: ${error!.code}]` : '';
+    const code =
+      typeof error?.code === 'number' && Number.isSafeInteger(error.code)
+        ? ` [code: ${error.code}]`
+        : '';
     throw new CloudflareApiError(
       `Cloudflare version upload failed (${response.status})${code}.`,
       response.status,
@@ -542,16 +542,16 @@ function localNamespaceBindings(
   className: string,
   workerName: string,
 ): Array<Json> {
-  return bindings
-    .map(object)
-    .filter(
-      (binding): binding is Json =>
-        binding?.type === 'durable_object_namespace' &&
-        binding.class_name === className &&
-        (binding.script_name === undefined || binding.script_name === workerName) &&
-        binding.environment === undefined &&
-        binding.dispatch_namespace === undefined,
-    );
+  return bindings.flatMap((entry) => {
+    const binding = object(entry);
+    return binding?.type === 'durable_object_namespace' &&
+      binding.class_name === className &&
+      (binding.script_name === undefined || binding.script_name === workerName) &&
+      binding.environment === undefined &&
+      binding.dispatch_namespace === undefined
+      ? [binding]
+      : [];
+  });
 }
 
 function assertContainerApplicationIdentity(
@@ -571,6 +571,17 @@ function assertContainerApplicationIdentity(
   }
 }
 
+function sortedByText(list: ReadonlyArray<unknown>): Array<unknown> {
+  return [...list].sort((left, right) => {
+    const leftText = String(left);
+    const rightText = String(right);
+    if (leftText === rightText) {
+      return 0;
+    }
+    return leftText < rightText ? -1 : 1;
+  });
+}
+
 function assertContainerApplicationSettings(application: Json, plan: ContainerPlan): void {
   const desired = object(plan.settings.configuration) ?? {};
   const current = object(application.configuration) ?? {};
@@ -587,7 +598,7 @@ function assertContainerApplicationSettings(application: Json, plan: ContainerPl
     }
     if (key === 'experimental_flags' && Array.isArray(value)) {
       const flags = current.experimental_flags ?? [];
-      return !Array.isArray(flags) || !isDeepStrictEqual([...flags].sort(), [...value].sort());
+      return !Array.isArray(flags) || !isDeepStrictEqual(sortedByText(flags), sortedByText(value));
     }
     return !isDeepStrictEqual(current[key] ?? [], value);
   });
@@ -667,14 +678,14 @@ function containerPlansFromOutput(
         'Scheduler-managed Cloudflare Containers cannot be uploaded with pinned secrets.',
       );
     }
-    const classes = Object.entries(exports ?? {}).filter(
-      ([, value]) => object(value)?.container === config.name,
-    );
+    const classes = Object.entries(exports ?? {}).flatMap(([name, value]) => {
+      const declaration = object(value);
+      return declaration?.container === config.name ? [{ className: name, declaration }] : [];
+    });
     if (classes.length !== 1) {
       throw new Error(`Cloudflare Container ${config.name} needs exactly one local SQLite export.`);
     }
-    const [className, raw] = classes[0];
-    const declaration = object(raw)!;
+    const { className, declaration } = classes[0];
     const localBindings = bindings.filter(
       (binding) =>
         binding.type === 'durable_object_namespace' &&
@@ -694,34 +705,27 @@ function containerPlansFromOutput(
     ) {
       throw new Error(`Cloudflare Container ${config.name} has an unsupported setting.`);
     }
-    const settings: Json = {
-      ...(configuration || config.ssh || config.authorizedKeys
-        ? {
-            configuration: {
-              ...(configuration ?? {}),
-              ...(config.ssh ? { wrangler_ssh: config.ssh } : {}),
-              ...(config.authorizedKeys
-                ? {
-                    authorized_keys: config.authorizedKeys.map(({ name, publicKey }) => ({
-                      name,
-                      public_key: publicKey,
-                    })),
-                  }
-                : {}),
-            },
-          }
-        : {}),
-      ...(config.observability
-        ? {
-            observability: {
-              logs: {
-                enabled:
-                  config.observability.enabled === true ||
-                  config.observability.logs?.enabled === true,
-              },
-            },
-          }
-        : {}),
+    const settings = {
+      ...(!!(configuration || config.ssh || config.authorizedKeys) && {
+        configuration: {
+          ...(configuration ?? {}),
+          ...(!!config.ssh && { wrangler_ssh: config.ssh }),
+          ...(!!config.authorizedKeys && {
+            authorized_keys: config.authorizedKeys.map(({ name, publicKey }) => ({
+              name,
+              public_key: publicKey,
+            })),
+          }),
+        },
+      }),
+      ...(!!config.observability && {
+        observability: {
+          logs: {
+            enabled:
+              config.observability.enabled === true || config.observability.logs?.enabled === true,
+          },
+        },
+      }),
     };
     plans.push({ name: config.name, className, images: config.images ?? {}, settings });
   }
@@ -763,9 +767,9 @@ async function dockerImageDigest(
   });
   const digests: unknown = JSON.parse(stdout);
   const repository = image.replace(/:[^/:]+$/, '');
-  const matching = Array.isArray(digests)
+  const matching: Array<string> = Array.isArray(digests)
     ? digests.filter(
-        (digest) =>
+        (digest: unknown): digest is string =>
           typeof digest === 'string' &&
           digest.startsWith(`${repository}@sha256:`) &&
           /^[a-f0-9]{64}$/.test(digest.slice(digest.lastIndexOf(':') + 1)),
@@ -774,7 +778,7 @@ async function dockerImageDigest(
   if (matching.length !== 1) {
     throw new Error('Cloudflare Container image digest could not be verified after push.');
   }
-  return matching[0] as string;
+  return matching[0];
 }
 
 async function prepareContainerMetadata(options: {
@@ -802,7 +806,10 @@ async function prepareContainerMetadata(options: {
   for (const plan of options.plans) {
     const images: Json = {};
     for (const [name, raw] of Object.entries(plan.images)) {
-      const source = object(raw)!;
+      const source = object(raw);
+      if (!source) {
+        throw new Error(`Container ${plan.name} image ${name} is not an object.`);
+      }
       const reference = requiredString(
         source.localReference ?? source.reference,
         `Container ${plan.name} image`,
@@ -830,7 +837,7 @@ async function prepareContainerMetadata(options: {
           const remote = matches.length === 1 ? matches[0][1] : '';
           if (
             !remote.startsWith(`registry.cloudflare.com/${options.accountId}/`) ||
-            [...remote].some(
+            Array.from(remote).some(
               (character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127,
             )
           ) {
@@ -873,7 +880,7 @@ async function prepareContainerMetadata(options: {
     result.push({
       name: plan.name,
       class_name: plan.className,
-      ...(Object.keys(images).length ? { images } : {}),
+      ...(!!Object.keys(images).length && { images }),
     });
   }
   return result;
@@ -924,17 +931,16 @@ async function ensureContainerApplications(options: {
     !Array.isArray(metadata) ||
     metadata.length !== options.containers.length ||
     options.containers.some((expected) => {
-      const matching = metadata
-        .map(object)
-        .filter(
-          (entry) =>
-            entry !== null &&
-            entry.name === expected.name &&
-            entry.class_name === expected.class_name,
-        );
+      const matching = metadata.flatMap((entry: unknown) => {
+        const container = object(entry);
+        return container !== null &&
+          container.name === expected.name &&
+          container.class_name === expected.class_name
+          ? [container]
+          : [];
+      });
       return (
-        matching.length !== 1 ||
-        !isDeepStrictEqual(matching[0]!.images ?? {}, expected.images ?? {})
+        matching.length !== 1 || !isDeepStrictEqual(matching[0].images ?? {}, expected.images ?? {})
       );
     })
   ) {
@@ -1218,7 +1224,7 @@ export async function uploadPinnedCloudflareVersion(options: {
   }
   const modules: Array<Json> = [];
   for (const [name, entry] of Object.entries(config.manifest.modules)) {
-    const type = moduleContentTypes[entry.type];
+    const type = moduleContentTypes.get(entry.type);
     if (!type || name.startsWith('/') || name.split('/').includes('..')) {
       throw new Error(`Cloudflare Worker module ${name} cannot be uploaded with pinned secrets.`);
     }
@@ -1280,21 +1286,19 @@ export async function uploadPinnedCloudflareVersion(options: {
       compatibility_flags: config.compatibilityFlags,
       package_dependencies: await readPackageDependencies(options.output.directory),
       bindings,
-      ...(config.limits
-        ? { limits: { cpu_ms: config.limits.cpuMs, subrequests: config.limits.subrequests } }
-        : {}),
-      ...(placement ? { placement } : {}),
-      ...(config.cache
-        ? {
-            cache_options: {
-              enabled: config.cache.enabled,
-              cross_version_cache: config.cache.crossVersionCache,
-            },
-          }
-        : {}),
-      ...(exports ? { exports } : {}),
-      ...(containers.length ? { containers } : {}),
-      ...(jwt ? { assets: { jwt, ...(assetConfig ? { config: assetConfig } : {}) } } : {}),
+      ...(!!config.limits && {
+        limits: { cpu_ms: config.limits.cpuMs, subrequests: config.limits.subrequests },
+      }),
+      ...(!!placement && { placement }),
+      ...(!!config.cache && {
+        cache_options: {
+          enabled: config.cache.enabled,
+          cross_version_cache: config.cache.crossVersionCache,
+        },
+      }),
+      ...(!!exports && { exports }),
+      ...(!!containers.length && { containers }),
+      ...(!!jwt && { assets: { jwt, ...(!!assetConfig && { config: assetConfig }) } }),
       annotations: { 'workers/message': options.message ?? '' },
     },
     options.verifyUploader,

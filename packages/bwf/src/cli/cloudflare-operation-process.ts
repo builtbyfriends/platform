@@ -102,9 +102,9 @@ function result(status: number, stdout = '', stderr = '', data?: unknown): Resul
     status,
     stdout,
     stderr,
-    ...(data !== undefined ? { data } : {}),
-    ...(errorCode ? { errorCode } : {}),
-    ...([10_006, 10_007, 10_090].includes(errorCode ?? 0) ? { failure: 'not-found' as const } : {}),
+    ...(data !== undefined && { data }),
+    ...(!!errorCode && { errorCode }),
+    ...([10_006, 10_007, 10_090].includes(errorCode ?? 0) && { failure: 'not-found' as const }),
   };
 }
 
@@ -123,7 +123,7 @@ function runCf(
     shell: false,
     windowsHide: true,
     maxBuffer: bounds?.maxOutputBytes ?? 32 * 1024 * 1024,
-    ...(bounds ? { timeout: bounds.timeoutMs } : {}),
+    ...(!!bounds && { timeout: bounds.timeoutMs }),
     // Decision: An interactive command shares this process's terminal, so cf can ask there.
     stdio: interactive ? 'inherit' : ['ignore', 'pipe', 'pipe'],
   });
@@ -307,9 +307,9 @@ function d1Database(token: string): { id: string; dir: string; table: string; pa
   return {
     id: selected.database_id,
     dir: typeof selected.migrations_dir === 'string' ? selected.migrations_dir : './migrations',
-    ...(typeof selected.migrations_pattern === 'string'
-      ? { pattern: selected.migrations_pattern }
-      : {}),
+    ...(typeof selected.migrations_pattern === 'string' && {
+      pattern: selected.migrations_pattern,
+    }),
     table:
       typeof selected.migrations_table === 'string' ? selected.migrations_table : 'd1_migrations',
   };
@@ -908,7 +908,7 @@ async function resources(): Promise<Result> {
         ? result(0, '', '', {
             id: queue.queue_id,
             name: queue.queue_name,
-            ...(consumers ? { consumers } : {}),
+            ...(!!consumers && { consumers }),
           })
         : { ...result(1, '', 'Cloudflare Queue does not exist.'), failure: 'not-found' };
     }
@@ -1207,7 +1207,7 @@ async function workerHistory(): Promise<Result> {
         JSON.stringify({
           strategy: 'percentage',
           versions,
-          ...(operation.message ? { annotations: { 'workers/message': operation.message } } : {}),
+          ...(!!operation.message && { annotations: { 'workers/message': operation.message } }),
         }),
         ...(operation.bypassDeploymentChecks ? ['--bypass-deployment-checks'] : []),
       ]);
@@ -1345,8 +1345,8 @@ async function workerChanges(): Promise<Result> {
         : printed.workersDevUrl;
     return result(0, '', called.stderr, {
       versionId,
-      ...(previewUrl ? { previewUrl } : {}),
-      ...(workersDevUrl ? { workersDevUrl } : {}),
+      ...(!!previewUrl && { previewUrl }),
+      ...(!!workersDevUrl && { workersDevUrl }),
     });
   }
   throw new Error('Unsupported Cloudflare Worker operation.');
@@ -1552,13 +1552,13 @@ try {
     process.stdout.write(
       JSON.stringify({
         operationResult: 1,
-        ...(output.signal ? { signal: output.signal } : {}),
-        ...(output.error ? { error: output.error } : {}),
-        ...(data !== undefined ? { data } : {}),
-        ...(output.errorCode !== undefined ? { errorCode: output.errorCode } : {}),
-        ...(output.failure ? { failure: output.failure } : {}),
-        ...(output.stderr ? { errors: [{ code: output.errorCode, message: output.stderr }] } : {}),
-        ...(humanOutput ? { output: humanOutput } : {}),
+        ...(!!output.signal && { signal: output.signal }),
+        ...(!!output.error && { error: output.error }),
+        ...(data !== undefined && { data }),
+        ...(output.errorCode !== undefined && { errorCode: output.errorCode }),
+        ...(!!output.failure && { failure: output.failure }),
+        ...(!!output.stderr && { errors: [{ code: output.errorCode, message: output.stderr }] }),
+        ...(!!humanOutput && { output: humanOutput }),
       }) + '\n',
     );
   }

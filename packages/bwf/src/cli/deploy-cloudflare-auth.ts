@@ -214,7 +214,7 @@ export async function readWranglerAuthToken(
     // Decision: A clean status here would read as a successful upload.
     failure: {
       status: status === 0 ? 1 : status,
-      ...(signal ? { signal } : {}),
+      ...(!!signal && { signal }),
       stdout: '',
       stderr,
     },

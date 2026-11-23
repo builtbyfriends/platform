@@ -18,7 +18,7 @@ export function parseAccountArgs(args: Array<string>): AccountArgs {
     if (trailing || (extra !== undefined && !/^[a-z][a-z0-9_-]{0,63}$/.test(extra))) {
       throw new Error('account: Usage: bwf account link [connection-id].');
     }
-    return { subcommand, ...(extra ? { connectionId: extra } : {}) };
+    return { subcommand, ...(!!extra && { connectionId: extra }) };
   }
   if (!subcommand || !['login', 'logout', 'whoami', 'token'].includes(subcommand)) {
     throw new Error('account: Usage: bwf account <login|link|logout|whoami|token>.');

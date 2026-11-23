@@ -7,6 +7,7 @@ import {
   assertExistingCloudflareConfig,
 } from '@builtbyfriends/deploy-cloudflare';
 import type { ExistingCloudflareWorker } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { dirname, resolve } from 'pathslash';
 import {
   deployPointerPath,
@@ -23,6 +24,7 @@ import {
   normalizeContainerImagePaths,
   collectEmittedQueueGroupNames,
 } from './deploy-binding-snapshot.ts';
+import type { DeployConfigCheck } from './deploy-binding-snapshot.ts';
 import { log } from './deploy-helpers.ts';
 import { BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { buildSchemaProbeEnv } from './deploy-transport.ts';
@@ -69,19 +71,30 @@ async function validateEmittedVarsDefault(
   return validateEmittedVarsViaSubprocess(input, env);
 }
 
-export function resolveGeneratedDeployConfigPathDefault(root: string): string {
-  const pointerPath = deployPointerPath(root);
-  const pointer = JSON.parse(readFileSync(pointerPath, 'utf8')) as { configPath?: unknown };
-  if (typeof pointer.configPath !== 'string' || pointer.configPath.length === 0) {
-    throw new Error(`Generated Cloudflare deploy pointer ${pointerPath} has no configPath.`);
+function readPointerConfigPath(pointerPath: string): string | undefined {
+  const pointer: unknown = JSON.parse(readFileSync(pointerPath, 'utf8'));
+  if (!isRecord(pointer)) {
+    throw new TypeError(`Generated Cloudflare deploy pointer ${pointerPath} is not an object.`);
   }
-  return resolve(dirname(pointerPath), pointer.configPath);
+  const configPath = pointer.configPath;
+  return typeof configPath === 'string' && configPath.length > 0 ? configPath : undefined;
 }
 
-export function readGeneratedDeployConfig(root: string): {
+export function resolveGeneratedDeployConfigPathDefault(root: string): string {
+  const pointerPath = deployPointerPath(root);
+  const configPath = readPointerConfigPath(pointerPath);
+  if (configPath === undefined) {
+    throw new Error(`Generated Cloudflare deploy pointer ${pointerPath} has no configPath.`);
+  }
+  return resolve(dirname(pointerPath), configPath);
+}
+
+export type GeneratedDeployConfig = {
   path: string;
   config: Record<string, unknown>;
-} {
+};
+
+export function readGeneratedDeployConfig(root: string): GeneratedDeployConfig {
   const redirectedPath = resolveGeneratedDeployConfigPathDefault(root);
   try {
     return { path: redirectedPath, config: readGeneratedWranglerConfigFile(redirectedPath) };
@@ -146,7 +159,7 @@ export function verifyGeneratedDeployConfig(
     /** Additional Worker secret names the generated version must inherit. */
     requiredSecretNames?: Array<string>;
     /** Containers the build should emit: the root's, plus bwf's sandbox container when used. */
-    expectedContainers?: Array<Record<string, unknown>>;
+    expectedContainers?: Array<unknown>;
     /** Exact pre-build Durable Object bindings, including bwf's sandbox and live additions. */
     expectedDurableObjectBindings?: Array<Record<string, unknown>>;
     /** Exact pre-build migration sequence, including bwf's sandbox and live additions. */
@@ -154,7 +167,7 @@ export function verifyGeneratedDeployConfig(
     /** Cron schedules the build should emit, derived from the source before the build. */
     expectedCrons?: Array<string>;
   },
-): { ok: boolean; reason?: string } {
+): DeployConfigCheck {
   const deployConfigPath = deployPointerPath(root);
   if (!existsSync(deployConfigPath)) {
     return {
@@ -164,11 +177,11 @@ export function verifyGeneratedDeployConfig(
   }
   let redirectedPath: string;
   try {
-    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf8')) as { configPath?: unknown };
-    if (typeof parsed.configPath !== 'string' || parsed.configPath.length === 0) {
+    const configPath = readPointerConfigPath(deployConfigPath);
+    if (configPath === undefined) {
       return { ok: false, reason: `${deployConfigPath} has no "configPath" pointer.` };
     }
-    redirectedPath = resolve(dirname(deployConfigPath), parsed.configPath);
+    redirectedPath = resolve(dirname(deployConfigPath), configPath);
   } catch {
     return { ok: false, reason: `${deployConfigPath} is not valid JSON.` };
   }
@@ -202,10 +215,7 @@ export function verifyGeneratedDeployConfig(
   }
   if (expectedRequiredSecrets.size > 0) {
     const secrets = generated.secrets;
-    const required =
-      typeof secrets === 'object' && secrets !== null && !Array.isArray(secrets)
-        ? (secrets as Record<string, unknown>).required
-        : undefined;
+    const required = isRecord(secrets) ? secrets.required : undefined;
     if (
       !Array.isArray(required) ||
       !required.every((name): name is string => typeof name === 'string') ||
@@ -407,12 +417,10 @@ export function verifyGeneratedDeployConfig(
         reason: 'generated config durable_objects bindings could not be verified.',
       };
     }
-    const byName = (left: Record<string, unknown>, right: Record<string, unknown>) =>
-      String(left.name).localeCompare(String(right.name));
     if (
       !deepEqual(
-        [...emittedBindings].sort(byName),
-        [...expected.expectedDurableObjectBindings].sort(byName),
+        [...emittedBindings].sort(compareBindingNames),
+        [...expected.expectedDurableObjectBindings].sort(compareBindingNames),
       )
     ) {
       return {
@@ -443,7 +451,7 @@ export function verifyGeneratedDeployConfig(
       : [];
     const expectedContainers = expected.expectedContainers;
     if (emittedContainers.length !== 0 || expectedContainers.length !== 0) {
-      const expectedByClass = new Map<string, Record<string, unknown>>();
+      const expectedByClass = new Map<string, unknown>();
       const expectedNoClass: Array<unknown> = [];
       for (const container of expectedContainers) {
         const className = readD1EntryString(container, 'class_name');
@@ -538,11 +546,7 @@ export function verifyGeneratedDeployConfig(
   if (expected.expectedCrons) {
     const triggers = generated.triggers;
     const emittedCrons: Array<unknown> =
-      typeof triggers === 'object' &&
-      triggers !== null &&
-      Array.isArray((triggers as Record<string, unknown>).crons)
-        ? ((triggers as Record<string, unknown>).crons as Array<unknown>)
-        : [];
+      isRecord(triggers) && Array.isArray(triggers.crons) ? triggers.crons : [];
     const expectedCronCounts = new Map<string, number>();
     for (const schedule of expected.expectedCrons) {
       expectedCronCounts.set(schedule, (expectedCronCounts.get(schedule) ?? 0) + 1);
@@ -567,6 +571,10 @@ export function verifyGeneratedDeployConfig(
     }
   }
   return { ok: true };
+}
+
+function compareBindingNames(left: { name?: unknown }, right: { name?: unknown }): number {
+  return String(left.name).localeCompare(String(right.name));
 }
 
 /** Check the built Worker against the pinned deployment target before upload. */

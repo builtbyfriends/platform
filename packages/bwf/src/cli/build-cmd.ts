@@ -25,7 +25,9 @@ function isBuildLogComplete(page: BuildLogsResponse): boolean {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**
@@ -66,7 +68,7 @@ export async function followBuildLogs(opts: {
   onRetry?: (err: unknown) => void;
 }): Promise<{ status: string; terminal: boolean }> {
   let cursor = opts.since;
-  let status = opts.status;
+  let status: string;
   let terminalSince: number | null = null;
   const pollMs = opts.pollMs ?? POLL_MS;
   for (;;) {
@@ -107,6 +109,12 @@ export async function runBuildCommand(root: string, args: BuildArgs): Promise<vo
   if (args.subcommand === 'logs') {
     return runBuildLogsCommand(root, args);
   }
+}
+
+function onBuildLogsRetry(err: unknown): void {
+  log.warn(
+    `build: transient error while following (${err instanceof Error ? err.message : String(err)}); retrying…`,
+  );
 }
 
 async function runBuildLogsCommand(
@@ -158,11 +166,6 @@ async function runBuildLogsCommand(
     ? (line: string): void => appendFileSync(args.output!, `${line}\n`)
     : (line: string): void => console.log(line);
 
-  const onRetry = (err: unknown): void =>
-    log.warn(
-      `build: transient error while following (${err instanceof Error ? err.message : String(err)}); retrying…`,
-    );
-
   // Decision: A transient failure on the first poll mustn't kill `--follow` either. On a fatal error we exit
   // with a friendly message. On a non-fatal error we exit at once only for the one-shot command;
   // under --follow we call onRetry, sleep and request since=0 again.
@@ -184,7 +187,7 @@ async function runBuildLogsCommand(
         log.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-      onRetry(error);
+      onBuildLogsRetry(error);
       await sleep(POLL_MS);
     }
   }
@@ -217,7 +220,7 @@ async function runBuildLogsCommand(
       since: first.lastSeq,
       status,
       isFatal: isFatalFollowError,
-      onRetry,
+      onRetry: onBuildLogsRetry,
     }));
   }
 

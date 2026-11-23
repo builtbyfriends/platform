@@ -119,10 +119,10 @@ function applyPreservationFlags(raw: JsonObject, worker: JsonObject): void {
     ...unsafe,
     metadata: {
       ...metadata,
-      ...(keepBindings.length > 0
-        ? { keep_bindings: [...new Set([...(previous ?? []), ...keepBindings])] }
-        : {}),
-      ...(raw.keep_assets === true ? { keep_assets: true } : {}),
+      ...(keepBindings.length > 0 && {
+        keep_bindings: [...new Set([...(previous ?? []), ...keepBindings])],
+      }),
+      ...(raw.keep_assets === true && { keep_assets: true }),
     },
   };
 }
@@ -185,21 +185,19 @@ function applyWorkflows(raw: JsonObject, worker: JsonObject): void {
     exports[workflow.class_name] = {
       type: 'workflow',
       name: workflow.name,
-      ...(workflow.limits !== undefined ? { limits: workflow.limits } : {}),
-      ...(workflow.concurrency !== undefined ? { concurrency: workflow.concurrency } : {}),
-      ...(schedules !== undefined ? { schedules } : {}),
-      ...(retention
-        ? {
-            defaultRetention: {
-              ...(retention.success_retention !== undefined
-                ? { successRetention: retention.success_retention }
-                : {}),
-              ...(retention.error_retention !== undefined
-                ? { errorRetention: retention.error_retention }
-                : {}),
-            },
-          }
-        : {}),
+      ...(workflow.limits !== undefined && { limits: workflow.limits }),
+      ...(workflow.concurrency !== undefined && { concurrency: workflow.concurrency }),
+      ...(schedules !== undefined && { schedules }),
+      ...(!!retention && {
+        defaultRetention: {
+          ...(retention.success_retention !== undefined && {
+            successRetention: retention.success_retention,
+          }),
+          ...(retention.error_retention !== undefined && {
+            errorRetention: retention.error_retention,
+          }),
+        },
+      }),
     };
   }
   worker.env = env;
@@ -344,9 +342,9 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
                 name,
                 {
                   dockerfile: source.dockerfile,
-                  ...(typeof source.build_context === 'string'
-                    ? { buildContext: source.build_context }
-                    : {}),
+                  ...(typeof source.build_context === 'string' && {
+                    buildContext: source.build_context,
+                  }),
                 },
               ];
             }
@@ -364,8 +362,8 @@ function containersFromWrangler(raw: JsonObject, exports: JsonObject): Array<Jso
     return {
       name: value.name,
       image: { reference: value.image },
-      ...(typeof value.max_instances === 'number' ? { maxInstances: value.max_instances } : {}),
-      ...(typeof value.instance_type === 'string' ? { instanceType: value.instance_type } : {}),
+      ...(typeof value.max_instances === 'number' && { maxInstances: value.max_instances }),
+      ...(typeof value.instance_type === 'string' && { instanceType: value.instance_type }),
     };
   });
 }
