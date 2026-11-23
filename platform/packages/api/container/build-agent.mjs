@@ -1505,11 +1505,11 @@ function readPackageManagerPin() {
  */
 function readYarnLockKind() {
   try {
-    const head = new Set(readFileSync(`${WORK_DIR}/yarn.lock`, 'utf8').slice(0, 200));
-    if (head.has('# yarn lockfile v1')) {
+    const head = readFileSync(`${WORK_DIR}/yarn.lock`, 'utf8').slice(0, 200);
+    if (head.includes('# yarn lockfile v1')) {
       return 'classic';
     }
-    if (head.has('__metadata:')) {
+    if (head.includes('__metadata:')) {
       return 'berry';
     }
     return 'unknown';

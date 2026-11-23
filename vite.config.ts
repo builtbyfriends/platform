@@ -375,6 +375,9 @@ export default defineConfig({
       'no-console': 'off',
       // Decision: The error classes here are checked with instanceof, in our code and in the upstream code we merge.
       '@nkzw/no-instanceof': 'off',
+      // Decision: In untyped .mjs files this rule takes a string for an array, and its fix turned a substring check
+      // into a Set of characters.
+      'unicorn/prefer-set-has': 'off',
       'react-you-might-not-need-an-effect/no-derived-state': 'error',
       'react-you-might-not-need-an-effect/no-chain-state-updates': 'error',
       'react-you-might-not-need-an-effect/no-event-handler': 'error',
