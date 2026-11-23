@@ -1111,6 +1111,9 @@ export async function cleanupStalePendingDomains(
 
     // Decision: Keep the row visible until provider and routing cleanup finish so a concurrent add can't publish a
     // replacement that this run then removes.
+    // Decision: The row is the only record of the Cloudflare hostname id. When the provider delete fails twice,
+    // the row stays so the next run can try again.
+    let providerDeleteFailed = false;
     const claimed = await cleanupPendingDomainUnderProjectFence(env, db, domain, async () => {
       try {
         await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
@@ -1120,14 +1123,21 @@ export async function cleanupStalePendingDomains(
             await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
           } catch (retryErr) {
             if (!(retryErr instanceof CloudflareApiError && retryErr.status === 404)) {
-              console.error(
-                `[scheduled] failed to delete stale CF hostname for ${domain.hostname} after retry — CF hostname ${domain.cf_hostname_id} is ORPHANED:`,
-                retryErr,
-              );
+              providerDeleteFailed = true;
+              throw retryErr;
             }
           }
         }
       }
+    }).catch((error: unknown) => {
+      if (!providerDeleteFailed) {
+        throw error;
+      }
+      console.error(
+        `[scheduled] failed to delete stale CF hostname for ${domain.hostname}; keeping the row for the next run:`,
+        error,
+      );
+      return false;
     });
     if (!claimed) {
       continue;
