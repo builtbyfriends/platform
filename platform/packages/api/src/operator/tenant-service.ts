@@ -460,6 +460,7 @@ async function commitOwnershipTransfer(
   projectId: string,
   targetUserId: string,
   operatorUserId: string,
+  keepFormerOwner = true,
 ): Promise<OwnershipTransferCommit> {
   return db.transaction(async (tx) => {
     const [lockedProject] = await tx
@@ -609,18 +610,20 @@ async function commitOwnershipTransfer(
       .set({ user_id: newOwner.id })
       .where(eq(projects.id, projectId))
       .returning();
-    await tx
-      .insert(projectMembers)
-      .values({
-        project_id: projectId,
-        user_id: currentOwner.id,
-        role: 'admin',
-        added_by_user_id: operatorUserId,
-      })
-      .onConflictDoUpdate({
-        target: [projectMembers.project_id, projectMembers.user_id],
-        set: { role: 'admin', updated_at: sql`now()` },
-      });
+    if (keepFormerOwner) {
+      await tx
+        .insert(projectMembers)
+        .values({
+          project_id: projectId,
+          user_id: currentOwner.id,
+          role: 'admin',
+          added_by_user_id: operatorUserId,
+        })
+        .onConflictDoUpdate({
+          target: [projectMembers.project_id, projectMembers.user_id],
+          set: { role: 'admin', updated_at: sql`now()` },
+        });
+    }
     return {
       project: updatedProject!,
       previousOwner: currentOwner,
@@ -808,6 +811,10 @@ export async function transferOperatorProjectOwner(
   projectId: string,
   targetUserId: string,
   dryRun = false,
+  by: { actorId: string; keepFormerOwner: boolean } = {
+    actorId: context.get('user')?.id,
+    keepFormerOwner: true,
+  },
 ) {
   if (dryRun) {
     return previewOperatorProjectOwner(context, projectId, targetUserId);
@@ -819,7 +826,8 @@ export async function transferOperatorProjectOwner(
     db,
     projectId,
     targetUserId,
-    context.get('user').id,
+    by.actorId,
+    by.keepFormerOwner,
   );
   const convergence = {
     countersComplete: false,
@@ -889,7 +897,8 @@ export async function transferOperatorProjectOwner(
     previousOwner: historicalAccountSummary(transfer.previousOwner, transfer.previousOwnerId),
     newOwner: accountSummary(convergedOwner),
     transferredAt: transfer.transferredAt,
-    formerOwnerRole: transfer.previousOwnerId === transfer.newOwner.id ? null : 'admin',
+    formerOwnerRole:
+      transfer.previousOwnerId === transfer.newOwner.id || !by.keepFormerOwner ? null : 'admin',
     changed: transfer.changed,
     convergence,
   };

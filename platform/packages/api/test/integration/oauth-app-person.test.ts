@@ -5,7 +5,13 @@ import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vite-plus
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import rawApp from '../../src/index.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
-import { oauthGrants, oauthRequests, projects, users } from '../../src/schema.ts';
+import {
+  oauthGrants,
+  oauthRequests,
+  projectOwnershipPeriods,
+  projects,
+  users,
+} from '../../src/schema.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -173,5 +179,147 @@ describe('app-person grant', () => {
     expect(next.project_id).toBe(credential.project_id);
     const [paid] = await env.db.select().from(projects).where(eq(projects.id, next.project_id));
     expect(paid.payer_person_id).toBe('p2');
+  });
+});
+
+describe('groups', () => {
+  const billing = async (path: string, body: unknown, authorization = basic()) =>
+    request('/app-billing/' + path, {
+      method: 'POST',
+      headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const accessFor = async (form: Record<string, string>) =>
+    ((await (await token(form)).json()) as { access_token: string }).access_token;
+  const publish = async (form: Record<string, string>, slug = 'team-app') => {
+    const response = await call('publish.request', await accessFor(form), {
+      redirect_uri: redirect,
+      state: 's'.repeat(32),
+      code_challenge: await calculatePKCECodeChallenge('v'.repeat(64)),
+      code_challenge_method: 'S256',
+      slug,
+      checkpoint: 'checkpoint-1',
+      artifact,
+    });
+    expect(response.status).toBe(200);
+    const { request_id } = rpcData(await response.json()) as { request_id: string };
+    const approved = await token({ ...form, publish_request: request_id });
+    expect(approved.status).toBe(200);
+    return { requestId: request_id, ...((await approved.json()) as { project_id: string }) };
+  };
+  const ownerOf = async (projectId: string) => {
+    const [row] = await env.db
+      .select({ project: projects, owner: users })
+      .from(projects)
+      .innerJoin(users, eq(users.id, projects.user_id))
+      .where(eq(projects.id, projectId));
+    return row!;
+  };
+
+  it('needs the person acting for a group, and keeps person ids away from groups', async () => {
+    expect((await token({ group: 'acme' })).status).toBe(400);
+    expect((await token({ group: 'acme', acting_person: 'p1', person: 'p1' })).status).toBe(400);
+    expect((await token({ person: 'group:acme' })).status).toBe(400);
+    expect((await token({ group: 'acme', acting_person: 'p1' })).status).toBe(200);
+    const [group] = await env.db.select().from(users);
+    expect(group).toMatchObject({
+      provider: 'app:' + registration.client.id,
+      provider_id: 'group:acme',
+    });
+    const [grant] = await env.db.select().from(oauthGrants);
+    expect(grant!.session).toMatchObject({ appPerson: true, actingPerson: 'p1' });
+  });
+
+  it('keeps a group’s app up and republishable after the person who published it is removed', async () => {
+    const first = await publish({ group: 'acme', acting_person: 'p1' });
+    await token({ person: 'p1' });
+    const [record] = await env.db
+      .select()
+      .from(oauthRequests)
+      .where(eq(oauthRequests.id, first.requestId));
+    expect(record!.data.actingPerson).toBe('p1');
+    expect((await ownerOf(first.project_id)).owner.provider_id).toBe('group:acme');
+
+    expect((await billing('people.delete', { person: 'p1' })).status).toBe(200);
+    expect(await env.db.select().from(users).where(eq(users.provider_id, 'p1'))).toHaveLength(0);
+    expect((await ownerOf(first.project_id)).project.status).toBe('active');
+    const again = await publish({ group: 'acme', acting_person: 'p2' });
+    expect(again.project_id).toBe(first.project_id);
+  });
+
+  it('moves a person’s app to a group with its address and payer, and lists it', async () => {
+    const mine = await publish({ person: 'p1' }, 'corner-shop');
+    const before = await ownerOf(mine.project_id);
+    const moved = await billing('projects.owner', {
+      project: 'corner-shop',
+      group: 'acme',
+      actingPerson: 'p1',
+    });
+    expect(await moved.json()).toEqual({
+      data: { projectId: mine.project_id, group: 'acme', changed: true },
+    });
+    const after = await ownerOf(mine.project_id);
+    expect(after.owner.provider_id).toBe('group:acme');
+    expect(after.project).toMatchObject({
+      slug: 'corner-shop',
+      payer_person_id: 'p1',
+      created_at: before.project.created_at,
+    });
+    const periods = await env.db
+      .select()
+      .from(projectOwnershipPeriods)
+      .where(eq(projectOwnershipPeriods.project_id, mine.project_id));
+    expect(periods.find((period) => period.ends_at === null)).toMatchObject({
+      owner_user_id: after.owner.id,
+      changed_by_user_id: `app:${registration.client.id}:p1`,
+    });
+    const listed = (await (await billing('projects.list', { group: 'acme' })).json()) as {
+      data: { projects: Array<{ projectId: string; slug: string; payer: string }> };
+    };
+    expect(listed.data.projects).toMatchObject([
+      { projectId: mine.project_id, slug: 'corner-shop', payer: 'p1' },
+    ]);
+    expect(
+      await (
+        await billing('projects.owner', {
+          project: 'corner-shop',
+          group: 'acme',
+          actingPerson: 'p1',
+        })
+      ).json(),
+    ).toMatchObject({ data: { changed: false } });
+    expect(
+      (await billing('projects.owner', { project: 'corner-shop', group: 'acme' })).status,
+    ).toBe(400);
+  });
+
+  it('keeps another application away from a group’s apps', async () => {
+    const mine = await publish({ group: 'acme', acting_person: 'p1' });
+    const other = await registerOAuthClient(env.db, {
+      name: 'Other',
+      operator: 'Other Co',
+      redirectUris: [redirect],
+      scopes: ['profile', 'deploy:approve'],
+    });
+    await setOAuthPreviewPermission(env.db, other.client.id, true);
+    (env as unknown as Record<string, string>).PLATFORM_APP_PERSON_CLIENTS =
+      registration.client.id + ',' + other.client.id;
+    const asOther = 'Basic ' + btoa(other.client.id + ':' + other.clientSecret);
+    expect((await token({ group: 'acme', acting_person: 'p1' }, asOther)).status).toBe(200);
+    const groups = await env.db.select().from(users).where(eq(users.provider_id, 'group:acme'));
+    expect(groups).toHaveLength(2);
+    expect(await (await billing('projects.list', { group: 'acme' }, asOther)).json()).toEqual({
+      data: { projects: [] },
+    });
+    expect(
+      (
+        await billing(
+          'projects.owner',
+          { project: mine.project_id, group: 'acme', actingPerson: 'p1' },
+          asOther,
+        )
+      ).status,
+    ).toBe(404);
+    expect((await ownerOf(mine.project_id)).owner.provider).toBe('app:' + registration.client.id);
   });
 });

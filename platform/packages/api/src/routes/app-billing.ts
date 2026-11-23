@@ -55,8 +55,14 @@ import {
 import { getOwnedProjectsByUserId } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
-import { deleteOperatorUser, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
+import { OperatorError } from '../operator/common.ts';
+import {
+  deleteOperatorUser,
+  reconcileOperatorUserPlan,
+  transferOperatorProjectOwner,
+} from '../operator/tenant-service.ts';
 import { resolvePlanLimits } from '../plans.ts';
+import { projectUrl } from '../project-url.ts';
 import {
   appBuyers,
   appPayers,
@@ -70,6 +76,7 @@ import {
   projects,
   users,
 } from '../schema.ts';
+import { appPersonUser, GROUP } from './oauth-app-person.ts';
 
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
@@ -826,6 +833,99 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       console.error('[billing] payer plan reconcile failed', { userId: found.owner, error });
     });
     return context.json({ data: { projectId: found.id, payer: body.payer, changed: true } });
+  })
+  .post('/projects.owner', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.project)) {
+      return context.json({ error: 'bad_project' }, 400);
+    }
+    if (!isPersonId(body.group)) {
+      return context.json({ error: 'bad_group' }, 400);
+    }
+    if (!isPersonId(body.actingPerson)) {
+      return context.json({ error: 'bad_acting_person' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const [found] = await db
+      .select({ project: projects, owner: users })
+      .from(projects)
+      .innerJoin(users, eq(users.id, projects.user_id))
+      .where(
+        and(
+          eq(users.provider, APP + clientId),
+          ne(projects.status, 'deleting'),
+          or(eq(projects.id, body.project), eq(projects.slug, body.project)),
+        ),
+      );
+    if (!found) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (found.project.preview_client_id) {
+      return context.json({ error: 'preview' }, 409);
+    }
+    const group = await appPersonUser(db, clientId, GROUP + body.group, { login: '', email: null });
+    if (found.owner.id === group.id) {
+      return context.json({
+        data: { projectId: found.project.id, group: body.group, changed: false },
+      });
+    }
+    // Decision: The payer stays the same. An app paid for by the person it was built for names them, since the
+    // group isn't them.
+    if (!found.project.payer_person_id) {
+      await db
+        .update(projects)
+        .set({ payer_person_id: found.owner.provider_id })
+        .where(eq(projects.id, found.project.id));
+    }
+    try {
+      await transferOperatorProjectOwner(context, found.project.id, group.id, false, {
+        actorId: `${APP}${clientId}:${body.actingPerson}`,
+        keepFormerOwner: false,
+      });
+    } catch (error) {
+      if (error instanceof OperatorError) {
+        return context.json(
+          { error: error.code ?? 'transfer_failed', message: error.message },
+          error.status === 500 ? 503 : (error.status as 400 | 404 | 409 | 503),
+        );
+      }
+      throw error;
+    }
+    return context.json({
+      data: { projectId: found.project.id, group: body.group, changed: true },
+    });
+  })
+  .post('/projects.list', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.group)) {
+      return context.json({ error: 'bad_group' }, 400);
+    }
+    const rows = await context
+      .get('db')
+      .select({ project: projects, payer: payerOf })
+      .from(projects)
+      .innerJoin(users, eq(users.id, projects.user_id))
+      .where(
+        and(
+          eq(users.provider, APP + context.get('billingClient')),
+          eq(users.provider_id, GROUP + body.group),
+          ne(projects.status, 'deleting'),
+        ),
+      )
+      .orderBy(projects.created_at);
+    return context.json({
+      data: {
+        projects: rows.map(({ project, payer }) => ({
+          projectId: project.id,
+          slug: project.slug,
+          url: projectUrl(project, context.env),
+          payer,
+          preview: Boolean(project.preview_client_id),
+          suspended: Boolean(project.suspended_reason),
+        })),
+      },
+    });
   })
   .post('/credits.close', async (context) => {
     const body = await context.req.json().catch(() => null);

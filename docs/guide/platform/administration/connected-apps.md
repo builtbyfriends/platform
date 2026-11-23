@@ -99,6 +99,28 @@ Platform finds or makes a user for that person (provider `app:<client id>`) and 
 
 A publish still needs the person's approval, but the application asks for it in its own interface. Make the publish request as usual with the token, then, once the person approves, send the same token request with `publish_request` set to the returned `request_id`. The answer is the publish credential that the browser approval gives (`project_id`, `approval_id` and a `deploy:approve` token). Platform takes this request as the person's approval, so only list a client you trust to ask its people first.
 
+### Apps owned by a group
+
+An app doesn't have to belong to one person. A group, such as a team, can own apps, so they stay when the person who made them leaves. Ask for a token for the group instead of a person, and name the person acting for it:
+
+```
+POST /oauth/token
+grant_type=urn:builtbyfriends:params:oauth:grant-type:app-person
+group=<the application's id for the group>
+acting_person=<the application's id for the person>
+```
+
+Previews and publishes made with that token belong to the group, and each publish keeps the acting person. A person's id can't start with `group:`, and another application's group with the same id is a different group. Name a payer for a group's apps, such as the group's wallet, with `payer` or `projects.payer`.
+
+Two more calls use the client's own credentials:
+
+| Call             | Body                               | What it does                                                                                                                   |
+| ---------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `projects.owner` | `{ project, group, actingPerson }` | Moves one of the application's apps to a group, from a person or another group. It keeps its address, data, domains and payer. |
+| `projects.list`  | `{ group }`                        | Lists the group's apps with their address and payer.                                                                           |
+
+Send both to `POST /app-billing/<call>`. A preview can't move (`preview`). The person who had the app isn't added to its team, so removing them later leaves the app with the group.
+
 ## Sell plans to an application's people
 
 An application can sell plans to its people through Platform's billing. Open **Admin → Connected apps** and fill in **Plans its people can buy** for the application. Each entry pairs a plan id from the [plan catalog](./plans.md) with the Stripe price that charges for it and the credits it includes each month, in millionths of a dollar:
