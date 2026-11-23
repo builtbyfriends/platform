@@ -79,10 +79,18 @@ export const oauthClients = pgTable('oauth_clients', {
   secret_hash: text('secret_hash').notNull(),
   enabled: boolean('enabled').notNull().default(true),
   /** The plans this application's people can buy: each one's Stripe price and monthly credits. */
-  plans:
-    jsonb('plans').$type<
-      Record<string, { stripePriceId: string; creditMicros: number; perSeat?: boolean }>
-    >(),
+  plans: jsonb('plans').$type<
+    Record<
+      string,
+      {
+        stripePriceId: string;
+        creditMicros: number;
+        perSeat?: boolean;
+        customDomains?: boolean;
+        protection?: boolean;
+      }
+    >
+  >(),
   /** The one-time credit each person can be given once, set by an operator. Null gives none. */
   starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
   /** How people buy credits once: the smallest amount, the step above it, and how many days bought credits last. Null sells none. */
@@ -942,6 +950,11 @@ export const projectZeroTrust = pgTable(
     protected_application_id: text('protected_application_id'),
     protected_application_name: text('protected_application_name'),
     protected_application_audience: text('protected_application_audience'),
+    /** Set by a connected application: only people signed in with these email domains get in, at the project's
+     * own address and its custom domains. Null uses the installation's policies. */
+    access_email_domains: text('access_email_domains').array(),
+    /** The project's platform hostnames that its protected application covers, when it covers them. */
+    protected_application_platform_hosts: text('protected_application_platform_hosts').array(),
     // Decision: Last custom hostname whose routing protection was cleared. Public projects can have more domains
     // than fit in one reconciliation run.
     routing_cursor: text('routing_cursor'),

@@ -31,6 +31,7 @@ import {
   fetchSubscription,
   stripeLiveMode,
 } from '../billing/stripe.ts';
+import { getPlatformCapabilities } from '../capabilities.ts';
 import {
   balancesOf,
   closeWallet,
@@ -53,6 +54,7 @@ import {
   setAutoTopUp,
 } from '../credit-purchase.ts';
 import { getOwnedProjectsByUserId } from '../db.ts';
+import { getDomainsByProjectId } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
 import { OperatorError } from '../operator/common.ts';
@@ -62,7 +64,14 @@ import {
   transferOperatorProjectOwner,
 } from '../operator/tenant-service.ts';
 import { resolvePlanLimits } from '../plans.ts';
+import { installationDefaultPlan } from '../plans.ts';
 import { projectUrl } from '../project-url.ts';
+import {
+  addDomain,
+  DomainRefusal,
+  domainStatusOf,
+  removeDomain,
+} from '../rpc/procedures/domains.ts';
 import {
   appBuyers,
   appPayers,
@@ -74,8 +83,11 @@ import {
   appWalletUse,
   oauthClients,
   projects,
+  projectZeroTrust,
   users,
 } from '../schema.ts';
+import { ZeroTrustUnavailableError } from '../zero-trust/errors.ts';
+import { setProjectZeroTrustProtection } from '../zero-trust/project.ts';
 import { appPersonUser, GROUP } from './oauth-app-person.ts';
 
 const isPersonId = (value: unknown): value is string =>
@@ -324,6 +336,121 @@ const seatsOf = (row: typeof appPeople.$inferSelect) => ({
     ? null
     : row.current_period_end && new Date(row.current_period_end).toISOString(),
 });
+
+/** One of the application's own projects, by id or slug, with its owner and who pays for it. */
+async function appProject(context: BillingContext, ref: unknown) {
+  if (!isPersonId(ref)) {
+    return null;
+  }
+  const [found] = await context
+    .get('db')
+    .select({ project: projects, owner: users, payer: payerOf })
+    .from(projects)
+    .innerJoin(users, eq(users.id, projects.user_id))
+    .where(
+      and(
+        eq(users.provider, APP + context.get('billingClient')),
+        ne(projects.status, 'deleting'),
+        or(eq(projects.id, ref), eq(projects.slug, ref)),
+      ),
+    );
+  return found ?? null;
+}
+
+type Feature = 'customDomains' | 'protection';
+
+/** Whether the plan of the project's payer includes a feature, as the application's plan list says. */
+async function payerHas(
+  context: BillingContext,
+  payer: string,
+  feature: Feature,
+): Promise<boolean> {
+  const db = context.get('db');
+  const clientId = context.get('billingClient');
+  const [[row], plans] = await Promise.all([
+    db
+      .select()
+      .from(appPeople)
+      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, payer))),
+    clientPlans(db, clientId),
+  ]);
+  const plan =
+    (row?.livemode === stripeLiveMode(context.env) ? row.plan : undefined) ??
+    (await installationDefaultPlan(db, context.env)).id;
+  return plans[plan]?.[feature] === true;
+}
+
+/**
+ * Finds the application's project for a domain or protection call, and refuses one that can't have the
+ * feature. Answers the project, or the response to send.
+ */
+async function featureProject(context: BillingContext, ref: unknown, feature: Feature) {
+  if (feature === 'customDomains' && !getPlatformCapabilities(context.env).customDomains) {
+    return context.json(
+      { error: 'CAPABILITY_UNAVAILABLE', message: 'This Platform has custom domains turned off.' },
+      501,
+    );
+  }
+  const found = await appProject(context, ref);
+  if (!found) {
+    return context.json({ error: 'unknown_project' }, 404);
+  }
+  if (found.project.preview_client_id) {
+    return context.json({ error: 'preview' }, 409);
+  }
+  if (!(await payerHas(context, found.payer, feature))) {
+    return context.json(
+      {
+        error: 'plan_required',
+        feature,
+        message: "The payer's plan doesn't include this. Move them to a plan that does.",
+      },
+      403,
+    );
+  }
+  return found;
+}
+
+const domainAnswer = (domain: {
+  id: string;
+  hostname: string;
+  status: string;
+  cname_target?: string;
+  ownership_verification?: unknown;
+  ssl_validation_records?: unknown;
+}) => ({
+  domainId: domain.id,
+  hostname: domain.hostname,
+  status: domain.status,
+  ...(domain.cname_target
+    ? { dns: { type: 'CNAME', name: domain.hostname, target: domain.cname_target } }
+    : {}),
+  ...(domain.ownership_verification
+    ? { ownershipVerification: domain.ownership_verification }
+    : {}),
+  ...(domain.ssl_validation_records ? { sslValidationRecords: domain.ssl_validation_records } : {}),
+});
+
+async function domainCall<T>(context: BillingContext, run: () => Promise<T>) {
+  try {
+    return { data: await run() };
+  } catch (error) {
+    if (error instanceof DomainRefusal) {
+      return {
+        refused: context.json(
+          { error: error.code, message: error.message },
+          error.status as 400 | 403 | 404 | 409 | 422 | 429 | 501,
+        ),
+      };
+    }
+    throw error;
+  }
+}
+
+const isEmailDomain = (value: unknown) =>
+  typeof value === 'string' &&
+  value.length <= 253 &&
+  /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(value);
 
 const MAX_SEATS = 500;
 const isSeatCount = (value: unknown): value is number =>
@@ -926,6 +1053,135 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         })),
       },
     });
+  })
+  .post('/domains.add', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const found = await featureProject(context, body?.project, 'customDomains');
+    if (found instanceof Response) {
+      return found;
+    }
+    if (typeof body.hostname !== 'string') {
+      return context.json({ error: 'HOSTNAME_INVALID' }, 400);
+    }
+    const owner = { db: context.get('db'), user: { id: found.owner.id } };
+    const hostname = body.hostname.toLowerCase();
+    const added = await domainCall(context, () =>
+      addDomain(context.env, owner, { projectId: found.project.id, hostname }),
+    );
+    return added.refused ?? context.json({ data: domainAnswer(added.data!) });
+  })
+  .post('/domains.list', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const found = await featureProject(context, body?.project, 'customDomains');
+    if (found instanceof Response) {
+      return found;
+    }
+    const list = await getDomainsByProjectId(context.get('db'), found.project.id);
+    return context.json({ data: { domains: list.map(domainAnswer) } });
+  })
+  .post('/domains.status', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const found = await featureProject(context, body?.project, 'customDomains');
+    if (found instanceof Response) {
+      return found;
+    }
+    if (typeof body.domainId !== 'string') {
+      return context.json({ error: 'DOMAIN_NOT_FOUND' }, 404);
+    }
+    const owner = { db: context.get('db'), user: { id: found.owner.id } };
+    const checked = await domainCall(context, () =>
+      domainStatusOf(
+        context.env,
+        owner,
+        { projectId: found.project.id, domainId: body.domainId },
+        found.project,
+      ),
+    );
+    if (checked.refused) {
+      return checked.refused;
+    }
+    const domain = checked.data!;
+    return context.json({
+      data: {
+        ...domainAnswer(domain),
+        sslStatus: domain.ssl_status,
+        awaitingDeployment: domain.awaiting_deployment,
+        ...(domain.verification_errors ? { verificationErrors: domain.verification_errors } : {}),
+      },
+    });
+  })
+  .post('/domains.remove', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const found = await appProject(context, body?.project);
+    if (!found) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (typeof body.domainId !== 'string') {
+      return context.json({ error: 'DOMAIN_NOT_FOUND' }, 404);
+    }
+    const owner = { db: context.get('db'), user: { id: found.owner.id } };
+    const removed = await domainCall(context, () =>
+      removeDomain(context.env, owner, { projectId: found.project.id, domainId: body.domainId }),
+    );
+    return (
+      removed.refused ??
+      context.json({
+        data: {
+          removed: true,
+          ...(removed.data!.warnings ? { warnings: removed.data!.warnings } : {}),
+        },
+      })
+    );
+  })
+  .post('/projects.protect', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const on = body?.protected !== false;
+    if (
+      on &&
+      (!Array.isArray(body?.emailDomains) ||
+        body.emailDomains.length === 0 ||
+        body.emailDomains.length > 20 ||
+        !body.emailDomains.every(isEmailDomain))
+    ) {
+      return context.json({ error: 'bad_email_domains', max: 20 }, 400);
+    }
+    const found = on
+      ? await featureProject(context, body.project, 'protection')
+      : await appProject(context, body?.project);
+    if (found instanceof Response) {
+      return found;
+    }
+    if (!found) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    const db = context.get('db');
+    const emailDomains: Array<string> | null = on
+      ? [...new Set<string>(body.emailDomains)].sort()
+      : null;
+    const saved = await db
+      .update(projectZeroTrust)
+      .set({ access_email_domains: emailDomains, updated_at: new Date().toISOString() })
+      .where(eq(projectZeroTrust.project_id, found.project.id))
+      .returning();
+    try {
+      if (saved.length === 0) {
+        throw new ZeroTrustUnavailableError("Sign-in protection isn't set up on this Platform.");
+      }
+      const state = await setProjectZeroTrustProtection(context.env, db, found.project.id, on);
+      return context.json({
+        data: {
+          projectId: found.project.id,
+          protected: state.desired_protected,
+          emailDomains,
+          ready: state.status === 'ready',
+        },
+      });
+    } catch (error) {
+      if (error instanceof ZeroTrustUnavailableError) {
+        return context.json({ error: 'ZERO_TRUST_UNAVAILABLE', message: error.message }, 409);
+      }
+      throw error;
+    }
   })
   .post('/credits.close', async (context) => {
     const body = await context.req.json().catch(() => null);

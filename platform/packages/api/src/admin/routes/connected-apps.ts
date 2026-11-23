@@ -114,7 +114,7 @@ app.post('/:id/plans', async (context) => {
   if ((text && !plans) || Object.keys(plans ?? {}).some((id) => !known.has(id))) {
     throw new OAuthError(
       'invalid_request',
-      'Give each plan from the plan catalog a stripePriceId and a creditMicros amount, and perSeat: true for a plan sold by the seat.',
+      'Give each plan from the plan catalog a stripePriceId and a creditMicros amount, and perSeat: true for a plan sold by the seat. customDomains and protection are true or false.',
     );
   }
   const purchaseText = String(body.creditPurchase ?? '').trim();

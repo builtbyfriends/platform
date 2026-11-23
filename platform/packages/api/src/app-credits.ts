@@ -89,7 +89,14 @@ export function costMicros(meter: Meter, quantity: number, prices: MeterPrices):
  * the seat is bought in any count, and each seat brings creditMicros. A plan billed for longer
  * than a month still brings creditMicros once a month.
  */
-export type ClientPlan = { stripePriceId: string; creditMicros: number; perSeat?: boolean };
+export type ClientPlan = {
+  stripePriceId: string;
+  creditMicros: number;
+  perSeat?: boolean;
+  /** Whether the payer's apps can have custom domains, and be put behind sign-in. */
+  customDomains?: boolean;
+  protection?: boolean;
+};
 export type ClientPlans = Record<string, ClientPlan>;
 
 /** Reads the plans an operator typed in for an application. Null when the shape is wrong. */
@@ -104,7 +111,9 @@ export function parseClientPlans(value: unknown): ClientPlans | null {
       typeof plan?.stripePriceId !== 'string' ||
       !Number.isSafeInteger(plan.creditMicros) ||
       (plan.creditMicros as number) < 0 ||
-      (plan.perSeat !== undefined && typeof plan.perSeat !== 'boolean')
+      (['perSeat', 'customDomains', 'protection'] as const).some(
+        (flag) => plan[flag] !== undefined && typeof plan[flag] !== 'boolean',
+      )
     ) {
       return null;
     }
@@ -112,6 +121,8 @@ export function parseClientPlans(value: unknown): ClientPlans | null {
       stripePriceId: plan.stripePriceId,
       creditMicros: plan.creditMicros as number,
       ...(plan.perSeat ? { perSeat: true } : {}),
+      ...(plan.customDomains ? { customDomains: true } : {}),
+      ...(plan.protection ? { protection: true } : {}),
     };
   }
   return plans;

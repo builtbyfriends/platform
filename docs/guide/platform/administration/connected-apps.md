@@ -121,6 +121,20 @@ Two more calls use the client's own credentials:
 
 Send both to `POST /app-billing/<call>`. A preview can't move (`preview`). The person who had the app isn't added to its team, so removing them later leaves the app with the group.
 
+### Custom domains and sign-in for an application's apps
+
+An application can add custom domains to its people's apps and put an app behind sign-in. Both depend on the payer's plan: add `"customDomains": true` or `"protection": true` to a plan in the application's plan list. A payer on another plan gets `plan_required` with the `feature` it lacks. Custom domains also need the installation's `customDomains` capability, or the calls answer `CAPABILITY_UNAVAILABLE`.
+
+| Call               | Body                        | What it does                                                                                                                                                                         |
+| ------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `domains.add`      | `{ project, hostname }`     | Adds a custom domain. The answer has the `dns` record to set (a CNAME) and Cloudflare's ownership check.                                                                             |
+| `domains.status`   | `{ project, domainId }`     | Checks the domain with Cloudflare and turns it on once its DNS and certificate are ready.                                                                                            |
+| `domains.list`     | `{ project }`               | Lists the app's custom domains.                                                                                                                                                      |
+| `domains.remove`   | `{ project, domainId }`     | Removes a custom domain. It works whatever the payer's plan is.                                                                                                                      |
+| `projects.protect` | `{ project, emailDomains }` | Lets only people signed in with an address at those email domains (1 to 20) into the app, at its own address and its custom domains. `{ project, protected: false }` opens it again. |
+
+Send them to `POST /app-billing/<call>`. `project` is an app's id or address name, and a preview can't take a domain or sign-in. Domain errors use the same codes as `bwf domains`, such as `HOSTNAME_IN_USE`. Sign-in needs Cloudflare Access set up for the installation (see [Zero Trust](./zero-trust.md)); without it, `projects.protect` answers `ZERO_TRUST_UNAVAILABLE`. A payer who moves to a plan without these features keeps the domains and sign-in already set.
+
 ## Sell plans to an application's people
 
 An application can sell plans to its people through Platform's billing. Open **Admin → Connected apps** and fill in **Plans its people can buy** for the application. Each entry pairs a plan id from the [plan catalog](./plans.md) with the Stripe price that charges for it and the credits it includes each month, in millionths of a dollar:

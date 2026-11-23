@@ -124,10 +124,10 @@ async function readProjectZeroTrustRouting(
   if (!row.effective_protected) {
     throw new ZeroTrustUnavailableError('Project Zero Trust is still reconciling.');
   }
-  const protectedApplication = managedProtectedApplication(
-    row,
-    (await getDomainsByProjectId(db as Db, projectId)).map((domain) => domain.hostname),
-  );
+  const protectedApplication = managedProtectedApplication(row, [
+    ...(row.protected_application_platform_hosts ?? []),
+    ...(await getDomainsByProjectId(db as Db, projectId)).map((domain) => domain.hostname),
+  ]);
   return routingProtection(configuration, protectedApplication);
 }
 

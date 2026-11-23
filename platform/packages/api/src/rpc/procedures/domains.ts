@@ -11,6 +11,7 @@ import {
   getDomainsByProjectId,
   type Db,
 } from '../../db.ts';
+import type { ApiEnv } from '../../env.ts';
 import {
   ProjectAccessDeniedError,
   ProjectNotFoundError,
@@ -25,6 +26,7 @@ import {
   type CustomHostnameInfo,
 } from '../../provisioning/cloudflare-api.ts';
 import type { DomainVerificationData } from '../../schema.ts';
+import type { Project } from '../../types.ts';
 import { ZeroTrustUnavailableError } from '../../zero-trust/errors.ts';
 import { lockZeroTrustConfiguration } from '../../zero-trust/lock.ts';
 import { reconcileProjectZeroTrustDomains } from '../../zero-trust/project.ts';
@@ -34,7 +36,7 @@ import {
   MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT,
 } from '../../zero-trust/state.ts';
 import { canOnProject, grantedAccess } from '../access.ts';
-import { member, procedure, type Caller } from '../procedure.ts';
+import { member, procedure } from '../procedure.ts';
 
 const ORPHAN_ADOPTION_MIN_AGE_MS = 60_000;
 const DOMAIN_LIMIT_MESSAGE = `Protected projects support at most ${MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT} custom domains`;
@@ -56,6 +58,41 @@ const ERRORS = {
 } as const;
 
 type Refusal = { code: keyof typeof ERRORS; message?: string };
+
+/** Who changes a project's domains: someone who can change its settings. */
+export type DomainCaller = { db: Db; user: { id: string } };
+
+/** A refusal a caller can act on, by the domain procedures' error codes. */
+export class DomainRefusal extends Error {
+  constructor(
+    readonly code: keyof typeof ERRORS,
+    readonly detail?: string,
+  ) {
+    super(detail ?? ERRORS[code].message);
+  }
+
+  get status() {
+    return ERRORS[this.code].status;
+  }
+}
+
+const refuse = (code: keyof typeof ERRORS, message?: string): never => {
+  throw new DomainRefusal(code, message);
+};
+
+async function refusing<T>(
+  fail: (code: never, message?: string) => never,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof DomainRefusal) {
+      return fail(error.code as never, error.detail);
+    }
+    throw error;
+  }
+}
 
 /** The refusal for a Cloudflare 4xx a caller can act on, or null for any other failure. */
 function cloudflareRefusal(error: unknown): Refusal | null {
@@ -132,130 +169,137 @@ export const add = procedure('domains.add')
   .errors(ERRORS)
   .mcp({ description: 'Add a custom domain to a project', effect: 'write' })
   .cli({ command: 'domains add', description: 'Add a custom domain' })
-  .handler(async ({ env, ctx, input, fail }) => {
-    const unavailable = capabilityRefusal(env);
-    if (unavailable) {
-      return fail(unavailable.code);
-    }
-    const { projectId, hostname } = input;
-    if (!/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(hostname)) {
-      return fail('HOSTNAME_INVALID');
-    }
-    const siteDomain = env.SITE_DOMAIN ?? SITE_DOMAIN;
-    if (hostname.endsWith(`.${siteDomain}`)) {
-      return fail('HOSTNAME_RESERVED', `cannot use ${siteDomain} subdomains`);
-    }
-    if (await getDomainByHostname(ctx.db, hostname)) {
-      return fail('HOSTNAME_IN_USE');
-    }
-    if (await protectedProjectReachedDomainLimit(ctx.db, projectId)) {
-      return fail('DOMAIN_LIMIT');
-    }
+  .handler(({ env, ctx, input, fail }) => refusing(fail, () => addDomain(env, ctx, input)));
 
-    // Decision: A duplicate hostname can be a Cloudflare object left by an earlier post-create DB failure. Adopt
-    // only still-pending objects with an open ownership challenge; a verified or active hostname mustn't
-    // become claimable by another project. Creation is a reversible first phase: the second phase takes
-    // the project lock and rechecks access, and if it loses, the created object is handed back.
-    let cfHostname: CustomHostnameInfo;
-    let createdCfHostname: CustomHostnameInfo | undefined;
-    try {
-      cfHostname = await createCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, hostname);
-      createdCfHostname = cfHostname;
-    } catch (error) {
-      if (error instanceof CloudflareApiError && error.status === 409) {
-        if (await getDomainByHostname(ctx.db, hostname)) {
-          return fail('HOSTNAME_IN_USE');
+/** addDomain: the procedure's work, for a caller who already holds the project. */
+export async function addDomain(
+  env: ApiEnv['Bindings'],
+  ctx: DomainCaller,
+  input: { projectId: string; hostname: string },
+) {
+  const unavailable = capabilityRefusal(env);
+  if (unavailable) {
+    return refuse(unavailable.code);
+  }
+  const { projectId, hostname } = input;
+  if (!/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(hostname)) {
+    return refuse('HOSTNAME_INVALID');
+  }
+  const siteDomain = env.SITE_DOMAIN ?? SITE_DOMAIN;
+  if (hostname.endsWith(`.${siteDomain}`)) {
+    return refuse('HOSTNAME_RESERVED', `cannot use ${siteDomain} subdomains`);
+  }
+  if (await getDomainByHostname(ctx.db, hostname)) {
+    return refuse('HOSTNAME_IN_USE');
+  }
+  if (await protectedProjectReachedDomainLimit(ctx.db, projectId)) {
+    return refuse('DOMAIN_LIMIT');
+  }
+
+  // Decision: A duplicate hostname can be a Cloudflare object left by an earlier post-create DB failure. Adopt
+  // only still-pending objects with an open ownership challenge; a verified or active hostname mustn't
+  // become claimable by another project. Creation is a reversible first phase: the second phase takes
+  // the project lock and rechecks access, and if it loses, the created object is handed back.
+  let cfHostname: CustomHostnameInfo;
+  let createdCfHostname: CustomHostnameInfo | undefined;
+  try {
+    cfHostname = await createCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, hostname);
+    createdCfHostname = cfHostname;
+  } catch (error) {
+    if (error instanceof CloudflareApiError && error.status === 409) {
+      if (await getDomainByHostname(ctx.db, hostname)) {
+        return refuse('HOSTNAME_IN_USE');
+      }
+      let orphaned: CustomHostnameInfo | null;
+      try {
+        orphaned = await getCustomHostnameByHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, hostname);
+      } catch (lookupError) {
+        if (lookupError instanceof CloudflareApiError && lookupError.status === 429) {
+          return refuse('CLOUDFLARE_RATE_LIMITED', lookupError.message);
         }
-        let orphaned: CustomHostnameInfo | null;
-        try {
-          orphaned = await getCustomHostnameByHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, hostname);
-        } catch (lookupError) {
-          if (lookupError instanceof CloudflareApiError && lookupError.status === 429) {
-            return fail('CLOUDFLARE_RATE_LIMITED', lookupError.message);
-          }
-          return fail('CLOUDFLARE_CONFLICT', error.message);
-        }
-        if (orphaned && isAdoptablePostCreateOrphan(orphaned)) {
-          cfHostname = orphaned;
-        } else {
-          return fail('CLOUDFLARE_CONFLICT', error.message);
-        }
+        return refuse('CLOUDFLARE_CONFLICT', error.message);
+      }
+      if (orphaned && isAdoptablePostCreateOrphan(orphaned)) {
+        cfHostname = orphaned;
       } else {
-        const refusal = cloudflareRefusal(error);
-        if (refusal) {
-          return fail(refusal.code, refusal.message);
-        }
-        throw error;
+        return refuse('CLOUDFLARE_CONFLICT', error.message);
       }
-    }
-
-    const rollbackCreatedHostname = async (): Promise<void> => {
-      if (!createdCfHostname) {
-        return;
+    } else {
+      const refusal = cloudflareRefusal(error);
+      if (refusal) {
+        return refuse(refusal.code, refusal.message);
       }
-      const persisted = await getDomainByHostnameOrCfHostnameId(
-        ctx.db,
-        hostname,
-        createdCfHostname.id,
-      );
-      if (!persisted) {
-        await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, createdCfHostname.id).catch(
-          (error) => {
-            console.error(
-              `Failed to delete orphaned custom hostname ${createdCfHostname?.id} after DB transaction failure:`,
-              error,
-            );
-          },
-        );
-      }
-    };
-
-    let result;
-    try {
-      result = await ctx.db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-        const refused = await lockedAccess(tx, ctx, projectId, 'settings');
-        if (refused) {
-          return refused;
-        }
-        // Decision: Recheck after waiting for the lock: an earlier request may have committed meanwhile.
-        if (await getDomainByHostname(tx, hostname)) {
-          return { code: 'HOSTNAME_IN_USE' } as const;
-        }
-        if (await protectedProjectReachedDomainLimit(tx, projectId)) {
-          return { code: 'DOMAIN_LIMIT' } as const;
-        }
-        // Decision: Under HTTP-DCV the certificate is validated at the edge once the hostname proxies, so Cloudflare
-        // doesn't send `ssl.validation_records`; keep the ownership challenge instead.
-        const verification: DomainVerificationData = {
-          ownership_verification: cfHostname.ownership_verification,
-          ssl_validation_records: cfHostname.ssl.validation_records,
-        };
-        const created = await createDomain(tx, projectId, hostname, cfHostname.id, verification);
-        return {
-          ...created,
-          cname_target: `cname.${env.SITE_DOMAIN ?? SITE_DOMAIN}`,
-          ownership_verification: cfHostname.ownership_verification,
-          ssl_validation_records: cfHostname.ssl.validation_records ?? [],
-        };
-      });
-    } catch (error) {
-      // Decision: The create can succeed even when the transaction later fails. Hand back only the object this
-      // request created; an adopted one belongs to the recovery path.
-      await rollbackCreatedHostname();
       throw error;
     }
-    if (result.code) {
-      await rollbackCreatedHostname();
-      return fail(result.code, 'message' in result ? result.message : undefined);
+  }
+
+  const rollbackCreatedHostname = async (): Promise<void> => {
+    if (!createdCfHostname) {
+      return;
     }
-    return { ...result, ssl_validation_records: [...(result.ssl_validation_records ?? [])] };
-  });
+    const persisted = await getDomainByHostnameOrCfHostnameId(
+      ctx.db,
+      hostname,
+      createdCfHostname.id,
+    );
+    if (!persisted) {
+      await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, createdCfHostname.id).catch(
+        (error) => {
+          console.error(
+            `Failed to delete orphaned custom hostname ${createdCfHostname?.id} after DB transaction failure:`,
+            error,
+          );
+        },
+      );
+    }
+  };
+
+  let result;
+  try {
+    result = await ctx.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+      const refused = await lockedAccess(tx, ctx, projectId, 'settings');
+      if (refused) {
+        return refused;
+      }
+      // Decision: Recheck after waiting for the lock: an earlier request may have committed meanwhile.
+      if (await getDomainByHostname(tx, hostname)) {
+        return { code: 'HOSTNAME_IN_USE' } as const;
+      }
+      if (await protectedProjectReachedDomainLimit(tx, projectId)) {
+        return { code: 'DOMAIN_LIMIT' } as const;
+      }
+      // Decision: Under HTTP-DCV the certificate is validated at the edge once the hostname proxies, so Cloudflare
+      // doesn't send `ssl.validation_records`; keep the ownership challenge instead.
+      const verification: DomainVerificationData = {
+        ownership_verification: cfHostname.ownership_verification,
+        ssl_validation_records: cfHostname.ssl.validation_records,
+      };
+      const created = await createDomain(tx, projectId, hostname, cfHostname.id, verification);
+      return {
+        ...created,
+        cname_target: `cname.${env.SITE_DOMAIN ?? SITE_DOMAIN}`,
+        ownership_verification: cfHostname.ownership_verification,
+        ssl_validation_records: cfHostname.ssl.validation_records ?? [],
+      };
+    });
+  } catch (error) {
+    // Decision: The create can succeed even when the transaction later fails. Hand back only the object this
+    // request created; an adopted one belongs to the recovery path.
+    await rollbackCreatedHostname();
+    throw error;
+  }
+  if (result.code) {
+    await rollbackCreatedHostname();
+    return refuse(result.code, 'message' in result ? result.message : undefined);
+  }
+  return { ...result, ssl_validation_records: [...(result.ssl_validation_records ?? [])] };
+}
 
 /** Under the project lock: the caller still holds `capability`, and the project is not going away. */
 async function lockedAccess(
   tx: Db,
-  caller: Caller,
+  caller: DomainCaller,
   projectId: string,
   capability: 'settings',
 ): Promise<Refusal | null> {
@@ -300,33 +344,42 @@ export const status = procedure('domains.status')
     idempotent: true,
   })
   .cli({ command: 'domains status', description: 'Show a custom domain’s live status' })
-  .handler(async ({ env, ctx, input, fail }) => {
-    if (capabilityRefusal(env)) {
-      return fail('CAPABILITY_UNAVAILABLE');
-    }
-    const { project } = grantedAccess(ctx);
-    const found = await getDomain(ctx.db, input.domainId);
-    if (!found || found.project_id !== input.projectId) {
-      return fail('DOMAIN_NOT_FOUND');
-    }
-    const { cf, activated, awaitingDeployment } = await tryActivateDomain(
-      env,
-      ctx.db,
-      found,
-      project,
-    );
-    return {
-      ...found,
-      status: activated || found.status === 'active' ? 'active' : found.status,
-      cname_target: `cname.${env.SITE_DOMAIN ?? SITE_DOMAIN}`,
-      ssl_status: cf.ssl.status,
-      cf_status: cf.status,
-      awaiting_deployment: awaitingDeployment,
-      verification_errors: cf.verification_errors,
-      ownership_verification: cf.ownership_verification,
-      ssl_validation_records: [...(cf.ssl.validation_records ?? [])],
-    };
-  });
+  .handler(({ env, ctx, input, fail }) =>
+    refusing(fail, () => domainStatusOf(env, ctx, input, grantedAccess(ctx).project)),
+  );
+
+/** domainStatusOf: the procedure's work, for a caller who already holds the project. */
+export async function domainStatusOf(
+  env: ApiEnv['Bindings'],
+  ctx: DomainCaller,
+  input: { projectId: string; domainId: string },
+  project: Project,
+) {
+  if (capabilityRefusal(env)) {
+    return refuse('CAPABILITY_UNAVAILABLE');
+  }
+  const found = await getDomain(ctx.db, input.domainId);
+  if (!found || found.project_id !== input.projectId) {
+    return refuse('DOMAIN_NOT_FOUND');
+  }
+  const { cf, activated, awaitingDeployment } = await tryActivateDomain(
+    env,
+    ctx.db,
+    found,
+    project,
+  );
+  return {
+    ...found,
+    status: activated || found.status === 'active' ? 'active' : found.status,
+    cname_target: `cname.${env.SITE_DOMAIN ?? SITE_DOMAIN}`,
+    ssl_status: cf.ssl.status,
+    cf_status: cf.status,
+    awaiting_deployment: awaitingDeployment,
+    verification_errors: cf.verification_errors,
+    ownership_verification: cf.ownership_verification,
+    ssl_validation_records: [...(cf.ssl.validation_records ?? [])],
+  };
+}
 
 export const remove = procedure('domains.remove')
   .use(member)
@@ -336,57 +389,64 @@ export const remove = procedure('domains.remove')
   .errors(ERRORS)
   .mcp({ description: 'Remove a custom domain from a project', effect: 'destructive' })
   .cli({ command: 'domains remove', description: 'Remove a custom domain' })
-  .handler(async ({ env, ctx, input, fail }) => {
-    if (capabilityRefusal(env)) {
-      return fail('CAPABILITY_UNAVAILABLE');
-    }
-    const { projectId } = input;
-    const found = await getDomain(ctx.db, input.domainId);
-    if (!found || found.project_id !== projectId) {
-      return fail('DOMAIN_NOT_FOUND');
-    }
-    const warnings: Array<string> = [];
-    const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  .handler(({ env, ctx, input, fail }) => refusing(fail, () => removeDomain(env, ctx, input)));
 
-    // Decision: Cloudflare cleanup is best effort. KV and DB deletion serialize with deploy, rollback, activation
-    // and failed-cutover compensation through the project row, so none can bring back this hostname from
-    // a stale snapshot. The shared Zero Trust lock comes first: when it refuses during uninstall, nothing
-    // outside the database has been removed yet.
-    const refused = await ctx.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
-      try {
-        await lockZeroTrustConfiguration(tx, 'shared');
-      } catch (error) {
-        if (error instanceof ZeroTrustUnavailableError) {
-          return { code: 'ZERO_TRUST_UNAVAILABLE', message: error.message } as const;
-        }
-        throw error;
+/** removeDomain: the procedure's work, for a caller who already holds the project. */
+export async function removeDomain(
+  env: ApiEnv['Bindings'],
+  ctx: DomainCaller,
+  input: { projectId: string; domainId: string },
+) {
+  if (capabilityRefusal(env)) {
+    return refuse('CAPABILITY_UNAVAILABLE');
+  }
+  const { projectId } = input;
+  const found = await getDomain(ctx.db, input.domainId);
+  if (!found || found.project_id !== projectId) {
+    return refuse('DOMAIN_NOT_FOUND');
+  }
+  const warnings: Array<string> = [];
+  const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  // Decision: Cloudflare cleanup is best effort. KV and DB deletion serialize with deploy, rollback, activation
+  // and failed-cutover compensation through the project row, so none can bring back this hostname from
+  // a stale snapshot. The shared Zero Trust lock comes first: when it refuses during uninstall, nothing
+  // outside the database has been removed yet.
+  const refused = await ctx.db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`);
+    try {
+      await lockZeroTrustConfiguration(tx, 'shared');
+    } catch (error) {
+      if (error instanceof ZeroTrustUnavailableError) {
+        return { code: 'ZERO_TRUST_UNAVAILABLE', message: error.message } as const;
       }
-      try {
-        await requireProjectCapability(tx, projectId, ctx.user.id, 'settings');
-      } catch (error) {
-        if (error instanceof ProjectNotFoundError || error instanceof ProjectAccessDeniedError) {
-          return { code: 'ACCESS_DENIED' } as const;
-        }
-        throw error;
-      }
-      await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, found.cf_hostname_id).catch(
-        (error) => warnings.push(`Failed to delete custom hostname: ${describe(error)}`),
-      );
-      await env.ROUTING.delete(`domain:${found.hostname}`).catch((error) =>
-        warnings.push(`Failed to delete routing entry: ${describe(error)}`),
-      );
-      // Decision: The project's custom-domain application still lists this hostname. Record that with the deletion,
-      // so the hostname isn't freed while no retry would remove it from there.
-      await markProjectCustomDomainsChanged(tx, projectId);
-      await deleteDomain(tx, found.id);
-      return null;
-    });
-    if (refused) {
-      return fail(refused.code, 'message' in refused ? refused.message : undefined);
+      throw error;
     }
-    await reconcileProjectZeroTrustDomains(env, ctx.db, projectId).catch((error) =>
-      warnings.push(`Failed to reconcile Zero Trust custom-domain protection: ${describe(error)}`),
+    try {
+      await requireProjectCapability(tx, projectId, ctx.user.id, 'settings');
+    } catch (error) {
+      if (error instanceof ProjectNotFoundError || error instanceof ProjectAccessDeniedError) {
+        return { code: 'ACCESS_DENIED' } as const;
+      }
+      throw error;
+    }
+    await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, found.cf_hostname_id).catch(
+      (error) => warnings.push(`Failed to delete custom hostname: ${describe(error)}`),
     );
-    return { ok: true, ...(warnings.length > 0 && { warnings }) } as const;
+    await env.ROUTING.delete(`domain:${found.hostname}`).catch((error) =>
+      warnings.push(`Failed to delete routing entry: ${describe(error)}`),
+    );
+    // Decision: The project's custom-domain application still lists this hostname. Record that with the deletion,
+    // so the hostname isn't freed while no retry would remove it from there.
+    await markProjectCustomDomainsChanged(tx, projectId);
+    await deleteDomain(tx, found.id);
+    return null;
   });
+  if (refused) {
+    return refuse(refused.code, 'message' in refused ? refused.message : undefined);
+  }
+  await reconcileProjectZeroTrustDomains(env, ctx.db, projectId).catch((error) =>
+    warnings.push(`Failed to reconcile Zero Trust custom-domain protection: ${describe(error)}`),
+  );
+  return { ok: true, ...(warnings.length > 0 && { warnings }) } as const;
+}

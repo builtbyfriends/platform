@@ -41,8 +41,12 @@ import { projectSuspensionKey } from '../../src/suspension.ts';
 import {
   setupEnv,
   teardownEnv,
+  cfSuccess,
   clearTables,
   createMockExecutionContext,
+  createTestProject,
+  createTestUser,
+  mockCfApi,
   rpcData,
   withLegacyDeploy,
   type TestEnv,
@@ -2038,6 +2042,102 @@ describe('app billing', () => {
         ).toBe(true);
         const [buyer] = await env.db.select().from(appPayers).where(eq(appPayers.payer_id, 'p2'));
         expect(buyer!.blocked_at).not.toBeNull();
+      });
+    });
+  });
+
+  describe('domains and sign-in', () => {
+    let projectId: string;
+    const onPlan = (plan: string) =>
+      env.db
+        .insert(appPeople)
+        .values({ client_id: registration.client.id, person_id: 'p1', plan })
+        .onConflictDoUpdate({ target: [appPeople.client_id, appPeople.person_id], set: { plan } });
+
+    beforeEach(async () => {
+      await env.db
+        .update(oauthClients)
+        .set({
+          plans: {
+            solo: { stripePriceId: 'price_app_solo', creditMicros: 0 },
+            team: {
+              stripePriceId: 'price_app_team',
+              creditMicros: 0,
+              perSeat: true,
+              customDomains: true,
+              protection: true,
+            },
+          },
+        })
+        .where(eq(oauthClients.id, registration.client.id));
+      const owner = await createTestUser(env.db, 'p1', 'app:' + registration.client.id, 'p1');
+      projectId = (await createTestProject(env.db, owner.id, 'corner-cafe')).id;
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      delete (env as { PLATFORM_CAPABILITIES?: string }).PLATFORM_CAPABILITIES;
+    });
+
+    it('adds a custom domain for a payer whose plan has them, and answers the DNS record', async () => {
+      const order = { project: 'corner-cafe', hostname: 'shop.example.com' };
+      expect(await (await call('/domains.add', order)).json()).toMatchObject({
+        error: 'plan_required',
+        feature: 'customDomains',
+      });
+      await onPlan('solo');
+      expect((await call('/domains.add', order)).status).toBe(403);
+      await onPlan('team');
+      mockCfApi({
+        createCustomHostname: () =>
+          cfSuccess({
+            id: 'ch-shop',
+            hostname: 'shop.example.com',
+            status: 'pending',
+            ssl: { status: 'pending_validation', validation_records: [] },
+          }),
+      });
+      const added = (await (await call('/domains.add', order)).json()) as {
+        data: { domainId: string; dns: { type: string; name: string; target: string } };
+      };
+      expect(added.data.dns).toMatchObject({ type: 'CNAME', name: 'shop.example.com' });
+      expect(added.data.dns.target).toMatch(/^cname\./);
+      expect(await (await call('/domains.list', { project: projectId })).json()).toMatchObject({
+        data: { domains: [{ domainId: added.data.domainId, hostname: 'shop.example.com' }] },
+      });
+      expect(
+        await (await call('/domains.add', { ...order, hostname: 'not a host' })).json(),
+      ).toMatchObject({ error: 'HOSTNAME_INVALID' });
+    });
+
+    it('answers CAPABILITY_UNAVAILABLE when the installation has custom domains off', async () => {
+      await onPlan('team');
+      (env as { PLATFORM_CAPABILITIES?: string }).PLATFORM_CAPABILITIES = JSON.stringify({
+        ai: true,
+        customDomains: false,
+        email: true,
+        githubActions: true,
+        githubOAuth: true,
+        googleOAuth: true,
+        managedBuilds: true,
+        sandbox: true,
+      });
+      const refused = await call('/domains.add', { project: projectId, hostname: 'a.example.com' });
+      expect(refused.status).toBe(501);
+      expect(await refused.json()).toMatchObject({ error: 'CAPABILITY_UNAVAILABLE' });
+    });
+
+    it('checks the email domains and the plan before turning on sign-in', async () => {
+      const protect = (emailDomains: unknown) =>
+        call('/projects.protect', { project: projectId, emailDomains });
+      expect((await protect([])).status).toBe(400);
+      expect((await protect(['Example.com'])).status).toBe(400);
+      expect(await (await protect(['example.com'])).json()).toMatchObject({
+        error: 'plan_required',
+        feature: 'protection',
+      });
+      await onPlan('team');
+      expect(await (await protect(['example.com'])).json()).toMatchObject({
+        error: 'ZERO_TRUST_UNAVAILABLE',
       });
     });
   });
