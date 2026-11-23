@@ -39,6 +39,7 @@ import { migrateLegacyBwfConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
+import { validateProjectSlug } from './project-slug.ts';
 import {
   readDeploymentPlatform,
   readProjectConfig,
@@ -1776,9 +1777,10 @@ ${install}
   // Decision: When the slug is unknown, fall back to a repository variable and prefix the `BWF_PROJECT` line
   // with a comment (each comment line indented 2 spaces so it stays inside the `env:` mapping and the
   // YAML stays valid).
-  const projectLine = slug
-    ? `BWF_PROJECT: ${slug}`
-    : `# Set a BWF_PROJECT repository variable to your project slug
+  const projectLine =
+    slug && validateProjectSlug(slug) === undefined
+      ? `BWF_PROJECT: ${slug}`
+      : `# Set a BWF_PROJECT repository variable to your project slug
   # (Settings → Secrets and variables → Actions → Variables).
   BWF_PROJECT: \${{ vars.BWF_PROJECT }}`;
   return `name: Deploy to bwf
@@ -1871,6 +1873,9 @@ function setupGithubActions(
  * linked after the workflow was written. Returns false when there is none.
  */
 function patchWorkflowProjectSlug(root: string, slug: string): boolean {
+  if (validateProjectSlug(slug) !== undefined) {
+    return false;
+  }
   const workflowPath = join(root, '.github', 'workflows', 'bwf-deploy.yml');
   if (!existsSync(workflowPath)) {
     return false;
