@@ -14,6 +14,7 @@ import { hasEmailHandlers } from '../router/email.ts';
 import type { EmailHandlersScan } from '../router/email.ts';
 import { DEFAULT_PLATFORM_AI_BINDING } from './deploy-binding-snapshot.ts';
 import type { CloudflareAuthSecretFailureReason } from './deploy-types.ts';
+import { isJsonObject } from './json-value.ts';
 import { isRealD1Id } from './provision.ts';
 import type { DesiredResourceSet, ProvisionDriftEntry } from './provision.ts';
 
@@ -107,8 +108,8 @@ function suffixedResourceName(workerName: string, suffix: string): string {
 export function deriveWorkerName(root: string): string {
   let pkgName: string | undefined;
   try {
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { name?: unknown };
-    if (typeof pkg.name === 'string' && pkg.name.length > 0) {
+    const pkg: unknown = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    if (isJsonObject(pkg) && typeof pkg.name === 'string' && pkg.name.length > 0) {
       pkgName = pkg.name;
     }
   } catch {}
@@ -177,7 +178,7 @@ export async function computeDesiredCloudflareResources(
       (entry) => entry.binding === binding,
     )?.database_name;
     const name =
-      storedName != null && isRealD1Id(storedId)
+      storedName !== null && storedName !== undefined && isRealD1Id(storedId)
         ? storedName
         : authoredName?.trim() ||
           (basename(configPath) !== MATERIALIZED_CLOUDFLARE_FILE && storedName !== 'default'

@@ -32,15 +32,17 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   typescript: '^7.0.2',
 } as const;
 
+type ScaffoldVitePlusDevDependencies = {
+  readonly vite: string;
+  readonly 'vite-plus': string;
+};
+
 /**
  * Vite+ and the Vite+ core it accepts. Both come from the vite-plus release in
  * the repository catalog, so they can't drift apart: vite-plus pins its own
  * core (`npm:@voidzero-dev/vite-plus-core@<version>`) and refuses another one.
  */
-export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: {
-  readonly vite: string;
-  readonly 'vite-plus': string;
-} = {
+export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: ScaffoldVitePlusDevDependencies = {
   vite: vitePlusManifest.dependencies.vite,
   'vite-plus': `^${vitePlusManifest.version}`,
 };
@@ -99,13 +101,11 @@ export type SpaStarterTemplate = {
   files: Record<string, string>;
 };
 
-export function detectScaffoldFrameworkFromDependencies(
-  deps: Record<string, unknown>,
+export function detectScaffoldFrameworkFromDependencies<T extends Record<string, unknown>>(
+  deps: T,
 ): ScaffoldFramework | undefined {
-  for (const [framework, config] of Object.entries(SCAFFOLD_FRAMEWORKS) as Array<
-    [ScaffoldFramework, ScaffoldFrameworkConfig]
-  >) {
-    if (config.detectPackage in deps) {
+  for (const { value: framework } of SCAFFOLD_FRAMEWORK_OPTIONS) {
+    if (SCAFFOLD_FRAMEWORKS[framework].detectPackage in deps) {
       return framework;
     }
   }
@@ -152,6 +152,22 @@ export function createSpaStarterTemplate(options: {
     files['db/seed.ts'] = getSeedFile();
   }
 
+  const dependencies: SpaStarterTemplate['dependencies'] = {
+    ...SCAFFOLD_BASE_DEPENDENCIES,
+    ...config.dependencies,
+  };
+  if (starterMode !== 'spa') {
+    dependencies.zod = '^4.6.7';
+  }
+  const devDependencies: SpaStarterTemplate['devDependencies'] = {
+    '@builtbyfriends/bwf': bwfPackageSpec,
+    ...SCAFFOLD_BASE_DEV_DEPENDENCIES,
+  };
+  if (toolchain === 'vite-plus') {
+    Object.assign(devDependencies, SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES);
+  }
+  Object.assign(devDependencies, config.devDependencies);
+
   return {
     scripts: {
       dev: toolchain === 'vite-plus' ? 'vp dev' : 'vite',
@@ -161,17 +177,8 @@ export function createSpaStarterTemplate(options: {
       // generated types before the editor opens tsconfig.json.
       postinstall: 'bwf prepare',
     },
-    dependencies: {
-      ...SCAFFOLD_BASE_DEPENDENCIES,
-      ...config.dependencies,
-      ...(starterMode !== 'spa' ? { zod: '^4.6.7' } : {}),
-    },
-    devDependencies: {
-      '@builtbyfriends/bwf': bwfPackageSpec,
-      ...SCAFFOLD_BASE_DEV_DEPENDENCIES,
-      ...(toolchain === 'vite-plus' ? SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES : {}),
-      ...config.devDependencies,
-    },
+    dependencies,
+    devDependencies,
     files,
   };
 }

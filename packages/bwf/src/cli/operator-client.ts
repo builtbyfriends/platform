@@ -1,10 +1,19 @@
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
+import { isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 
 const OPERATOR_READ_TIMEOUT_MS: number = 30_000;
 const OPERATOR_MUTATION_TIMEOUT_MS: number = 5 * 60_000;
 export const OPERATOR_MAX_TIMEOUT_MS: number = 60 * 60_000;
+
+type OperatorClientErrorJson = {
+  error: string;
+  message: string;
+  status?: number;
+  details?: unknown;
+};
 
 export class OperatorClientError extends Error {
   constructor(
@@ -16,13 +25,15 @@ export class OperatorClientError extends Error {
     super(message);
     this.name = 'OperatorClientError';
   }
-  toJSON(): Record<string, unknown> {
-    return {
-      error: this.code,
-      message: this.message,
-      ...(this.status === undefined ? {} : { status: this.status }),
-      ...(this.details === undefined ? {} : { details: this.details }),
-    };
+  toJSON(): OperatorClientErrorJson {
+    const json: OperatorClientErrorJson = { error: this.code, message: this.message };
+    if (this.status !== undefined) {
+      json.status = this.status;
+    }
+    if (this.details !== undefined) {
+      json.details = this.details;
+    }
+    return json;
   }
 }
 
@@ -35,16 +46,16 @@ export class OperatorClient {
   ) {
     this.origin = normalizePlatformApiUrl(origin);
   }
-  async request(
+  async request<TBody extends Record<string, unknown>>(
     path: string,
     options: {
       method?: 'GET' | 'POST';
       query?: Record<string, string>;
-      body?: Record<string, unknown>;
+      body?: TBody;
       signal?: AbortSignal;
       timeoutMs?: number;
     } = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<JsonObject> {
     if (
       !path.startsWith('/') ||
       path.startsWith('//') ||
@@ -80,15 +91,18 @@ export class OperatorClient {
     try {
       let response: Response;
       try {
+        const jsonBody = options.body
+          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) }
+          : undefined;
         response = await this.fetcher(url, {
           method: options.method ?? 'GET',
           headers: {
             ...cfAccessHeaders(process.env, this.origin),
             Authorization: `Bearer ${this.token}`,
             Accept: 'application/json',
-            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...jsonBody?.headers,
           },
-          ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+          ...(jsonBody ? { body: jsonBody.body } : undefined),
           redirect: 'manual',
           signal,
         });
@@ -124,14 +138,14 @@ export class OperatorClient {
           response.status,
         );
       }
-      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      if (!isJsonObject(data)) {
         throw new OperatorClientError(
           'Operator API returned an invalid response object.',
           'invalid_response',
           response.status,
         );
       }
-      const result = data as Record<string, unknown>;
+      const result = data;
       if (!response.ok) {
         throw new OperatorClientError(
           typeof result.message === 'string'

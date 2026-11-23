@@ -4,6 +4,7 @@ import { outro, log, cancel, isCancel, password, confirm } from '@voidzero-dev/v
 import { getToken } from './auth.ts';
 import { PlatformClient } from './client.ts';
 import { validateSecretValues } from './env-validation.ts';
+import { Buffer } from './node-buffer.ts';
 import { printSuccess, formatCount, note } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';

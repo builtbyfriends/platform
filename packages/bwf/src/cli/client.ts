@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { getPackageDir } from './agents.ts';
@@ -17,12 +18,14 @@ import type {
   DeployWorkerUploadResponse,
 } from './types.ts';
 
+type PlatformRequestInit = Omit<RequestInit, 'headers'> & { headers?: Record<string, string> };
+
 // Decision: Null omits `X-Platform-CLI-Version`: the platform answers an unparseable version with 426.
 function readCliVersion(): string | null {
   try {
     const pkgPath = join(getPackageDir(), 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : null;
+    const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    return isRecord(pkg) && typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     return null;
   }
@@ -61,9 +64,12 @@ type PlatformVersionProbe =
  */
 export function isOlderPlatformVersion(version: string, minimumVersion: string): boolean | null {
   const actual = RELEASE_VERSION.exec(version);
-  const minimum = RELEASE_VERSION.exec(minimumVersion)!;
+  const minimum = RELEASE_VERSION.exec(minimumVersion);
   if (!actual) {
     return null;
+  }
+  if (!minimum) {
+    throw new Error(`Invalid minimum platform version ${minimumVersion}.`);
   }
   for (const part of [1, 2, 3]) {
     const difference = Number(actual[part]) - Number(minimum[part]);
@@ -666,7 +672,7 @@ export class PlatformClient {
     };
   }
 
-  private async request(url: string | URL, options: RequestInit = {}): Promise<Response> {
+  private async request(url: string | URL, options: PlatformRequestInit = {}): Promise<Response> {
     if (new URL(url).origin !== this.baseUrl) {
       throw new Error('Platform credentials cannot be sent to another origin.');
     }
@@ -716,10 +722,8 @@ export class PlatformClient {
     if (!response.ok && response.status !== 404) {
       await throwPlatformApiError('Failed to check migration capabilities', response, 'deploy');
     }
-    const capabilities = response.ok
-      ? ((await response.json()) as { skipMigrations?: unknown })
-      : null;
-    if (capabilities?.skipMigrations !== true) {
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.skipMigrations !== true) {
       throw new Error(
         'deploy: This bwf platform does not support --skip-migrations. Ask its administrator to upgrade with `bwf platform upgrade`.',
       );
@@ -738,10 +742,8 @@ export class PlatformClient {
         'deploy',
       );
     }
-    const capabilities = response.ok
-      ? ((await response.json()) as { d1ReadReplication?: unknown })
-      : null;
-    if (capabilities?.d1ReadReplication !== true) {
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.d1ReadReplication !== true) {
       throw new Error(
         'deploy: This bwf platform cannot apply `database.readReplication` from bwf.config.ts. Ask its administrator to upgrade with `bwf platform upgrade`.',
       );
@@ -777,7 +779,7 @@ export class PlatformClient {
     }
   }
 
-  private async send(url: string | URL, options: RequestInit): Promise<Response> {
+  private async send(url: string | URL, options: PlatformRequestInit): Promise<Response> {
     // Decision: A service-token pair is long-lived and was captured before managed deploy scrubs the parent
     // environment. User tokens can be renewed in the browser, so keep checking for a newer environment
     // value when no service pair was captured, and let current credentials override the fallback below.
@@ -796,7 +798,7 @@ export class PlatformClient {
         response: fetch(url, {
           ...options,
           headers: {
-            ...(options.headers as Record<string, string>),
+            ...options.headers,
             ...accessHeaders,
           },
           redirect: 'manual',
@@ -870,8 +872,9 @@ export class PlatformClient {
     }
     let body = text;
     try {
-      const { error } = JSON.parse(text) as { error?: { code?: string; message?: string } };
-      if (error?.code) {
+      const parsed: unknown = JSON.parse(text);
+      const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : undefined;
+      if (typeof error?.code === 'string' && error.code) {
         body = JSON.stringify({ error: error.code.toLowerCase(), message: error.message });
       }
     } catch {
@@ -890,7 +893,7 @@ export class PlatformClient {
     action: string,
     options?: { method?: string; body?: unknown; permission?: ProjectPermission },
   ): Promise<T> {
-    return (await this.call(url, action, options)).json() as Promise<T>;
+    return (await this.call(url, action, options)).json<T>();
   }
 
   async startIdentityLink(
@@ -1130,12 +1133,10 @@ export class PlatformClient {
     migrationDiff?: Array<string>;
     error?: string;
   }> {
-    const body: { deploymentId: string; allowDestructive?: Array<string> } = {
+    const body = {
       deploymentId,
+      ...(!!options?.allowDestructive?.length && { allowDestructive: options.allowDestructive }),
     };
-    if (options?.allowDestructive && options.allowDestructive.length > 0) {
-      body.allowDestructive = options.allowDestructive;
-    }
     return this.json(`${this.baseUrl}/projects/${projectId}/rollback`, 'Rollback failed', {
       method: 'POST',
       body,
@@ -1801,7 +1802,7 @@ export class PlatformClient {
     );
     // Decision: 201 means the address was registered now; 200 means it was already listed. Whether a link went
     // out is the body's `verificationSent`, not the status.
-    const body = (await res.json()) as EmailDestinationResponse;
+    const body = await res.json<EmailDestinationResponse>();
     return { ...body, created: res.status === 201 };
   }
 
@@ -1896,5 +1897,7 @@ export class PlatformClient {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

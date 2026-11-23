@@ -1,3 +1,4 @@
+import type { JsonObject } from './json-value.ts';
 import { deleteKeyringPassword, readKeyringPassword, writeKeyringPassword } from './keyring.ts';
 import { OperatorClient, OperatorClientError } from './operator-client.ts';
 import {
@@ -102,7 +103,7 @@ export async function readOperatorApiTokenStdin(): Promise<string> {
 export async function exchangeOperatorSession(
   origin: string,
   apiToken: string,
-): Promise<Record<string, unknown> & { token: string }> {
+): Promise<JsonObject & { token: string }> {
   const session = await new OperatorClient(origin, apiToken).request('/session', {
     method: 'POST',
     body: {},
@@ -115,5 +116,5 @@ export async function exchangeOperatorSession(
   ) {
     throw new OperatorClientError('Operator API returned an invalid session.', 'invalid_response');
   }
-  return session as Record<string, unknown> & { token: string };
+  return { ...session, token: session.token };
 }

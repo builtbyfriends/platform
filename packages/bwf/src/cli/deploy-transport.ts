@@ -181,6 +181,7 @@ export function assertNoConfigOverrideInProjectDotenv(
  * the deploy tail (build / whoami / migrate / deploy) share one source of truth.
  * Returns the single resolved API base URL to pin into every child env.
  */
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- wrangler config shape is shared across deploy steps
 export function resolveDeployTransport(root: string, rootConfig: Record<string, unknown>): string {
   assertNoAmbientConfigOverride();
   assertNoTransportRedirectInProjectDotenv(root);

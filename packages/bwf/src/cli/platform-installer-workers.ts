@@ -180,7 +180,10 @@ export async function recoverInterruptedPlatformWorkerCutover(
       'api',
     ];
     for (const key of recoveryOrder.filter((key) => interruptedCutover.staged.has(key))) {
-      const snapshot = interruptedCutover.staged.get(key)!;
+      const snapshot = interruptedCutover.staged.get(key);
+      if (!snapshot) {
+        continue;
+      }
       const preservedRoutes = dependencies.recoverWorkerCutover
         ? []
         : await inventoryUnmanagedPlatformWorkerTraffic(
@@ -703,12 +706,13 @@ export async function deployPlatformWorker(
         workerName,
         readRunner,
       );
-      if (!deploymentRunsOnlyVersion(deployments[0], previousVersionId)) {
+      const currentDeployment = deployments[0];
+      if (!currentDeployment || !deploymentRunsOnlyVersion(currentDeployment, previousVersionId)) {
         throw new Error(
           `platform: Worker ${workerName} changed concurrently while its deployment lineage was inspected.`,
         );
       }
-      previousDeployment = deployments[0]!;
+      previousDeployment = currentDeployment;
       previousDeploymentId = previousDeployment.id;
       if (
         contentHash &&
@@ -744,11 +748,10 @@ export async function deployPlatformWorker(
       ? platformWorkerUploadFingerprint(immutableConfig, options.managedRoutes)
       : null;
     if (immutableConfig) {
-      uploadConfig = {
-        ...uploadConfig,
-        main: immutableConfig.main,
-        ...(immutableConfig.assets === undefined ? {} : { assets: immutableConfig.assets }),
-      };
+      uploadConfig = { ...uploadConfig, main: immutableConfig.main };
+      if (immutableConfig.assets !== undefined) {
+        uploadConfig.assets = immutableConfig.assets;
+      }
       writeFileSync(configPath, `${JSON.stringify(uploadConfig, null, 2)}\n`, { mode: 0o600 });
     }
     const operation: CloudflareOperation = {
@@ -909,12 +912,15 @@ export async function deployPlatformWorker(
         `platform: Worker ${workerName} changed concurrently during activation. The intervening deployment was restored without deleting deployment history.`,
       );
     }
+    const knownTriggerConfigs: Record<string, typeof nextTriggers> = {
+      [uploadedVersionId]: nextTriggers,
+    };
+    if (previousVersionId) {
+      knownTriggerConfigs[previousVersionId] = previousTriggers;
+    }
     const triggers = await stabilizeCloudflareVersionTriggers({
       configPath,
-      knownTriggerConfigs: {
-        [uploadedVersionId]: nextTriggers,
-        ...(previousVersionId ? { [previousVersionId]: previousTriggers } : {}),
-      },
+      knownTriggerConfigs,
       manageRoutes: false,
       previousTriggerConfig: previousTriggers,
       runWrangler: platformWorkerCommandRunner(accountId, directory, readRunner),
@@ -930,11 +936,12 @@ export async function deployPlatformWorker(
       await options.publishRoutes(workerName, options.managedRoutes);
     }
     await options.onTrafficPublished();
+    const publishedVersionId = uploadedVersionId;
     const rollback = () =>
       rollbackPlatformWorker({
         accountId,
         activatedDeploymentId,
-        activatedVersionId: uploadedVersionId!,
+        activatedVersionId: publishedVersionId,
         config,
         nextTriggers,
         previousConfig: options.previousConfig,

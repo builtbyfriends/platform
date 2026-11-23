@@ -66,7 +66,7 @@ async function resolveProjectId(
   return linked.projectId;
 }
 
-function invitationResponseError(error: unknown, apiUrl: string): unknown {
+function invitationResponseError<T>(error: T, apiUrl: string): T {
   if (!(error instanceof PlatformApiError)) {
     return error;
   }

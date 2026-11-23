@@ -25,7 +25,7 @@ type SsgPreset = {
  * Known output conventions for SSGs.
  * Keyed by the SSG name — detection iterates in insertion order.
  */
-const SSG_PRESETS: Record<string, SsgPreset> = {
+const SSG_PRESETS = {
   vitepress: {
     dep: 'vitepress',
     buildCommand: 'vitepress build',
@@ -46,7 +46,7 @@ const SSG_PRESETS: Record<string, SsgPreset> = {
     outputDir: 'build',
     appType: 'static',
   },
-};
+} satisfies Record<string, SsgPreset>;
 
 export type StaticPreset = {
   buildCommand: string | null;
@@ -142,7 +142,7 @@ export function detectPreset(
   const pkg = readPackageJson(root);
   if (pkg) {
     const allDeps = getPackageDependencies(pkg);
-    for (const preset of Object.values(SSG_PRESETS)) {
+    for (const preset of Object.values<SsgPreset>(SSG_PRESETS)) {
       if (preset.dep in allDeps) {
         if (options?.strictBackend) {
           const backendSources = findBackendSources(root);
@@ -249,7 +249,9 @@ function resolveProjectScriptCommand(root: string, scriptName: string): string |
   if (!script || typeof script !== 'object' || Array.isArray(script)) {
     return null;
   }
-  if (typeof (script as Record<string, unknown>)[scriptName] !== 'string') {
+  if (
+    !Object.entries(script).some(([key, value]) => key === scriptName && typeof value === 'string')
+  ) {
     return null;
   }
 
@@ -265,7 +267,7 @@ function resolveProjectScriptCommand(root: string, scriptName: string): string |
   }
 }
 
-function hasViteLike(pkg: Record<string, unknown>): boolean {
+function hasViteLike<T extends Record<string, unknown>>(pkg: T): boolean {
   return hasPackageDependency(pkg, 'vite') || hasPackageDependency(pkg, 'vite-plus');
 }
 

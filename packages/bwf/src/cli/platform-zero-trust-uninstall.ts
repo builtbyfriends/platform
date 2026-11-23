@@ -18,6 +18,7 @@ const UNINSTALL_SETTING = 'platform.uninstall';
 const LISTED_APPLICATIONS = 20;
 
 export type QueryConnection = Readonly<{
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- generic default; callers read untyped rows
   query: <Row extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
     values?: ReadonlyArray<unknown>,
@@ -50,6 +51,10 @@ export type PlatformZeroTrustApplication = Readonly<{
   /** The owning project stopped partway through deletion. */
   deleting?: boolean;
 }>;
+
+type MutableApplication = {
+  -readonly [Key in keyof PlatformZeroTrustApplication]: PlatformZeroTrustApplication[Key];
+};
 
 export type PlatformProjectZeroTrustState = Readonly<{
   /** Zero Trust is enabled, or a configure, reconcile, or disable operation is unfinished. */
@@ -147,20 +152,26 @@ export function projectZeroTrustUninstallState(
     const deleting = row.project_status === 'deleting';
     const owned = applications.length;
     if (row.bypass_application_id || row.bypass_application_name) {
-      applications.push({
+      const application: MutableApplication = {
         role: `public exception for ${row.project_id}`,
         id: row.bypass_application_id,
         name: row.bypass_application_name,
-        ...(deleting ? { deleting } : {}),
-      });
+      };
+      if (deleting) {
+        application.deleting = deleting;
+      }
+      applications.push(application);
     }
     if (row.protected_application_id || row.protected_application_name) {
-      applications.push({
+      const application: MutableApplication = {
         role: `custom domain application for ${row.project_id}`,
         id: row.protected_application_id,
         name: row.protected_application_name,
-        ...(deleting ? { deleting } : {}),
-      });
+      };
+      if (deleting) {
+        application.deleting = deleting;
+      }
+      applications.push(application);
     }
     if (deleting && applications.length > owned) {
       unfinishedDeletions.push(row.project_slug ?? row.project_id);

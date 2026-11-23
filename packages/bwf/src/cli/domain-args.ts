@@ -14,9 +14,13 @@ export type DomainArgs = {
   verbose?: boolean;
 };
 
+function isDomainSubcommand(value: string | undefined): value is DomainArgs['subcommand'] {
+  return value === 'add' || value === 'delete' || value === 'list' || value === 'status';
+}
+
 export function parseDomainArgs(args: Array<string>): DomainArgs {
-  const subcommand = args[0] as DomainArgs['subcommand'];
-  if (!subcommand || !['add', 'delete', 'list', 'status'].includes(subcommand)) {
+  const subcommand = args[0];
+  if (!isDomainSubcommand(subcommand)) {
     throw new Error(
       'domain: Usage: bwf domain <add|delete|list|status> [hostname] [--project <name>].',
     );

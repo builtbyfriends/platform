@@ -25,6 +25,7 @@ import type { CfCommand } from './cf-version-api.ts';
 import { publishCloudflareWorkerSettings } from './cf-worker-settings.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import type { WranglerAuthTokenResult } from './deploy-cloudflare-auth.ts';
+import { Buffer } from './node-buffer.ts';
 
 function failed(message: string): CloudflareCommandResult {
   return { status: 1, stdout: '', stderr: message };
@@ -57,6 +58,25 @@ function publishesWorkerSettings(message: string | undefined): boolean {
     metadata.triggerConfig.observability !== undefined ||
     metadata.triggerConfig.logpush !== undefined
   );
+}
+
+type VersionItem = { id: string; number: number; [key: string]: unknown };
+
+function readVersionItems(body: unknown, pageSize: number): Array<VersionItem> | null {
+  if (!Array.isArray(body) || body.length > pageSize) {
+    return null;
+  }
+  const items: Array<VersionItem> = [];
+  for (const item of body) {
+    if (!record(item) || typeof item.id !== 'string' || typeof item.number !== 'number') {
+      return null;
+    }
+    if (!Number.isSafeInteger(item.number)) {
+      return null;
+    }
+    items.push({ ...item, id: item.id, number: item.number });
+  }
+  return new Set(items.map((item) => item.number)).size === items.length ? items : null;
 }
 
 function parseJson(value: string): unknown {
@@ -296,7 +316,7 @@ export function createCfCommand(options: {
           try {
             process.kill(-child.pid, 'SIGKILL');
           } catch (error_) {
-            if ((error_ as NodeJS.ErrnoException).code !== 'ESRCH') {
+            if (!(record(error_) && error_.code === 'ESRCH')) {
               child.kill('SIGKILL');
             }
           }
@@ -354,7 +374,7 @@ export function createCfCommand(options: {
         }
         const output = Buffer.concat(stdout).toString('utf8');
         const diagnostic = Buffer.concat(stderr).toString('utf8');
-        const completed = typeof status === 'number' && signal == null && error == null;
+        const completed = typeof status === 'number' && signal === null && error === null;
         const code = completed
           ? (output + '\n' + diagnostic).match(/\[(?:code:\s*)?(\d{4,})\]/)?.[1]
           : undefined;
@@ -386,6 +406,26 @@ export function createCfCommand(options: {
   };
 }
 
+function uploadedResult(result: CloudflareCommandResult): CloudflareCommandResult {
+  if (!isCleanCloudflareExit(result)) {
+    return result;
+  }
+  if (record(result.data) && typeof result.data.versionId === 'string') {
+    return result;
+  }
+  const { versionId, previewUrl, workersDevUrl } = readCfUploadOutput(result);
+  return {
+    ...result,
+    data: versionId
+      ? {
+          versionId,
+          ...(!!previewUrl && { previewUrl }),
+          ...(!!workersDevUrl && { workersDevUrl }),
+        }
+      : undefined,
+  };
+}
+
 /**
  * Adapt the stable activation protocol to cf's prebuilt and API commands.
  * The protocol keeps the existing preview, inheritance, traffic and rollback checks.
@@ -406,25 +446,6 @@ export function createCfVersionRunner(options: {
   const run = async (args: Array<string>, capture: boolean, cwd = output.directory) => {
     const result = await runCf(args, { cwd, capture });
     return { ...result, data: result.data ?? parseJson(result.stdout) };
-  };
-  const uploadedResult = (result: CloudflareCommandResult): CloudflareCommandResult => {
-    if (!isCleanCloudflareExit(result)) {
-      return result;
-    }
-    if (record(result.data) && typeof result.data.versionId === 'string') {
-      return result;
-    }
-    const { versionId, previewUrl, workersDevUrl } = readCfUploadOutput(result);
-    return {
-      ...result,
-      data: versionId
-        ? {
-            versionId,
-            ...(!!previewUrl && { previewUrl }),
-            ...(!!workersDevUrl && { workersDevUrl }),
-          }
-        : undefined,
-    };
   };
   // Decision: The session bearer is read before upload, so a deploy that can't get one (Global API Key session,
   // broken helper child) stops while traffic is unchanged. The pinned upload reuses it. The settings
@@ -580,20 +601,7 @@ export function createCfVersionRunner(options: {
           ],
           true,
         );
-        const body = result.data;
-        return {
-          result,
-          versions:
-            Array.isArray(body) &&
-            body.length <= pageSize &&
-            body.every(
-              (item) =>
-                record(item) && typeof item.id === 'string' && Number.isSafeInteger(item.number),
-            ) &&
-            new Set(body.map((item) => item.number)).size === body.length
-              ? body
-              : null,
-        };
+        return { result, versions: readVersionItems(result.data, pageSize) };
       };
       const first = await readPage(1);
       if (!isCleanCloudflareExit(first.result)) {
@@ -612,8 +620,8 @@ export function createCfVersionRunner(options: {
           return failed('The Cloudflare Worker version history was not readable.');
         }
         if (second.versions.length > 0) {
-          const firstNumbers = versions.map((item) => item.number as number);
-          const secondNumbers = second.versions.map((item) => item.number as number);
+          const firstNumbers = versions.map((item) => item.number);
+          const secondNumbers = second.versions.map((item) => item.number);
           if (Math.min(...secondNumbers) > Math.max(...firstNumbers)) {
             versions.push(...second.versions);
             let last = Math.max(...secondNumbers);
@@ -628,7 +636,7 @@ export function createCfVersionRunner(options: {
               if (next.versions.length === 0) {
                 break;
               }
-              const numbers = next.versions.map((item) => item.number as number);
+              const numbers = next.versions.map((item) => item.number);
               if (Math.min(...numbers) <= last) {
                 return failed('The Cloudflare Worker version history changed during inspection.');
               }
@@ -648,7 +656,7 @@ export function createCfVersionRunner(options: {
       }
       return {
         ...first.result,
-        data: versions.sort((a, b) => (a.number as number) - (b.number as number)).slice(-10),
+        data: versions.sort((a, b) => a.number - b.number).slice(-10),
       };
     }
 
@@ -828,7 +836,7 @@ export function createCfVersionRunner(options: {
           return failed('The Cloudflare trigger snapshot was not convertible.');
         }
         const next = migrated.triggers ?? [];
-        const previous = Array.isArray(worker.triggers) ? worker.triggers : [];
+        const previous: Array<unknown> = Array.isArray(worker.triggers) ? worker.triggers : [];
         const preserveRoutes = raw.routes === undefined && raw.route === undefined;
         const preserveEmail = raw.addresses === undefined;
         worker.triggers = [
@@ -930,7 +938,9 @@ export function createCfVersionRunner(options: {
       if (!Array.isArray(allQueues)) {
         return failed('The Cloudflare Queue list was not readable.');
       }
-      const queue = allQueues.find((item) => record(item) && item.queue_name === queueName);
+      const queue: unknown = allQueues.find(
+        (item: unknown) => record(item) && item.queue_name === queueName,
+      );
       if (!record(queue) || typeof queue.queue_id !== 'string') {
         return failed(`Cloudflare Queue ${queueName} was not found.`);
       }

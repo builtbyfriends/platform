@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { isRecord } from '@builtbyfriends/deploy-core';
 import type { PlatformDiscoveryDocument } from '@builtbyfriends/platform';
 import { log, confirm, isCancel, cancel, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { parse } from 'jsonc-parser';
@@ -24,6 +23,7 @@ import { snapshotDrizzleOutputs } from '../drizzle/generate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { ensureGitignoreLines } from '../shared/gitignore.ts';
 import { hasPackageDependency, readPackageJson } from '../shared/package-json.ts';
+import type { PackageJson } from '../shared/package-json.ts';
 import type { PackageDependencyField } from '../shared/package-json.ts';
 import { detectAgents, getOwnVersion, getPackageDir } from './agents.ts';
 import { connectCloudflare } from './cloudflare-connect.ts';
@@ -32,6 +32,8 @@ import { maybeScaffoldEnvTs } from './env-scaffold.ts';
 import { initialCommitCommand, setupGit } from './init-git.ts';
 import { commandInProject } from './init-shell.ts';
 import { configureVitePlusScaffold } from './init-vite-plus.ts';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import { migrateLegacyBwfConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
@@ -85,10 +87,11 @@ function parseChoice<T extends string>(
   if (value === undefined) {
     return undefined;
   }
-  if (typeof value !== 'string' || !choices.includes(value as T)) {
+  const choice = choices.find((candidate) => candidate === value);
+  if (choice === undefined) {
     throw new Error(`init: --${flag} must be one of ${choices.join(', ')}.`);
   }
-  return value as T;
+  return choice;
 }
 
 export function parseInitArgs(args: Array<string>): InitArgs {
@@ -116,7 +119,7 @@ export function parseInitArgs(args: Array<string>): InitArgs {
   return {
     tsconfig: parsed.values.tsconfig === true,
     github: parsed.values.github === true,
-    git: parsed.values.git as boolean | undefined,
+    git: typeof parsed.values.git === 'boolean' ? parsed.values.git : undefined,
     toolchain: parseChoice(
       'toolchain',
       parsed.values.toolchain,
@@ -208,15 +211,17 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
 
 // Decision: scaffoldSpaApp() replaces these starter scripts; custom scripts make the package an existing
 // project.
-const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
-  test: undefined,
-  dev: new Set(['vite', 'vp dev']),
-  build: new Set(['vite build', 'vp build']),
-  preview: new Set(['vite preview', 'vp preview']),
-  postinstall: new Set(['bwf prepare']),
-};
+const EMPTY_PROJECT_ALLOWED_SCRIPTS = new Map(
+  Object.entries({
+    test: undefined,
+    dev: new Set(['vite', 'vp dev']),
+    build: new Set(['vite build', 'vp build']),
+    preview: new Set(['vite preview', 'vp preview']),
+    postinstall: new Set(['bwf prepare']),
+  } satisfies Record<string, Set<string> | undefined>),
+);
 const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
-  Object.values(EMPTY_PROJECT_ALLOWED_SCRIPTS).flatMap((commands) =>
+  [...EMPTY_PROJECT_ALLOWED_SCRIPTS.values()].flatMap((commands) =>
     commands ? Array.from(commands) : [],
   ),
 );
@@ -252,14 +257,13 @@ const VITE_CONFIG_FILES = [
 const BWF_CONFIG_FILE = 'bwf.json';
 type DatabaseSetupChoice = DatabaseDialect | 'none';
 type InitLocationChoice = 'subfolder' | 'current';
-type JsonObject = Record<string, unknown>;
 type TsconfigInheritancePatch = {
   files: Array<string>;
   paths: Record<string, Array<string>>;
 };
 
 function asRecord(value: unknown): JsonObject | null {
-  return isRecord(value) ? value : null;
+  return isJsonObject(value) ? value : null;
 }
 
 function parseJsoncFile(path: string): JsonObject | null {
@@ -362,7 +366,7 @@ function readStringArray(value: unknown): Array<string> {
     : [];
 }
 
-function readPaths(value: unknown): Record<string, Array<string>> {
+function readPaths(value: unknown) {
   const paths = asRecord(value);
   if (!paths) {
     return {};
@@ -548,10 +552,10 @@ export function isScaffoldableEmptyProject(root: string): boolean {
 
   const scripts = asRecord(pkg.scripts) ?? {};
   for (const [name, command] of Object.entries(scripts)) {
-    if (!(name in EMPTY_PROJECT_ALLOWED_SCRIPTS)) {
+    if (!EMPTY_PROJECT_ALLOWED_SCRIPTS.has(name)) {
       return false;
     }
-    const allowed = EMPTY_PROJECT_ALLOWED_SCRIPTS[name];
+    const allowed = EMPTY_PROJECT_ALLOWED_SCRIPTS.get(name);
     if (allowed === undefined) {
       continue;
     }
@@ -595,7 +599,7 @@ async function resolveInitRoot(root: string): Promise<string> {
     return root;
   }
 
-  const choice = await select({
+  const choice = await select<InitLocationChoice>({
     message: 'This folder is not empty. Where should bwf initialize?',
     initialValue: 'subfolder',
     options: [
@@ -617,7 +621,7 @@ async function resolveInitRoot(root: string): Promise<string> {
     process.exit(0);
   }
 
-  if ((choice as InitLocationChoice) === 'current') {
+  if (choice === 'current') {
     return root;
   }
 
@@ -670,7 +674,7 @@ function parsePackageManagerField(pkg: unknown): ProjectState['packageManager'] 
  * workspace root, so a member without local markers inherits them, but a local
  * lockfile or pin for another manager always wins.
  */
-function isPnpmProject(root: string, pkg: JsonObject): boolean {
+function isPnpmProject(root: string, pkg: PackageJson): boolean {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) {
     return true;
   }
@@ -713,7 +717,7 @@ function hasAncestorPnpmMarkers(start: string): boolean {
   const pkgPath = join(workspaceRoot, 'package.json');
   if (existsSync(pkgPath)) {
     try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
       if (parsePackageManagerField(pkg) === 'pnpm') {
         return true;
       }
@@ -766,8 +770,8 @@ function findWorkspaceRoot(start: string): string | undefined {
     const pkgPath = join(dir, 'package.json');
     if (existsSync(pkgPath)) {
       try {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as Record<string, unknown>;
-        if (pkg && typeof pkg === 'object' && 'workspaces' in pkg) {
+        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+        if (isJsonObject(pkg) && 'workspaces' in pkg) {
           return dir;
         }
       } catch {}
@@ -800,14 +804,14 @@ function readWorkspacePatterns(workspaceRoot: string): Array<string> {
   const pkgPath = join(workspaceRoot, 'package.json');
   if (existsSync(pkgPath)) {
     try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as Record<string, unknown>;
-      const workspaces = (pkg as { workspaces?: unknown }).workspaces;
-      if (Array.isArray(workspaces)) {
+      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const workspaces = isJsonObject(pkg) ? pkg.workspaces : undefined;
+      if (isJsonArray(workspaces)) {
         return workspaces.filter((x): x is string => typeof x === 'string');
       }
-      if (workspaces && typeof workspaces === 'object') {
-        const packages = (workspaces as { packages?: unknown }).packages;
-        if (Array.isArray(packages)) {
+      if (isJsonObject(workspaces)) {
+        const packages = workspaces.packages;
+        if (isJsonArray(packages)) {
           return packages.filter((x): x is string => typeof x === 'string');
         }
       }
@@ -1042,7 +1046,7 @@ function isInsideWorkspaceSubpackage(root: string): boolean {
  */
 function resolveWorkspaceDeferral(
   root: string,
-  pkg: JsonObject | null,
+  pkg: PackageJson | null,
 ): { workspaceRoot: string } | undefined {
   const workspaceRoot = findWorkspaceRoot(root);
   if (workspaceRoot === undefined) {
@@ -1185,12 +1189,12 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     const extendsValue = tsconfig.extends;
     const target = './.bwf/tsconfig.json';
     const hasCorrectExtends =
-      extendsValue === target || (Array.isArray(extendsValue) && extendsValue.includes(target));
+      extendsValue === target || (isJsonArray(extendsValue) && extendsValue.includes(target));
 
     if (!hasCorrectExtends) {
       if (typeof extendsValue === 'string') {
         tsconfig.extends = [extendsValue, target];
-      } else if (Array.isArray(extendsValue)) {
+      } else if (isJsonArray(extendsValue)) {
         tsconfig.extends = [...extendsValue, target];
       } else {
         tsconfig.extends = target;
@@ -1253,15 +1257,16 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     // Decision: Remove @cloudflare/workers-types from package.json: bwf/env includes it.
     try {
       const pkgPath = join(root, 'package.json');
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
       let pkgUpdated = false;
-      if (pkg.dependencies?.['@cloudflare/workers-types']) {
-        delete pkg.dependencies['@cloudflare/workers-types'];
-        pkgUpdated = true;
-      }
-      if (pkg.devDependencies?.['@cloudflare/workers-types']) {
-        delete pkg.devDependencies['@cloudflare/workers-types'];
-        pkgUpdated = true;
+      if (isJsonObject(pkg)) {
+        for (const field of ['dependencies', 'devDependencies'] as const) {
+          const dependencies = pkg[field];
+          if (isJsonObject(dependencies) && dependencies['@cloudflare/workers-types']) {
+            delete dependencies['@cloudflare/workers-types'];
+            pkgUpdated = true;
+          }
+        }
       }
       if (pkgUpdated) {
         writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
@@ -1300,8 +1305,12 @@ function readProjectWranglerCompatDate(root: string): string | undefined {
   }
   try {
     const errors: Array<ParseError> = [];
-    const parsed = parse(readFileSync(configPath, 'utf8'), errors);
-    if (errors.length === 0 && typeof parsed?.compatibility_date === 'string') {
+    const parsed: unknown = parse(readFileSync(configPath, 'utf8'), errors);
+    if (
+      errors.length === 0 &&
+      isJsonObject(parsed) &&
+      typeof parsed.compatibility_date === 'string'
+    ) {
       return parsed.compatibility_date;
     }
   } catch {}
@@ -1309,10 +1318,10 @@ function readProjectWranglerCompatDate(root: string): string | undefined {
 }
 
 export function ensureBwfWorkerCompatibilityDate(root: string): void {
-  const config = readConfig(root) as Record<string, unknown>;
+  const config = readConfig(root);
 
-  const worker = asRecord(config.worker) ?? {};
-  if (typeof worker.compatibility_date === 'string' && worker.compatibility_date.length > 0) {
+  const worker = config.worker;
+  if (typeof worker?.compatibility_date === 'string' && worker.compatibility_date.length > 0) {
     return;
   }
 
@@ -1508,7 +1517,7 @@ async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<S
     'toolchain',
     SCAFFOLD_TOOLCHAIN_OPTIONS.map((option) => option.value),
   );
-  const choice = await select({
+  const choice = await select<ScaffoldToolchain>({
     message: 'Choose a scaffold toolchain:',
     initialValue: 'vite-plus',
     options: [...SCAFFOLD_TOOLCHAIN_OPTIONS],
@@ -1519,7 +1528,7 @@ async function promptScaffoldToolchain(toolchain?: ScaffoldToolchain): Promise<S
     process.exit(0);
   }
 
-  return choice as ScaffoldToolchain;
+  return choice;
 }
 
 async function promptDatabaseSetup(root: string): Promise<DatabaseSetupChoice> {
@@ -1663,12 +1672,14 @@ function getNodeVersionLine(root: string): string {
   return `${version}\n          check-latest: true`;
 }
 
+type WorkflowSetupSteps = { setup: string; install: string; runner: string };
+
 // Decision: Per-package-manager install and setup steps. `bwf deploy` runs through the package manager's own
 // runner in the deploy step below.
 function getWorkflowSetupSteps(
   root: string,
   pm: ProjectState['packageManager'],
-): { setup: string; install: string; runner: string } {
+): WorkflowSetupSteps {
   const nodeVersion = getNodeVersionLine(root);
   switch (pm) {
     case 'pnpm':
@@ -1897,11 +1908,10 @@ function ensureGitignore(root: string): void {
   }
 }
 
+type RemovedYamlBlock = { yaml: string; removed: Array<string> };
+
 /** Removes each block-style top-level `key:` block; `removed` holds its non-blank lines. */
-function removeTopLevelYamlBlock(
-  yaml: string,
-  key: string,
-): { yaml: string; removed: Array<string> } {
+function removeTopLevelYamlBlock(yaml: string, key: string): RemovedYamlBlock {
   const lines = yaml.split(/\r?\n/);
   const next: Array<string> = [];
   const removed: Array<string> = [];
@@ -1981,7 +1991,7 @@ function insertPnpmAllowBuilds(yaml: string, allowBuilds: string): string {
   return `${lines.join('\n').replaceAll(/\n{3,}/g, '\n\n')}\n`;
 }
 
-function resolvePnpmConfigRoot(root: string, pkg: JsonObject): string {
+function resolvePnpmConfigRoot(root: string, pkg: PackageJson): string {
   if (
     existsSync(join(root, 'pnpm-workspace.yaml')) ||
     existsSync(join(root, 'pnpm-lock.yaml')) ||
@@ -1999,7 +2009,7 @@ function resolvePnpmConfigRoot(root: string, pkg: JsonObject): string {
   return root;
 }
 
-function ensurePnpmAllowBuilds(root: string, pkg: JsonObject): void {
+function ensurePnpmAllowBuilds(root: string, pkg: PackageJson): void {
   const configRoot = resolvePnpmConfigRoot(root, pkg);
   const workspacePath = join(configRoot, 'pnpm-workspace.yaml');
   const displayPath = configRoot === root ? 'pnpm-workspace.yaml' : relative(root, workspacePath);
@@ -2438,7 +2448,9 @@ export const posts = sqliteTable("posts", {
 `;
 }
 
-function demoFiles(root: string): { schema: string; route: string; client: string } {
+type DemoFiles = { schema: string; route: string; client: string };
+
+function demoFiles(root: string): DemoFiles {
   const paths = readProjectPaths(root);
   return {
     schema: paths.schemaFile,

@@ -56,6 +56,20 @@ const isEnterKey = (key: string) => key === '\r' || key === '\n';
 const isBackspaceKey = (key: string) => key === '\u007F' || key === '\b';
 const isPrintableKey = (key: string) => key.length === 1 && key >= ' ';
 
+function guidePrefix(): string {
+  return getGuide() ? pc.gray(S_BAR) + ' ' : '  ';
+}
+
+function checkboxMarker(selected: boolean, focused: boolean): string {
+  const checkbox = selected
+    ? pc.blue(S_CHECKBOX_SELECTED)
+    : focused
+      ? pc.blue(S_CHECKBOX_INACTIVE)
+      : pc.dim(S_CHECKBOX_INACTIVE);
+  const pointer = focused ? pc.blue(S_RADIO_ACTIVE) : S_RADIO_INACTIVE;
+  return pointer + ' ' + checkbox;
+}
+
 export function promptSubcommand(
   command: string,
   subcommands: Array<SubcommandDef>,
@@ -82,6 +96,37 @@ export function promptSubcommand(
     stdin.setRawMode(true);
     stdin.resume();
     stdout.write('\u001B[?25l'); /* Decision: Hide the cursor. */
+
+    function currentSub(): SubcommandDef {
+      if (!selectedSub) {
+        throw new Error('No subcommand is selected.');
+      }
+      return selectedSub;
+    }
+
+    function currentFlags(): Array<FlagDef> {
+      const flags = currentSub().flags;
+      if (!flags) {
+        throw new Error('The selected subcommand has no flags.');
+      }
+      return flags;
+    }
+
+    function multiSelectFollowUp(): Extract<FollowUpDef, { type: 'multi-select' }> {
+      const followUp = currentSub().followUp;
+      if (followUp?.type !== 'multi-select') {
+        throw new Error('The selected subcommand has no multi-select follow-up.');
+      }
+      return followUp;
+    }
+
+    function repeatInputFollowUp(): Extract<FollowUpDef, { type: 'repeat-input' }> {
+      const followUp = currentSub().followUp;
+      if (followUp?.type !== 'repeat-input') {
+        throw new Error('The selected subcommand has no repeat-input follow-up.');
+      }
+      return followUp;
+    }
 
     function clear() {
       if (previousFrame) {
@@ -111,10 +156,6 @@ export function promptSubcommand(
       return `${lines[0]}…`;
     }
 
-    function guidePrefix(): string {
-      return getGuide() ? pc.gray(S_BAR) + ' ' : '  ';
-    }
-
     function renderOption(marker: string, label: string, focused: boolean, suffix = ''): string {
       return (
         guidePrefix() +
@@ -126,16 +167,6 @@ export function promptSubcommand(
           suffix,
         )
       );
-    }
-
-    function checkboxMarker(selected: boolean, focused: boolean): string {
-      const checkbox = selected
-        ? pc.blue(S_CHECKBOX_SELECTED)
-        : focused
-          ? pc.blue(S_CHECKBOX_INACTIVE)
-          : pc.dim(S_CHECKBOX_INACTIVE);
-      const pointer = focused ? pc.blue(S_RADIO_ACTIVE) : S_RADIO_INACTIVE;
-      return pointer + ' ' + checkbox;
     }
 
     function instructions(items: Array<string>): Array<string> {
@@ -182,7 +213,7 @@ export function promptSubcommand(
     function headerLine(): string {
       const argPart = selectedArg ? ` ${selectedArg}` : '';
       return promptTitle(
-        `${pc.blue(title)} ${pc.dim('·')} ${selectedSub!.name}${argPart}`,
+        `${pc.blue(title)} ${pc.dim('·')} ${currentSub().name}${argPart}`,
         'active',
         { output: stdout },
       );
@@ -231,7 +262,7 @@ export function promptSubcommand(
     }
 
     function renderFlags() {
-      const flags = selectedSub!.flags!;
+      const flags = currentFlags();
       const focused = flags[cursor];
       const lines: Array<string> = [];
 
@@ -265,7 +296,7 @@ export function promptSubcommand(
     }
 
     function renderMultiSelect() {
-      const followUp = selectedSub!.followUp as Extract<FollowUpDef, { type: 'multi-select' }>;
+      const followUp = multiSelectFollowUp();
       const options = followUp.options;
       const lines: Array<string> = [];
 
@@ -281,7 +312,7 @@ export function promptSubcommand(
     }
 
     function renderRepeatInput() {
-      const followUp = selectedSub!.followUp as Extract<FollowUpDef, { type: 'repeat-input' }>;
+      const followUp = repeatInputFollowUp();
       const lines: Array<string> = [];
 
       for (const entry of repeatEntries) {
@@ -348,7 +379,7 @@ export function promptSubcommand(
 
     function finalize() {
       const result: SubcommandResult = {
-        subcommand: selectedSub!.name,
+        subcommand: currentSub().name,
         arg: selectedArg,
       };
 
@@ -364,16 +395,17 @@ export function promptSubcommand(
     }
 
     function advancePhase() {
-      if (phase === 'select' && selectedSub!.flags && selectedSub!.flags.length > 0) {
+      const sub = currentSub();
+      if (phase === 'select' && sub.flags && sub.flags.length > 0) {
         phase = 'flags';
         cursor = 0;
-        flagStates = selectedSub!.flags.map(() => ({ enabled: false, value: '' }));
+        flagStates = sub.flags.map(() => ({ enabled: false, value: '' }));
         render();
         return;
       }
 
-      if ((phase === 'select' || phase === 'flags') && selectedSub!.followUp) {
-        const followUp = selectedSub!.followUp;
+      if ((phase === 'select' || phase === 'flags') && sub.followUp) {
+        const followUp = sub.followUp;
         if (followUp.type === 'multi-select') {
           phase = 'multi-select';
           cursor = 0;
@@ -440,7 +472,7 @@ export function promptSubcommand(
     }
 
     function handleFlagKey(key: string) {
-      const flags = selectedSub!.flags!;
+      const flags = currentFlags();
       const focused = flags[cursor];
       const state = flagStates[cursor];
 
@@ -490,7 +522,7 @@ export function promptSubcommand(
     }
 
     function handleMultiSelectKey(key: string) {
-      const followUp = selectedSub!.followUp as Extract<FollowUpDef, { type: 'multi-select' }>;
+      const followUp = multiSelectFollowUp();
       const options = followUp.options;
 
       if (moveCursor(key, options.length)) {

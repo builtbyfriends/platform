@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import {
   aiLoggingChangeLines,
   aiLoggingPreviewLines,
@@ -42,10 +44,15 @@ function table(rows: Array<unknown>, indent: string): Array<string> {
   if (!rows.length) {
     return [`${indent}(none)`];
   }
-  if (!rows.every((row) => row && typeof row === 'object' && !Array.isArray(row))) {
+  const records: Array<JsonObject> = [];
+  for (const row of rows) {
+    if (isJsonObject(row)) {
+      records.push(row);
+    }
+  }
+  if (records.length !== rows.length) {
     return rows.map((row) => `${indent}${printable(row)}`);
   }
-  const records = rows as Array<Record<string, unknown>>;
   const keys = [...new Set(records.flatMap((row) => Object.keys(row)))].filter((key) =>
     records.some((row) => row[key] !== null && typeof row[key] !== 'object'),
   );
@@ -97,25 +104,27 @@ function eventLines(events: Array<unknown>, indent: string): Array<string> {
   ]);
 }
 
-const LABEL_WORDS: Record<string, string> = {
-  api: 'API',
-  dns: 'DNS',
-  github: 'GitHub',
-  http: 'HTTP',
-  id: 'ID',
-  ids: 'IDs',
-  oauth: 'OAuth',
-  oidc: 'OIDC',
-  url: 'URL',
-  urls: 'URLs',
-};
+const LABEL_WORDS = new Map(
+  Object.entries({
+    api: 'API',
+    dns: 'DNS',
+    github: 'GitHub',
+    http: 'HTTP',
+    id: 'ID',
+    ids: 'IDs',
+    oauth: 'OAuth',
+    oidc: 'OIDC',
+    url: 'URL',
+    urls: 'URLs',
+  } satisfies Record<string, string>),
+);
 
 function fieldLabel(key: string): string {
   const words = key
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1 $2')
     .split(/[\s_-]+/)
     .filter(Boolean)
-    .map((word) => LABEL_WORDS[word.toLowerCase()] ?? word.toLowerCase());
+    .map((word) => LABEL_WORDS.get(word.toLowerCase()) ?? word.toLowerCase());
   if (words[0]) {
     words[0] = words[0][0].toUpperCase() + words[0].slice(1);
   }
@@ -148,11 +157,11 @@ function output(value: unknown, json: boolean): void {
   console.log(json ? JSON.stringify(value) : humanLines(value).join('\n'));
 }
 
-function outputMutation(result: Record<string, unknown>, args: OperatorArgs): void {
+function outputMutation(result: JsonObject, args: OperatorArgs): void {
   output(result, args.json);
   // Decision: Some successful HTTP responses checkpoint work instead of completing it.
-  const configuration = result.configuration as { status?: string } | undefined;
-  const project = result.project as { state?: string; last_error?: string | null } | undefined;
+  const configuration = isJsonObject(result.configuration) ? result.configuration : undefined;
+  const project = isJsonObject(result.project) ? result.project : undefined;
   if (
     args.json ||
     result.ok === false ||
@@ -173,7 +182,7 @@ function outputMutation(result: Record<string, unknown>, args: OperatorArgs): vo
 }
 
 function outputLogs(
-  result: Record<string, unknown>,
+  result: JsonObject,
   json: boolean,
   state: { runtimeLogsNoted?: boolean } = {},
 ): void {
@@ -187,12 +196,11 @@ function outputLogs(
     state.runtimeLogsNoted = true;
     console.log(dim(MINIMAL_RUNTIME_LOGS_NOTE));
   }
-  if (Array.isArray(result.lines)) {
+  if (isJsonArray(result.lines)) {
     for (const entry of result.lines) {
-      if (entry && typeof entry === 'object') {
-        const line = entry as Record<string, unknown>;
+      if (isJsonObject(entry)) {
         console.log(
-          `${line.ts ? `[${printable(line.ts)}] ` : ''}${printable(line.line ?? line.text ?? entry)}`,
+          `${entry.ts ? `[${printable(entry.ts)}] ` : ''}${printable(entry.line ?? entry.text ?? entry)}`,
         );
       } else {
         console.log(printable(entry));
@@ -204,13 +212,12 @@ function outputLogs(
     if (result.terminal) {
       console.log(`Build ${printable(result.status ?? 'finished')}.`);
     }
-  } else if (Array.isArray(result.data)) {
-    for (const entry of result.data) {
-      if (!entry || typeof entry !== 'object') {
-        console.log(printable(entry));
+  } else if (isJsonArray(result.data)) {
+    for (const row of result.data) {
+      if (!isJsonObject(row)) {
+        console.log(printable(row));
         continue;
       }
-      const row = entry as Record<string, unknown>;
       const parts = [
         printable(row.timestamp ?? row.ts),
         printable(row.method),
@@ -219,12 +226,12 @@ function outputLogs(
       ];
       // Decision: Minimal runtime logs record no URL or messages; their lines skip them.
       console.log((minimal ? parts.filter((part) => part !== '') : parts).join(' '));
-      if (Array.isArray(row.logs)) {
+      if (isJsonArray(row.logs)) {
         for (const log of row.logs) {
-          if (log && typeof log === 'object') {
-            const record = log as Record<string, unknown>;
+          if (isJsonObject(log)) {
+            const record = log;
             const level = record.level ? `[${printable(record.level)}] ` : '';
-            if (minimal && Array.isArray(record.message) && record.message.length === 0) {
+            if (minimal && isJsonArray(record.message) && record.message.length === 0) {
               console.log(`  ${level.trimEnd()}`);
             } else {
               console.log(`  ${level}${printable(record.message ?? log)}`);
@@ -234,10 +241,10 @@ function outputLogs(
           }
         }
       }
-      if (Array.isArray(row.exceptions)) {
+      if (isJsonArray(row.exceptions)) {
         for (const exception of row.exceptions) {
-          if (exception && typeof exception === 'object') {
-            const record = exception as Record<string, unknown>;
+          if (isJsonObject(exception)) {
+            const record = exception;
             if (minimal && record.message === '' && record.name) {
               console.log(`  ${printable(record.name)}`);
             } else {
@@ -258,7 +265,7 @@ function outputLogs(
   }
 }
 
-function operationRecoveryFence(value: unknown): {
+type OperationRecoveryFence = {
   stepId: string;
   attempt: number;
   requestDigest: string;
@@ -267,11 +274,10 @@ function operationRecoveryFence(value: unknown): {
   desiredGeneration: number;
   routeId: string | null;
   routeDesiredGeneration: number | null;
-} {
-  const target =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
+};
+
+function operationRecoveryFence(value: unknown): OperationRecoveryFence {
+  const target = isJsonObject(value) ? value : null;
   if (
     !target ||
     typeof target.stepId !== 'string' ||
@@ -305,17 +311,8 @@ function operationRecoveryFence(value: unknown): {
 }
 
 function runtimeLogFingerprint(row: unknown): string {
-  const ingestedAt =
-    row && typeof row === 'object' && !Array.isArray(row)
-      ? (row as Record<string, unknown>).ingestedAt
-      : undefined;
-  if (
-    !row ||
-    typeof row !== 'object' ||
-    Array.isArray(row) ||
-    typeof ingestedAt !== 'number' ||
-    !Number.isSafeInteger(ingestedAt)
-  ) {
+  const ingestedAt = isJsonObject(row) ? row.ingestedAt : undefined;
+  if (!isJsonObject(row) || typeof ingestedAt !== 'number' || !Number.isSafeInteger(ingestedAt)) {
     throw new OperatorClientError(
       'Runtime log response has an invalid ingestion cursor.',
       'invalid_response',
@@ -326,7 +323,7 @@ function runtimeLogFingerprint(row: unknown): string {
 
 async function confirmOperatorMutation(
   origin: string,
-  preview: Record<string, unknown>,
+  preview: JsonObject,
   args: Pick<OperatorArgs, 'yes' | 'plan' | 'json'>,
 ): Promise<boolean> {
   if (args.plan) {
@@ -410,16 +407,11 @@ async function runAuth(origin: string, args: OperatorArgs): Promise<void> {
       }
     }
     removeOperatorToken(origin);
-    output(
-      {
-        origin,
-        ok: true,
-        ...(process.env.PLATFORM_OPERATOR_TOKEN
-          ? { message: 'Operator session revoked. Unset PLATFORM_OPERATOR_TOKEN in your shell.' }
-          : {}),
-      },
-      args.json,
-    );
+    const loggedOut: JsonObject = { origin, ok: true };
+    if (process.env.PLATFORM_OPERATOR_TOKEN) {
+      loggedOut.message = 'Operator session revoked. Unset PLATFORM_OPERATOR_TOKEN in your shell.';
+    }
+    output(loggedOut, args.json);
     if (!args.json) {
       printSuccess('Signed out of platform administration.');
     }
@@ -648,7 +640,13 @@ async function migrateDeploymentAssets(
       }
       return;
     }
-    const cursor = nextCursor as string;
+    if (typeof nextCursor !== 'string') {
+      throw new OperatorClientError(
+        'The server returned an invalid asset migration continuation. Inspect the deployment before resuming; no batch was retried.',
+        'invalid_response',
+      );
+    }
+    const cursor = nextCursor;
     seenCursors.add(cursor);
     body = { ...args.body, cursor };
   }
@@ -709,12 +707,12 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
         'invalid_preview',
       );
     }
-    let recoveryFence: Record<string, unknown> =
+    let recoveryFence: JsonObject =
       args.group === 'email' && args.action === 'operation-resolve'
         ? operationRecoveryFence(preview.target)
         : {};
     if (args.group === 'email' && args.action === 'shared-recipient-resolve') {
-      const target = preview.target as Record<string, unknown> | null;
+      const target = isJsonObject(preview.target) ? preview.target : null;
       if (
         !target ||
         typeof target.recoveryFence !== 'string' ||
@@ -732,7 +730,7 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
       args.group === 'email' &&
       args.action === 'domain-add' &&
       args.body.outboundOnly === true &&
-      (preview.target as Record<string, unknown> | null)?.inboundMode !== 'none'
+      (isJsonObject(preview.target) ? preview.target.inboundMode : undefined) !== 'none'
     ) {
       throw new OperatorClientError(
         'This platform does not support outbound-only email domains. Upgrade it first. No change was requested.',
@@ -746,16 +744,14 @@ export async function runOperatorCommand(args: OperatorArgs): Promise<void> {
     if (!(await confirmOperatorMutation(origin, preview, args))) {
       return;
     }
-    const body = {
-      ...args.body,
-      ...(args.group === 'worker' && args.action === 'rollback-all'
-        ? { versions: preview.versions }
-        : {}),
-      ...(args.group === 'project' && args.action === 'normalize'
-        ? { expected: preview.changes }
-        : {}),
-      ...recoveryFence,
-    };
+    const body: JsonObject = { ...args.body };
+    if (args.group === 'worker' && args.action === 'rollback-all') {
+      body.versions = preview.versions;
+    }
+    if (args.group === 'project' && args.action === 'normalize') {
+      body.expected = preview.changes;
+    }
+    Object.assign(body, recoveryFence);
     const result = await client.request(args.path, {
       method: 'POST',
       body,

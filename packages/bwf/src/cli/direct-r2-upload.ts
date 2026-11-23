@@ -87,7 +87,7 @@ export async function uploadAssetsToR2(
     return;
   }
 
-  let firstError: unknown = null;
+  const errors: Array<Error> = [];
   let nextIndex = 0;
 
   // Decision: Bounded-pool worker pattern: each worker pulls the next index until exhausted or a sibling worker
@@ -97,7 +97,7 @@ export async function uploadAssetsToR2(
   for (let w = 0; w < workerCount; w++) {
     workers.push(
       (async () => {
-        while (firstError === null) {
+        while (errors.length === 0) {
           const i = nextIndex++;
           if (i >= items.length) {
             return;
@@ -105,8 +105,10 @@ export async function uploadAssetsToR2(
           try {
             await uploadOne(items[i], cliLog, fetchImpl);
           } catch (error) {
-            if (firstError === null) {
-              firstError = error;
+            if (errors.length === 0) {
+              errors.push(
+                error instanceof Error ? error : new Error(String(error), { cause: error }),
+              );
             }
             return;
           }
@@ -117,7 +119,8 @@ export async function uploadAssetsToR2(
     );
   }
   await Promise.all(workers);
-  if (firstError !== null) {
+  const [firstError] = errors;
+  if (firstError) {
     throw firstError;
   }
 }
@@ -230,5 +233,7 @@ function truncate(s: string): string {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

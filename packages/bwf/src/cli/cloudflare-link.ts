@@ -8,6 +8,7 @@ import type {
   ExistingCloudflareWorker,
   CloudflareCommandRunner,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import type { ParseError } from 'jsonc-parser';
@@ -34,31 +35,29 @@ export function readCloudflareLink(root: string): CloudflareLink | null {
     return null;
   }
   try {
-    const value = JSON.parse(readFileSync(path, 'utf8'));
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!isRecord(value)) {
+      throw new TypeError('The saved Cloudflare link is not an object.');
+    }
     const receipt = value.candidateReceipt;
-    const validReceipt =
-      receipt === undefined ||
-      (typeof receipt === 'object' &&
-        receipt !== null &&
-        typeof receipt.parentVersionId === 'string' &&
-        receipt.parentVersionId.length > 0 &&
-        isVersionIdChain(receipt.versionIds));
+    const candidateReceipt =
+      isRecord(receipt) &&
+      typeof receipt.parentVersionId === 'string' &&
+      receipt.parentVersionId.length > 0 &&
+      isVersionIdChain(receipt.versionIds)
+        ? { parentVersionId: receipt.parentVersionId, versionIds: [...receipt.versionIds] }
+        : undefined;
     if (
       typeof value.accountId === 'string' &&
       value.accountId &&
       typeof value.workerName === 'string' &&
       value.workerName &&
-      validReceipt
+      (receipt === undefined || candidateReceipt !== undefined)
     ) {
       return {
         accountId: value.accountId,
         workerName: value.workerName,
-        ...(receipt !== undefined && {
-          candidateReceipt: {
-            parentVersionId: receipt.parentVersionId,
-            versionIds: [...receipt.versionIds],
-          },
-        }),
+        ...(candidateReceipt !== undefined && { candidateReceipt }),
       };
     }
   } catch {
@@ -132,7 +131,8 @@ export async function prepareExistingCloudflareDeploy(options: {
     return null;
   }
   const text = readFileSync(options.configPath, 'utf8');
-  const config = parse(text);
+  const parsedConfig: unknown = parse(text);
+  const config = isRecord(parsedConfig) ? parsedConfig : undefined;
   if (
     typeof config?.name !== 'string' ||
     !config.name ||
@@ -142,12 +142,16 @@ export async function prepareExistingCloudflareDeploy(options: {
       'The configured account or Worker differs from the existing Cloudflare link. Restore the original target before retrying.',
     );
   }
+  const workerName = config.name;
   const existing = await (options.readExistingWorker ?? readExistingCloudflareWorker)({
     runWrangler: options.runWrangler,
     configPath: options.configPath,
-    workerName: config.name,
+    workerName,
   });
-  const patch: Record<string, unknown> = { account_id: options.accountId, keep_vars: true };
+  const patch = new Map<string, unknown>([
+    ['account_id', options.accountId],
+    ['keep_vars', true],
+  ]);
   // Decision: Native deploys may add version metadata only to their generated artifact.
   // Reuse the inspected binding when it's omitted; authored replacements still fail validation.
   const metadataBindings = existing.bindings.filter(
@@ -159,16 +163,16 @@ export async function prepareExistingCloudflareDeploy(options: {
     typeof metadataBindings[0].name === 'string'
   ) {
     config.version_metadata = { binding: metadataBindings[0].name };
-    patch.version_metadata = config.version_metadata;
+    patch.set('version_metadata', config.version_metadata);
   }
   assertExistingCloudflareConfig(existing, config, false);
   let updated = text;
   for (const key of ['compatibility_date', 'compatibility_flags', 'limits']) {
     if (config[key] === undefined && existing.runtime[key] !== undefined) {
-      patch[key] = existing.runtime[key];
+      patch.set(key, existing.runtime[key]);
     }
   }
-  for (const [key, value] of Object.entries(patch)) {
+  for (const [key, value] of patch) {
     updated = applyEdits(
       updated,
       modify(updated, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
@@ -178,7 +182,7 @@ export async function prepareExistingCloudflareDeploy(options: {
   saveCloudflareLink(options.root, {
     ...(pending ?? {}),
     accountId: options.accountId,
-    workerName: config.name,
+    workerName,
   });
   writeFileSync(options.configPath, updated);
   persistCloudflareConfig(options.root);
@@ -218,20 +222,18 @@ export async function maybeLinkCloudflareDeploy(
   }
   const errors: Array<ParseError> = [];
   const configPath = files.length ? join(root, name) : materializeCloudflareConfig(root);
-  const config = parse(readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''), errors, {
-    allowTrailingComma: true,
-  });
+  const parsedConfig: unknown = parse(
+    readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''),
+    errors,
+    {
+      allowTrailingComma: true,
+    },
+  );
+  const config = isRecord(parsedConfig) ? parsedConfig : undefined;
   if (!files.length && (!config || typeof config.name !== 'string' || !config.name.trim())) {
     return null;
   }
-  if (
-    errors.length ||
-    !config ||
-    typeof config !== 'object' ||
-    Array.isArray(config) ||
-    typeof config.name !== 'string' ||
-    !config.name.trim()
-  ) {
+  if (errors.length || !config || typeof config.name !== 'string' || !config.name.trim()) {
     throw new Error(
       `Set the existing Worker's name in a valid ${name} before linking to Cloudflare.`,
     );

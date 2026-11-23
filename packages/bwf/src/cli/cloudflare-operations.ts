@@ -16,6 +16,7 @@ import {
   resolveD1MigrateTarget,
 } from '@builtbyfriends/deploy-cloudflare';
 import type { CloudflareVersionMetadata } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { createCloudflareProcessRunner } from './cloudflare-process.ts';
@@ -123,12 +124,11 @@ export async function listCloudflareSecrets(
     throw new Error('Cloudflare secret list returned an unexpected response.');
   }
   return parsed
-    .map((entry) => {
-      if (typeof entry !== 'object' || entry === null) {
+    .map((entry: unknown) => {
+      if (!isRecord(entry)) {
         return null;
       }
-      const value = entry as Record<string, unknown>;
-      return typeof value.name === 'string' ? value.name : null;
+      return typeof entry.name === 'string' ? entry.name : null;
     })
     .filter((name): name is string => name !== null)
     .sort();
@@ -177,6 +177,20 @@ export async function deleteCloudflareSecret(
   });
 }
 
+function readOptionalD1MigrationSetting(
+  field: { present: boolean; value: unknown },
+  binding: string,
+  key: string,
+): string | undefined {
+  if (!field.present) {
+    return undefined;
+  }
+  if (typeof field.value !== 'string' || field.value.length === 0) {
+    throw new Error(`D1 binding ${binding} has an invalid ${key}.`);
+  }
+  return field.value;
+}
+
 export function resolveCloudflareD1Context(
   root: string,
   binding: string,
@@ -195,24 +209,14 @@ export function resolveCloudflareD1Context(
     binding,
     'migrations_table',
   );
-  if (
-    migrationsDir.present &&
-    (typeof migrationsDir.value !== 'string' || migrationsDir.value.length === 0)
-  ) {
-    throw new Error(`D1 binding ${binding} has an invalid migrations_dir.`);
-  }
-  if (
-    migrationsTable.present &&
-    (typeof migrationsTable.value !== 'string' || migrationsTable.value.length === 0)
-  ) {
-    throw new Error(`D1 binding ${binding} has an invalid migrations_table.`);
-  }
   return {
     operation,
     binding,
     migrateToken: target.token,
-    migrationsDir: migrationsDir.present ? (migrationsDir.value as string) : undefined,
-    migrationsTable: migrationsTable.present ? (migrationsTable.value as string) : 'd1_migrations',
+    migrationsDir: readOptionalD1MigrationSetting(migrationsDir, binding, 'migrations_dir'),
+    migrationsTable:
+      readOptionalD1MigrationSetting(migrationsTable, binding, 'migrations_table') ??
+      'd1_migrations',
   };
 }
 
@@ -264,16 +268,16 @@ export async function executeCloudflareD1Sql(
   }
   const rows: Array<Record<string, unknown>> = [];
   for (const item of parsed) {
-    if (typeof item !== 'object' || item === null) {
+    if (!isRecord(item)) {
       throw new Error('Cloudflare D1 execute returned a malformed result.');
     }
-    const resultRows = (item as Record<string, unknown>).results;
+    const resultRows = item.results;
     if (!Array.isArray(resultRows)) {
       continue;
     }
     for (const row of resultRows) {
-      if (typeof row === 'object' && row !== null && !Array.isArray(row)) {
-        rows.push(row as Record<string, unknown>);
+      if (isRecord(row)) {
+        rows.push(row);
       }
     }
   }
@@ -320,7 +324,7 @@ export async function restoreCloudflareD1Database(
     target,
     configPath: context.operation.configPath,
   });
-  const previous = (result.data as { previousBookmark?: unknown } | undefined)?.previousBookmark;
+  const previous = isRecord(result.data) ? result.data.previousBookmark : undefined;
   return typeof previous === 'string' ? previous : undefined;
 }
 
@@ -364,30 +368,26 @@ export function parseCloudflareDeployedVersionIds(value: unknown): Array<string>
     throw new Error('Cloudflare deployment list returned an unexpected response.');
   }
   const ids = new Set<string>();
-  parsed.forEach((deployment, deploymentIndex) => {
-    if (
-      typeof deployment !== 'object' ||
-      deployment === null ||
-      !Array.isArray((deployment as Record<string, unknown>).versions)
-    ) {
+  parsed.forEach((deployment: unknown, deploymentIndex) => {
+    if (!isRecord(deployment) || !Array.isArray(deployment.versions)) {
       throw new Error(`Cloudflare deployment list entry ${deploymentIndex + 1} is malformed.`);
     }
-    for (const version of (deployment as { versions: Array<unknown> }).versions) {
+    const deploymentVersions: Array<unknown> = deployment.versions;
+    for (const version of deploymentVersions) {
       if (
-        typeof version !== 'object' ||
-        version === null ||
-        typeof (version as Record<string, unknown>).version_id !== 'string' ||
-        typeof (version as Record<string, unknown>).percentage !== 'number' ||
-        !Number.isFinite((version as Record<string, number>).percentage) ||
-        (version as Record<string, number>).percentage < 0 ||
-        (version as Record<string, number>).percentage > 100
+        !isRecord(version) ||
+        typeof version.version_id !== 'string' ||
+        typeof version.percentage !== 'number' ||
+        !Number.isFinite(version.percentage) ||
+        version.percentage < 0 ||
+        version.percentage > 100
       ) {
         throw new Error(`Cloudflare deployment list entry ${deploymentIndex + 1} is malformed.`);
       }
       // Decision: A version staged at 0% for readiness is in deployment history even when its probe failed. It
       // hasn't served production traffic and mustn't become a rollback candidate.
-      if ((version as { percentage: number }).percentage > 0) {
-        ids.add((version as { version_id: string }).version_id);
+      if (version.percentage > 0) {
+        ids.add(version.version_id);
       }
     }
   });
@@ -399,18 +399,12 @@ export function parseCloudflareVersions(value: unknown): Array<CloudflareWorkerV
   if (!Array.isArray(parsed)) {
     throw new Error('Cloudflare version list returned an unexpected response.');
   }
-  return parsed.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null || typeof entry.id !== 'string') {
+  return parsed.map((entry: unknown, index) => {
+    if (!isRecord(entry) || typeof entry.id !== 'string') {
       throw new Error(`Cloudflare version list entry ${index + 1} is malformed.`);
     }
-    const metadata =
-      typeof entry.metadata === 'object' && entry.metadata !== null
-        ? (entry.metadata as Record<string, unknown>)
-        : undefined;
-    const annotations =
-      typeof entry.annotations === 'object' && entry.annotations !== null
-        ? (entry.annotations as Record<string, unknown>)
-        : undefined;
+    const metadata = isRecord(entry.metadata) ? entry.metadata : undefined;
+    const annotations = isRecord(entry.annotations) ? entry.annotations : undefined;
     const message =
       typeof annotations?.['workers/message'] === 'string' ? annotations['workers/message'] : null;
     return {
@@ -424,31 +418,18 @@ export function parseCloudflareVersions(value: unknown): Array<CloudflareWorkerV
 
 export function parseActiveVersionId(value: unknown): string | null {
   const parsed = requireData(value, 'Cloudflare deployment status');
-  if (typeof parsed !== 'object' || parsed === null) {
+  if (!isRecord(parsed) || !Array.isArray(parsed.versions)) {
     throw new Error('Cloudflare deployment status returned an unexpected response.');
   }
-  const deployment = parsed as Record<string, unknown>;
-  if (!Array.isArray(deployment.versions)) {
-    throw new Error('Cloudflare deployment status returned an unexpected response.');
-  }
-  const versions = deployment.versions;
-  const active = versions.find(
-    (entry) =>
-      typeof entry === 'object' &&
-      entry !== null &&
-      Number((entry as Record<string, unknown>).percentage) === 100,
-  );
+  const versions: Array<unknown> = parsed.versions;
+  const active = versions.find((entry) => isRecord(entry) && Number(entry.percentage) === 100);
   if (active === undefined) {
     return null;
   }
-  if (
-    typeof active !== 'object' ||
-    active === null ||
-    typeof (active as Record<string, unknown>).version_id !== 'string'
-  ) {
+  if (!isRecord(active) || typeof active.version_id !== 'string') {
     throw new Error('Cloudflare deployment status has a malformed active version.');
   }
-  return (active as Record<string, string>).version_id;
+  return active.version_id;
 }
 
 export async function activateCloudflareExistingVersion(
@@ -511,7 +492,7 @@ export async function activateCloudflareExistingVersion(
     },
     { capture: false },
   );
-  const knownTriggerConfigs: Record<string, typeof targetTriggerConfig> = {
+  const knownTriggerConfigs = {
     [target.id]: targetTriggerConfig,
     [current.id]: currentTriggerConfig,
   };
@@ -757,20 +738,17 @@ function writeDomainTriggerConfig(
   triggerConfigPath: string,
 ): void {
   const source = parseRootWranglerConfig(sourceConfigPath);
-  const config: Record<string, unknown> = {
+  const workersDev = source.workers_dev;
+  const previewUrls = source.preview_urls;
+  const compatibilityDate = readWranglerTopLevelString(source, 'compatibility_date');
+  const config = {
     name: context.workerName,
     account_id: context.accountId,
     routes: Array.isArray(source.routes) ? source.routes : [],
+    ...(typeof workersDev === 'boolean' && { workers_dev: workersDev }),
+    ...(typeof previewUrls === 'boolean' && { preview_urls: previewUrls }),
+    ...(!!compatibilityDate && { compatibility_date: compatibilityDate }),
   };
-  for (const field of ['workers_dev', 'preview_urls'] as const) {
-    if (typeof source[field] === 'boolean') {
-      config[field] = source[field];
-    }
-  }
-  const compatibilityDate = readWranglerTopLevelString(source, 'compatibility_date');
-  if (compatibilityDate) {
-    config.compatibility_date = compatibilityDate;
-  }
   writeFileSync(triggerConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
@@ -787,7 +765,7 @@ async function run(
   );
   if (
     result.status !== 0 ||
-    result.signal != null ||
+    (result.signal !== null && result.signal !== undefined) ||
     (result.error !== undefined && result.error !== null && result.error !== '')
   ) {
     const detail = result.stderr.trim() || result.stdout.trim() || result.error || 'unknown error';
@@ -833,7 +811,7 @@ function assertNoOperationConfigOverride(root: string): void {
   }
 }
 
-function requireData(value: unknown, label: string): unknown {
+function requireData(value: unknown, label: string): NonNullable<unknown> | null {
   if (value === undefined) {
     throw new Error(label + ' did not return structured data.');
   }

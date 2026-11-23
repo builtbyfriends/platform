@@ -238,6 +238,7 @@ export interface CloudflareEmailStepInput {
   configPath: string;
   bwfConfig: BwfConfig;
   /** The pre-probe root config (step 3) — `send_email` / `addresses` are read from it. */
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- wrangler config shape is shared across deploy steps
   rootConfig: Record<string, unknown>;
   handlers: EmailHandlersScan;
   workerName: string;

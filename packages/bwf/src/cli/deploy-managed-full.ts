@@ -39,6 +39,7 @@ import {
 import { formatDeploySummary, printDeploySuccess } from './deploy-summary.ts';
 import { MANAGED_DEPLOY_BUILD_ENV } from './deploy-transport.ts';
 import type { GitDeployMetadata } from './git-metadata.ts';
+import { isJsonObject } from './json-value.ts';
 import type { CliLogger } from './log-file.ts';
 import { createSpinner, formatCount, note } from './output.ts';
 import {
@@ -102,12 +103,11 @@ export async function runFullDeploy(
   let assetsPrefix = 'assets';
   const clientManifestPath = join(distDir, 'client', '.vite', 'manifest.json');
   if (existsSync(clientManifestPath)) {
-    const manifest: Record<string, { file?: string }> = JSON.parse(
-      readFileSync(clientManifestPath, 'utf8'),
-    );
-    for (const entry of Object.values(manifest)) {
-      if (entry.file?.includes('/')) {
-        const dir = entry.file.slice(0, entry.file.indexOf('/'));
+    const manifest: unknown = JSON.parse(readFileSync(clientManifestPath, 'utf8'));
+    for (const entry of isJsonObject(manifest) ? Object.values(manifest) : []) {
+      const file = isJsonObject(entry) ? entry.file : undefined;
+      if (typeof file === 'string' && file.includes('/')) {
+        const dir = file.slice(0, file.indexOf('/'));
         if (dir !== 'assets') {
           assetsPrefix = dir;
         }

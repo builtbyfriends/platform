@@ -4,6 +4,16 @@ import { PlatformClient } from './client.ts';
 import { createSpinner, dim, formatCount, formatRelativeTime, printSuccess } from './output.ts';
 import { readDeploymentPlatform, readProjectConfig } from './project.ts';
 
+function parseAppliedMigrations(raw: string | null | undefined): Array<string> {
+  if (!raw) {
+    return [];
+  }
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
 export async function runRollbackCommand(
   root: string,
   deployId?: string,
@@ -75,13 +85,13 @@ export async function runRollbackCommand(
   }
 
   const active = deployments.find((d) => d.id === activeDeploymentId);
-  const target = candidates.find((d) => d.id === targetId)!;
-  const currentMigrations: Array<string> = active?.applied_migrations
-    ? JSON.parse(active.applied_migrations)
-    : [];
-  const targetMigrations: Array<string> = target.applied_migrations
-    ? JSON.parse(target.applied_migrations)
-    : [];
+  const target = candidates.find((d) => d.id === targetId);
+  if (!target) {
+    log.error(`Deployment ${targetId} is not available for rollback.`);
+    process.exit(1);
+  }
+  const currentMigrations = parseAppliedMigrations(active?.applied_migrations);
+  const targetMigrations = parseAppliedMigrations(target.applied_migrations);
   const migrationDiff = currentMigrations.filter((m) => !targetMigrations.includes(m));
   await confirmUnrevertedMigrations(migrationDiff, 'deployment');
 
@@ -161,7 +171,12 @@ async function runCloudflareRollback(
       cancel('Rollback cancelled.');
       process.exit(0);
     }
-    target = candidates.find((version) => version.id === result)!;
+    const selected = candidates.find((version) => version.id === result);
+    if (!selected) {
+      log.error(`Version ${String(result)} is not available for rollback.`);
+      process.exit(1);
+    }
+    target = selected;
   }
 
   const current = status.versions.find((version) => version.id === status.activeVersionId);
