@@ -22,7 +22,6 @@ import {
 import { loadTypedBwfConfigFile, TYPED_CONFIG_FILE } from '../config-loader.ts';
 import { GENERATED_MARKERS, renderBwfConfig } from '../config-write.ts';
 import { validateConfig } from '../config.ts';
-import type { BwfConfig } from '../config.ts';
 import { ensureGitignoreLines } from '../shared/gitignore.ts';
 import { parseJsoncObject } from './generated-wrangler-config.ts';
 import { printSuccess } from './output.ts';

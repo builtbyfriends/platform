@@ -246,7 +246,6 @@ describe('cliVersionGate — defers to project authorization', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             if (!beforeTxHoldFired) {
               beforeTxHoldFired = true;

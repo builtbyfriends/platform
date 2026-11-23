@@ -185,7 +185,6 @@ export function restartPlugin(): Plugin {
     },
 
     load: {
-      // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
       filter: { id: /^\0virtual:bwf\/binding-hint$/ },
       handler() {
         return clientModule(restartToken);

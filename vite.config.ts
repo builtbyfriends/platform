@@ -68,6 +68,65 @@ const platformAlias = {
   ),
 };
 
+// Decision: These rules still have reports in older code, so they warn until the count reaches zero. Fix the
+// warnings in the files you touch, and move a rule back to the preset's error once it's clean.
+const unfinishedRules = {
+  '@nkzw/require-use-effect-arguments': 'warn',
+  eqeqeq: 'warn',
+  'no-promise-executor-return': 'warn',
+  'no-unused-vars': 'warn',
+  'no-useless-assignment': 'warn',
+  'prefer-promise-reject-errors': 'warn',
+  'import/export': 'warn',
+  'import/no-namespace': 'warn',
+  'quality/no-array-filter-map': 'warn',
+  'quality/no-conditional-empty-object-spread': 'warn',
+  'quality/no-known-value-widening': 'warn',
+  'quality/no-object-parameters': 'warn',
+  'quality/no-reflect-apply': 'warn',
+  'quality/no-reflect-get': 'warn',
+  'quality/no-unknown-returns': 'warn',
+  'quality/no-unsafe-dictionary-type': 'warn',
+  'react/button-has-type': 'warn',
+  'react/no-unescaped-entities': 'warn',
+  'react/purity': 'warn',
+  'react/refs': 'warn',
+  'react/set-state-in-effect': 'warn',
+  'react-hooks/rules-of-hooks': 'warn',
+  'typescript/array-type': 'warn',
+  'typescript/await-thenable': 'warn',
+  'typescript/ban-ts-comment': 'warn',
+  'typescript/consistent-type-imports': 'warn',
+  'typescript/no-empty-object-type': 'warn',
+  'typescript/no-floating-promises': 'warn',
+  'typescript/no-import-type-side-effects': 'warn',
+  'typescript/no-misused-promises': 'warn',
+  'typescript/no-misused-spread': 'warn',
+  'typescript/no-non-null-assertion': 'warn',
+  'typescript/no-unnecessary-type-assertion': 'warn',
+  'typescript/no-unsafe-argument': 'warn',
+  'typescript/no-unsafe-assignment': 'warn',
+  'typescript/no-unsafe-call': 'warn',
+  'typescript/no-unsafe-member-access': 'warn',
+  'typescript/no-unsafe-return': 'warn',
+  'typescript/no-unsafe-type-assertion': 'warn',
+  'typescript/no-unsafe-unary-minus': 'warn',
+  'typescript/only-throw-error': 'warn',
+  '@typescript-eslint/only-throw-error': 'warn',
+  '@typescript-eslint/no-floating-promises': 'warn',
+  'typescript/require-array-sort-compare': 'warn',
+  'typescript/return-await': 'warn',
+  'typescript/switch-exhaustiveness-check': 'warn',
+  'typescript/unbound-method': 'warn',
+  'typescript/use-unknown-in-catch-callback-variable': 'warn',
+  'unicorn/consistent-function-scoping': 'warn',
+  'unicorn/no-array-fill-with-reference-type': 'warn',
+  'unicorn/prefer-number-properties': 'warn',
+  'unicorn/prefer-single-call': 'warn',
+  'unicorn/prefer-structured-clone': 'warn',
+  'unicorn/prefer-top-level-await': 'warn',
+} as const;
+
 export default defineConfig({
   run: {
     tasks: {
@@ -164,6 +223,7 @@ export default defineConfig({
     ],
     overrides: [
       ...(cloudflare.overrides ?? []),
+      { files: ['**/*'], rules: unfinishedRules },
       {
         files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
         rules: {
@@ -314,8 +374,6 @@ export default defineConfig({
       '@typescript-eslint/no-duplicate-enum-values': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-extra-non-null-assertion': 'error',
-      // Decision: Type-aware: `vp run lint:platform` enforces it; plain `vp lint` skips it.
-      '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-new': 'error',
       '@typescript-eslint/no-non-null-asserted-optional-chain': 'error',
       '@typescript-eslint/no-require-imports': 'error',
@@ -447,6 +505,7 @@ export default defineConfig({
       'vite-plus/prefer-vite-plus-imports': 'error',
       // Decision: Vitest rejects `.only` only in CI; this catches it locally and in pre-commit too.
       'vitest/no-focused-tests': 'error',
+      ...unfinishedRules,
     },
     options: {
       ...cloudflare.options,

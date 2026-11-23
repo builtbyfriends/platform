@@ -1,5 +1,4 @@
 import { Files } from '@cloudflare/sandbox';
-import type { FileOperationOptions } from '@cloudflare/sandbox';
 import { DurableObject, RpcTarget } from 'cloudflare:workers';
 
 export type SandboxInstance =

@@ -321,7 +321,6 @@ describe('rebuildRequest preserves request.cf', () => {
 
   beforeEach(() => {
     RequestCalls = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Request = class extends OriginalRequest {
       constructor(input: RequestInfo | URL, init?: RequestInit) {
         // Decision: `cf` is removed before delegating because Node would reject it.

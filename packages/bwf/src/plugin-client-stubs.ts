@@ -65,7 +65,6 @@ export function createClientStubsPlugin(): Plugin {
       .join('|')
       .replaceAll('/', String.raw`\/`)})$`,
   );
-  // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
   const STUB_LOAD_FILTER = new RegExp(`^\\0platform-client-stub:`);
 
   const clientStubsPlugin: Plugin = {

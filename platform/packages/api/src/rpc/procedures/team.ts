@@ -24,6 +24,7 @@ import type {
   ProjectInvitation,
   ProjectInvitationStatus,
   ProjectMember,
+  ProjectRole,
   User,
 } from '../../types.ts';
 import { canOnProject, grantedAccess } from '../access.ts';
@@ -140,7 +141,7 @@ function summary(user: User) {
 }
 
 interface MembersResult {
-  members: Array<ReturnType<typeof memberJson>>;
+  members: Array<{ user: ReturnType<typeof summary>; role: ProjectRole; created_at: string }>;
   warnings?: Array<string>;
 }
 

@@ -945,7 +945,9 @@ function okSchemaFacts(overrides: Partial<SelfHostSchemaFacts> = {}): EnvSchemaP
   return { kind: 'ok', facts: { ...NO_SCHEMA_FACTS, ...overrides } };
 }
 
-function emittedVars(vars: Record<string, unknown> = {}): EmittedWorkerVarsResult {
+function emittedVars(
+  vars: Extract<EmittedWorkerVarsResult, { ok: true }>['vars'] = {},
+): EmittedWorkerVarsResult {
   return { ok: true, vars };
 }
 

@@ -531,7 +531,6 @@ describe('uploadAssetBuckets', () => {
     );
 
     for (const call of fetchMock.mock.calls) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const options = (call as any)[1] as { headers: { Authorization: string } };
       expect(options.headers.Authorization).toBe('Bearer session-jwt');
     }

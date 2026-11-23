@@ -23,7 +23,7 @@ import type { StaticPreset } from './preset.ts';
 import { attachSelectedPlatform, shouldLinkDeployProject, writeProjectConfig } from './project.ts';
 import type { ProjectConfig } from './project.ts';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt.ts';
-import type { DeployManifest, QueueMeta, ScheduleMeta } from './types.ts';
+import type { QueueMeta, ScheduleMeta } from './types.ts';
 import {
   readExistingLiveBindingConfig,
   normalizeWranglerCompatibilityFlags,

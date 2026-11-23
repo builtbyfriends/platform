@@ -66,7 +66,7 @@ import type { SelfHostSchemaFacts } from './env-validation.ts';
 import type { CliLogger } from './log-file.ts';
 import { getErrorMessage } from './output.ts';
 import { checkCloudflareProvisionDrift, provisionCloudflareResources } from './provision.ts';
-import type { ComplianceRegion, ProvisionDriftEntry } from './provision.ts';
+import type { ComplianceRegion } from './provision.ts';
 import { sameMigrationsDir, writeProvisionedWranglerConfig } from './wrangler.ts';
 
 /** Validate source-level native deploy inputs before account operations or project code. */

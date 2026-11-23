@@ -2,7 +2,6 @@ import { existsSync, readdirSync } from 'node:fs';
 import { hasStandalonePragma } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { readJournal, stripSqlExt } from './collect.ts';
-import type { DrizzleJournal, DrizzleJournalEntry } from './collect.ts';
 import { DESTRUCTIVE_PRAGMA, getExecutableSql } from './plan.ts';
 
 export type MigrationFile = {

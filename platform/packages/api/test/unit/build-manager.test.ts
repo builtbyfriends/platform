@@ -238,7 +238,6 @@ vi.mock('../../src/github/check-run.ts', async (importOriginal) => ({
   completeCheckRun: vi.fn(async () => false),
 }));
 
-// eslint-disable-next-line import/no-relative-packages -- intentional cross-package contract reference
 import bwfPackageJson from '../../../../../packages/bwf/package.json' with { type: 'json' };
 // Decision: Importing the .mjs only pulls in its exported helpers: the entrypoint guard keeps `main()` from
 // starting the control server on import. Types come from the sibling build-agent.d.mts.

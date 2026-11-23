@@ -289,7 +289,6 @@ const COMPILE_OPTIONS = {
   emailDir: '/e',
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function compile(email: any): string {
   return compileRouteTable(
     {
@@ -303,7 +302,6 @@ function compile(email: any): string {
     '/m',
     '/j',
     '/q',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     COMPILE_OPTIONS,
   );
 }
@@ -338,7 +336,6 @@ function buildEmailDispatcher(
     .replace('export async function __emailHandler', 'async function __emailHandler')
     .replaceAll(/\(\) => import\((".*?")\)/g, '() => __modules[$1]');
 
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
   return new Function('__modules', `${body}\nreturn __emailHandler;`)(modules) as never;
 }
 
@@ -742,7 +739,6 @@ describe('compileWorkerEntry (email)', () => {
     const method = code.match(/ {2}async email\(message\) \{[\s\S]*?\n {2}\}/)?.[0];
     expect(method).toBeDefined();
     const handleEmail = vi.fn(async () => [{ type: 'reject', reason: 'test' }]);
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const entryEmail = new Function(
       '__isForwardableEmailMessage',
       'handleEmail',

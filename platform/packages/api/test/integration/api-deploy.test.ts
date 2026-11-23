@@ -126,7 +126,6 @@ function injectLostGoLiveCommitAcknowledgement(projectId: string): {
   const wrappedDb = new Proxy(realDb, {
     get(target, prop, receiver) {
       if (prop === 'transaction') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return async (fn: any) => {
           const result = await realTransaction(fn);
           if (!injected) {
@@ -5323,7 +5322,6 @@ describe('ambiguous go-live commit outcomes', () => {
     const wrappedDb = new Proxy(realDb, {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) =>
             realTransaction(async (tx) => {
               const result = await fn(tx);

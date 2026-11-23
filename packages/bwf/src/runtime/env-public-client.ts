@@ -12,17 +12,13 @@
  */
 
 type ImportMetaEnvLike = {
-  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
   readonly env?: Record<string, unknown>;
 };
 
-// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
 function getClientEnv(): Record<string, unknown> | undefined {
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- import.meta.env shape is bundler defined
   return (import.meta as ImportMetaEnvLike).env;
 }
 
-// oxlint-disable-next-line quality/no-unknown-returns -- env values are untyped
 function readClientKey(key: string): unknown {
   const meta = getClientEnv();
   if (meta && key in meta) {
@@ -35,42 +31,39 @@ function readClientKey(key: string): unknown {
   );
 }
 
-export const env = new Proxy(
-  {},
-  {
-    get(_target, key) {
-      if (typeof key === 'symbol') {
-        return undefined;
-      }
-      return readClientKey(String(key));
-    },
-    has(_target, key) {
-      if (typeof key !== 'string') {
-        return false;
-      }
-      const meta = getClientEnv();
-      return meta ? key in meta : false;
-    },
-    ownKeys() {
-      const meta = getClientEnv();
-      return meta ? Object.keys(meta) : [];
-    },
-    getOwnPropertyDescriptor(_target, key) {
-      if (typeof key !== 'string') {
-        return undefined;
-      }
-      const meta = getClientEnv();
-      if (!meta || !(key in meta)) {
-        return undefined;
-      }
-      return {
-        enumerable: true,
-        configurable: true,
-        value: meta[key],
-      };
-    },
+export const env = new Proxy({} as Record<string, unknown>, {
+  get(_target, key) {
+    if (typeof key === 'symbol') {
+      return undefined;
+    }
+    return readClientKey(String(key));
   },
-);
+  has(_target, key) {
+    if (typeof key !== 'string') {
+      return false;
+    }
+    const meta = getClientEnv();
+    return meta ? key in meta : false;
+  },
+  ownKeys() {
+    const meta = getClientEnv();
+    return meta ? Object.keys(meta) : [];
+  },
+  getOwnPropertyDescriptor(_target, key) {
+    if (typeof key !== 'string') {
+      return undefined;
+    }
+    const meta = getClientEnv();
+    if (!meta || !(key in meta)) {
+      return undefined;
+    }
+    return {
+      enumerable: true,
+      configurable: true,
+      value: meta[key],
+    };
+  },
+}) as Record<string, unknown>;
 
 /**
  * In client builds `defineEnv` is a no-op identity function — schema

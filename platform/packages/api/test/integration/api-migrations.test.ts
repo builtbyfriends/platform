@@ -4122,7 +4122,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     let aHoldFired = false;
     const originalPut = env.ROUTING.put.bind(env.ROUTING);
     vi.spyOn(env.ROUTING, 'put').mockImplementation(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (key: string, value: any, options?: any) => {
         if (!aHoldFired && key === project.slug) {
           aHoldFired = true;
@@ -4164,7 +4163,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             if (!bHoldFired) {
               bHoldFired = true;
@@ -4260,7 +4258,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             if (!beforeTxHoldFired) {
               beforeTxHoldFired = true;
@@ -4348,7 +4345,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             transactionCount++;
             const rejectsCutover = transactionCount === 2;
@@ -4440,7 +4436,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             transactionCount++;
             if (transactionCount === 3) {
@@ -4521,7 +4516,6 @@ describe('POST /projects/:id/migrations/rename', () => {
     const wrappedDb: Db = new Proxy(realDb, {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           return async (fn: any) => {
             transactionCount++;
             const result = await realTransaction(fn);
