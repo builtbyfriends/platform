@@ -47,6 +47,16 @@ export function createPlatformInstallationSecrets(input: {
   checkpoint?: Record<string, string> | null;
 }): PlatformInstallationSecrets {
   const checkpoint = input.checkpoint ?? {};
+  if (!input.r2AccessKeyId !== !input.r2SecretAccessKey) {
+    const [given, missing] = input.r2AccessKeyId
+      ? ['PLATFORM_R2_ACCESS_KEY_ID', 'PLATFORM_R2_SECRET_ACCESS_KEY']
+      : ['PLATFORM_R2_SECRET_ACCESS_KEY', 'PLATFORM_R2_ACCESS_KEY_ID'];
+    throw new Error(
+      `platform: ${given} is set but ${missing} is not. ` +
+        'Set PLATFORM_R2_ACCESS_KEY_ID and PLATFORM_R2_SECRET_ACCESS_KEY together, ' +
+        'even if only the secret changed.',
+    );
+  }
   const required = (value: string, name: string): string => {
     if (!value) {
       throw new Error(`platform: ${name} is required to install the platform.`);
