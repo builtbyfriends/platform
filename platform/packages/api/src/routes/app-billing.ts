@@ -869,16 +869,20 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       return context.json({ error: 'bad_buyer' }, 400);
     }
     const payer = body.payer ?? body.buyer;
-    // Decision: Buying for someone else, such as a server's wallet, comes later. Buyer and payer are separate fields
-    // now so that's an input change then.
-    if (payer !== body.buyer) {
-      return context.json({ error: 'payer_must_be_buyer' }, 400);
+    if (!isPersonId(payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    if (body.label !== undefined && (typeof body.label !== 'string' || body.label.length > 100)) {
+      return context.json({ error: 'bad_label' }, 400);
     }
     const db = context.get('db');
     const clientId = context.get('billingClient');
     const rules = await creditPurchase(db, clientId);
     if (!rules) {
       return context.json({ error: 'credits_not_sold' }, 400);
+    }
+    if (payer !== body.buyer && !rules.buyForOthers) {
+      return context.json({ error: 'buy_for_others_off' }, 403);
     }
     if (!fitsPurchase(rules, body.amountMicros)) {
       return context.json(
@@ -889,7 +893,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isReturnUrl(body.returnUrl)) {
       return context.json({ error: 'bad_return_url' }, 400);
     }
-    if (await payerBlocked(db, { clientId, payer })) {
+    // Decision: A dispute blocks the person who paid. A blocked wallet with a clean buyer may still be bought for,
+    // since that settles what it owes.
+    if (await payerBlocked(db, { clientId, payer: body.buyer })) {
       return context.json({ error: 'blocked' }, 403);
     }
     const livemode = stripeLiveMode(context.env);
@@ -915,6 +921,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         email: typeof body.email === 'string' ? body.email : null,
         saveCard: body.saveCard === true,
         returnUrl: body.returnUrl,
+        label: body.label ?? null,
       });
       return context.json({ data: { url } });
     } catch (error) {
@@ -937,12 +944,15 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       return context.json({ data: { autoTopUp: await autoTopUpStatus(db, payer) } });
     }
     const buyer = body.buyer ?? body.payer;
-    if (buyer !== body.payer) {
-      return context.json({ error: 'payer_must_be_buyer' }, 400);
+    if (!isPersonId(buyer)) {
+      return context.json({ error: 'bad_buyer' }, 400);
     }
     const rules = await creditPurchase(db, clientId);
     if (!rules) {
       return context.json({ error: 'credits_not_sold' }, 400);
+    }
+    if (buyer !== body.payer && !rules.buyForOthers) {
+      return context.json({ error: 'buy_for_others_off' }, 403);
     }
     if (!fitsPurchase(rules, body.amountMicros)) {
       return context.json(
@@ -956,7 +966,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (body.monthlyLimitMicros < body.amountMicros) {
       return context.json({ error: 'limit_under_amount' }, 400);
     }
-    if (await payerBlocked(db, payer)) {
+    if (await payerBlocked(db, { clientId, payer: buyer })) {
       return context.json({ error: 'blocked' }, 403);
     }
     // Decision: Auto top-up charges a card saved by a credits Checkout with saveCard, so the buyer agreed to

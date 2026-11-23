@@ -52,6 +52,7 @@ type StripeObject = {
   payment_status?: string;
   mode?: string;
   amount_subtotal?: number;
+  customer_details?: { address?: { country?: string | null; state?: string | null } | null } | null;
   last_payment_error?: { code?: string } | null;
   status?: string;
   amount?: number;
@@ -222,7 +223,7 @@ function takeBack(tx: Tx, event: StripeEvent) {
   return object.status === 'won' ? restoreDisputedGrant(tx, paymentIntentId) : null;
 }
 
-/** A dispute ends the payer's subscription, so no more invoices are charged to the disputed card. */
+/** A dispute ends the buyer's subscription, so no more invoices are charged to the disputed card. */
 async function cancelDisputed(
   context: Context<ApiEnv>,
   payer: { clientId: string; payer: string },
@@ -435,6 +436,8 @@ async function applyCreditEvent(
       amountMicros,
       livemode: event.livemode,
       giverId: metadata.buyerId,
+      billingCountry: object.customer_details?.address?.country ?? null,
+      billingState: object.customer_details?.address?.state ?? null,
       stripePaymentIntentId: paymentIntentId,
       expiresAt: boughtUntil(new Date(), Number(metadata.lifeDays)),
     });
@@ -518,8 +521,8 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     if (!outcome) {
       return context.json({ ok: true, ignored: true });
     }
-    if (event.type === 'charge.dispute.created') {
-      await cancelDisputed(context, outcome);
+    if ('buyer' in outcome && typeof outcome.buyer === 'string') {
+      await cancelDisputed(context, { clientId: outcome.clientId, payer: outcome.buyer });
     }
     await applyCredits(context.env, db, outcome.clientId, outcome.payer);
     return context.json({ ok: true });

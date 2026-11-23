@@ -122,7 +122,7 @@ app.post('/:id/plans', async (context) => {
   if (purchaseText && !creditPurchase) {
     throw new OAuthError(
       'invalid_request',
-      'Give credit sales a minMicros and stepMicros in whole cents, and lifeDays, each above 0.',
+      'Give credit sales a minMicros and stepMicros in whole cents, and lifeDays, each above 0. buyForOthers is true or false.',
     );
   }
   const input = {

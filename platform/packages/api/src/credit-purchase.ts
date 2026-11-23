@@ -6,7 +6,13 @@ import {
   stripeLiveMode,
   type StripeEnv,
 } from './billing/stripe.ts';
-import { creditBalance, grantCredits, lockPayer, type Payer } from './credit-ledger.ts';
+import {
+  creditBalance,
+  grantCredits,
+  lockPayer,
+  payerBlocked,
+  type Payer,
+} from './credit-ledger.ts';
 import type { Db, DbOrTx } from './db.ts';
 import {
   appBuyers,
@@ -31,11 +37,17 @@ export function parseCreditPurchase(value: unknown): CreditPurchase | null {
     !isCount(rules.stepMicros) ||
     !isCount(rules.lifeDays) ||
     rules.minMicros % MICROS_PER_CENT !== 0 ||
-    rules.stepMicros % MICROS_PER_CENT !== 0
+    rules.stepMicros % MICROS_PER_CENT !== 0 ||
+    (rules.buyForOthers !== undefined && typeof rules.buyForOthers !== 'boolean')
   ) {
     return null;
   }
-  return { minMicros: rules.minMicros, stepMicros: rules.stepMicros, lifeDays: rules.lifeDays };
+  return {
+    minMicros: rules.minMicros,
+    stepMicros: rules.stepMicros,
+    lifeDays: rules.lifeDays,
+    ...(rules.buyForOthers ? { buyForOthers: true } : {}),
+  };
 }
 
 /** How the application sells credits, or null when it doesn't. */
@@ -241,8 +253,12 @@ export async function topUpIfLow(
       creditPurchase(tx, payer.clientId),
       buyerOf(tx, payer.clientId, settings.buyer, livemode),
     ]);
-    if (row.blocked_at) {
+    // Decision: A dispute blocks the person who paid, so their card stops topping up any wallet.
+    if (await payerBlocked(tx, { clientId: payer.clientId, payer: settings.buyer })) {
       return off('blocked');
+    }
+    if (settings.buyer !== payer.payer && !rules?.buyForOthers) {
+      return off('buy_for_others_off');
     }
     if (!rules) {
       return off('not_sold');

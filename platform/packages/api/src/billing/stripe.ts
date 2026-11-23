@@ -122,6 +122,7 @@ export async function createCreditCheckoutSession(
     email: string | null;
     saveCard: boolean;
     returnUrl: string;
+    label?: string | null;
   },
   fetcher: typeof fetch = fetch,
 ): Promise<string> {
@@ -130,7 +131,7 @@ export async function createCreditCheckoutSession(
     'line_items[0][quantity]': '1',
     'line_items[0][price_data][currency]': 'usd',
     'line_items[0][price_data][unit_amount]': String(input.amountMicros / MICROS_PER_CENT),
-    'line_items[0][price_data][product_data][name]': 'Credits',
+    'line_items[0][price_data][product_data][name]': input.label || 'Credits',
     success_url: input.returnUrl,
     cancel_url: input.returnUrl,
   });

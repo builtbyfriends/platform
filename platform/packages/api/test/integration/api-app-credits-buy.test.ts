@@ -186,7 +186,7 @@ describe('buying credits', () => {
     expect((await call('/credits.checkout', order(40 * DOLLAR))).status).toBe(200);
     expect(
       await (await call('/credits.checkout', order(20 * DOLLAR, { payer: 'p2' }))).json(),
-    ).toEqual({ error: 'payer_must_be_buyer' });
+    ).toEqual({ error: 'buy_for_others_off' });
   });
 
   it('sells nothing when the operator set no credit sales', async () => {

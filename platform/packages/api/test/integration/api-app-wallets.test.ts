@@ -12,7 +12,7 @@ import {
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
-import { oauthClients } from '../../src/schema.ts';
+import { appBuyers, appCreditGrants, appPayers, oauthClients } from '../../src/schema.ts';
 import {
   captureQueries,
   clearTables,
@@ -55,6 +55,79 @@ type Status = {
 const status = async (person: string) =>
   rpcData<Status>(await (await call('/usage.status', { person })).json());
 
+async function webhook(event: object) {
+  const body = JSON.stringify({ id: 'evt_' + crypto.randomUUID(), livemode: false, ...event });
+  const t = Math.floor(Date.now() / 1000);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode('whsec_test'),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${body}`));
+  const v1 = Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
+  return app.fetch(
+    new Request(origin + '/billing/stripe', {
+      method: 'POST',
+      headers: { 'stripe-signature': `t=${t},v1=${v1}` },
+      body,
+    }),
+    env,
+    ctx,
+  );
+}
+
+const paid = (buyer: string, payer: string, cents: number, extra: Record<string, string> = {}) => {
+  const paymentIntent = 'pi_' + crypto.randomUUID();
+  return {
+    paymentIntent,
+    event: {
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_' + crypto.randomUUID(),
+          mode: 'payment',
+          payment_status: 'paid',
+          amount_subtotal: cents,
+          amount_total: cents,
+          customer: 'cus_' + buyer,
+          customer_details: { address: { country: 'US', state: 'CA' } },
+          payment_intent: paymentIntent,
+          metadata: {
+            kind: 'credits',
+            clientId: registration.client.id,
+            buyerId: buyer,
+            payerId: payer,
+            lifeDays: '365',
+            saveCard: 'false',
+            ...extra,
+          },
+        },
+      },
+    },
+  };
+};
+
+const dispute = (paymentIntent: string) =>
+  webhook({
+    type: 'charge.dispute.created',
+    data: { object: { payment_intent: paymentIntent, amount: 2000, status: 'needs_response' } },
+  });
+
+const buyForOthers = (on: boolean) =>
+  env.db
+    .update(oauthClients)
+    .set({
+      credit_purchase: {
+        minMicros: 20 * DOLLAR,
+        stepMicros: 20 * DOLLAR,
+        lifeDays: 365,
+        buyForOthers: on,
+      },
+    })
+    .where(eq(oauthClients.id, registration.client.id));
+
 const give = (payer: string, amountMicros: number) =>
   grantCredits(env.db, {
     clientId: registration.client.id,
@@ -89,7 +162,14 @@ describe('wallets', () => {
       .where(eq(oauthClients.id, registration.client.id));
     calls = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      calls.push({ url: String(input), init });
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/v1/payment_intents')) {
+        return Response.json({ id: 'pi_top_' + calls.length, status: 'succeeded' });
+      }
+      if (url.includes('/v1/payment_intents/')) {
+        return Response.json({ id: 'pi_x', payment_method: 'pm_' + url.split('/').at(-1) });
+      }
       return Response.json({ url: 'https://stripe.example/session' });
     });
   });
@@ -225,6 +305,99 @@ describe('wallets', () => {
         payer: 'ben',
         wallets: [{ payer: 'ben', balanceMicros: null, personUsedMicros: 0 }],
       });
+    });
+  });
+
+  describe('buying for a wallet', () => {
+    const order = (buyer: string, payer: string, extra: object = {}) => ({
+      buyer,
+      payer,
+      amountMicros: 20 * DOLLAR,
+      returnUrl: 'https://example.com/credits',
+      ...extra,
+    });
+    const lastCheckout = () =>
+      new URLSearchParams(
+        String(calls.filter((c) => c.url.includes('checkout')).at(-1)!.init!.body),
+      );
+
+    beforeEach(async () => {
+      await call('/wallets.open', { payer: 'server:1' });
+    });
+
+    it('is off until the operator turns it on', async () => {
+      const answer = await call('/credits.checkout', order('ana', 'server:1'));
+      expect(answer.status).toBe(403);
+      expect(await answer.json()).toEqual({ error: 'buy_for_others_off' });
+    });
+
+    it('grants a purchase to the wallet with the buyer as giver, and keeps each buyer’s customer', async () => {
+      await buyForOthers(true);
+      const label = 'Credits for the Design server';
+      expect((await call('/credits.checkout', order('ana', 'server:1', { label }))).status).toBe(
+        200,
+      );
+      expect(lastCheckout().get('metadata[payerId]')).toBe('server:1');
+      expect(lastCheckout().get('metadata[buyerId]')).toBe('ana');
+      expect(lastCheckout().get('line_items[0][price_data][product_data][name]')).toBe(label);
+      await webhook(paid('ana', 'server:1', 2000).event);
+      await webhook(paid('ben', 'server:1', 2000).event);
+      const grants = await env.db.select().from(appCreditGrants);
+      expect(
+        grants.map((grant) => [grant.payer_id, grant.giver_id, grant.billing_country]),
+      ).toEqual(
+        expect.arrayContaining([
+          ['server:1', 'ana', 'US'],
+          ['server:1', 'ben', 'US'],
+        ]),
+      );
+      expect((await status('server:1')).credits?.balanceMicros).toBe(40 * DOLLAR);
+      const buyers = await env.db.select().from(appBuyers);
+      expect(buyers.map((buyer) => [buyer.buyer_id, buyer.stripe_customer_id]).sort()).toEqual([
+        ['ana', 'cus_ana'],
+        ['ben', 'cus_ben'],
+      ]);
+    });
+
+    it('blocks the buyer on a dispute, and the wallet works again once its owed is settled', async () => {
+      await buyForOthers(true);
+      const gift = paid('ana', 'server:1', 2000);
+      await webhook(gift.event);
+      await call('/usage.record', { person: 'server:1', aiNeurons: 500_000 });
+      await dispute(gift.paymentIntent);
+      const rows = await env.db.select().from(appPayers);
+      expect(rows.find((row) => row.payer_id === 'ana')?.blocked_reason).toBe('dispute');
+      expect(rows.find((row) => row.payer_id === 'server:1')?.blocked_at).toBeNull();
+      expect((await status('server:1')).credits).toMatchObject({ balanceMicros: -5_500_000 });
+      expect(await (await call('/credits.checkout', order('ana', 'server:1'))).json()).toEqual({
+        error: 'blocked',
+      });
+      expect((await call('/credits.checkout', order('ben', 'server:1'))).status).toBe(200);
+      await webhook(paid('ben', 'server:1', 2000).event);
+      expect((await status('server:1')).credits).toMatchObject({
+        balanceMicros: 14_500_000,
+        out: false,
+      });
+    });
+
+    it('charges the card of the person who set up auto top-up on a wallet', async () => {
+      await buyForOthers(true);
+      await webhook(paid('ana', 'server:1', 2000, { saveCard: 'true' }).event);
+      const settings = {
+        payer: 'server:1',
+        buyer: 'ana',
+        thresholdMicros: 5 * DOLLAR,
+        amountMicros: 20 * DOLLAR,
+        monthlyLimitMicros: 40 * DOLLAR,
+      };
+      expect((await call('/credits.autoTopUp', settings)).status).toBe(200);
+      await call('/usage.record', { person: 'server:1', aiNeurons: 1_500_000 });
+      const charge = calls.find((c) => c.url.endsWith('/v1/payment_intents'));
+      const form = new URLSearchParams(String(charge!.init!.body));
+      expect(form.get('customer')).toBe('cus_ana');
+      expect(form.get('metadata[payerId]')).toBe('server:1');
+      expect(form.get('metadata[buyerId]')).toBe('ana');
+      expect((await status('server:1')).credits?.balanceMicros).toBe(23_500_000);
     });
   });
 });

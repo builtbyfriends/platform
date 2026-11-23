@@ -228,7 +228,16 @@ export const appWalletUse = pgTable(
   ],
 );
 
-export type CreditPurchase = { minMicros: number; stepMicros: number; lifeDays: number };
+/**
+ * How an application sells credits. `buyForOthers` lets a person buy for, or top up, a payer other than
+ * themselves, such as a shared wallet. It's off unless the operator turns it on.
+ */
+export type CreditPurchase = {
+  minMicros: number;
+  stepMicros: number;
+  lifeDays: number;
+  buyForOthers?: boolean;
+};
 
 /** The payer's auto top-up: who pays for it, the balance that starts a charge, its size, and the most it charges in a calendar month. */
 export type AutoTopUp = {
@@ -264,6 +273,9 @@ export const appCreditGrants = pgTable(
       .default(0),
     voided_owed_micros: bigint('voided_owed_micros', { mode: 'number' }).notNull().default(0),
     giver_id: text('giver_id'),
+    /** Where the buyer's billing address was, from Checkout, so sales tax can be worked out later. */
+    billing_country: text('billing_country'),
+    billing_state: text('billing_state'),
     /** Why an operator gave the grant. */
     note: text('note'),
     stripe_invoice_id: text('stripe_invoice_id'),

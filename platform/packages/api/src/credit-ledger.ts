@@ -117,6 +117,8 @@ export type NewGrant = Payer & {
   amountMicros: number;
   livemode: boolean;
   giverId?: string | null;
+  billingCountry?: string | null;
+  billingState?: string | null;
   note?: string | null;
   stripeInvoiceId?: string | null;
   stripePaymentIntentId?: string | null;
@@ -142,6 +144,8 @@ export async function grantCredits(db: DbOrTx, grant: NewGrant, now = new Date()
         amount_micros: grant.amountMicros,
         remaining_micros: grant.amountMicros - settled,
         giver_id: grant.giverId ?? null,
+        billing_country: grant.billingCountry ?? null,
+        billing_state: grant.billingState ?? null,
         note: grant.note ?? null,
         stripe_invoice_id: grant.stripeInvoiceId ?? null,
         stripe_payment_intent_id: grant.stripePaymentIntentId ?? null,
@@ -338,14 +342,15 @@ export async function refundGrant(
 }
 
 /**
- * A card dispute takes back the whole grant. What was already spent becomes owed, so the balance
- * can go below zero, and the payer is blocked from buying until an operator clears it.
+ * A card dispute takes back the whole grant. What was already spent becomes owed by the payer, so the
+ * balance can go below zero. The buyer who paid is blocked from buying until an operator clears it,
+ * and `buyer` in the answer names them.
  */
 export async function disputeGrant(
   tx: Tx,
   paymentIntentId: string,
   now = new Date(),
-): Promise<Payer | null> {
+): Promise<(Payer & { buyer: string }) | null> {
   const grant = await grantByPayment(tx, paymentIntentId);
   if (!grant || grant.voided_at) {
     return null;
@@ -365,13 +370,22 @@ export async function disputeGrant(
     .where(eq(appCreditGrants.id, grant.id));
   await tx
     .update(appPayers)
+    .set({ owed_micros: row.owed_micros + spent })
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  const buyer = grant.giver_id ?? grant.payer_id;
+  await blockPayer(tx, { clientId: grant.client_id, payer: buyer }, now);
+  return { ...payer, buyer };
+}
+
+async function blockPayer(tx: Tx, payer: Payer, now: Date) {
+  const row = await lockPayer(tx, payer);
+  await tx
+    .update(appPayers)
     .set({
-      owed_micros: row.owed_micros + spent,
       blocked_at: row.blocked_at ?? now.toISOString(),
       blocked_reason: row.blocked_reason ?? 'dispute',
     })
     .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
-  return payer;
 }
 
 /**
