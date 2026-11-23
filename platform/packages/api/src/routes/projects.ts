@@ -874,7 +874,7 @@ const app = new Hono<ApiEnv>()
               } else {
                 await context.env.ROUTING.put(
                   key,
-                  key === lockedProject.slug || key.startsWith('domain:')
+                  key === projectRouteKey(lockedProject) || key.startsWith('domain:')
                     ? withProjectZeroTrustRouting(undo.value, currentZeroTrust, lockedProject.id)
                     : undo.value,
                 );
