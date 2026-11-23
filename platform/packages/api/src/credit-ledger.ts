@@ -124,6 +124,7 @@ export type NewGrant = Payer & {
   billingState?: string | null;
   note?: string | null;
   stripeInvoiceId?: string | null;
+  unpaid?: boolean;
   stripePaymentIntentId?: string | null;
   /** Which month of a longer paid period the grant is, so one payment can bring one grant a month. */
   monthIndex?: number;
@@ -164,6 +165,7 @@ export async function grantCredits(
         billing_state: grant.billingState ?? null,
         note: grant.note ?? null,
         stripe_invoice_id: grant.stripeInvoiceId ?? null,
+        unpaid: grant.unpaid ?? false,
         stripe_payment_intent_id: grant.stripePaymentIntentId ?? null,
         month_index: grant.monthIndex ?? 0,
         livemode: grant.livemode,
@@ -795,4 +797,80 @@ export async function forgetPayer(db: DbOrTx, payer: Payer, now = new Date()): P
           .where(same)
       : tx.delete(appPayers).where(same));
   });
+}
+
+/** The grant a credit block's invoice brought. */
+async function invoiceGrant(tx: Tx, payer: Payer, invoiceId: string) {
+  const [grant] = await tx
+    .select()
+    .from(appCreditGrants)
+    .where(
+      and(
+        payerGrants(payer),
+        eq(appCreditGrants.source, 'invoice'),
+        eq(appCreditGrants.stripe_invoice_id, invoiceId),
+      ),
+    )
+    .for('update');
+  return grant;
+}
+
+/**
+ * A paid credit block invoice. A grant given early is marked paid. Otherwise the block is granted now,
+ * once per invoice. Answers true when the ledger changed.
+ */
+export async function payInvoiceGrant(
+  tx: Tx,
+  grant: NewGrant & { stripeInvoiceId: string },
+  now = new Date(),
+): Promise<boolean> {
+  const early = await invoiceGrant(tx, grant, grant.stripeInvoiceId);
+  if (!early) {
+    return Boolean(await grantCredits(tx, { ...grant, source: 'invoice' }, now));
+  }
+  if (!early.unpaid || early.voided_at) {
+    return false;
+  }
+  await tx
+    .update(appCreditGrants)
+    .set({
+      unpaid: false,
+      stripe_payment_intent_id: grant.stripePaymentIntentId ?? early.stripe_payment_intent_id,
+    })
+    .where(eq(appCreditGrants.id, early.id));
+  return true;
+}
+
+/**
+ * A voided or uncollectible credit block invoice takes back a grant given before it was paid. What was
+ * already spent becomes owed, as with a dispute. A paid grant is left alone.
+ */
+export async function voidInvoiceGrant(
+  tx: Tx,
+  payer: Payer,
+  invoiceId: string,
+  reason: 'invoice_voided' | 'invoice_uncollectible',
+  now = new Date(),
+): Promise<boolean> {
+  const row = await lockPayer(tx, payer);
+  const grant = await invoiceGrant(tx, payer, invoiceId);
+  if (!grant?.unpaid || grant.voided_at) {
+    return false;
+  }
+  const spent = spentOf(grant);
+  await tx
+    .update(appCreditGrants)
+    .set({
+      remaining_micros: 0,
+      voided_at: now.toISOString(),
+      void_reason: reason,
+      voided_remaining_micros: grant.remaining_micros,
+      voided_owed_micros: spent,
+    })
+    .where(eq(appCreditGrants.id, grant.id));
+  await tx
+    .update(appPayers)
+    .set({ owed_micros: row.owed_micros + spent })
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return true;
 }

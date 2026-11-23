@@ -1,0 +1,36 @@
+name: Back Up Platform Database
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: platform-backup
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  backup:
+    if: ${{ vars.PLATFORM_BACKUP_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: Backup
+    steps:
+      - name: Dump the database and upload it to the backup bucket
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ vars.BACKUP_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.BACKUP_R2_BUCKET }}
+          POSTGRES_IMAGE: postgres:${{ vars.BACKUP_POSTGRES_VERSION || '17' }}
+        run: |
+          set -euo pipefail
+          name="platform-$(date -u +%Y-%m-%dT%H%M%SZ).dump"
+          docker run --rm -e DATABASE_URL -v "$PWD:/out" "$POSTGRES_IMAGE" \
+            sh -c 'pg_dump --format=custom --no-owner --file="/out/$0" "$DATABASE_URL"' "$name"
+          test -s "$name"
+          aws s3 cp "$name" "s3://$BUCKET/$name" --endpoint-url "$ENDPOINT"
+          echo "Uploaded $name ($(du -h "$name" | cut -f1))" >> "$GITHUB_STEP_SUMMARY"

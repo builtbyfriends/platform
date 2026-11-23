@@ -194,6 +194,22 @@ export const operatorCommands: Array<OperatorCommand> = [
   },
   {
     group: 'person',
+    action: 'invoice',
+    description: 'Send a Stripe invoice for a block of credits',
+    path: '/oauth/clients/:client/people/:person/invoices',
+    positional: ['client', 'person'],
+    values: {
+      dollars: 'Amount in dollars',
+      expires: "Date the credits end (ISO), such as the contract's end",
+      email: 'Billing contact the invoice goes to',
+      days: 'Days to pay, 30 by default',
+      early: 'yes to grant the credits now, marked unpaid',
+      note: 'Why, kept with the grant',
+    },
+    method: 'POST',
+  },
+  {
+    group: 'person',
     action: 'refund',
     description: 'Refund the payment behind a grant through Stripe',
     path: '/oauth/clients/:client/people/:person/refunds',

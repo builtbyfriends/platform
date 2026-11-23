@@ -24,8 +24,10 @@ import {
   disputeGrant,
   grantCredits,
   payerBlocked,
+  payInvoiceGrant,
   refundGrant,
   restoreDisputedGrant,
+  voidInvoiceGrant,
 } from '../credit-ledger.ts';
 import {
   boughtEvent,
@@ -624,6 +626,60 @@ async function applyCreditEvent(
   return null;
 }
 
+const CREDIT_BLOCK_EVENTS = new Set([
+  'invoice.paid',
+  'invoice.voided',
+  'invoice.marked_uncollectible',
+]);
+
+/**
+ * A credit block invoice an operator sent. Stripe sends invoice.paid only once the whole amount is in,
+ * so a partial bank transfer grants nothing until the rest arrives. Answers true when the ledger changed.
+ */
+async function applyCreditBlockEvent(
+  tx: Tx,
+  event: StripeEvent,
+  metadata: Metadata,
+  paymentIntentId: string | null,
+): Promise<boolean> {
+  const invoiceId = event.data.object.id;
+  const payer = { clientId: metadata.clientId ?? '', payer: metadata.payerId ?? '' };
+  if (!invoiceId || !payer.clientId || !payer.payer) {
+    return false;
+  }
+  if (event.type === 'invoice.paid') {
+    const amountMicros = Number(metadata.amountMicros);
+    const expiresAt = new Date(metadata.expiresAt ?? NaN);
+    if (
+      !Number.isSafeInteger(amountMicros) ||
+      amountMicros <= 0 ||
+      Number.isNaN(expiresAt.getTime())
+    ) {
+      console.error('[credits] credit block invoice without an amount or end date', {
+        id: event.id,
+      });
+      return false;
+    }
+    return payInvoiceGrant(tx, {
+      ...payer,
+      source: 'invoice',
+      amountMicros,
+      livemode: event.livemode,
+      giverId: metadata.giverId ?? null,
+      note: metadata.note ?? null,
+      stripeInvoiceId: invoiceId,
+      stripePaymentIntentId: paymentIntentId,
+      expiresAt,
+    });
+  }
+  return voidInvoiceGrant(
+    tx,
+    payer,
+    invoiceId,
+    event.type === 'invoice.voided' ? 'invoice_voided' : 'invoice_uncollectible',
+  );
+}
+
 /**
  * Stripe tells the platform when a subscription starts or ends, and the account's plan follows.
  * Plan limits, usage counters and suspension are the platform's own, so nothing else changes here.
@@ -681,6 +737,24 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
       await applyCredits(context.env, db, clientId, payer);
     }
     return context.json({ ok: true });
+  }
+
+  if (metadata.kind === 'credit_block' && CREDIT_BLOCK_EVENTS.has(event.type)) {
+    const paymentIntentId =
+      event.type === 'invoice.paid' ? await paidBy(context, event.data.object) : null;
+    const outcome = await db.transaction(async (tx) => {
+      const fresh = await tx.insert(stripeEvents).values(seen).onConflictDoNothing().returning();
+      return fresh.length === 0
+        ? ('duplicate' as const)
+        : applyCreditBlockEvent(tx, event, metadata, paymentIntentId);
+    });
+    if (outcome === 'duplicate') {
+      return context.json({ ok: true, duplicate: true });
+    }
+    if (outcome) {
+      await applyCredits(context.env, db, metadata.clientId!, metadata.payerId!);
+    }
+    return context.json(outcome ? { ok: true } : { ok: true, ignored: true });
   }
 
   if (isCreditMetadata(metadata)) {

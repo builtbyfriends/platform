@@ -264,7 +264,7 @@ export type AutoTopUp = {
   monthlyLimitMicros: number;
 };
 
-export type CreditSource = 'plan' | 'bought' | 'given' | 'starter' | 'moved';
+export type CreditSource = 'plan' | 'bought' | 'given' | 'starter' | 'moved' | 'invoice';
 
 /**
  * One grant of credits to a payer of a connected application. The balance is what's left on
@@ -301,6 +301,8 @@ export const appCreditGrants = pgTable(
     /** Why an operator gave the grant. */
     note: text('note'),
     stripe_invoice_id: text('stripe_invoice_id'),
+    /** An invoice grant given before its invoice was paid. A voided invoice takes it back. */
+    unpaid: boolean('unpaid').notNull().default(false),
     stripe_payment_intent_id: text('stripe_payment_intent_id'),
     /** Which month of a longer paid period, such as a year, the grant is. 0 for a grant that isn't one. */
     month_index: integer('month_index').notNull().default(0),

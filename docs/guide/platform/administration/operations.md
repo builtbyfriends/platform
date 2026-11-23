@@ -69,7 +69,26 @@ Use `bwf platform upgrade`, `repair`, `disable`, and `enable` to maintain your p
 
 During an upgrade or rollback, the admin UI shows progress at `/admin/status`. See [Follow upgrade and rollback progress](/guide/platform/installation/maintenance#follow-upgrade-and-rollback-progress).
 
-For backups and restores, see [Prepare for disaster recovery](/guide/platform/installation/maintenance#prepare-for-disaster-recovery).
+For backups and restores, see [Back up and restore](/guide/platform/installation/maintenance#back-up-and-restore).
+
+### Public status page {#status-page}
+
+A status page tells the people who use your apps about an outage before they have to ask. Host it with a status page service, such as Better Stack or Instatus, rather than on the platform, so it stays up when the platform is down.
+
+Add these checks, each every minute or two:
+
+| Check        | Address                                    | Healthy when                                     |
+| ------------ | ------------------------------------------ | ------------------------------------------------ |
+| API          | `https://<api-host>/health`                | HTTP 200. It also checks the platform's database |
+| Discovery    | `https://<api-host>/.well-known/platform`  | HTTP 200                                         |
+| Hosted apps  | An address of a small app you deploy on it | HTTP 200                                         |
+| Your own app | Its public address                         | HTTP 200                                         |
+
+`/health` answers 503 while the platform is disabled or an upgrade has paused traffic, so planned maintenance shows on the page too. Post a maintenance notice before an upgrade to say why.
+
+When Cloudflare Access protects the API, `/health` needs a service token. Create an Access service token for the monitor, add it to the API application's service policy, and have the check send its `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers. `/.well-known/platform` stays open.
+
+Use the service's incident posts to say what's affected, what you're doing about it, and when you'll post next.
 
 ## Using Scripts
 

@@ -136,11 +136,12 @@ Give credits, refund a payment, or clear a dispute block:
 
 ```sh
 bwf platform person grant <client-id> <person-id> --dollars <amount> [--expires <date>] [--note <text>]
+bwf platform person invoice <client-id> <person-id> --dollars <amount> --expires <date> --email <address> [--days <n>] [--early yes] [--note <text>]
 bwf platform person refund <client-id> <person-id> <grant-id> [--dollars <amount>]
 bwf platform person unblock <client-id> <person-id>
 ```
 
-Each one shows a preview first. A grant is added to the person's balance at once, with you recorded as the giver. Credits without `--expires` don't end. A refund goes to the payment behind the grant you name, and by default it's the share of that payment the person hasn't spent. Stripe sends the refund, and the credits come off the balance when Stripe's refund event reaches the platform, usually within a few seconds. A card dispute blocks a person from buying until you clear it with `unblock`. Grants, refunds and unblocks are kept in the audit log.
+Each one shows a preview first. A grant is added to the person's balance at once, with you recorded as the giver. Credits without `--expires` don't end. A refund goes to the payment behind the grant you name, and by default it's the share of that payment the person hasn't spent. Stripe sends the refund, and the credits come off the balance when Stripe's refund event reaches the platform, usually within a few seconds. `invoice` sends a Stripe invoice for a block of credits that last until `--expires`, and grants them when it's paid. With `--early yes` it grants them now, marked unpaid, and a voided invoice takes them back. See [Sell a block of credits by invoice](../../guide/platform/administration/connected-apps.md#credit-block-invoice). A card dispute blocks a person from buying until you clear it with `unblock`. Grants, refunds and unblocks are kept in the audit log.
 
 ## Signup Access {#operator-signup}
 

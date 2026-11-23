@@ -324,3 +324,166 @@ describe('admin pages for an app’s people', () => {
     expect(refused.status).toBe(400);
   });
 });
+
+describe('credit block invoices', () => {
+  const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+  let metadata: Record<string, string>;
+  let posts: Array<{ url: string; body: URLSearchParams; key: string | null }>;
+
+  async function webhook(
+    type: string,
+    object: Record<string, unknown>,
+    id: string = crypto.randomUUID(),
+  ) {
+    const body = JSON.stringify({ id: `evt_${id}`, type, livemode: false, data: { object } });
+    const t = Math.floor(Date.now() / 1000);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode('whsec_test'),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${body}`));
+    const v1 = Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, '0')).join('');
+    return json(
+      app.fetch(
+        new Request('https://api.example.com/billing/stripe', {
+          method: 'POST',
+          headers: { 'stripe-signature': `t=${t},v1=${v1}` },
+          body,
+        }),
+        { ...env, STRIPE_WEBHOOK_SECRET: 'whsec_test', USAGE_COUNTER: counter },
+        ctx,
+      ),
+    );
+  }
+
+  const invoice = (extra: Record<string, unknown> = {}) => ({
+    id: 'in_b',
+    metadata,
+    payment_intent: 'pi_b',
+    amount_paid: 1_000_000,
+    ...extra,
+  });
+
+  const grants = () =>
+    env.db.select().from(appCreditGrants).where(eq(appCreditGrants.payer_id, 'team-wallet'));
+
+  beforeEach(() => {
+    posts = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = new URLSearchParams(String(init?.body ?? ''));
+      posts.push({ url, body, key: new Headers(init?.headers).get('idempotency-key') });
+      if (url.endsWith('/v1/invoices')) {
+        metadata = Object.fromEntries(
+          [...body]
+            .filter(([name]) => name.startsWith('metadata['))
+            .map(([name, value]) => [name.slice(9, -1), value]),
+        );
+      }
+      return Response.json(
+        url.endsWith('/v1/customers')
+          ? { id: 'cus_b' }
+          : url.endsWith('/v1/invoices')
+            ? { id: 'in_b' }
+            : url.endsWith('/send')
+              ? { hosted_invoice_url: 'https://invoice.stripe.com/b' }
+              : {},
+      );
+    });
+  });
+
+  const path = () => `${client.client.id}/people/team-wallet/invoices`;
+  const block = { dollars: '10000', expires: '2099-11-30', email: 'ap@example.com' };
+
+  test('sends a bank transfer invoice and grants the block once when it is paid', async () => {
+    expect((await operator(path(), { ...block, expires: '' })).status).toBe(400);
+    expect((await operator(path(), { ...block, email: 'nope' })).status).toBe(400);
+    expect(await json(operator(path(), { ...block, dryRun: true }))).toMatchObject({
+      dryRun: true,
+      early: false,
+      balanceAfterMicros: 0,
+    });
+    expect(posts).toEqual([]);
+
+    const sent = await json(operator(path(), block));
+    expect(sent).toMatchObject({
+      invoice: 'in_b',
+      invoiceUrl: 'https://invoice.stripe.com/b',
+      grantId: null,
+    });
+    expect(posts.map((post) => post.url.replace('https://api.stripe.com/v1/', ''))).toEqual([
+      'customers',
+      'invoices',
+      'invoiceitems',
+      'invoices/in_b/finalize',
+      'invoices/in_b/send',
+    ]);
+    expect(posts[1]!.body.get('payment_settings[payment_method_types][0]')).toBe(
+      'customer_balance',
+    );
+    expect(posts[1]!.body.get('collection_method')).toBe('send_invoice');
+    expect(posts[2]!.body.get('amount')).toBe('1000000');
+    expect(new Set(posts.map((post) => post.key)).size).toBe(5);
+    expect(metadata).toMatchObject({ kind: 'credit_block', payerId: 'team-wallet' });
+    expect(await grants()).toEqual([]);
+
+    expect(await webhook('invoice.paid', invoice(), 'paid')).toEqual({ ok: true });
+    expect(await webhook('invoice.paid', invoice(), 'paid')).toMatchObject({ duplicate: true });
+    expect(await webhook('invoice.paid', invoice())).toMatchObject({ ignored: true });
+    expect(await grants()).toEqual([
+      expect.objectContaining({
+        source: 'invoice',
+        amount_micros: 10_000_000_000,
+        stripe_invoice_id: 'in_b',
+        stripe_payment_intent_id: 'pi_b',
+        unpaid: false,
+        giver_id: `operator:${login}`,
+        expires_at: '2099-11-30 00:00:00+00',
+      }),
+    ]);
+    expect(await webhook('invoice.voided', invoice())).toMatchObject({ ignored: true });
+    expect((await grants())[0]).toMatchObject({ voided_at: null });
+
+    const person = await json(operator(`${client.client.id}/people/team-wallet`));
+    expect(person.grants).toEqual([
+      expect.objectContaining({ source: 'invoice', invoice: 'in_b', unpaid: false }),
+    ]);
+  });
+
+  test('grants early, marks it paid, or takes it back when the invoice is voided', async () => {
+    const sent = await json(operator(path(), { ...block, early: 'yes' }));
+    expect(sent.grantId).toEqual(expect.any(String));
+    expect(await grants()).toEqual([expect.objectContaining({ unpaid: true })]);
+
+    await env.db
+      .update(appCreditGrants)
+      .set({ remaining_micros: 9_000_000_000 })
+      .where(eq(appCreditGrants.payer_id, 'team-wallet'));
+    expect(await webhook('invoice.voided', invoice())).toEqual({ ok: true });
+    expect(await grants()).toEqual([
+      expect.objectContaining({
+        remaining_micros: 0,
+        void_reason: 'invoice_voided',
+        voided_owed_micros: 1_000_000_000,
+      }),
+    ]);
+    const [payer] = await env.db
+      .select()
+      .from(appPayers)
+      .where(eq(appPayers.payer_id, 'team-wallet'));
+    expect(payer!.owed_micros).toBe(1_000_000_000);
+    expect(await webhook('invoice.paid', invoice())).toMatchObject({ ignored: true });
+
+    await env.db.delete(appCreditGrants).where(eq(appCreditGrants.payer_id, 'team-wallet'));
+    await env.db.delete(appPayers).where(eq(appPayers.payer_id, 'team-wallet'));
+    await operator(path(), { ...block, early: 'yes' });
+    expect(await webhook('invoice.paid', invoice())).toEqual({ ok: true });
+    expect(await grants()).toEqual([
+      expect.objectContaining({ unpaid: false, stripe_payment_intent_id: 'pi_b' }),
+    ]);
+    expect(await webhook('invoice.voided', invoice())).toMatchObject({ ignored: true });
+  });
+});

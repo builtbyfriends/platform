@@ -303,7 +303,10 @@ const HELP_TREE = {
         command: 'config billing [set|show]',
         description: 'Save the Stripe values that upgrades set on the API Worker',
       },
-      { command: 'list', description: 'List installed and connected platforms' },
+      {
+        command: 'list',
+        description: 'List installed and connected platforms; --health adds live versions',
+      },
       { command: 'use [id]', description: 'Select the default bwf platform' },
       { command: 'status [id]', description: 'Inspect a platform and its health' },
       { command: 'discover', description: 'Recover installations from a Cloudflare account' },
@@ -312,7 +315,10 @@ const HELP_TREE = {
         description: 'Add an application domain to a test platform',
       },
       { command: 'install', description: 'Install a bwf platform in Cloudflare' },
-      { command: 'upgrade [id]', description: 'Upgrade an installed bwf platform' },
+      {
+        command: 'upgrade [id...]',
+        description: 'Upgrade installed platforms, one at a time',
+      },
       {
         command: 'rollback [id]',
         description: 'Restore a compatible earlier platform runtime',
@@ -511,7 +517,16 @@ const HELP_TREE = {
           },
         },
       },
-      list: basicSubcommand('List installed and connected platforms.', 'bwf platform list'),
+      list: {
+        summary: 'List installed and connected platforms.',
+        usage: ['bwf platform list [--health]'],
+        options: [
+          {
+            command: '--health',
+            description: 'Check each platform and show its live version and health',
+          },
+        ],
+      },
       use: basicSubcommand(
         'Select the default bwf platform by installation slug, name, saved ID, or API URL.',
         'bwf platform use [id]',
@@ -1522,7 +1537,7 @@ function lifecycleHelp(
   return {
     summary,
     usage: [
-      `bwf platform ${command} [id] [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>] [--custom-domains] [--accept-outside-changes]' : ''}${command === 'upgrade' ? ' [--runtime-logs <full|minimal>] [--storage-location <hint|automatic>]' : ''}${command === 'repair' ? ' [--auth-config <path>]' : ''} [--yes]`,
+      `bwf platform ${command} ${command === 'upgrade' ? '[id...]' : '[id]'} [--plan]${command === 'disable' ? '' : ' [--runtime <path>]'}${command === 'upgrade' || command === 'repair' ? ' [--dashboard-url <origin>] [--custom-domains] [--accept-outside-changes]' : ''}${command === 'upgrade' ? ' [--runtime-logs <full|minimal>] [--storage-location <hint|automatic>]' : ''}${command === 'repair' ? ' [--auth-config <path>]' : ''} [--yes]`,
     ],
     options: [
       { command: '--plan', description: 'Print the exact plan without making changes' },

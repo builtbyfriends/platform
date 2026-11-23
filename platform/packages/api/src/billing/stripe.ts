@@ -477,21 +477,114 @@ export async function invoicePaymentIntent(
   return null;
 }
 
-async function stripePost(
+/**
+ * Sends a Stripe invoice for a block of credits, paid by bank transfer or card within `daysUntilDue`.
+ * `metadata` goes on the invoice, so its paid and voided events find the payer. Each call uses
+ * `key` for Stripe's idempotency keys, so a retry with the same key sends the same invoice.
+ */
+export async function sendCreditBlockInvoice(
+  env: StripeEnv,
+  input: {
+    key: string;
+    customerId: string | null;
+    email: string;
+    amountMicros: number;
+    label: string;
+    daysUntilDue: number;
+    metadata: Record<string, string>;
+  },
+  fetcher: typeof fetch = fetch,
+): Promise<{ customerId: string; invoiceId: string; url: string | null }> {
+  const customerId =
+    input.customerId ??
+    (
+      await stripePost<{ id?: string }>(
+        env,
+        'customers',
+        new URLSearchParams({ email: input.email }),
+        fetcher,
+        `${input.key}:customer`,
+      )
+    ).id;
+  if (!customerId) {
+    throw new BillingUnavailableError('Stripe refused the customer.');
+  }
+  const invoiceForm = new URLSearchParams({
+    customer: customerId,
+    collection_method: 'send_invoice',
+    days_until_due: String(input.daysUntilDue),
+    currency: 'usd',
+    description: input.label,
+    'payment_settings[payment_method_types][0]': 'customer_balance',
+    'payment_settings[payment_method_types][1]': 'card',
+    'payment_settings[payment_method_options][customer_balance][funding_type]': 'bank_transfer',
+    'payment_settings[payment_method_options][customer_balance][bank_transfer][type]':
+      'us_bank_transfer',
+  });
+  for (const [name, value] of Object.entries(input.metadata)) {
+    invoiceForm.set(`metadata[${name}]`, value);
+  }
+  if (env.STRIPE_AUTOMATIC_TAX === 'true') {
+    invoiceForm.set('automatic_tax[enabled]', 'true');
+  }
+  const invoice = await stripePost<{ id?: string }>(
+    env,
+    'invoices',
+    invoiceForm,
+    fetcher,
+    `${input.key}:invoice`,
+  );
+  if (!invoice.id) {
+    throw new BillingUnavailableError('Stripe refused the invoice.');
+  }
+  const invoicePath = `invoices/${encodeURIComponent(invoice.id)}`;
+  await stripePost(
+    env,
+    'invoiceitems',
+    new URLSearchParams({
+      customer: customerId,
+      invoice: invoice.id,
+      amount: String(input.amountMicros / MICROS_PER_CENT),
+      currency: 'usd',
+      description: input.label,
+    }),
+    fetcher,
+    `${input.key}:item`,
+  );
+  await stripePost(
+    env,
+    `${invoicePath}/finalize`,
+    new URLSearchParams(),
+    fetcher,
+    `${input.key}:finalize`,
+  );
+  const sent = await stripePost<{ hosted_invoice_url?: string | null }>(
+    env,
+    `${invoicePath}/send`,
+    new URLSearchParams(),
+    fetcher,
+    `${input.key}:send`,
+  );
+  return { customerId, invoiceId: invoice.id, url: sent.hosted_invoice_url ?? null };
+}
+
+async function stripePost<T extends object = { url?: string }>(
   env: StripeEnv,
   path: string,
   form: URLSearchParams,
   fetcher: typeof fetch,
-): Promise<{ url?: string }> {
+  idempotencyKey?: string,
+): Promise<T> {
   const response = await fetcher(`https://api.stripe.com/v1/${path}`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${stripeSecretKey(env)}`,
       'content-type': 'application/x-www-form-urlencoded',
+      ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
     },
     body: form,
   });
-  const body = (await response.json().catch(() => null)) as { url?: string } | null;
+  const body = (await response.json().catch(() => null)) as T | null;
   if (!response.ok || !body) {
     throw new BillingUnavailableError('Stripe refused the request.');
   }
