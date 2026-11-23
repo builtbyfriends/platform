@@ -142,7 +142,7 @@ export const add = procedure('domains.add')
       return fail('HOSTNAME_INVALID');
     }
     const siteDomain = env.SITE_DOMAIN ?? SITE_DOMAIN;
-    if (hostname.endsWith(`.${siteDomain}`)) {
+    if (hostname === siteDomain || hostname.endsWith(`.${siteDomain}`)) {
       return fail('HOSTNAME_RESERVED', `cannot use ${siteDomain} subdomains`);
     }
     if (await getDomainByHostname(ctx.db, hostname)) {
