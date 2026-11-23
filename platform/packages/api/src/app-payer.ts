@@ -4,7 +4,7 @@ import type { OAuthSession } from './auth/oauth-types.ts';
 import { OAuthError } from './auth/oauth.ts';
 import type { DbOrTx } from './db.ts';
 import { resolvePlanLimits } from './plans.ts';
-import { appPeople, appUsage, projects, users } from './schema.ts';
+import { appPayers, appPeople, appUsage, projects, users } from './schema.ts';
 
 type Owner = { id: string; plan: string; provider: string; provider_id: string };
 type Paid = { payer_person_id: string | null };
@@ -90,8 +90,8 @@ export async function billedAccountPlanLimits(db: DbOrTx, owner: Owner): Promise
 
 /**
  * Checks the payer an application named for a project. Only an application acting for its own
- * people can name one, and it has to be a person the application has already told Platform
- * about: someone it asked a token for, sold a plan to, or reported use for.
+ * people can name one, and it has to be a payer the application has already told Platform
+ * about: someone it asked a token for, sold a plan to, or reported use for, or a wallet it opened.
  */
 export async function namedPayer(
   db: DbOrTx,
@@ -120,6 +120,11 @@ export async function namedPayer(
       .select(one)
       .from(appUsage)
       .where(and(eq(appUsage.client_id, grant.client_id), eq(appUsage.person_id, payer)))
+      .limit(1),
+    db
+      .select(one)
+      .from(appPayers)
+      .where(and(eq(appPayers.client_id, grant.client_id), eq(appPayers.payer_id, payer)))
       .limit(1),
   ]);
   if (!known.some((rows) => rows.length > 0)) {

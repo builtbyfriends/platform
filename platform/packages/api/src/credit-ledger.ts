@@ -28,6 +28,31 @@ const hasGrants = async (db: DbOrTx, payer: Payer) =>
       .limit(1)
   ).length > 0;
 
+/** True when the application marked the payer as a wallet, which has only its balance. */
+export async function isWallet(db: DbOrTx, payer: Payer): Promise<boolean> {
+  const [row] = await db
+    .select({ wallet: appPayers.wallet })
+    .from(appPayers)
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return Boolean(row?.wallet);
+}
+
+/** Marks a payer as a wallet. A new wallet starts at zero and out, so its first status sends no event. */
+export async function openWallet(db: DbOrTx, payer: Payer, now = new Date()): Promise<void> {
+  await db
+    .insert(appPayers)
+    .values({
+      client_id: payer.clientId,
+      payer_id: payer.payer,
+      wallet: true,
+      out_since: now.toISOString(),
+    })
+    .onConflictDoUpdate({
+      target: [appPayers.client_id, appPayers.payer_id],
+      set: { wallet: true },
+    });
+}
+
 const openGrants = (payer: Payer, now: Date) =>
   and(
     payerGrants(payer),
@@ -54,7 +79,7 @@ export async function spendCredits(
   micros: number,
   now = new Date(),
 ): Promise<void> {
-  if (micros <= 0 || !(await hasGrants(db, payer))) {
+  if (micros <= 0 || !((await hasGrants(db, payer)) || (await isWallet(db, payer)))) {
     return;
   }
   await db.transaction(async (tx) => {
@@ -140,7 +165,7 @@ const iso = (value: string | null) => (value ? new Date(value).toISOString() : n
 
 /**
  * A payer's balance: what's left on grants that haven't ended, less what they owe. Null for a
- * payer who has never had a grant, whose plan's caps decide instead.
+ * payer who has never had a grant, whose plan's caps decide instead. A wallet always has a balance.
  */
 export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) {
   const [[row], grants, any] = await Promise.all([
@@ -156,10 +181,11 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
     hasGrants(db, payer),
   ]);
   const owedMicros = row?.owed_micros ?? 0;
-  if (!any && owedMicros === 0) {
+  if (!any && owedMicros === 0 && !row?.wallet) {
     return null;
   }
   return {
+    wallet: Boolean(row?.wallet),
     balanceMicros: grants.reduce((sum, grant) => sum + grant.remaining_micros, 0) - owedMicros,
     owedMicros,
     outSince: iso(row?.out_since ?? null),

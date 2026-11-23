@@ -519,5 +519,11 @@ export async function applyCredits(
   if (resumed.length > 0) {
     await event('apps.resumed', { projects: resumed.map((change) => change.projectId) });
   }
-  return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
+  return {
+    ...standing,
+    row,
+    paid,
+    defaultPlanId: defaultPlan.id,
+    wallet: balance?.wallet ?? false,
+  };
 }

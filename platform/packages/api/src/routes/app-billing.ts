@@ -27,7 +27,14 @@ import {
   fetchSubscription,
   stripeLiveMode,
 } from '../billing/stripe.ts';
-import { creditBalance, forgetPayer, grantCredits, payerBlocked } from '../credit-ledger.ts';
+import {
+  creditBalance,
+  forgetPayer,
+  grantCredits,
+  isWallet,
+  openWallet,
+  payerBlocked,
+} from '../credit-ledger.ts';
 import {
   autoTopUpStatus,
   buyerOf,
@@ -61,6 +68,14 @@ const isReturnUrl = (value: unknown): value is string =>
   typeof value === 'string' && URL.canParse(value) && new URL(value).protocol === 'https:';
 
 type BillingContext = Context<ApiEnv>;
+
+const walletRefused = async (context: BillingContext, person: string) =>
+  (await isWallet(context.get('db'), { clientId: context.get('billingClient'), payer: person }))
+    ? context.json(
+        { error: 'payer_is_wallet', message: 'A wallet has no plan, starter credit or portal.' },
+        400,
+      )
+    : null;
 
 type Share = { model: string; source: string; aiNeurons: number; sandboxSeconds: number };
 
@@ -166,14 +181,14 @@ async function hostedUse(context: BillingContext, person: string) {
 async function standing(context: BillingContext, person: string) {
   const db = context.get('db');
   const clientId = context.get('billingClient');
-  const { row, meters, credits, paid, defaultPlanId } = await applyCredits(
+  const { row, meters, credits, paid, defaultPlanId, wallet } = await applyCredits(
     context.env,
     db,
     clientId,
     person,
   );
-  const plan = row?.plan ?? defaultPlanId;
-  const limits = await resolvePlanLimits(db, plan);
+  const plan = wallet ? null : (row?.plan ?? defaultPlanId);
+  const limits = plan ? await resolvePlanLimits(db, plan) : null;
   const period = currentPeriod();
   const quantity = (meter: Meter) => meters.find((entry) => entry.meter === meter)!.quantity;
   const usedNow = { aiNeurons: quantity('aiNeurons'), sandboxSeconds: quantity('sandboxSeconds') };
@@ -195,18 +210,23 @@ async function standing(context: BillingContext, person: string) {
   // Decision: 0 means unlimited in a plan's limits.
   const within = (limit: number, value: number) => limit === 0 || value < limit;
   // Decision: A plan with credits is held to its balance, and the two caps stop deciding.
-  const aiWithinCap = credits ? !credits.out : within(limits.aiNeuronsPerMonth, usedNow.aiNeurons);
-  const sandboxWithinCap = credits
-    ? !credits.out
-    : within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
+  const aiWithinCap =
+    credits || !limits ? !credits?.out : within(limits.aiNeuronsPerMonth, usedNow.aiNeurons);
+  const sandboxWithinCap =
+    credits || !limits
+      ? !credits?.out
+      : within(limits.sandboxRuntimeSecondsPerMonth, usedNow.sandboxSeconds);
   return {
+    wallet,
     plan,
     paid,
     billingPeriodStart: `${period}T00:00:00.000Z`,
-    caps: {
-      aiNeuronsPerMonth: limits.aiNeuronsPerMonth,
-      sandboxSecondsPerMonth: limits.sandboxRuntimeSecondsPerMonth,
-    },
+    caps: limits
+      ? {
+          aiNeuronsPerMonth: limits.aiNeuronsPerMonth,
+          sandboxSecondsPerMonth: limits.sandboxRuntimeSecondsPerMonth,
+        }
+      : null,
     used: usedNow,
     breakdown,
     credits,
@@ -549,10 +569,31 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       },
     });
   })
+  .post('/wallets.open', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const [person] = await db
+      .select({ one: sql<number>`1` })
+      .from(appPeople)
+      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, body.payer)));
+    if (person) {
+      return context.json({ error: 'payer_is_person' }, 409);
+    }
+    await openWallet(db, { clientId, payer: body.payer });
+    return context.json({ data: { payer: body.payer, wallet: true } });
+  })
   .post('/credits.starter', async (context) => {
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
+    }
+    const refused = await walletRefused(context, body.person);
+    if (refused) {
+      return refused;
     }
     const db = context.get('db');
     const clientId = context.get('billingClient');
@@ -619,6 +660,10 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
+    }
+    const refused = await walletRefused(context, body.person);
+    if (refused) {
+      return refused;
     }
     const plans = await clientPlans(context.get('db'), context.get('billingClient'));
     if (Object.keys(plans).length === 0) {
@@ -801,6 +846,10 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.person)) {
       return context.json({ error: 'bad_person' }, 400);
+    }
+    const refused = await walletRefused(context, body.person);
+    if (refused) {
+      return refused;
     }
     if (!isReturnUrl(body?.returnUrl)) {
       return context.json({ error: 'bad_return_url' }, 400);
