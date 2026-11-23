@@ -3,10 +3,10 @@ import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
 import { appCreditGrants, appPayers, type CreditSource, type PayerCap } from './schema.ts';
 
-type Payer = { clientId: string; payer: string };
+export type Payer = { clientId: string; payer: string };
 
 /** Locks the payer's row, made if missing, so two charges or grants for one payer run one after the other. */
-async function lockPayer(tx: Tx, { clientId, payer }: Payer) {
+export async function lockPayer(tx: Tx, { clientId, payer }: Payer) {
   await tx.insert(appPayers).values({ client_id: clientId, payer_id: payer }).onConflictDoNothing();
   const [row] = await tx
     .select()
@@ -161,6 +161,7 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
     balanceMicros: grants.reduce((sum, grant) => sum + grant.remaining_micros, 0) - owedMicros,
     owedMicros,
     outSince: iso(row?.out_since ?? null),
+    lowSince: iso(row?.low_since ?? null),
     grants: grants.map((grant) => ({
       id: grant.id,
       source: grant.source,
@@ -173,18 +174,32 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
 }
 
 /** Records when a payer's balance reached zero, or clears it. True when that changed. */
-export async function markOut(db: DbOrTx, payer: Payer, out: boolean, now = new Date()) {
+export const markOut = (db: DbOrTx, payer: Payer, out: boolean, now = new Date()) =>
+  markSince(db, payer, 'out_since', out, now);
+
+/** Records when a payer's balance went under the application's low mark, or clears it. True when that changed. */
+export const markLow = (db: DbOrTx, payer: Payer, low: boolean, now = new Date()) =>
+  markSince(db, payer, 'low_since', low, now);
+
+async function markSince(
+  db: DbOrTx,
+  payer: Payer,
+  field: 'out_since' | 'low_since',
+  on: boolean,
+  now: Date,
+) {
+  const column = appPayers[field];
   const changed = await db
     .insert(appPayers)
     .values({
       client_id: payer.clientId,
       payer_id: payer.payer,
-      out_since: out ? now.toISOString() : null,
+      [field]: on ? now.toISOString() : null,
     })
     .onConflictDoUpdate({
       target: [appPayers.client_id, appPayers.payer_id],
-      set: { out_since: out ? sql`coalesce(${appPayers.out_since}, ${now.toISOString()})` : null },
-      setWhere: out ? isNull(appPayers.out_since) : sql`${appPayers.out_since} is not null`,
+      set: { [field]: on ? sql`coalesce(${column}, ${now.toISOString()})` : null },
+      setWhere: on ? isNull(column) : sql`${column} is not null`,
     })
     .returning({ id: appPayers.payer_id });
   return changed.length > 0;

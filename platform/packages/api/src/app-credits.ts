@@ -1,7 +1,9 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
-import { stripeLiveMode } from './billing/stripe.ts';
-import { creditBalance, markOut, markOverCaps, spendCredits } from './credit-ledger.ts';
-import { creditsReason, readGraceDays, setCreditsPause } from './credits-pause.ts';
+import { queueBillingEvent, type BillingEventType } from './billing-events.ts';
+import { stripeLiveMode, type StripeEnv } from './billing/stripe.ts';
+import { creditBalance, markLow, markOut, markOverCaps, spendCredits } from './credit-ledger.ts';
+import { topUpIfLow } from './credit-purchase.ts';
+import { DAY_MS, creditsReason, readGraceDays, setCreditsPause } from './credits-pause.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { installationDefaultPlan, resolvePlanLimits } from './plans.ts';
@@ -186,6 +188,7 @@ export function creditStanding(
           owedMicros: balance.owedMicros,
           out: balance.balanceMicros <= 0,
           outSince: balance.outSince,
+          lowSince: balance.lowSince,
           starterMicros: balance.grants
             .filter((grant) => grant.source === 'starter')
             .reduce((sum, grant) => sum + grant.remainingMicros, 0),
@@ -418,15 +421,7 @@ export async function dropTestPlans(
  * or pauses those projects by how long the payer has been at zero (see credits-pause.ts).
  */
 export async function applyCredits(
-  env: Pick<
-    Bindings,
-    | 'USAGE_COUNTER'
-    | 'STRIPE_PRICE_SOLO'
-    | 'STRIPE_PRICE_PRO'
-    | 'PLATFORM_INSTALLATION_ID'
-    | 'STRIPE_SECRET_KEY'
-    | 'ROUTING'
-  >,
+  env: StripeEnv & Pick<Bindings, 'USAGE_COUNTER' | 'PLATFORM_INSTALLATION_ID' | 'ROUTING'>,
   db: Db,
   clientId: string,
   person: string,
@@ -434,23 +429,31 @@ export async function applyCredits(
   const period = currentPeriod();
   const payer = { clientId, payer: person };
   const now = new Date();
-  const [[stored], plans, prices, use, balance, defaultPlan, graceDays] = await Promise.all([
-    db
-      .select()
-      .from(appPeople)
-      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
-    clientPlans(db, clientId),
-    readMeterPrices(db),
-    payerUse(db, clientId, person, period),
-    creditBalance(db, payer),
-    installationDefaultPlan(db, env),
-    readGraceDays(db),
-  ]);
+  await topUpIfLow(env, db, payer);
+  const [[stored], plans, prices, use, balance, defaultPlan, [client], graceDays] =
+    await Promise.all([
+      db
+        .select()
+        .from(appPeople)
+        .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
+      clientPlans(db, clientId),
+      readMeterPrices(db),
+      payerUse(db, clientId, person, period),
+      creditBalance(db, payer),
+      installationDefaultPlan(db, env),
+      db
+        .select({ lowMark: oauthClients.low_balance_micros })
+        .from(oauthClients)
+        .where(eq(oauthClients.id, clientId)),
+      readGraceDays(db),
+    ]);
   const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
   // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
   // that ends writes the default plan on the row.
   const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
   const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0, balance);
+  const event = (type: BillingEventType, data: object) =>
+    queueBillingEvent(db, env, { clientId, type, person, data });
   // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide. They are
   // read from the daily totals, so they can be up to an hour behind.
   const limits = balance ? null : await resolvePlanLimits(db, row?.plan ?? defaultPlan.id);
@@ -461,8 +464,24 @@ export async function applyCredits(
       ? (['sandbox'] as const)
       : []),
   ];
-  const outChanged = balance ? await markOut(db, payer, standing.credits!.out) : false;
-  if ((await markOverCaps(db, payer, overCaps)) || outChanged) {
+  let changed = await markOverCaps(db, payer, overCaps);
+  if (balance) {
+    const out = standing.credits!.out;
+    const low = balance.balanceMicros < (client?.lowMark ?? 0);
+    // Decision: Low and out are each sent once for each crossing. A balance that drops straight to zero sends only out.
+    if ((await markLow(db, payer, low)) && low && !out) {
+      await event('credits.low', { balanceMicros: balance.balanceMicros });
+    }
+    if (await markOut(db, payer, out)) {
+      const pausesAt = new Date(now.getTime() + graceDays * DAY_MS).toISOString();
+      await event(out ? 'credits.out' : 'credits.restored', {
+        balanceMicros: balance.balanceMicros,
+        ...(out ? { pausesAt } : {}),
+      });
+      changed = true;
+    }
+  }
+  if (changed) {
     for (const id of await paidOwnerIds(db, clientId, person)) {
       await env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(id))
         .fetch(
@@ -480,7 +499,7 @@ export async function applyCredits(
   }
   const out = Boolean(balance && standing.credits!.out);
   const requestsPast = past(limits?.requestsPerMonth ?? 0, use.hostedRequests);
-  await setCreditsPause(
+  const changes = await setCreditsPause(
     env,
     db,
     clientId,
@@ -492,5 +511,13 @@ export async function applyCredits(
         : null,
     now,
   );
+  const paused = changes.filter((change) => change.to === REASON_CREDITS_PAUSED);
+  const resumed = changes.filter((change) => change.from === REASON_CREDITS_PAUSED && !change.to);
+  if (paused.length > 0) {
+    await event('apps.paused', { projects: paused.map((change) => change.projectId) });
+  }
+  if (resumed.length > 0) {
+    await event('apps.resumed', { projects: resumed.map((change) => change.projectId) });
+  }
   return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
 }

@@ -19,16 +19,26 @@ import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import {
   BillingUnavailableError,
   createCheckoutSession,
+  createCreditCheckoutSession,
   createPortalSession,
   stripeLiveMode,
 } from '../billing/stripe.ts';
 import { grantCredits, payerBlocked } from '../credit-ledger.ts';
+import {
+  autoTopUpStatus,
+  buyerOf,
+  creditPurchase,
+  fitsPurchase,
+  setAutoTopUp,
+} from '../credit-purchase.ts';
 import type { ApiEnv } from '../env.ts';
 import { resolvePlanLimits } from '../plans.ts';
 import { appPeople, appUsage, appUsageEvents, appUsageSources, oauthClients } from '../schema.ts';
 
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
+const isMicros = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
 const isReturnUrl = (value: unknown): value is string =>
   typeof value === 'string' && URL.canParse(value) && new URL(value).protocol === 'https:';
 
@@ -186,6 +196,7 @@ async function standing(context: BillingContext, person: string) {
     withinCaps: aiWithinCap && sandboxWithinCap,
     aiWithinCap,
     sandboxWithinCap,
+    autoTopUp: await autoTopUpStatus(db, { clientId, payer: person }),
     subscribed: Boolean(row?.stripe_subscription_id),
     subscriptionStatus: row?.stripe_subscription_id ? row.subscription_status : null,
     cancelAtPeriodEnd: row?.stripe_subscription_id ? row.cancel_at_period_end : false,
@@ -369,6 +380,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     const plans = await clientPlans(context.get('db'), context.get('billingClient'));
     return context.json({
       data: {
+        creditPurchase: await creditPurchase(context.get('db'), context.get('billingClient')),
         // Decision: Stored JSON doesn't keep its order, so the list goes from the smallest plan up.
         plans: Object.entries(plans)
           .map(([id, plan]) => ({ id, creditMicros: plan.creditMicros }))
@@ -421,7 +433,17 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     try {
       const url = await createCheckoutSession(context.env, {
-        customerId: row?.stripe_customer_id ?? null,
+        customerId:
+          row?.stripe_customer_id ??
+          (
+            await buyerOf(
+              context.get('db'),
+              context.get('billingClient'),
+              body.person,
+              stripeLiveMode(context.env),
+            )
+          )?.stripe_customer_id ??
+          null,
         reference: `${context.get('billingClient')}:${body.person}`,
         metadata: { clientId: context.get('billingClient'), personId: body.person },
         email: typeof body.email === 'string' ? body.email : null,
@@ -436,6 +458,117 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       }
       throw error;
     }
+  })
+  .post('/credits.checkout', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.buyer)) {
+      return context.json({ error: 'bad_buyer' }, 400);
+    }
+    const payer = body.payer ?? body.buyer;
+    // Decision: Buying for someone else, such as a server's wallet, comes later. Buyer and payer are separate fields
+    // now so that's an input change then.
+    if (payer !== body.buyer) {
+      return context.json({ error: 'payer_must_be_buyer' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const rules = await creditPurchase(db, clientId);
+    if (!rules) {
+      return context.json({ error: 'credits_not_sold' }, 400);
+    }
+    if (!fitsPurchase(rules, body.amountMicros)) {
+      return context.json(
+        { error: 'bad_amount', minMicros: rules.minMicros, stepMicros: rules.stepMicros },
+        400,
+      );
+    }
+    if (!isReturnUrl(body.returnUrl)) {
+      return context.json({ error: 'bad_return_url' }, 400);
+    }
+    if (await payerBlocked(db, { clientId, payer })) {
+      return context.json({ error: 'blocked' }, 403);
+    }
+    const livemode = stripeLiveMode(context.env);
+    const [person] = await db
+      .select()
+      .from(appPeople)
+      .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, body.buyer)));
+    const customerId =
+      (await buyerOf(db, clientId, body.buyer, livemode))?.stripe_customer_id ??
+      (person?.livemode === livemode ? person.stripe_customer_id : null);
+    try {
+      const url = await createCreditCheckoutSession(context.env, {
+        amountMicros: body.amountMicros,
+        metadata: {
+          kind: 'credits',
+          clientId,
+          buyerId: body.buyer,
+          payerId: payer,
+          lifeDays: String(rules.lifeDays),
+          saveCard: String(body.saveCard === true),
+        },
+        customerId,
+        email: typeof body.email === 'string' ? body.email : null,
+        saveCard: body.saveCard === true,
+        returnUrl: body.returnUrl,
+      });
+      return context.json({ data: { url } });
+    } catch (error) {
+      if (error instanceof BillingUnavailableError) {
+        return context.json({ error: 'billing_unavailable' }, 503);
+      }
+      throw error;
+    }
+  })
+  .post('/credits.autoTopUp', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const payer = { clientId, payer: body.payer as string };
+    if (body.enabled === false) {
+      await setAutoTopUp(db, payer, null);
+      return context.json({ data: { autoTopUp: await autoTopUpStatus(db, payer) } });
+    }
+    const buyer = body.buyer ?? body.payer;
+    if (buyer !== body.payer) {
+      return context.json({ error: 'payer_must_be_buyer' }, 400);
+    }
+    const rules = await creditPurchase(db, clientId);
+    if (!rules) {
+      return context.json({ error: 'credits_not_sold' }, 400);
+    }
+    if (!fitsPurchase(rules, body.amountMicros)) {
+      return context.json(
+        { error: 'bad_amount', minMicros: rules.minMicros, stepMicros: rules.stepMicros },
+        400,
+      );
+    }
+    if (!isMicros(body.thresholdMicros) || !isMicros(body.monthlyLimitMicros)) {
+      return context.json({ error: 'bad_settings' }, 400);
+    }
+    if (body.monthlyLimitMicros < body.amountMicros) {
+      return context.json({ error: 'limit_under_amount' }, 400);
+    }
+    if (await payerBlocked(db, payer)) {
+      return context.json({ error: 'blocked' }, 403);
+    }
+    // Decision: Auto top-up charges a card saved by a credits Checkout with saveCard, so the buyer agreed to
+    // charges made with nobody present.
+    const saved = await buyerOf(db, clientId, buyer, stripeLiveMode(context.env));
+    if (!saved?.stripe_payment_method_id) {
+      return context.json({ error: 'needs_saved_card' }, 409);
+    }
+    await setAutoTopUp(db, payer, {
+      buyer,
+      thresholdMicros: body.thresholdMicros,
+      amountMicros: body.amountMicros,
+      monthlyLimitMicros: body.monthlyLimitMicros,
+    });
+    await applyCredits(context.env, db, clientId, payer.payer);
+    return context.json({ data: { autoTopUp: await autoTopUpStatus(db, payer) } });
   })
   .post('/billing.portal', async (context) => {
     const body = await context.req.json().catch(() => null);
@@ -455,12 +588,22 @@ export const appBillingRoutes = new Hono<ApiEnv>()
           eq(appPeople.person_id, body.person),
         ),
       );
-    if (!row?.stripe_customer_id) {
+    const customerId =
+      row?.stripe_customer_id ??
+      (
+        await buyerOf(
+          context.get('db'),
+          context.get('billingClient'),
+          body.person,
+          stripeLiveMode(context.env),
+        )
+      )?.stripe_customer_id;
+    if (!customerId) {
       return context.json({ error: 'no_subscription' }, 404);
     }
     try {
       const url = await createPortalSession(context.env, {
-        customerId: row.stripe_customer_id,
+        customerId,
         returnUrl: body.returnUrl,
       });
       return context.json({ data: { url } });

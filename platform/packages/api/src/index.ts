@@ -29,6 +29,7 @@ import { syncHostedUse } from './app-usage-sync.ts';
 import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { purgeExpiredOAuthRequests } from './auth/oauth.ts';
+import { deliverBillingEvents } from './billing-events.ts';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
@@ -714,6 +715,12 @@ async function runScheduledMaintenance(
   await reconcileProjectCleanupJobs(db, env).catch((error) =>
     console.error('[scheduled] project cleanup retry failed:', error),
   );
+
+  await deliverBillingEvents(db)
+    .then((waiting) => {
+      fastTier.unfinished ||= waiting;
+    })
+    .catch((error) => console.error('[scheduled] billing event delivery failed:', error));
 
   // Decision: Fast tier: a resumable Zero Trust batch owns the rest of this invocation so it stays inside the
   // per-invocation subrequest budget. A failed batch doesn't, so the pending-domain and email work

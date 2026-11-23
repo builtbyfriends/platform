@@ -14,7 +14,7 @@ import {
 
 export const GRACE_DAYS_SETTING = 'credits:grace-days';
 export const DEFAULT_GRACE_DAYS = 3;
-const DAY_MS = 86_400_000;
+export const DAY_MS = 86_400_000;
 
 export const isGraceDays = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 365;
