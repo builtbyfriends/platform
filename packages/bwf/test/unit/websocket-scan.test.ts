@@ -69,6 +69,12 @@ describe('JSX WebSocket discovery', () => {
 });
 
 describe('WebSocket resource names', () => {
+  it('names the file when its name starts with a digit', () => {
+    const root = createRoot();
+    createRoute(root, '2fa.ws.ts', 'export default defineWebSocket({})');
+    expect(() => scanWebSocketRoutesSync(root)).toThrow('2fa.ws.ts');
+  });
+
   it.each([
     ['chat/[room].ws.ts', 'chat-room', 'ChatRoomWs'],
     ['(admin)/API/[...IDs].prod.ws.mts', 'API-IDs', 'APIIDsWs'],
