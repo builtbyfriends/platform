@@ -806,6 +806,7 @@ export async function runInstalledPlatformCommand(args: PlatformArgs): Promise<v
         (
           await createPlatformInstallPlan(client, planInput, recoveryManifest, {
             allowRuntimeLogsChange: args.subcommand === 'upgrade',
+            allowStorageLocationChange: args.subcommand === 'upgrade',
             authoritativeProvisionIntents: true,
             repairMissing: true,
             includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
