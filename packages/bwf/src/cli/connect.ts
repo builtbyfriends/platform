@@ -90,7 +90,7 @@ export async function runConnectCommand(
     if (!interactive) {
       throw new Error('connect: Supply a platform URL or --platform cloudflare|platform.');
     }
-    const value = await select({
+    const value = await select<'cloudflare' | 'platform'>({
       message: 'Where should this project deploy?',
       initialValue: readDeploymentPlatform(root) === 'platform' ? 'platform' : 'cloudflare',
       options: [
@@ -105,7 +105,7 @@ export async function runConnectCommand(
     if (isCancel(value)) {
       throw new Error('connect: Cancelled.');
     }
-    target = value as 'cloudflare' | 'platform';
+    target = value;
   }
   if (target === 'cloudflare') {
     await connectCloudflare(root, interactive);

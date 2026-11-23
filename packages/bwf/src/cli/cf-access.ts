@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
+import { Buffer } from './node-buffer.ts';
 import { normalizePlatformApiUrl, platformCredentialAccount } from './platform-registry.ts';
 
 const ACCESS_KEYRING_SERVICE = 'dev.platform.cli.access';
@@ -8,23 +10,25 @@ const keyringTokens = new Map<string, string | null>();
 
 function usableToken(token: string): boolean {
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')) as {
-      exp?: unknown;
-    };
-    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60;
+    const payload: unknown = JSON.parse(
+      Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+    );
+    return (
+      isRecord(payload) && typeof payload.exp === 'number' && payload.exp > Date.now() / 1000 + 60
+    );
   } catch {
     return false;
   }
 }
 
 function readOriginCredentials(raw: string): Record<string, unknown> {
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) {
     throw new Error(
       'platform: PLATFORM_ACCESS_CREDENTIALS must contain an origin-keyed JSON object.',
     );
   }
-  return parsed as Record<string, unknown>;
+  return parsed;
 }
 
 function rememberOriginToken(origin: string, token: string): void {
@@ -85,7 +89,10 @@ export function ensurePlatformAccessToken(
   const account = platformCredentialAccount(origin);
   if (!keyringTokens.has(origin)) {
     if (keyringTokens.size >= 64) {
-      keyringTokens.delete(keyringTokens.keys().next().value!);
+      const oldest = keyringTokens.keys().next();
+      if (!oldest.done) {
+        keyringTokens.delete(oldest.value);
+      }
     }
     keyringTokens.set(origin, readKeyringPassword(ACCESS_KEYRING_SERVICE, account));
   }

@@ -17,8 +17,13 @@ export type PlatformRuntimeLogsClient = Pick<
   'listDispatchNamespaceScripts' | 'patchDispatchNamespaceScriptSettings'
 >;
 
+type ProjectWorkerObservability = Readonly<{
+  enabled: boolean;
+  logs?: Readonly<{ invocation_logs: boolean; head_sampling_rate: number }>;
+}>;
+
 /** Same `observability` the API sends when it uploads a project Worker. */
-export function projectWorkerObservability(minimal: boolean): Record<string, unknown> {
+export function projectWorkerObservability(minimal: boolean): ProjectWorkerObservability {
   return minimal
     ? { enabled: false }
     : { enabled: true, logs: { invocation_logs: true, head_sampling_rate: 1 } };

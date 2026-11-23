@@ -58,6 +58,7 @@ function emailActionWireSize(action: EmailAction): number {
 }
 
 /** The raw env, or `undefined` outside a worker or SSR request. */
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env bindings are platform-defined
 export function tryGetRawRuntimeEnv(): Record<string, unknown> | undefined {
   try {
     return getRawRuntimeEnv();
@@ -84,6 +85,7 @@ export function readProjectSlug(): string | undefined {
 // Decision: The relay-lane marker `createMessageProxy` sets from `envelope.viaDomain`;
 // undefined for platform-lane, own-account and hand-built messages.
 function readRelayDomain(message: ForwardableEmailMessage): string | undefined {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- relay domain is an unofficial message field
   const raw: unknown = (message as { __platformRelayDomain?: unknown }).__platformRelayDomain;
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
@@ -439,7 +441,7 @@ export function createMessageProxy(
     }
   }
 
-  // oxlint-disable-next-line quality/no-chained-type-assertions
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion,quality/no-chained-type-assertions -- harness stub for the platform message
   const message = {
     from: envelope.from,
     to: userVisibleTo,
@@ -513,11 +515,14 @@ export function createMessageProxy(
       if (headersObj) {
         assertForwardHeadersWithinBounds(headersObj);
       }
-      const action = {
-        type: 'forward' as const,
+      // oxlint-disable-next-line quality/no-known-value-widening -- headers are added below
+      const action: { type: 'forward'; to: typeof to; headers?: NonNullable<typeof headersObj> } = {
+        type: 'forward',
         to,
-        ...(headersObj ? { headers: headersObj } : {}),
       };
+      if (headersObj) {
+        action.headers = headersObj;
+      }
       if (new TextEncoder().encode(JSON.stringify(action)).byteLength > MAX_ACTION_METADATA_BYTES) {
         throw new MimeError(
           'MIME_ERROR',
@@ -590,6 +595,7 @@ export function createMessageProxy(
           if (
             typeof raw !== 'object' ||
             raw === null ||
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- checked for getReader above
             typeof (raw as ReadableStream<Uint8Array>).getReader !== 'function'
           ) {
             throw new MimeError(
@@ -835,6 +841,7 @@ export async function buildReplyMessage(
   // Decision: Threading rides `threading`, since `headers` reserve these names. Both
   // ids are remote-controlled: drop one that cannot fit a line or holds a
   // control character rather than fail the reply.
+  // oxlint-disable-next-line quality/no-known-value-widening -- optional fields are assigned below
   const threading: { inReplyTo?: string; references?: string } = {};
   const messageId = threadingId('In-Reply-To', originalMessageId);
   if (messageId) {
@@ -910,6 +917,7 @@ export async function enactEmailActions(
   actions: ReadonlyArray<EmailAction>,
 ): Promise<void> {
   const deadline = Date.now() + INBOUND_ACTION_BATCH_DEADLINE_MS;
+  // oxlint-disable-next-line quality/no-unknown-returns -- callers ignore the result
   const submit = async (run: () => Promise<unknown>): Promise<unknown> => {
     const remaining = Math.min(INBOUND_PROVIDER_DEADLINE_MS, deadline - Date.now());
     if (remaining <= 0) {

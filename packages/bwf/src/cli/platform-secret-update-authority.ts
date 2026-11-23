@@ -50,14 +50,9 @@ function unresolvedWorkerSecretUpdate(
 ): WorkerSecretUpdateMarker | null {
   const markers = manifest.steps.flatMap((step) => {
     const match = /^worker-secret-updates:(\d+):(pending|committed)$/.exec(step.key);
-    return match
-      ? [
-          {
-            generation: Number(match[1]),
-            id: step.resultHash,
-            state: match[2] as 'committed' | 'pending',
-          },
-        ]
+    const state = match?.[2];
+    return match && (state === 'pending' || state === 'committed')
+      ? [{ generation: Number(match[1]), id: step.resultHash, state }]
       : [];
   });
   const latestGeneration = Math.max(0, ...markers.map((marker) => marker.generation));

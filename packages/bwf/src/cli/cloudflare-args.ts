@@ -10,11 +10,16 @@ export type CloudflareArgs = { subcommand: 'login' | 'status' | 'logout' };
 
 export function parseCloudflareArgs(args: Array<string>): CloudflareArgs {
   const [subcommand, extra] = args;
-  if (!subcommand || !['login', 'status', 'logout'].includes(subcommand)) {
-    throw new Error('cloudflare: Usage: bwf cloudflare <login|status|logout>.');
+  switch (subcommand) {
+    case 'login':
+    case 'status':
+    case 'logout': {
+      if (extra) {
+        throw new Error(`cloudflare: Unexpected argument '${extra}'.`);
+      }
+      return { subcommand };
+    }
+    default:
+      throw new Error('cloudflare: Usage: bwf cloudflare <login|status|logout>.');
   }
-  if (extra) {
-    throw new Error(`cloudflare: Unexpected argument '${extra}'.`);
-  }
-  return { subcommand: subcommand as CloudflareArgs['subcommand'] };
 }

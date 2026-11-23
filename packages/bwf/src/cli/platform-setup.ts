@@ -15,6 +15,12 @@ type PlatformSetupPage = Readonly<{
   linkInTitle?: boolean;
 }>;
 
+type PlatformSetupPages = Readonly<{
+  runtime: PlatformSetupPage;
+  github: PlatformSetupPage;
+  r2: PlatformSetupPage;
+}>;
+
 /** Return a prompt answer, or stop the platform command when the prompt was cancelled. */
 export function platformPromptAnswer<T>(value: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(value) || typeof value === 'symbol') {
@@ -27,14 +33,16 @@ export function platformSetupLink(page: Pick<PlatformSetupPage, 'title' | 'url'>
   return formatLink(pc.underline(page.title), page.url);
 }
 
+function docs(page: string, section: string, title: string): string {
+  return platformSetupLink({
+    title,
+    url: `https://github.com/builtbyfriends/platform/blob/main/docs/guide/platform/installation/${page}.md#${section}`,
+  });
+}
+
 export function platformSetupFieldHelp(
   key: string,
 ): Readonly<{ description: string; placeholder?: string }> | undefined {
-  const docs = (page: string, section: string, title: string) =>
-    platformSetupLink({
-      title,
-      url: `https://github.com/builtbyfriends/platform/blob/main/docs/guide/platform/installation/${page}.md#${section}`,
-    });
   switch (key) {
     case 'databaseUrl':
       return {
@@ -152,11 +160,7 @@ export function platformManagementSetupPage(
   };
 }
 
-export function platformSetupPages(plan: PlatformInstallPlan): {
-  runtime: PlatformSetupPage;
-  github: PlatformSetupPage;
-  r2: PlatformSetupPage;
-} {
+export function platformSetupPages(plan: PlatformInstallPlan): PlatformSetupPages {
   const needsGateway = plan.actions.some(
     (action) => action.kind === 'ai-gateway' && action.action === 'inspect',
   );

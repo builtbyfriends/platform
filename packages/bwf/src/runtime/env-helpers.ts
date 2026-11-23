@@ -43,6 +43,7 @@ function build<T>(parse: Parser<T>, state: BuilderState<T>): EnvSchema<T> {
             return { value: state.defaultValue };
           }
           if (state.optional) {
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- optional value is undefined by contract
             return { value: undefined as T };
           }
           return { issues: [{ message: 'Required' }] };
@@ -62,6 +63,7 @@ function build<T>(parse: Parser<T>, state: BuilderState<T>): EnvSchema<T> {
       });
     },
     default(value: NonNullable<T>): EnvSchema<NonNullable<T>> {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- default() narrows the parser output
       return build<NonNullable<T>>(parse as Parser<NonNullable<T>>, {
         optional: false,
         defaultValue: value,
@@ -148,9 +150,13 @@ export function oneOf<const Values extends Array<string>>(
 export function json<T = unknown>(): EnvSchema<T> {
   return build<T>((raw) => {
     try {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- JSON.parse result is typed by the caller
       return { ok: true, value: JSON.parse(raw) as T };
     } catch (error) {
-      return { ok: false, message: `Invalid JSON: ${(error as Error).message}` };
+      return {
+        ok: false,
+        message: `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }, empty());
 }

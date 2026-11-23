@@ -226,6 +226,7 @@ function validateContentId(field: string, value: string): void {
   }
 }
 
+// oxlint-disable-next-line quality/no-known-value-widening -- looked up by arbitrary extension
 const COMMON_TYPES: Record<string, string> = {
   txt: 'text/plain',
   html: 'text/html',
@@ -354,7 +355,9 @@ function unquotePairs(text: string): string {
  * Exported so `bwf.config.ts` `email.from` is validated by the same rules
  * the runtime applies to `from` at send time.
  */
-export function parseAddress(value: Address, field: string): { email: string; name?: string } {
+type ParsedAddress = { email: string; name?: string };
+
+export function parseAddress(value: Address, field: string): ParsedAddress {
   if (typeof value === 'string') {
     rejectCRLF(`${field} address`, value);
     // Decision: `Display Name <email@domain>`, quotes paired or absent. The unquoted
@@ -650,6 +653,7 @@ function normalizeThreading(threading: unknown): NormalizedEmail['threading'] {
   if (typeof threading !== 'object' || threading === null || Array.isArray(threading)) {
     throw new MimeError('MIME_ERROR', 'threading: must be an object.');
   }
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- caller-supplied object is checked field by field below
   const { inReplyTo = '', references = '' } = threading as Record<string, unknown>;
   if (typeof inReplyTo !== 'string') {
     throw new MimeError('MIME_ERROR', 'threading.inReplyTo: must be a string.');
@@ -662,7 +666,14 @@ function normalizeThreading(threading: unknown): NormalizedEmail['threading'] {
   if (!parent && !chain) {
     return undefined;
   }
-  return { ...(parent ? { inReplyTo: parent } : {}), ...(chain ? { references: chain } : {}) };
+  const result: NonNullable<NormalizedEmail['threading']> = {};
+  if (parent) {
+    result.inReplyTo = parent;
+  }
+  if (chain) {
+    result.references = chain;
+  }
+  return result;
 }
 
 /**
@@ -1293,7 +1304,9 @@ function generateMessageId(fromEmail: string): string {
  * Build the raw RFC 5322 message body. Returns the message bytes plus the
  * generated Message-ID header so callers can surface it in the result.
  */
-export function buildMime(email: NormalizedEmail): { raw: Uint8Array; messageId: string } {
+type BuiltMime = { raw: Uint8Array; messageId: string };
+
+export function buildMime(email: NormalizedEmail): BuiltMime {
   // Decision: Project the size before rendering, which holds several copies of the
   // message: an oversize body or header must fail with `MIME_ERROR`, not
   // exhaust the isolate. Each term is a lower bound; the final check rules.
@@ -1352,6 +1365,7 @@ export function buildMime(email: NormalizedEmail): { raw: Uint8Array; messageId:
   if (textPart && htmlPart) {
     bodyPart = wrapMultipart('alternative', [textPart, htmlPart]);
   } else {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an email with neither text nor html keeps the old behavior
     bodyPart = (textPart ?? htmlPart) as MimePart;
   }
 

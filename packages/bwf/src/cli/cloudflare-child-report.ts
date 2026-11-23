@@ -3,6 +3,7 @@ import type {
   CloudflareCommandResult,
   CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { redactMessage } from '../shared/env-mask.ts';
 import { WRANGLER_AUTH_CREDENTIAL_ENV_VARS } from '../shared/untrusted-env.ts';
 import type { CfCommand } from './cf-version-api.ts';
@@ -206,8 +207,7 @@ export function observeCloudflareRunner(
       throw thrown;
     }
     if (operation.type === 'auth.token' && isCleanCloudflareExit(result)) {
-      const data = result.data as { token?: unknown } | null | undefined;
-      reporter.redactor.add(data?.token);
+      reporter.redactor.add(isRecord(result.data) ? result.data.token : undefined);
     }
     const scrubbed = scrubCloudflareResult(result, reporter.redactor);
     logCloudflareOp(reporter, operation.type, startedAt, { result: scrubbed });

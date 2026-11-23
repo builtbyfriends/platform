@@ -162,8 +162,9 @@ async function runBuildLogsCommand(
     buildId = builds[0].id;
   }
 
-  const write = args.output
-    ? (line: string): void => appendFileSync(args.output!, `${line}\n`)
+  const outputPath = args.output;
+  const write = outputPath
+    ? (line: string): void => appendFileSync(outputPath, `${line}\n`)
     : (line: string): void => console.log(line);
 
   // Decision: A transient failure on the first poll mustn't kill `--follow` either. On a fatal error we exit

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { writeSync } from 'node:fs';
 import { findEnvFile } from '../codegen/env-types.ts';
 import type { SelfHostSchemaFacts, SelfHostSchemaFailureReason } from './env-validation.ts';
+import { isJsonObject } from './json-value.ts';
 
 /**
  * Runs the project's env.ts for the self-host deploy in a child process. The caller
@@ -56,7 +57,7 @@ const defaultSpawn: EnvSchemaProbeSpawn = (command, args, options) => {
   const fd3 = result.output?.[RESULT_FD];
   return {
     status: result.status,
-    fd3: typeof fd3 === 'string' ? fd3 : fd3 == null ? null : String(fd3),
+    fd3: typeof fd3 === 'string' ? fd3 : fd3 === null || fd3 === undefined ? null : String(fd3),
     error: result.error ?? null,
     signal: result.signal ?? null,
   };
@@ -218,8 +219,19 @@ async function runValidateEmittedChild(root: string): Promise<void> {
   }
 }
 
+function isChildInput(value: unknown): value is ChildInput {
+  return (
+    isJsonObject(value) &&
+    (value.op === 'facts' || value.op === 'validate-emitted') &&
+    typeof value.root === 'string'
+  );
+}
+
 async function runEnvSchemaProbeChild(rawInput: string): Promise<void> {
-  const input = JSON.parse(rawInput) as ChildInput;
+  const input: unknown = JSON.parse(rawInput);
+  if (!isChildInput(input)) {
+    throw new Error('env schema probe: invalid child input');
+  }
   if (input.op === 'validate-emitted') {
     await runValidateEmittedChild(input.root);
     return;
@@ -229,6 +241,7 @@ async function runEnvSchemaProbeChild(rawInput: string): Promise<void> {
 
 // Decision: Child entry. Any unexpected failure exits nonzero; the parent fails closed on that.
 if (process.argv[2] === PROBE_MARKER) {
+  // oxlint-disable-next-line unicorn/prefer-top-level-await -- a top-level await makes this module async, which breaks require(esm) consumers
   runEnvSchemaProbeChild(process.argv[3] ?? 'null').then(
     () => process.exit(0),
     () => process.exit(1),

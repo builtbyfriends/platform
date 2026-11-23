@@ -116,6 +116,7 @@ export function parseCapturedMessage(value: unknown): CapturedMessage | undefine
   if (typeof value !== 'object' || value === null) {
     return undefined;
   }
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- stored JSON is checked field by field
   const v = value as Record<string, unknown>;
   if (typeof v.id !== 'string' || typeof v.raw !== 'string') {
     return undefined;
@@ -141,6 +142,7 @@ export function parseCapturedMessage(value: unknown): CapturedMessage | undefine
     if (typeof entry !== 'object' || entry === null) {
       return undefined;
     }
+    // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- stored JSON is checked field by field
     const a = entry as Record<string, unknown>;
     attachments.push({
       filename: typeof a.filename === 'string' ? a.filename : '',
@@ -152,6 +154,7 @@ export function parseCapturedMessage(value: unknown): CapturedMessage | undefine
   }
   const headers: Record<string, string> = {};
   if (typeof v.headers === 'object' && v.headers !== null) {
+    // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- stored JSON is checked field by field
     for (const [k, hv] of Object.entries(v.headers as Record<string, unknown>)) {
       if (typeof hv === 'string') {
         headers[k] = hv;

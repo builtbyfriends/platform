@@ -201,13 +201,25 @@ export function parsePlanName(value: unknown): string {
   return value.trim();
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPlanLimits(value: unknown): value is PlanLimits {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.values(value).every((limit) => typeof limit === 'number')
+  );
+}
+
 export function parsePlanLimitsPatch(value: unknown): PlanLimitsPatch {
   const input = record(value, 'Plan limits');
   for (const [key, limit] of Object.entries(input)) {
     if (!(PLAN_EDITABLE_LIMIT_KEYS as ReadonlyArray<string>).includes(key)) {
       throw new Error('Unknown or unenforced plan limit: ' + key + '.');
     }
-    if (!Number.isSafeInteger(limit) || (limit as number) < 0) {
+    if (!isNonNegativeSafeInteger(limit)) {
       throw new Error(key + ' must be a nonnegative safe integer; 0 means unlimited.');
     }
   }
@@ -250,7 +262,8 @@ export function parseBuildInstanceType(value: unknown): BuildInstanceType {
 /** Strict saved-state validation: invalid configuration must not silently lift quotas. */
 export function parsePlatformPlanCatalog(value: unknown): PlatformPlanCatalog {
   const input = record(value, 'Plan catalog');
-  if (!Number.isSafeInteger(input.revision) || (input.revision as number) < 0) {
+  const revision = input.revision;
+  if (!isNonNegativeSafeInteger(revision)) {
     throw new Error('Invalid plan catalog revision.');
   }
   if (!Array.isArray(input.plans) || input.plans.length === 0 || input.plans.length > 100) {
@@ -278,12 +291,15 @@ export function parsePlatformPlanCatalog(value: unknown): PlatformPlanCatalog {
     ) {
       throw new Error('Plan limits must contain all supported fields.');
     }
-    validatePlanLimits(limits as PlanLimits);
+    if (!isPlanLimits(limits)) {
+      throw new Error('Plan limits must contain all supported fields.');
+    }
+    validatePlanLimits(limits);
     return {
       id,
       name: parsePlanName(plan.name),
       archived: plan.archived,
-      limits: limits as PlanLimits,
+      limits,
       buildInstanceType: parseBuildInstanceType(plan.buildInstanceType),
       allowShortSlugs: plan.allowShortSlugs,
     };
@@ -296,7 +312,7 @@ export function parsePlatformPlanCatalog(value: unknown): PlatformPlanCatalog {
   if (input.reconciliation !== null) {
     const operation = record(input.reconciliation, 'Plan reconciliation');
     if (
-      operation.revision !== input.revision ||
+      operation.revision !== revision ||
       typeof operation.complete !== 'boolean' ||
       !(operation.cursor === null || typeof operation.cursor === 'string') ||
       !Array.isArray(operation.planIds) ||
@@ -320,13 +336,13 @@ export function parsePlatformPlanCatalog(value: unknown): PlatformPlanCatalog {
       }
       error = { accountId: failure.accountId, message: failure.message };
     }
-    reconciliation = {
-      revision: operation.revision as number,
+    const state = {
+      revision,
       complete: operation.complete,
       cursor: operation.cursor,
       planIds,
-      ...(error ? { error } : {}),
     };
+    reconciliation = error ? { ...state, error } : state;
   }
-  return { revision: input.revision as number, defaultPlanId, plans, reconciliation };
+  return { revision, defaultPlanId, plans, reconciliation };
 }

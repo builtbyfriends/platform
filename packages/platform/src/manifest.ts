@@ -49,6 +49,14 @@ export type PlatformResourceNames = Readonly<{
 
 export type PlatformAppAccess = 'public' | 'platform' | 'custom';
 
+function isPlatformAppAccess(value: unknown): value is PlatformAppAccess {
+  return value === 'public' || value === 'platform' || value === 'custom';
+}
+
+function isPlatformLoginKind(value: unknown): value is PlatformLoginKind {
+  return PLATFORM_LOGIN_KINDS.some((kind) => kind === value);
+}
+
 /**
  * `minimal` keeps request URLs, console messages and exception messages out of
  * Workers Logs and the platform's request log rows. Omitted means `full`.
@@ -445,7 +453,9 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   assertRecord(controlPlane, 'controlPlane');
   assertRecord(authentication, 'authentication');
   assertRecord(rawResources, 'resources');
-  const capabilityKeys = Object.keys(CORE_CAPABILITIES) as Array<keyof PlatformCapabilities>;
+  const capabilityKeys = Object.keys(CORE_CAPABILITIES).filter(
+    (key): key is keyof PlatformCapabilities => Object.hasOwn(CORE_CAPABILITIES, key),
+  );
   const capabilities: Partial<Record<keyof PlatformCapabilities, boolean>> = {};
   for (const key of capabilityKeys) {
     const entry = rawCapabilities[key];
@@ -455,15 +465,15 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     capabilities[key] = entry;
   }
   const providers = authentication.providers;
+  const invalidProviders = 'authentication.providers must contain only github or google.';
+  if (!Array.isArray(providers) || !providers.every(isPlatformLoginKind)) {
+    throw new Error(invalidProviders);
+  }
   if (
-    !Array.isArray(providers) ||
-    providers.some(
-      (provider) =>
-        !PLATFORM_LOGIN_KINDS.includes(provider as PlatformLoginKind) ||
-        (Number(value.schemaVersion) < 3 && provider !== 'github' && provider !== 'google'),
-    )
+    Number(value.schemaVersion) < 3 &&
+    providers.some((provider) => provider !== 'github' && provider !== 'google')
   ) {
-    throw new Error('authentication.providers must contain only github or google.');
+    throw new Error(invalidProviders);
   }
   if (
     (value.schemaVersion === 3 && authentication.configurable !== true) ||
@@ -512,7 +522,10 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     legacyResourcePrefix(rawResources),
   );
   const resources: Partial<Record<keyof PlatformResourceNames, string>> = {};
-  for (const key of Object.keys(resourceDefaults) as Array<keyof PlatformResourceNames>) {
+  const resourceKeys = Object.keys(resourceDefaults).filter(
+    (key): key is keyof PlatformResourceNames => Object.hasOwn(resourceDefaults, key),
+  );
+  for (const key of resourceKeys) {
     resources[key] = requiredString(
       rawResources[key] ??
         (key === 'emailGatewayWorker' || key === 'deploymentQueue'
@@ -528,8 +541,8 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     return hostname === null ? null : requiredString(hostname, `controlPlane.${key}`);
   };
   return createPlatformDeploymentManifest({
-    ...(Number(value.schemaVersion) >= 4 && value.appAccess !== undefined
-      ? { appAccess: value.appAccess as PlatformAppAccess }
+    ...(Number(value.schemaVersion) >= 4 && isPlatformAppAccess(value.appAccess)
+      ? { appAccess: value.appAccess }
       : {}),
     application: {
       baseDomain: requiredString(application.baseDomain, 'application.baseDomain'),
@@ -542,7 +555,7 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
       ...(typeof application.zoneId === 'string' ? { zoneId: application.zoneId } : {}),
     },
     authentication: {
-      providers: providers as Array<PlatformLoginKind>,
+      providers,
       ...(authentication.configurable === true ? { configurable: true } : {}),
       ...(authentication.accessProtection === true ? { accessProtection: true } : {}),
     },
@@ -565,8 +578,8 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
     installationSlug: requiredString(value.installationSlug, 'installationSlug'),
     resources,
     ...(value.runtimeLogs === 'minimal' ? { runtimeLogs: 'minimal' as const } : {}),
-    ...(value.schemaVersion === 6
-      ? { storageLocationHint: value.storageLocationHint as R2LocationHint }
+    ...(value.schemaVersion === 6 && isR2LocationHint(value.storageLocationHint)
+      ? { storageLocationHint: value.storageLocationHint }
       : {}),
   });
 }

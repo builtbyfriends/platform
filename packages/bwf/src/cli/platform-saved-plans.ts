@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { writeFileAtomic } from '../shared/atomic-write.ts';
 import { parsePlatformArgs } from './platform-args.ts';
@@ -23,10 +24,10 @@ function planId(args: Pick<SavedPlatformInstallPlan['args'], 'account' | 'name'>
 }
 
 function parseSavedPlan(value: unknown): SavedPlatformInstallPlan {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error('Expected an installation plan.');
   }
-  const record = value as Record<string, unknown>;
+  const record = value;
   if (
     record.schemaVersion !== 1 ||
     !Array.isArray(record.arguments) ||
@@ -61,13 +62,12 @@ function parseSavedPlan(value: unknown): SavedPlatformInstallPlan {
   if (externalHyperdrive && externalHyperdrive.id !== args.hyperdrive) {
     throw new Error('Saved Hyperdrive selection does not match the plan.');
   }
-  return {
-    id: planId(args),
-    args,
-    accountName: record.accountName,
-    savedAt: record.savedAt,
-    ...(externalHyperdrive ? { externalHyperdrive } : {}),
-  };
+  const base = { id: planId(args), args, accountName: record.accountName, savedAt: record.savedAt };
+  return externalHyperdrive ? { ...base, externalHyperdrive } : base;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
 export function savePlatformInstallChoices(
@@ -101,7 +101,7 @@ function readSavedPlatformInstallPlan(path: string, id: string): SavedPlatformIn
     }
     return plan;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isMissingFileError(error)) {
       throw error;
     }
     throw new Error(
@@ -120,7 +120,7 @@ export function findSavedPlatformInstallPlan(
   try {
     return readSavedPlatformInstallPlan(join(directory, `plan-${id}.json`), id);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isMissingFileError(error)) {
       return undefined;
     }
     throw error;
@@ -134,7 +134,7 @@ export function listSavedPlatformInstallPlans(
   try {
     entries = readdirSync(directory, { withFileTypes: true });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isMissingFileError(error)) {
       return [];
     }
     throw error;

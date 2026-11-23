@@ -1,5 +1,6 @@
 import type { CloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
-import { isJsonArray, isJsonObject, type JsonObject } from './json-value.ts';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 
 // oxlint-disable-next-line quality/no-unknown-returns -- Cloudflare API reads are untrusted and narrowed at each use
 type ReadCloudflare = (path: string) => Promise<unknown>;

@@ -8,6 +8,7 @@
 
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
+import { isJsonObject } from './json-value.ts';
 
 const OIDC_AUDIENCE = 'platform';
 
@@ -70,7 +71,7 @@ async function requestGithubOidcToken(requestUrl: string, requestToken: string):
     throw new Error('github-oidc: GitHub OIDC token endpoint returned an invalid response.');
   }
 
-  const value = (body as { value?: unknown } | null)?.value;
+  const value = isJsonObject(body) ? body.value : undefined;
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error('github-oidc: GitHub OIDC token endpoint did not return a token value.');
   }
@@ -113,7 +114,7 @@ async function exchangeOidcTokenAtApi(
     throw new Error('github-oidc: OIDC token exchange returned an invalid response.');
   }
 
-  const token = (body as { token?: unknown } | null)?.token;
+  const token = isJsonObject(body) ? body.token : undefined;
   if (typeof token !== 'string' || token.length === 0) {
     throw new Error('github-oidc: OIDC token exchange did not return a deploy token.');
   }

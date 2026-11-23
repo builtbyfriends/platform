@@ -5,6 +5,7 @@ import {
   normalizeWorkersDevSubdomain,
 } from '@builtbyfriends/deploy-cloudflare';
 import type { CloudflareWorkersDevSubdomainLookup } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { dirname, join } from 'pathslash';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import type { DeployWranglerRun } from './deploy-types.ts';
@@ -146,9 +147,7 @@ export function rememberCloudflareWorkersDevSubdomain(
 
 function subdomainsByAccount(state: CloudflareLocalState): Record<string, unknown> {
   const value = state.workersDevSubdomains;
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 function readCloudflareLocalState(root: string): CloudflareLocalState {

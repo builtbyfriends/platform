@@ -29,6 +29,7 @@ export type WebSocketRouteMeta = {
 export type WebSocketDurableObjectInstance = {
   fetch(request: Request): Promise<Response>;
   /** Server-only RPC used by `getRoom()`. Never reachable from a client message or HTTP request. */
+  // oxlint-disable-next-line quality/no-unknown-returns -- room action results are defined by each action
   __platformRoomAction?(request: RoomActionRequest): Promise<unknown>;
   webSocketMessage(
     webSocket: WebSocket,
@@ -69,10 +70,9 @@ type StoredConnection = {
   state?: unknown;
 };
 
-function matchRoute(
-  pattern: string,
-  pathname: string,
-): { matched: boolean; params: Record<string, string> } {
+type RouteMatch = { matched: boolean; params: Record<string, string> };
+
+function matchRoute(pattern: string, pathname: string): RouteMatch {
   const patternSegments = pattern.split('/').filter(Boolean);
   const pathSegments = pathname.split('/').filter(Boolean);
   const params: Record<string, string> = {};
@@ -91,7 +91,7 @@ function matchRoute(
       return { matched: true, params };
     }
 
-    if (pathSegment == null) {
+    if (pathSegment === undefined) {
       return { matched: false, params: {} };
     }
 
@@ -165,10 +165,31 @@ function canonicalWebSocketPattern(pattern: string): string {
  * Shared through `globalThis` because dev can evaluate this module more than once.
  */
 const WEB_SOCKET_ROUTES_SYMBOL: unique symbol = Symbol.for('void.webSocketRoutes.v1');
-const sharedWebSocketRoutes = globalThis as {
-  [WEB_SOCKET_ROUTES_SYMBOL]?: Map<string, WebSocketRouteMeta>;
-};
-const webSocketRoutes = (sharedWebSocketRoutes[WEB_SOCKET_ROUTES_SYMBOL] ??= new Map());
+// oxlint-disable-next-line quality/no-unknown-returns -- room action results are defined by each action
+type RoomActionFunction = (context: RoomActionContext, ...args: Array<unknown>) => unknown;
+
+function isRoomAction(value: unknown): value is RoomActionFunction {
+  return typeof value === 'function';
+}
+
+function isRouteMap(value: unknown): value is Map<string, WebSocketRouteMeta> {
+  return value instanceof Map;
+}
+const existingWebSocketRoutes: unknown = Object.getOwnPropertyDescriptor(
+  globalThis,
+  WEB_SOCKET_ROUTES_SYMBOL,
+)?.value;
+const webSocketRoutes: Map<string, WebSocketRouteMeta> = isRouteMap(existingWebSocketRoutes)
+  ? existingWebSocketRoutes
+  : new Map<string, WebSocketRouteMeta>();
+if (!isRouteMap(existingWebSocketRoutes)) {
+  Object.defineProperty(globalThis, WEB_SOCKET_ROUTES_SYMBOL, {
+    value: webSocketRoutes,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+}
 
 /** @internal Called by the generated route table. */
 export function __registerWebSocketRoutes(routes: Array<WebSocketRouteMeta>): void {
@@ -209,14 +230,23 @@ function withAuthState<T>(state: AuthState | null, fn: () => Promise<T> | T): Pr
   return Promise.resolve(authContext.run({ user: state?.user ?? null, state }, fn));
 }
 
-function getStoredConnection(webSocket: WebSocket): StoredConnection {
-  const stored = (
-    webSocket as WebSocket & {
-      deserializeAttachment?: () => StoredConnection | undefined;
-    }
-  ).deserializeAttachment?.();
+function isStoredConnection(value: unknown): value is StoredConnection {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'params' in value &&
+    typeof value.params === 'object' &&
+    'roomId' in value &&
+    typeof value.roomId === 'string'
+  );
+}
 
-  if (stored) {
+function getStoredConnection(webSocket: WebSocket): StoredConnection {
+  const stored: unknown = webSocket.deserializeAttachment?.();
+
+  if (isStoredConnection(stored)) {
     return {
       ...stored,
       authState: stored.authState ?? null,
@@ -300,6 +330,45 @@ function createRoomController<ServerEvent>(
   };
 }
 
+function runContextHook(
+  definition: AnyWebSocketDefinition,
+  name: 'onBeforeConnect' | 'onConnect' | 'onRequest',
+  ctx: RoomContext | SocketContext,
+): Response | void | Promise<Response | void> {
+  if (definition.__kind === 'room' && 'room' in ctx) {
+    return definition[name]?.(ctx);
+  }
+  if (definition.__kind === 'socket' && 'socket' in ctx) {
+    return definition[name]?.(ctx);
+  }
+}
+
+function runMessageHook(
+  definition: AnyWebSocketDefinition,
+  ctx: RoomContext | SocketContext,
+  event: unknown,
+): void | Promise<void> {
+  if (definition.__kind === 'room' && 'room' in ctx) {
+    return definition.onMessage?.(ctx, event);
+  }
+  if (definition.__kind === 'socket' && 'socket' in ctx) {
+    return definition.onMessage?.(ctx, event);
+  }
+}
+
+function runCloseHook(
+  definition: AnyWebSocketDefinition,
+  ctx: RoomContext | SocketContext,
+  details: { code: number; reason: string; wasClean: boolean },
+): void | Promise<void> {
+  if (definition.__kind === 'room' && 'room' in ctx) {
+    return definition.onClose?.(ctx, details);
+  }
+  if (definition.__kind === 'socket' && 'socket' in ctx) {
+    return definition.onClose?.(ctx, details);
+  }
+}
+
 function createHookContext(
   definition: AnyWebSocketDefinition,
   state: DurableObjectState,
@@ -314,6 +383,7 @@ function createHookContext(
     params: stored.params,
     user: stored.user,
     request,
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- env bag is the worker's generated bindings
     env: env as CloudEnv['Bindings'],
     storage: state.storage,
   };
@@ -360,23 +430,24 @@ export function createWebSocketDurableObject(
       return withRuntimeEnv(this.env, () => this.#handleFetch(request));
     }
 
+    // oxlint-disable-next-line quality/no-unknown-returns -- room action results are defined by each action
     async __platformRoomAction(request: RoomActionRequest): Promise<unknown> {
       return withRuntimeEnv(this.env, () => {
         const actions = definition.__kind === 'room' ? definition.actions : undefined;
         const action =
           actions && Object.hasOwn(actions, request.name) ? actions[request.name] : undefined;
-        if (typeof action !== 'function') {
+        if (!isRoomAction(action)) {
           throw new Error(`ws: Unknown room action "${request.name}".`);
         }
         const context: RoomActionContext = {
           id: request.id,
           params: request.params,
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- env bag is the worker's generated bindings
           env: this.env as CloudEnv['Bindings'],
           storage: this.state.storage,
           room: createRoomController<unknown>(this.state, definition.messages.server),
         };
-        const handler = action as (context: RoomActionContext, ...args: Array<unknown>) => unknown;
-        return handler(context, ...request.args);
+        return action(context, ...request.args);
       });
     }
 
@@ -413,7 +484,7 @@ export function createWebSocketDurableObject(
 
         const beforeConnectCtx = this.#context(request, server, stored);
         const decision = await withAuthState(authState, () =>
-          definition.onBeforeConnect?.(beforeConnectCtx as never),
+          runContextHook(definition, 'onBeforeConnect', beforeConnectCtx),
         );
         if (decision instanceof Response) {
           return decision;
@@ -422,7 +493,7 @@ export function createWebSocketDurableObject(
         this.state.acceptWebSocket(server);
 
         const connectCtx = this.#context(request, server, stored);
-        await withAuthState(authState, () => definition.onConnect?.(connectCtx as never));
+        await withAuthState(authState, () => runContextHook(definition, 'onConnect', connectCtx));
 
         return new Response(null, { status: 101, webSocket: client });
       }
@@ -439,7 +510,13 @@ export function createWebSocketDurableObject(
         authState,
       };
       const ctx = this.#context(request, new WebSocketPair()[1], stored);
-      return withAuthState(authState, () => definition.onRequest!(ctx as never));
+      const response = await withAuthState(authState, () =>
+        runContextHook(definition, 'onRequest', ctx),
+      );
+      if (!(response instanceof Response)) {
+        throw new Error('ws: onRequest must return a Response.');
+      }
+      return response;
     }
 
     webSocketMessage(
@@ -473,7 +550,7 @@ export function createWebSocketDurableObject(
       const request = new Request(`https://platform.local${route.pattern}`);
       const ctx = this.#context(request, webSocket, stored);
       await withAuthState(stored.authState ?? null, () =>
-        definition.onMessage?.(ctx as never, result.value as never),
+        runMessageHook(definition, ctx, result.value),
       );
     }
 
@@ -499,7 +576,7 @@ export function createWebSocketDurableObject(
       const request = new Request(`https://platform.local${route.pattern}`);
       const ctx = this.#context(request, webSocket, stored);
       await withAuthState(stored.authState ?? null, () =>
-        definition.onClose?.(ctx as never, { code, reason, wasClean }),
+        runCloseHook(definition, ctx, { code, reason, wasClean }),
       );
     }
   }
@@ -531,14 +608,28 @@ export function createWebSocketTombstoneDurableObject(
   };
 }
 
+function isDurableObjectNamespace(value: unknown): value is DurableObjectNamespace {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'idFromName' in value &&
+    typeof value.idFromName === 'function' &&
+    'get' in value &&
+    typeof value.get === 'function'
+  );
+}
+
 function getStub(
   env: Record<string, unknown>,
   route: WebSocketRouteMeta,
   params: Record<string, string>,
 ) {
-  const binding = env[route.bindingName] as DurableObjectNamespace | undefined;
+  const binding = env[route.bindingName];
   if (!binding) {
     return null;
+  }
+  if (!isDurableObjectNamespace(binding)) {
+    throw new Error(`ws: Binding "${route.bindingName}" is not a Durable Object namespace.`);
   }
   const id = binding.idFromName(buildWebSocketInstanceId(route, params));
   return binding.get(id);

@@ -13,7 +13,7 @@ export type AuthArgs = {
 
 export function parseAuthArgs(args: Array<string>): AuthArgs {
   const [subcommand, ...rest] = args;
-  if (!subcommand || !['login', 'logout', 'status'].includes(subcommand)) {
+  if (subcommand !== 'login' && subcommand !== 'logout' && subcommand !== 'status') {
     throw new Error(
       'auth: Usage: bwf auth <login|status|logout> [--platform cloudflare|platform].',
     );
@@ -35,7 +35,7 @@ export function parseAuthArgs(args: Array<string>): AuthArgs {
     }
   }
   return {
-    subcommand: subcommand as AuthArgs['subcommand'],
+    subcommand,
     ...(!!platform && { platform }),
   };
 }

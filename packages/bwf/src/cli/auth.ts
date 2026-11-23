@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import {
   browserPageLead,
   browserPageStatus,
@@ -40,9 +42,19 @@ type Config = {
   tokens?: Record<string, string>;
 };
 
+function isConfig(value: unknown): value is Config {
+  return (
+    isRecord(value) &&
+    (value.tokens === undefined ||
+      (isRecord(value.tokens) &&
+        Object.values(value.tokens).every((token) => typeof token === 'string')))
+  );
+}
+
 function readConfig(): Config {
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    const parsed: unknown = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    return isConfig(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -61,13 +73,14 @@ function readOriginScopedToken(apiUrl: string, config: Config): string | null {
     return keyringToken;
   }
 
-  const fileToken = config.tokens?.[normalizedApiUrl];
-  if (!fileToken) {
+  const { tokens } = config;
+  const fileToken = tokens?.[normalizedApiUrl];
+  if (!tokens || !fileToken) {
     return null;
   }
   if (keyringSet(account, fileToken)) {
-    delete config.tokens![normalizedApiUrl];
-    if (Object.keys(config.tokens!).length === 0) {
+    delete tokens[normalizedApiUrl];
+    if (Object.keys(tokens).length === 0) {
       delete config.tokens;
     }
     try {
@@ -121,8 +134,10 @@ export function getToken(root: string = process.cwd()): string | null {
   return readTokenForOrigin(apiUrl, config);
 }
 
+export type AccountCredential = { apiUrl: string; token: string | null };
+
 /** Account actions follow the selected connection, independently of application metadata. */
-export function getAccountCredential(): { apiUrl: string; token: string | null } {
+export function getAccountCredential(): AccountCredential {
   const config = readConfig();
   const apiUrl = connectedPlatform(
     process.env.BWF_API_URL || getActivePlatformConnection()?.apiUrl,
@@ -374,8 +389,12 @@ export async function awaitBrowserCallback<T>(options: {
       resolve(result);
     };
 
-    const server = http.createServer(async (req, res) => {
-      const url = new URL(req.url!, `http://localhost`);
+    const failUnexpected = (error: unknown): void => {
+      fail(error instanceof Error ? error : new Error('auth: Login callback failed.'));
+    };
+
+    const handleCallback = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      const url = new URL(req.url ?? '/', `http://localhost`);
       if (url.pathname !== '/callback') {
         res.writeHead(404);
         res.end('Not found');
@@ -428,12 +447,16 @@ export async function awaitBrowserCallback<T>(options: {
         ),
       );
       succeed(result);
+    };
+
+    const server = http.createServer((req, res) => {
+      handleCallback(req, res).catch(failUnexpected);
     });
 
     // Decision: Close right after the callback, without waiting for the keep-alive timeout.
     server.on('connection', (socket) => socket.unref());
 
-    server.listen(0, '127.0.0.1', async () => {
+    const startLogin = async (): Promise<void> => {
       const addr = server.address();
       if (!addr || typeof addr === 'string') {
         fail(new Error('auth: Failed to start local callback server.'));
@@ -454,6 +477,10 @@ export async function awaitBrowserCallback<T>(options: {
 
       onUrl?.(authUrl);
       openBrowser(authUrl, options.execFile);
+    };
+
+    server.listen(0, '127.0.0.1', () => {
+      startLogin().catch(failUnexpected);
     });
 
     const timeout = setTimeout(() => {
@@ -498,6 +525,12 @@ export async function runPlatformLogin(
       }
       return null;
     },
-    finalize: (params) => exchangeLoginCode(apiUrl, params.get('code')!, state, codeVerifier),
+    finalize: (params) => {
+      const code = params.get('code');
+      if (!code) {
+        throw new Error('auth: No authorization code received.');
+      }
+      return exchangeLoginCode(apiUrl, code, state, codeVerifier);
+    },
   });
 }

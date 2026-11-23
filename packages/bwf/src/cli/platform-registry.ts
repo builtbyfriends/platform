@@ -11,11 +11,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, hostname } from 'node:os';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { parsePlatformInstallationManifest } from '@builtbyfriends/platform';
 import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { join, resolve } from 'pathslash';
 import { writeFileAtomic } from '../shared/atomic-write.ts';
 import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
+import { Buffer } from './node-buffer.ts';
 
 const PLATFORM_REGISTRY_SCHEMA_VERSION = 1 as const;
 
@@ -105,11 +107,21 @@ export function platformCredentialAccount(apiUrl: string): string {
   return `platform:${createHash('sha256').update(normalizePlatformApiUrl(apiUrl)).digest('hex')}`;
 }
 
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
+
+function optionalString(input: unknown): string | null {
+  return typeof input === 'string' && input !== '' ? input : null;
+}
+
 function parseConnection(value: unknown): PlatformConnection {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error('platform: Invalid connection entry in the local registry.');
   }
-  const entry = value as Record<string, unknown>;
+  const entry = value;
   const apiUrl = normalizePlatformApiUrl(String(entry.apiUrl ?? ''));
   const id = String(entry.id ?? '');
   if (id !== platformConnectionId(apiUrl)) {
@@ -122,8 +134,6 @@ function parseConnection(value: unknown): PlatformConnection {
   if (!Number.isFinite(Date.parse(lastUsedAt))) {
     throw new Error('platform: Invalid connection timestamp in the local registry.');
   }
-  const optionalString = (input: unknown): string | null =>
-    typeof input === 'string' && input !== '' ? input : null;
   const proxyUrl = optionalString(entry.proxyUrl);
   return {
     accountId: optionalString(entry.accountId),
@@ -144,10 +154,10 @@ function parseConnection(value: unknown): PlatformConnection {
 function readRegistry(directory: string): PlatformConnectionRegistry {
   try {
     const parsed = JSON.parse(readFileSync(join(directory, 'registry.json'), 'utf8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       throw new Error('registry must be an object');
     }
-    const value = parsed as Record<string, unknown>;
+    const value = parsed;
     if (
       value.schemaVersion !== PLATFORM_REGISTRY_SCHEMA_VERSION ||
       !Array.isArray(value.connections)
@@ -162,7 +172,7 @@ function readRegistry(directory: string): PlatformConnectionRegistry {
         : null;
     return { activeConnectionId, connections, schemaVersion: PLATFORM_REGISTRY_SCHEMA_VERSION };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (errorCode(error) === 'ENOENT') {
       return DEFAULT_REGISTRY;
     }
     throw new Error(
@@ -179,7 +189,7 @@ function withRegistryLock<T>(directory: string, operation: () => T): T {
   try {
     descriptor = openSync(lockPath, 'wx', 0o600);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+    if (errorCode(error) !== 'EEXIST') {
       throw error;
     }
     const age = Date.now() - statSync(lockPath).mtimeMs;
@@ -223,21 +233,23 @@ export function acquirePlatformLifecycleLock(
       );
       return descriptor;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      if (errorCode(error) !== 'EEXIST') {
         throw error;
       }
       let stale = false;
       try {
-        const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
-          host?: unknown;
-          pid?: unknown;
-          startedAt?: unknown;
-        };
+        const parsedOwner: unknown = JSON.parse(readFileSync(lockPath, 'utf8'));
+        if (parsedOwner === null) {
+          throw new TypeError('lock owner is null', { cause: error });
+        }
+        const owner: { host?: unknown; pid?: unknown; startedAt?: unknown } = isRecord(parsedOwner)
+          ? parsedOwner
+          : {};
         if (owner.host === hostname() && typeof owner.pid === 'number') {
           try {
             process.kill(owner.pid, 0);
           } catch (ownerError) {
-            stale = (ownerError as NodeJS.ErrnoException).code === 'ESRCH';
+            stale = errorCode(ownerError) === 'ESRCH';
           }
         } else {
           const startedAt =
@@ -417,7 +429,7 @@ export function listInstallationManifests(
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (errorCode(error) === 'ENOENT') {
       return [];
     }
     throw error;
@@ -677,7 +689,7 @@ function readRecoveryMaterial(
     ]);
     return parseRecoveryValues(JSON.parse(plaintext.toString('utf8')), `${kind} recovery material`);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (errorCode(error) !== 'ENOENT') {
       throw new Error(
         `platform: Could not read encrypted ${kind} material: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
@@ -695,7 +707,7 @@ function readRecoveryMaterial(
     rmSync(legacyPath, { force: true });
     return values;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (errorCode(error) === 'ENOENT') {
       return null;
     }
     throw new Error(
@@ -712,7 +724,10 @@ function writeEncryptedRecoveryMaterial(
   values: Record<string, string>,
   directory: string,
 ): void {
-  const key = platformRecoveryKey(directory, true)!;
+  const key = platformRecoveryKey(directory, true);
+  if (!key) {
+    throw new Error('platform: The recovery encryption key is unavailable.');
+  }
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   cipher.setAAD(recoveryAad(manifest, kind));
@@ -775,10 +790,10 @@ function parseRecoveryKey(value: string, name: string): Buffer {
 }
 
 function parseRecoveryEnvelope(value: unknown): PlatformRecoveryEnvelope {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error('encrypted recovery envelope must be an object');
   }
-  const envelope = value as Record<string, unknown>;
+  const envelope = value;
   if (
     envelope.schemaVersion !== PLATFORM_RECOVERY_ENVELOPE_VERSION ||
     envelope.algorithm !== 'aes-256-gcm' ||
@@ -794,18 +809,27 @@ function parseRecoveryEnvelope(value: unknown): PlatformRecoveryEnvelope {
   if (Buffer.from(envelope.tag, 'base64').byteLength !== 16) {
     throw new Error('encrypted recovery tag is invalid');
   }
-  return envelope as PlatformRecoveryEnvelope;
+  return {
+    algorithm: envelope.algorithm,
+    ciphertext: envelope.ciphertext,
+    iv: envelope.iv,
+    schemaVersion: envelope.schemaVersion,
+    tag: envelope.tag,
+  };
 }
 
 function parseRecoveryValues(value: unknown, name: string): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error(`${name} must be an object`);
   }
-  const entries = Object.entries(value);
-  if (entries.some(([, entry]) => typeof entry !== 'string')) {
-    throw new Error(`${name} values must be strings`);
+  const entries: Array<[string, string]> = [];
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') {
+      throw new Error(`${name} values must be strings`);
+    }
+    entries.push([key, entry]);
   }
-  return Object.fromEntries(entries) as Record<string, string>;
+  return Object.fromEntries(entries);
 }
 
 export function removePlatformConnectionForInstallation(

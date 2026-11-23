@@ -10,6 +10,7 @@ import { collectMigrations, readJournal } from '../migrations/collect.ts';
 import { assertJournalCoherence } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import type { GenArgs } from './gen-args.ts';
+import { isJsonObject } from './json-value.ts';
 import { printSuccess } from './output.ts';
 import { buildDrizzleKitSpawnEnv, drizzleKitBin } from './yarn-pnp.ts';
 
@@ -44,8 +45,11 @@ function writeIfNotExists(filePath: string, content: string): boolean {
   return true;
 }
 
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 export function formatTimestamp(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
   return (
     String(date.getUTCFullYear()) +
     pad(date.getUTCMonth() + 1) +
@@ -153,8 +157,11 @@ export function detectValidator(root: string): Validator | null {
     return null;
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  const dependencies = isJsonObject(pkg) && isJsonObject(pkg.dependencies) ? pkg.dependencies : {};
+  const devDependencies =
+    isJsonObject(pkg) && isJsonObject(pkg.devDependencies) ? pkg.devDependencies : {};
+  const allDeps = { ...dependencies, ...devDependencies };
 
   if ('valibot' in allDeps) {
     return 'valibot';
@@ -232,16 +239,16 @@ const VALIDATOR_TYPES: Record<SchemaValidator, ValidatorTypes> = {
 };
 
 // Decision: Column types not listed here (`string`, `text`, `datetime`) validate as strings.
-const VALUE_KINDS: Partial<Record<string, 'number' | 'boolean' | 'blob'>> = {
-  integer: 'number',
-  real: 'number',
-  boolean: 'boolean',
-  blob: 'blob',
-};
+const VALUE_KINDS = new Map<string, 'number' | 'boolean' | 'blob'>([
+  ['integer', 'number'],
+  ['real', 'number'],
+  ['boolean', 'boolean'],
+  ['blob', 'blob'],
+]);
 
 function validatorType(validator: SchemaValidator, col: ColumnSpec): string {
   const types = VALIDATOR_TYPES[validator];
-  const base = types[VALUE_KINDS[col.type] ?? 'string'];
+  const base = types[VALUE_KINDS.get(col.type) ?? 'string'];
   return col.nullable ? types.optional(base) : base;
 }
 
@@ -352,7 +359,7 @@ export const GET = defineHandler(async (c) => {
 `;
   }
 
-  const importLine = getImportLine(validator)!;
+  const importLine = getImportLine(validator) ?? '';
   const paramsSchema = getParamsSchema(validator);
 
   return `${importLine}
@@ -666,7 +673,7 @@ export default defineQueue<Message>(async (batch, env) => {
 
 function runProcedure(root: string, name: string): void {
   const segments = name.split('.');
-  const exportName = segments.pop()!;
+  const exportName = segments.pop() ?? name;
   const filePath = join(readProjectPaths(root).proceduresDir, ...segments) + '.ts';
   const existing = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
   if (existing && new RegExp(`export const ${exportName}\\b`).test(existing)) {

@@ -122,7 +122,6 @@ type SeedTarget = {
 };
 
 type PgClient = {
-  connect(): Promise<void>;
   end(): Promise<void>;
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
@@ -903,8 +902,8 @@ async function executeExternalRemoteSql(
   sql: string,
 ): Promise<void> {
   if (dialect === 'postgresql') {
-    const { Client } = await import('pg');
-    const pgClient: PgClient = new Client({ connectionString: dbUrl });
+    const { Client: PgDriverClient } = await import('pg');
+    const pgClient = new PgDriverClient({ connectionString: dbUrl });
     await pgClient.connect();
     try {
       const result = await pgClient.query(sql);

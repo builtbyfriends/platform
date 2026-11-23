@@ -1,3 +1,4 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import {
   parsePlatformInstallationManifest,
   setInstallationEndpoints,
@@ -218,8 +219,8 @@ export async function verifyInstallationEndpoint(
       `platform: Installation ${manifest.id} is not reachable (HTTP ${response.status}).`,
     );
   }
-  const value = (await response.json()) as { installationId?: unknown };
-  if (value.installationId !== manifest.id) {
+  const value: unknown = await response.json();
+  if (!isRecord(value) || value.installationId !== manifest.id) {
     throw new Error(`platform: Installation ${manifest.id} endpoint identity does not match.`);
   }
 }

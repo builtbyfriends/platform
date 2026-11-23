@@ -53,7 +53,12 @@ export function readCloudflareCandidate(root: string): CloudflareCandidateReceip
   ) {
     throw new Error(INVALID_CANDIDATE_MESSAGE);
   }
-  return value as CloudflareCandidateReceipt;
+  return {
+    accountId: value.accountId,
+    workerName: value.workerName,
+    parentVersionId: value.parentVersionId,
+    versionIds: value.versionIds,
+  };
 }
 
 export function assertCloudflareCandidateUnchanged(

@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import {
   createCloudflareProcessRunner,
   encodeCloudflareOperation,
@@ -152,20 +153,20 @@ export function cloudflareCredentialOverrides(
 }
 
 export function parseCloudflareAuthSession(value: unknown): CloudflareAuthSession | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return null;
   }
-  const record = value as Record<string, unknown>;
+  const record = value;
   if (record.loggedIn !== true || !Array.isArray(record.accounts)) {
     return null;
   }
 
   const accounts: Array<CloudflareAccount> = [];
   for (const account of record.accounts) {
-    if (!account || typeof account !== 'object' || Array.isArray(account)) {
+    if (!isRecord(account)) {
       continue;
     }
-    const item = account as Record<string, unknown>;
+    const item = account;
     if (typeof item.id !== 'string' || item.id.length === 0) {
       continue;
     }

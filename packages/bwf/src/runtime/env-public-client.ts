@@ -12,13 +12,17 @@
  */
 
 type ImportMetaEnvLike = {
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
   readonly env?: Record<string, unknown>;
 };
 
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
 function getClientEnv(): Record<string, unknown> | undefined {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- import.meta.env shape is bundler defined
   return (import.meta as ImportMetaEnvLike).env;
 }
 
+// oxlint-disable-next-line quality/no-unknown-returns -- env values are untyped
 function readClientKey(key: string): unknown {
   const meta = getClientEnv();
   if (meta && key in meta) {

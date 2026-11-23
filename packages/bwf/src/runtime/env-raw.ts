@@ -6,6 +6,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- bindings are platform-defined
 export type RuntimeEnv = Record<string, unknown>;
 
 /** Prefixes for platform-internal bindings that must be hidden from user code. */
@@ -20,6 +21,7 @@ export const INTERNAL_BINDING_PREFIXES = ['__PLATFORM_', '__PROJECT_'] as const;
  * store shape changes.
  */
 const ENV_CONTEXT_SYMBOL: unique symbol = Symbol.for('bwf.envContext.v1');
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- globalThis slot keyed by a symbol
 const shared = globalThis as { [ENV_CONTEXT_SYMBOL]?: AsyncLocalStorage<RuntimeEnv> };
 shared[ENV_CONTEXT_SYMBOL] ??= new AsyncLocalStorage<RuntimeEnv>();
 export const envContext: AsyncLocalStorage<RuntimeEnv> = shared[ENV_CONTEXT_SYMBOL];
@@ -34,6 +36,7 @@ let cloudflareEnv: RuntimeEnv | undefined;
 const isWorkerd = typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
 
 if (isWorkerd) {
+  // oxlint-disable-next-line unicorn/prefer-top-level-await -- awaiting would block module evaluation
   import('cloudflare:workers')
     .then((mod) => {
       cloudflareEnv = asEnv((mod as { env?: unknown }).env) ?? undefined;
@@ -48,6 +51,7 @@ function asEnv(value: unknown): RuntimeEnv | null {
   if ('then' in value && typeof (value as { then?: unknown }).then === 'function') {
     return null;
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- env bindings object has no known shape
   return value as RuntimeEnv;
 }
 

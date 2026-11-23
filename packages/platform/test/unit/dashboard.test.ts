@@ -17,12 +17,11 @@ import {
 import { deploymentInput, workerConfigs } from '../worker-config-fixture.ts';
 
 function configs(dashboardUrl?: string) {
-  return workerConfigs({
-    deployment: createPlatformDeploymentManifest({
-      ...deploymentInput,
-      ...(dashboardUrl ? { controlPlane: { dashboardUrl } } : {}),
-    }),
-  });
+  const input: Parameters<typeof createPlatformDeploymentManifest>[0] = { ...deploymentInput };
+  if (dashboardUrl) {
+    input.controlPlane = { dashboardUrl };
+  }
+  return workerConfigs({ deployment: createPlatformDeploymentManifest(input) });
 }
 
 describe('optional platform dashboard origin', () => {
@@ -74,9 +73,7 @@ describe('optional platform dashboard origin', () => {
       controlPlane: { dashboardUrl: 'https://dash.example.com:8443/' },
     });
     expect(deployment.controlPlane.dashboardHostname).toBe('dash.example.com');
-    expect(parsePlatformDeploymentManifest(JSON.parse(JSON.stringify(deployment)))).toEqual(
-      deployment,
-    );
+    expect(parsePlatformDeploymentManifest(structuredClone(deployment))).toEqual(deployment);
     const createdAt = '2026-10-01T00:00:00.000Z';
     const manifest = setInstallationEndpoints(
       createPlatformInstallationManifest({
@@ -94,9 +91,7 @@ describe('optional platform dashboard origin', () => {
       },
       createdAt,
     );
-    expect(parsePlatformInstallationManifest(JSON.parse(JSON.stringify(manifest)))).toEqual(
-      manifest,
-    );
+    expect(parsePlatformInstallationManifest(structuredClone(manifest))).toEqual(manifest);
     expect(manifest.endpoints.dashboardUrl).toBe('https://dash.example.com:8443');
   });
 

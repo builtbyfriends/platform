@@ -17,6 +17,7 @@ type RuntimeRequestScope = {
 
 // Decision: Shared across copies of this module for the reason given at `envContext`.
 const REQUEST_SCOPE_SYMBOL: unique symbol = Symbol.for('bwf.runtimeRequestScope.v1');
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- globalThis slot keyed by a symbol
 const shared = globalThis as { [REQUEST_SCOPE_SYMBOL]?: AsyncLocalStorage<RuntimeRequestScope> };
 shared[REQUEST_SCOPE_SYMBOL] ??= new AsyncLocalStorage<RuntimeRequestScope>();
 const runtimeRequestContext = shared[REQUEST_SCOPE_SYMBOL];
@@ -36,6 +37,7 @@ export function getRuntimeRequestResource<T>(
     throw new Error('env: Request-scoped resource is unavailable outside a runtime handler.');
   }
   if (scope.resources.has(key)) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- resource cache is keyed by caller, value type is the caller's T
     return scope.resources.get(key) as T;
   }
   const resource = initialize();
@@ -67,6 +69,7 @@ function filterEnvProxy(env: RuntimeEnv): RuntimeEnv {
       if (typeof prop === 'string' && isInternalBinding(prop)) {
         return undefined;
       }
+      // oxlint-disable-next-line quality/no-reflect-get,typescript/no-unsafe-return -- Proxy trap forwards symbol keys and receiver
       return Reflect.get(target, prop, receiver);
     },
     has(target, prop) {
@@ -99,6 +102,7 @@ export function getRuntimeBinding<T = unknown>(name: string): T | undefined {
   if (isInternalBinding(name)) {
     return undefined;
   }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- binding type is the caller's T
   return raw[name] as T | undefined;
 }
 

@@ -1,13 +1,15 @@
 import { parseSync } from 'vite';
 import { bindingNames } from './ast-bindings.ts';
-import { isIdentifier, moduleExportName, isAstProgram } from './ast.ts';
-import type {
-  AstExportAllDeclaration,
-  AstExportNamedDeclaration,
-  AstNode,
-  AstProgram,
-  AstVariableDeclaration,
+import {
+  isAstNode,
+  isAstProgram,
+  isExportAllDeclaration,
+  isExportNamedDeclaration,
+  isIdentifier,
+  isVariableDeclaration,
+  moduleExportName,
 } from './ast.ts';
+import type { AstNode, AstProgram } from './ast.ts';
 
 /** How a module exports some names, as far as its source shows without running it. */
 export type StaticExports = {
@@ -78,8 +80,8 @@ function staticExports(program: AstProgram, names: ReadonlySet<string>): StaticE
     }
   };
   for (const statement of program.body ?? []) {
-    if (statement.type === 'ExportAllDeclaration') {
-      const exported = statement as AstExportAllDeclaration;
+    if (isExportAllDeclaration(statement)) {
+      const exported = statement;
       if (exported.exportKind === 'type') {
         continue;
       }
@@ -90,10 +92,10 @@ function staticExports(program: AstProgram, names: ReadonlySet<string>): StaticE
       }
       continue;
     }
-    if (statement.type !== 'ExportNamedDeclaration') {
+    if (!isExportNamedDeclaration(statement)) {
       continue;
     }
-    const exported = statement as AstExportNamedDeclaration;
+    const exported = statement;
     if (exported.exportKind === 'type') {
       continue;
     }
@@ -103,8 +105,8 @@ function staticExports(program: AstProgram, names: ReadonlySet<string>): StaticE
       }
     }
     const declaration = exported.declaration;
-    if (declaration?.type === 'VariableDeclaration') {
-      const variables = declaration as AstVariableDeclaration;
+    if (declaration && isVariableDeclaration(declaration)) {
+      const variables = declaration;
       for (const variable of variables.declarations ?? []) {
         if (variables.kind === 'const' && isIdentifier(variable.id) && variable.init) {
           if (names.has(variable.id.name)) {
@@ -117,7 +119,7 @@ function staticExports(program: AstProgram, names: ReadonlySet<string>): StaticE
         }
       }
     } else if (declaration && VALUE_DECLARATIONS.has(declaration.type)) {
-      const id = declaration.id as AstNode | undefined;
+      const id = isAstNode(declaration.id) ? declaration.id : undefined;
       markUnreadable(isIdentifier(id) ? id.name : undefined);
     }
   }
@@ -146,21 +148,52 @@ export function unwrapStaticExpression(node: AstNode | undefined): AstNode | und
       'TSTypeAssertion',
     ].includes(node.type)
   ) {
-    node = node.expression as AstNode | undefined;
+    node = isAstNode(node.expression) ? node.expression : undefined;
   }
   return node;
 }
 
-export function staticLiteral(node: AstNode | undefined): unknown {
+export type StaticLiteral = string | number | boolean | bigint | RegExp | null | undefined;
+
+function literalValue(value: unknown): StaticLiteral {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint' ||
+    value === null ||
+    value instanceof RegExp
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function cookedText(node: unknown): string | undefined {
+  if (typeof node !== 'object' || node === null || !('value' in node)) {
+    return undefined;
+  }
+  const { value } = node;
+  if (typeof value !== 'object' || value === null || !('cooked' in value)) {
+    return undefined;
+  }
+  return typeof value.cooked === 'string' ? value.cooked : undefined;
+}
+
+export function staticLiteral(node: AstNode | undefined): StaticLiteral {
   node = unwrapStaticExpression(node);
   if (node?.type === 'Literal') {
-    return node.value;
+    return literalValue(node.value);
   }
   if (node?.type === 'TemplateLiteral') {
-    const expressions = node.expressions as Array<AstNode> | undefined;
-    const quasis = node.quasis as Array<{ value?: { cooked?: string } }> | undefined;
-    if (expressions?.length === 0 && quasis?.length === 1) {
-      return quasis[0]?.value?.cooked;
+    const { expressions, quasis } = node;
+    if (
+      Array.isArray(expressions) &&
+      expressions.length === 0 &&
+      Array.isArray(quasis) &&
+      quasis.length === 1
+    ) {
+      return cookedText(quasis[0]);
     }
   }
   return undefined;

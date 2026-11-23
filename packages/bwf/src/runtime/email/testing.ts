@@ -138,10 +138,12 @@ interface CompiledRoute {
   handler: EmailHandler;
 }
 
-function compileRoutes(routes: Record<string, EmailHandler>): {
+type CompiledRoutes = {
   compiled: Array<CompiledRoute>;
   defaultHandler?: EmailHandler;
-} {
+};
+
+function compileRoutes(routes: Record<string, EmailHandler>): CompiledRoutes {
   const compiled: Array<CompiledRoute> = [];
   let defaultHandler: EmailHandler | undefined;
   for (const [key, handler] of Object.entries(routes)) {
@@ -306,7 +308,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
 
     // Decision: Production's own proxy, built as the generated `email()` entry builds
     // it, so every proxy check throws here as it does after deploy.
-    const { message, getActions } = createMessageProxy(
+    const proxy = createMessageProxy(
       {
         from: input.from,
         to: input.to,
@@ -316,8 +318,9 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       },
       { slug },
     );
+    const { message } = proxy;
 
-    // oxlint-disable-next-line quality/no-chained-type-assertions
+    // oxlint-disable-next-line quality/no-chained-type-assertions,typescript/no-unsafe-type-assertion -- the harness stubs only the methods the proxy calls
     const ctx = {
       waitUntil() {
         // Decision: Nothing to extend: the harness has no request lifetime.
@@ -364,7 +367,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
 
     const result = await dispatch();
     // Decision: Recorded after the handler returns: a throwing handler enacts nothing.
-    record(getActions());
+    record(proxy.getActions());
     deliveries.push(result);
     return result;
   }
@@ -387,10 +390,13 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
           rejects.push(action.reason);
           break;
         case 'forward':
-          forwards.push({
-            to: action.to,
-            ...(action.headers ? { headers: new Headers(action.headers) } : {}),
-          });
+          {
+            const forward: InboundForwardCapture = { to: action.to };
+            if (action.headers) {
+              forward.headers = new Headers(action.headers);
+            }
+            forwards.push(forward);
+          }
           break;
         case 'reply':
           replies.push({ from: action.from, to: action.to, raw: action.raw });

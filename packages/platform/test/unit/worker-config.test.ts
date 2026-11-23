@@ -152,22 +152,18 @@ describe('platform usage queue bindings', () => {
   ])(
     'adds global_fetch_strictly_public only for workers.dev probes: $apiUrl, $proxyUrl, workersDev=$workersDev',
     ({ apiUrl, proxyUrl, workersDev, publicFetch }) => {
-      const configs = workerConfigs({
-        apiUrl,
-        proxyUrl,
-        ...(workersDev
-          ? {
-              deployment: createPlatformDeploymentManifest({
-                ...deploymentInput,
-                application: {
-                  baseDomain: 'account.workers.dev',
-                  zoneName: '',
-                  workersDev: { subdomain: 'account', installationId: 'example-123456abcdef' },
-                },
-              }),
-            }
-          : {}),
-      });
+      const overrides: Parameters<typeof workerConfigs>[0] = { apiUrl, proxyUrl };
+      if (workersDev) {
+        overrides.deployment = createPlatformDeploymentManifest({
+          ...deploymentInput,
+          application: {
+            baseDomain: 'account.workers.dev',
+            zoneName: '',
+            workersDev: { subdomain: 'account', installationId: 'example-123456abcdef' },
+          },
+        });
+      }
+      const configs = workerConfigs(overrides);
       expect(configs.api.compatibility_flags).toEqual([
         'nodejs_compat',
         ...(publicFetch ? ['global_fetch_strictly_public'] : []),

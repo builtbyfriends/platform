@@ -38,6 +38,7 @@ export function deriveFromSource<T>(path: string, kind: string, derive: (source:
   const entry = entries.get(key);
 
   if (trusted && entry?.signature === signature && entry.derived.has(kind)) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- cache is keyed by kind, so the stored value was derived as T
     return entry.derived.get(kind) as T;
   }
 

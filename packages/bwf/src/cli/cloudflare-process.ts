@@ -32,9 +32,9 @@ type OperationEnvelopeFields = {
 export function isCleanCloudflareExit(
   result: Pick<ProcessResult, 'status' | 'signal' | 'error'>,
 ): boolean {
-  return (
-    result.status === 0 && result.signal == null && (result.error == null || result.error === '')
-  );
+  const noSignal = result.signal === null || result.signal === undefined;
+  const noError = result.error === null || result.error === undefined || result.error === '';
+  return result.status === 0 && noSignal && noError;
 }
 
 /** Decode the private process envelope once, retaining cancellation provenance. */
@@ -61,8 +61,12 @@ export function decodeCloudflareOperationResult<T extends ProcessResult>(
     const envelope = value as OperationEnvelopeFields & { output?: string };
     if (
       (envelope.output !== undefined && typeof envelope.output !== 'string') ||
-      (envelope.signal != null && typeof envelope.signal !== 'string') ||
-      (envelope.error != null && typeof envelope.error !== 'string') ||
+      (envelope.signal !== null &&
+        envelope.signal !== undefined &&
+        typeof envelope.signal !== 'string') ||
+      (envelope.error !== null &&
+        envelope.error !== undefined &&
+        typeof envelope.error !== 'string') ||
       (envelope.errorCode !== undefined && !Number.isSafeInteger(envelope.errorCode)) ||
       (envelope.failure !== undefined &&
         !['not-found', 'durable-migration', 'containers-unavailable'].includes(envelope.failure)) ||

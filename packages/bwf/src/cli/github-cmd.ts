@@ -16,6 +16,12 @@ import { platformErrorMessage } from './platform-errors.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
 
+type GithubConnectionPatch = {
+  branch?: string;
+  buildExecutor?: 'container' | 'github_actions';
+  workflowPath?: string;
+};
+
 /**
  * The workflow file `bwf init --github` scaffolds and the platform default for
  * a connection's OIDC deploy pin. Kept in sync with the server default
@@ -130,21 +136,24 @@ export function formatInstallations(installations: Array<GithubInstallation>): s
     .join('\n\n');
 }
 
+function connectionRow(label: string, value: string): string {
+  return `  ${label.padEnd(16)}${value}`;
+}
+
 /**
  * Render a GitHub connection for `bwf github status`. Container builds never
  * read the workflow file, so it is marked unused for them.
  */
 export function formatConnection(connection: GithubConnection): string {
-  const row = (label: string, value: string): string => `  ${label.padEnd(16)}${value}`;
   const workflow =
     connection.build_executor === 'github_actions'
       ? connection.workflow_path
       : `${connection.workflow_path} (unused for container builds)`;
   const rows = [
-    row('Repository', connection.repo_full_name),
-    row('Branch', connection.branch),
-    row('Build executor', connection.build_executor),
-    row('Deploy workflow', workflow),
+    connectionRow('Repository', connection.repo_full_name),
+    connectionRow('Branch', connection.branch),
+    connectionRow('Build executor', connection.build_executor),
+    connectionRow('Deploy workflow', workflow),
   ];
   return rows.join('\n');
 }
@@ -525,6 +534,7 @@ export async function runConnect(
   }
 
   let installation: GithubInstallation;
+  const onlyInstallation = installations.length === 1 ? installations[0] : undefined;
 
   if (args.installationId) {
     let found = installations.find((i) => i.installation_id === args.installationId);
@@ -542,8 +552,8 @@ export async function runConnect(
       process.exit(1);
     }
     installation = found;
-  } else if (installations.length === 1) {
-    installation = installations[0]!;
+  } else if (installations.length === 1 && onlyInstallation !== undefined) {
+    installation = onlyInstallation;
   } else if (!isTTY) {
     log.error('connect: Multiple installations found. Pass --installation <id>.');
     process.exit(1);
@@ -559,7 +569,12 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    installation = installations.find((i) => i.installation_id === picked)!;
+    const chosen = installations.find((i) => i.installation_id === picked);
+    if (!chosen) {
+      log.error('connect: The selected installation is no longer available.');
+      process.exit(1);
+    }
+    installation = chosen;
   }
 
   let repoFullName: string;
@@ -634,7 +649,7 @@ export async function runConnect(
   } else if (!isTTY) {
     executor = 'container';
   } else {
-    const picked = await select({
+    const picked = await select<'container' | 'github_actions'>({
       message: 'Build executor:',
       options: [
         { value: 'container', label: 'Cloudflare Container', hint: 'build on bwf (default)' },
@@ -646,7 +661,7 @@ export async function runConnect(
       cancel('Cancelled.');
       process.exit(0);
     }
-    executor = picked as 'container' | 'github_actions';
+    executor = picked;
   }
 
   // Decision: Container builds don't read the workflow file. A prompted value equal to the default stays unset,
@@ -836,11 +851,7 @@ export async function runGithubUpdate(
     executor = args.executor ?? current.build_executor;
   }
 
-  const patch: {
-    branch?: string;
-    buildExecutor?: 'container' | 'github_actions';
-    workflowPath?: string;
-  } = {};
+  const patch: GithubConnectionPatch = {};
   if (branch !== current.branch) {
     patch.branch = branch;
   }

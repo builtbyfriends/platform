@@ -20,11 +20,17 @@ export function parseAccountArgs(args: Array<string>): AccountArgs {
     }
     return { subcommand, ...(!!extra && { connectionId: extra }) };
   }
-  if (!subcommand || !['login', 'logout', 'whoami', 'token'].includes(subcommand)) {
-    throw new Error('account: Usage: bwf account <login|link|logout|whoami|token>.');
+  switch (subcommand) {
+    case 'login':
+    case 'logout':
+    case 'whoami':
+    case 'token': {
+      if (extra) {
+        throw new Error(`account: Unexpected argument '${extra}'.`);
+      }
+      return { subcommand };
+    }
+    default:
+      throw new Error('account: Usage: bwf account <login|link|logout|whoami|token>.');
   }
-  if (extra) {
-    throw new Error(`account: Unexpected argument '${extra}'.`);
-  }
-  return { subcommand: subcommand as AccountArgs['subcommand'] };
 }

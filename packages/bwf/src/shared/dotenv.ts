@@ -114,7 +114,7 @@ export function expandDotenv(
   for (const key of Object.keys(input)) {
     resolveKey(key);
   }
-  return out;
+  return Object.assign({}, out);
 }
 
 /**

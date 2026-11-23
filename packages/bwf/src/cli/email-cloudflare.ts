@@ -10,6 +10,9 @@ import type {
 } from '@builtbyfriends/deploy-cloudflare';
 import { isRecord } from '@builtbyfriends/deploy-core';
 import type { EmailHandlersScan } from '../router/email.ts';
+import { errorCode } from './error-code.ts';
+import { isJsonArray, isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import { findBindingNameOwner } from './wrangler.ts';
 
 /** The `send_email` binding name bwf provisions and the runtime reads. */
@@ -25,12 +28,12 @@ const SENDING_SCOPES = ['email_sending:write'];
 const INBOUND_SCOPES = ['email_routing:write', ...SENDING_SCOPES];
 
 /** Cloudflare Email API error codes with a known meaning; others are reported verbatim. */
-const CF_EMAIL_ERROR_CODES: Readonly<Record<number, string>> = {
-  2062: 'Email Routing is not enabled on this zone',
-  2040: 'already onboarded for Email Sending',
-  2036: 'account is not entitled to Email Sending',
-  10_105: 'account is not entitled to Email Sending',
-};
+const CF_EMAIL_ERROR_CODES = new Map<number, string>([
+  [2062, 'Email Routing is not enabled on this zone'],
+  [2040, 'already onboarded for Email Sending'],
+  [2036, 'account is not entitled to Email Sending'],
+  [10_105, 'account is not entitled to Email Sending'],
+]);
 
 /** The one-time dashboard step printed when the subdomain routing call cannot be made. */
 export function subdomainDashboardFallback(apex: string, domain: string): string {
@@ -104,7 +107,7 @@ export interface EmailCloudflareInputs {
   /** Existing root-config top-level `addresses` array (verbatim), if any. */
   existingAddresses?: unknown;
   /** Existing root-config `vars` object (verbatim) — `__PLATFORM_EMAIL_FROM` is compared to `from`. */
-  existingVars?: Record<string, unknown>;
+  existingVars?: JsonObject;
   /** Writer refusals (`findEmailConfigConflicts`); each blocks before the account changes. */
   configConflicts?: Array<string>;
   /** The pinned project config used for provider operations. */
@@ -120,7 +123,9 @@ export interface EmailCloudflareInputs {
  * Config shapes the writer would refuse for `SEND_EMAIL` and `__PLATFORM_EMAIL_FROM`, checked
  * before anything is asked. The writer keeps the same guard, since the file can change first.
  */
-export function findEmailConfigConflicts(config: Record<string, unknown>): Array<string> {
+export function findEmailConfigConflicts<T extends Record<string, unknown>>(
+  config: T,
+): Array<string> {
   // Decision: A Set: one malformed field is reported by both lookups (the owner scan reads all fields).
   const conflicts = new Set<string>();
   const check = (field: string, name: string): void => {
@@ -142,19 +147,21 @@ export function findEmailConfigConflicts(config: Record<string, unknown>): Array
   return [...conflicts];
 }
 
+function isSendEmailList(value: unknown): value is Array<{ name?: unknown }> {
+  return Array.isArray(value);
+}
+
 /** The `EmailCloudflareInputs` fields read from the parsed root config. */
-export function emailConfigInputs(
-  rootConfig: Record<string, unknown>,
+export function emailConfigInputs<T extends Record<string, unknown>>(
+  rootConfig: T,
 ): Pick<
   EmailCloudflareInputs,
   'existingSendEmail' | 'existingAddresses' | 'existingVars' | 'configConflicts'
 > {
   return {
-    existingSendEmail: Array.isArray(rootConfig.send_email)
-      ? (rootConfig.send_email as Array<{ name?: unknown }>)
-      : undefined,
+    existingSendEmail: isSendEmailList(rootConfig.send_email) ? rootConfig.send_email : undefined,
     existingAddresses: rootConfig.addresses,
-    existingVars: isRecord(rootConfig.vars) ? rootConfig.vars : undefined,
+    existingVars: isJsonObject(rootConfig.vars) ? rootConfig.vars : undefined,
     configConflicts: findEmailConfigConflicts(rootConfig),
   };
 }
@@ -445,12 +452,11 @@ function sendingSettingsFromList(
 ): EmailWranglerRunResult {
   if (!response?.ok || !Array.isArray(response.result)) {
     const first = response?.errors[0];
-    return {
-      status: 1,
-      stdout: '',
-      stderr: first?.message ?? '',
-      ...(first?.code ? { errorCode: first.code } : {}),
-    };
+    const failure: EmailWranglerRunResult = { status: 1, stdout: '', stderr: first?.message ?? '' };
+    if (first?.code) {
+      failure.errorCode = first.code;
+    }
+    return failure;
   }
   const row = (response.result as Array<unknown>).find(
     (item) => isRecord(item) && typeof item.name === 'string' && item.name.toLowerCase() === domain,
@@ -577,8 +583,19 @@ async function probeTxt(dns: EmailDns, name: string): Promise<'present' | 'absen
 }
 
 function isNoRecord(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code;
+  const code = errorCode(err);
   return code === 'ENODATA' || code === 'ENOTFOUND';
+}
+
+function describeFailure(response: SessionBearerResponse | null): string {
+  if (!response) {
+    // Decision: `auth token --json` failed, so no bearer could be borrowed.
+    return 'could not borrow the Cloudflare session (session-bearer step failed)';
+  }
+  const first = response.errors[0];
+  const code = first?.code ? ` [code: ${first.code}]` : '';
+  const known = first?.code ? CF_EMAIL_ERROR_CODES.get(first.code) : undefined;
+  return `Cloudflare answered ${response.status}${code}${known ? ` — ${known}` : first?.message ? ` — ${first.message}` : ''}`;
 }
 
 /** Candidate zone names for `mail.acme.com`: `mail.acme.com`, `acme.com`. */
@@ -609,7 +626,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   const apiBaseUrl = inputs.apiBaseUrl ?? CLOUDFLARE_API_BASE_URL;
   const run = async (operation: CloudflareOperation): Promise<EmailWranglerRunResult> =>
     inputs.runWrangler(
-      { ...operation, ...(inputs.configPath ? { configPath: inputs.configPath } : {}) },
+      inputs.configPath ? { ...operation, configPath: inputs.configPath } : operation,
       { capture: true },
     );
 
@@ -768,10 +785,8 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   // provider's sending read first resolves the zone through Email Routing settings (Zone Settings
   // Read), which a sending-only token lacks. A `null` bearer leaves these rows `unknown`.
   let sendingRead: SessionBearerResponse | null = null;
-  let bearer: string | null = null;
-  if (pre.session.state === 'ok') {
-    bearer = await inputs.getSessionBearer().catch(() => null);
-  }
+  const bearer =
+    pre.session.state === 'ok' ? await inputs.getSessionBearer().catch(() => null) : null;
   if (bearer) {
     if (!receivesEmail) {
       pre.zone.state = 'not-found';
@@ -796,29 +811,29 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
         pre.zone.state = 'unknown';
         break;
       }
-      const list = Array.isArray(zones.result) ? (zones.result as Array<ZoneRecord>) : [];
-      const zone = list[0];
-      if (!zone) {
+      const first: unknown = isJsonArray(zones.result) ? zones.result[0] : undefined;
+      if (!first) {
         continue;
       }
+      const zone = readZoneRecord(first);
       if (
         !receivesEmail &&
-        (typeof zone.id !== 'string' ||
+        (zone.id === undefined ||
           zone.name !== candidate ||
-          typeof zone.type !== 'string' ||
-          typeof zone.account?.id !== 'string')
+          zone.type === undefined ||
+          zone.accountId === undefined)
       ) {
         pre.zone.state = 'unknown';
         break;
       }
       pre.zone.type = zone.type;
-      if (zone.account?.id && zone.account.id !== inputs.accountId) {
+      if (zone.accountId && zone.accountId !== inputs.accountId) {
         pre.zone = { state: 'other-account', zoneId: zone.id, type: zone.type };
       } else if (zone.type && zone.type !== 'full') {
         pre.zone = { state: 'partial', zoneId: zone.id, type: zone.type };
       } else {
         pre.zone = { state: 'found', zoneId: zone.id, type: zone.type };
-        if (!pre.apex) {
+        if (!pre.apex && zone.name !== undefined) {
           pre.apex = zone.name.toLowerCase();
           pre.mode = pre.apex === domain ? 'apex' : 'subdomain';
         }
@@ -834,7 +849,7 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
         undefined,
         apiBaseUrl,
       );
-      const flag = (routing.result as { support_subaddress?: unknown } | null)?.support_subaddress;
+      const flag = isJsonObject(routing.result) ? routing.result.support_subaddress : undefined;
       if (routing.ok && typeof flag === 'boolean') {
         pre.subaddressing.state = flag ? 'on' : 'off';
       }
@@ -850,7 +865,6 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
       );
     }
   }
-  bearer = null;
   if (!receivesEmail && pre.session.state === 'ok' && pre.zone.state === 'unknown') {
     block(
       'all',
@@ -1087,7 +1101,20 @@ export async function preflightEmail(inputs: EmailCloudflareInputs): Promise<Ema
   return pre;
 }
 
-type ZoneRecord = { id: string; name: string; type?: string; account?: { id?: string } };
+type ZoneRecord = { id?: string; name?: string; type?: string; accountId?: string };
+
+function readZoneRecord(value: unknown): ZoneRecord {
+  if (!isJsonObject(value)) {
+    return {};
+  }
+  const account = value.account;
+  return {
+    id: typeof value.id === 'string' ? value.id : undefined,
+    name: typeof value.name === 'string' ? value.name : undefined,
+    type: typeof value.type === 'string' ? value.type : undefined,
+    accountId: isJsonObject(account) && typeof account.id === 'string' ? account.id : undefined,
+  };
+}
 
 /** Column padding for the checklist; an overflowing cell gets three spaces. */
 function pad(text: string, width: number): string {
@@ -1293,10 +1320,8 @@ export async function fetchWithSessionBearer(
   body?: unknown,
   apiBaseUrl: string = CLOUDFLARE_API_BASE_URL,
 ): Promise<SessionBearerResponse> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${bearer}` };
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
+  const jsonHeaders = body === undefined ? undefined : { 'Content-Type': 'application/json' };
+  const headers = { Authorization: `Bearer ${bearer}`, ...jsonHeaders };
   // Decision: Nothing this function returns may carry the token: a transport error message or an API error
   // message that echoed the header is scrubbed before it leaves this closure.
   const scrub = (text: string): string => text.split(bearer).join('[redacted]');
@@ -1315,19 +1340,16 @@ export async function fetchWithSessionBearer(
       errors: [{ code: 0, message: scrub(error instanceof Error ? error.message : String(error)) }],
     };
   }
-  let payload: {
-    success?: boolean;
-    result?: unknown;
-    errors?: Array<{ code?: number; message?: string }>;
-  } = {};
+  let payload: JsonObject;
   try {
-    payload = (await response.json()) as typeof payload;
+    const parsed: unknown = await response.json();
+    payload = isJsonObject(parsed) ? parsed : {};
   } catch {
     payload = {};
   }
-  const errors = (payload.errors ?? []).map((e) => ({
-    code: typeof e?.code === 'number' ? e.code : 0,
-    message: typeof e?.message === 'string' ? scrub(e.message) : '',
+  const errors = (isJsonArray(payload.errors) ? payload.errors : []).map((e) => ({
+    code: isJsonObject(e) && typeof e.code === 'number' ? e.code : 0,
+    message: isJsonObject(e) && typeof e.message === 'string' ? scrub(e.message) : '',
   }));
   return {
     ok: response.ok && payload.success !== false,
@@ -1408,7 +1430,7 @@ export async function applyEmailSetup(
   const apiBaseUrl = inputs.apiBaseUrl ?? CLOUDFLARE_API_BASE_URL;
   const run = async (operation: CloudflareOperation): Promise<EmailWranglerRunResult> =>
     inputs.runWrangler(
-      { ...operation, ...(inputs.configPath ? { configPath: inputs.configPath } : {}) },
+      inputs.configPath ? { ...operation, configPath: inputs.configPath } : operation,
       { capture: true },
     );
 
@@ -1449,16 +1471,6 @@ export async function applyEmailSetup(
     }
     return response;
   };
-  const describeFailure = (response: SessionBearerResponse | null): string => {
-    if (!response) {
-      // Decision: `auth token --json` failed, so no bearer could be borrowed.
-      return 'could not borrow the Cloudflare session (session-bearer step failed)';
-    }
-    const first = response.errors[0];
-    const code = first?.code ? ` [code: ${first.code}]` : '';
-    const known = first?.code ? CF_EMAIL_ERROR_CODES[first.code] : undefined;
-    return `Cloudflare answered ${response.status}${code}${known ? ` — ${known}` : first?.message ? ` — ${first.message}` : ''}`;
-  };
 
   const apexRoutingOff = pre.mode === 'subdomain' && pre.routing.enabled !== true;
   if (receivesEmail && !result.routingReady) {
@@ -1470,7 +1482,7 @@ export async function applyEmailSetup(
       } else {
         const code = providerErrorCode(enable);
         lines.push(
-          `  ✘ routing   could not enable Email Routing on ${apex}${code ? ` [code: ${code}]${CF_EMAIL_ERROR_CODES[code] ? ` — ${CF_EMAIL_ERROR_CODES[code]}` : ''}` : ''}`,
+          `  ✘ routing   could not enable Email Routing on ${apex}${code ? ` [code: ${code}]${CF_EMAIL_ERROR_CODES.has(code) ? ` — ${CF_EMAIL_ERROR_CODES.get(code)}` : ''}` : ''}`,
         );
       }
     } else if (apexRoutingOff) {
@@ -1569,7 +1581,7 @@ export async function applyEmailSetup(
         `  ! sending   ${pre.domain} not onboarded (session bearer unavailable); rerun bwf email setup --platform cloudflare`,
       );
     } else {
-      const known = code ? CF_EMAIL_ERROR_CODES[code] : undefined;
+      const known = code ? CF_EMAIL_ERROR_CODES.get(code) : undefined;
       lines.push(
         `  ! sending   ${pre.domain} not onboarded${code ? ` [code: ${code}]` : ''}${known ? ` — ${known}` : ''}`,
       );
