@@ -54,6 +54,7 @@ export function AppPeoplePage({
               <TableHeaderCell>Balance</TableHeaderCell>
               <TableHeaderCell>Used this month</TableHeaderCell>
               <TableHeaderCell>Blocked</TableHeaderCell>
+              <TableHeaderCell>Apps paused</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -67,6 +68,7 @@ export function AppPeoplePage({
                 <TableCell>{dollars(person.balanceMicros)}</TableCell>
                 <TableCell>{dollars(person.usedMicros)}</TableCell>
                 <TableCell>{person.blocked ? (person.blocked.reason ?? 'yes') : '-'}</TableCell>
+                <TableCell>{person.creditsPause?.reason ?? '-'}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -150,6 +152,20 @@ export function AppPersonPage({
             <dd>{dollars(result.owedMicros)}</dd>
             <dt>Used this month</dt>
             <dd>{dollars(result.usedMicros)}</dd>
+            <dt>Auto top-up</dt>
+            <dd>
+              {result.autoTopUp
+                ? result.autoTopUp.enabled
+                  ? 'on'
+                  : `off${result.autoTopUp.offReason ? ` (${result.autoTopUp.offReason})` : ''}`
+                : 'never set up'}
+            </dd>
+            <dt>Hosted apps paused for credits</dt>
+            <dd>
+              {result.creditsPause
+                ? `${result.creditsPause.projects} of ${result.creditsPause.of} (${result.creditsPause.reason})`
+                : 'none'}
+            </dd>
             <dt>Blocked</dt>
             <dd>
               {result.blocked

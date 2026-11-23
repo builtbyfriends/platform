@@ -17,10 +17,12 @@ import {
   stripeLiveMode,
 } from '../billing/stripe.ts';
 import { creditBalance, grantCredits } from '../credit-ledger.ts';
+import { autoTopUpStatus } from '../credit-purchase.ts';
 import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { installationDefaultPlan } from '../plans.ts';
 import { appCreditGrants, appPayers, appPeople, appUsage, oauthClients, users } from '../schema.ts';
+import { CREDITS_REASONS } from '../suspension.ts';
 import { dryRun, OperatorError, pagination, preview, readBody } from './common.ts';
 
 type Page = ReturnType<typeof pagination>;
@@ -89,7 +91,7 @@ function personIds(db: Db, clientId: string, search?: string) {
 
 /** One person's plan, subscription, balance and this month's use, as an operator sees them. */
 async function personSummary(db: Db, env: ApiEnv['Bindings'], clientId: string, person: string) {
-  const [[row], [payer], balance, use, prices, defaultPlan] = await Promise.all([
+  const [[row], [payer], balance, use, prices, defaultPlan, topUp, paid] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -102,7 +104,12 @@ async function personSummary(db: Db, env: ApiEnv['Bindings'], clientId: string, 
     payerUse(db, clientId, person),
     readMeterPrices(db),
     installationDefaultPlan(db, env),
+    autoTopUpStatus(db, { clientId, payer: person }),
+    paidProjects(db, clientId, person),
   ]);
+  const paused = paid.filter(({ project }) =>
+    CREDITS_REASONS.includes(project.suspended_reason ?? ''),
+  );
   return {
     person,
     plan: row?.plan ?? defaultPlan.id,
@@ -115,6 +122,10 @@ async function personSummary(db: Db, env: ApiEnv['Bindings'], clientId: string, 
       0,
     ),
     blocked: payer?.blocked_at ? { at: payer.blocked_at, reason: payer.blocked_reason } : null,
+    autoTopUp: topUp,
+    creditsPause: paused.length
+      ? { reason: paused[0]!.project.suspended_reason, projects: paused.length, of: paid.length }
+      : null,
   };
 }
 

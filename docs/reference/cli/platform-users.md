@@ -130,7 +130,7 @@ bwf platform person list <client-id> [--search <text>] [--page <n>] [--limit <n>
 bwf platform person show <client-id> <person-id>
 ```
 
-`list` shows each person's plan, subscription status, credit balance and this month's use. It includes people who never bought a plan but have use or credits. `show` adds their grants, their use for each day this month, and the hosted apps they pay for. The admin UI has the same view under **Connected apps → People**.
+`list` shows each person's plan, subscription status, credit balance and this month's use. It includes people who never bought a plan but have use or credits. `show` adds their grants, their auto top-up, their use for each day this month, and the hosted apps they pay for, with how many are paused for credits. The admin UI has the same view under **Connected apps → People**.
 
 Give credits, refund a payment, or clear a dispute block:
 

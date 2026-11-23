@@ -13,7 +13,9 @@ export function ConnectedAppsPage({
   clients,
   meterPrices,
   meterUnits,
+  graceDays,
   credentials,
+  eventsSecret,
   error,
 }: {
   platformName: string;
@@ -27,10 +29,16 @@ export function ConnectedAppsPage({
     scopes: Array<string>;
     plans?: Record<string, { stripePriceId: string; creditMicros: number }> | null;
     starter_credit_micros?: number | null;
+    credit_purchase?: { minMicros: number; stepMicros: number; lifeDays: number } | null;
+    events_url?: string | null;
+    events_secret_set?: boolean;
+    low_balance_micros?: number;
   }>;
   meterPrices?: Record<string, number>;
   meterUnits?: Record<string, number>;
+  graceDays?: number;
   credentials?: { clientId: string; clientSecret: string };
+  eventsSecret?: { clientId: string; secret: string };
   error?: string;
 }) {
   return (
@@ -51,6 +59,23 @@ export function ConnectedAppsPage({
               <dt>Client secret</dt>
               <dd style={{ overflowWrap: 'anywhere' }}>
                 <code>{credentials.clientSecret}</code>
+              </dd>
+            </dl>
+          </AdminCard>
+        )}
+        {eventsSecret && (
+          <AdminCard
+            title="Billing events signing secret"
+            description="Save it on the app’s server to check each event’s signature. It is shown once."
+          >
+            <dl>
+              <dt>Client ID</dt>
+              <dd>
+                <code>{eventsSecret.clientId}</code>
+              </dd>
+              <dt>Signing secret</dt>
+              <dd style={{ overflowWrap: 'anywhere' }}>
+                <code>{eventsSecret.secret}</code>
               </dd>
             </dl>
           </AdminCard>
@@ -94,6 +119,17 @@ export function ConnectedAppsPage({
                 initialValue={JSON.stringify(meterPrices, null, 2)}
               />
               <Button type="submit" label="Save prices" />
+            </SectionStack>
+          </AdminCard>
+        )}
+        {graceDays !== undefined && (
+          <AdminCard
+            title="Grace days at zero"
+            description="When a payer’s balance reaches zero, their hosted apps keep answering at a lower request rate for this many days, then pause until credits return. A paused app’s data is kept."
+          >
+            <SectionStack as="form" method="post" action="/admin/connected-apps/grace-days">
+              <FormTextInput label="Days" name="days" required initialValue={String(graceDays)} />
+              <Button type="submit" label="Save grace days" />
             </SectionStack>
           </AdminCard>
         )}
@@ -144,7 +180,43 @@ export function ConnectedAppsPage({
                     client.starter_credit_micros ? String(client.starter_credit_micros) : ''
                   }
                 />
+                <FormTextInput
+                  label="Credits people can buy once (JSON): the smallest amount and the step in micros, and how many days they last. Empty sells none."
+                  name="creditPurchase"
+                  placeholder='{ "minMicros": 20000000, "stepMicros": 20000000, "lifeDays": 365 }'
+                  initialValue={
+                    client.credit_purchase ? JSON.stringify(client.credit_purchase) : ''
+                  }
+                />
                 <Button type="submit" label="Save plans" />
+              </SectionStack>
+            )}
+            {client.enabled && (
+              <SectionStack
+                as="form"
+                method="post"
+                action={`/admin/connected-apps/${client.id}/events`}
+              >
+                <FormTextInput
+                  label="Address for billing events (HTTPS). Empty sends none."
+                  name="eventsUrl"
+                  placeholder="https://app.example.com/billing-events"
+                  initialValue={client.events_url ?? ''}
+                />
+                <FormTextInput
+                  label="A balance under this many micros is low. 0 sends no low-balance event."
+                  name="lowBalanceMicros"
+                  placeholder="2000000"
+                  initialValue={String(client.low_balance_micros ?? 2_000_000)}
+                />
+                {client.events_secret_set && (
+                  <FormCheckbox
+                    label="Make a new signing secret"
+                    name="newSecret"
+                    submitValue="true"
+                  />
+                )}
+                <Button type="submit" label="Save billing events" />
               </SectionStack>
             )}
             {client.enabled && (

@@ -1,9 +1,74 @@
 {
-  "id": "d7207d2b-9a01-4fde-bad0-5c0005cd96cd",
+  "id": "5d53c244-3030-4ec5-b203-aece6d79b635",
   "prevId": "695592d2-d4d2-4843-b4ae-a0812eb95427",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.app_buyers": {
+      "name": "app_buyers",
+      "schema": "",
+      "columns": {
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "buyer_id": {
+          "name": "buyer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "livemode": {
+          "name": "livemode",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stripe_payment_method_id": {
+          "name": "stripe_payment_method_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "app_buyers_client_id_oauth_clients_id_fk": {
+          "name": "app_buyers_client_id_oauth_clients_id_fk",
+          "tableFrom": "app_buyers",
+          "tableTo": "oauth_clients",
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "app_buyers_client_id_buyer_id_livemode_pk": {
+          "name": "app_buyers_client_id_buyer_id_livemode_pk",
+          "columns": ["client_id", "buyer_id", "livemode"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.app_credit_grants": {
       "name": "app_credit_grants",
       "schema": "",
@@ -67,12 +132,6 @@
         },
         "giver_id": {
           "name": "giver_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "note": {
-          "name": "note",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -358,6 +417,51 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "top_up": {
+          "name": "top_up",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "top_up_enabled": {
+          "name": "top_up_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "top_up_off_reason": {
+          "name": "top_up_off_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "top_up_count": {
+          "name": "top_up_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "top_up_started_at": {
+          "name": "top_up_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "top_up_month": {
+          "name": "top_up_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "top_up_month_micros": {
+          "name": "top_up_month_micros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
       "indexes": {},
@@ -2911,6 +3015,12 @@
         "starter_credit_micros": {
           "name": "starter_credit_micros",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credit_purchase": {
+          "name": "credit_purchase",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

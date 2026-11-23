@@ -1,6 +1,6 @@
 import type { ApiEnv } from '../env.ts';
 
-type StripeEnv = Pick<
+export type StripeEnv = Pick<
   ApiEnv['Bindings'],
   | 'STRIPE_SECRET_KEY'
   | 'STRIPE_WEBHOOK_SECRET'
@@ -86,6 +86,14 @@ export async function createCheckoutSession(
   } else if (input.email) {
     form.set('customer_email', input.email);
   }
+  // Decision: Codes only show on subscription Checkout. Credits sell close to cost, so a discount on them is a loss.
+  if (env.STRIPE_PROMOTION_CODES === 'true') {
+    form.set('allow_promotion_codes', 'true');
+  }
+  return startCheckout(env, form, fetcher);
+}
+
+async function startCheckout(env: StripeEnv, form: URLSearchParams, fetcher: typeof fetch) {
   // Decision: Stripe refuses the session until the account's tax settings are filled in, so tax stays off by default.
   if (env.STRIPE_AUTOMATIC_TAX === 'true') {
     form.set('automatic_tax[enabled]', 'true');
@@ -94,15 +102,136 @@ export async function createCheckoutSession(
       form.set('customer_update[address]', 'auto');
     }
   }
-  // Decision: Codes only show on subscription Checkout. Credits sell close to cost, so a discount on them is a loss.
-  if (env.STRIPE_PROMOTION_CODES === 'true' && form.get('mode') === 'subscription') {
-    form.set('allow_promotion_codes', 'true');
-  }
   const body = await stripePost(env, 'checkout/sessions', form, fetcher);
   if (!body.url) {
     throw new BillingUnavailableError('Stripe refused the checkout.');
   }
   return body.url;
+}
+
+/**
+ * Starts a one-time Checkout for credits. The buyer's Stripe customer is reused, or Checkout makes one.
+ * `saveCard` keeps the card for auto top-up charges made with nobody present.
+ */
+export async function createCreditCheckoutSession(
+  env: StripeEnv,
+  input: {
+    amountMicros: number;
+    metadata: Record<string, string>;
+    customerId: string | null;
+    email: string | null;
+    saveCard: boolean;
+    returnUrl: string;
+  },
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  const form = new URLSearchParams({
+    mode: 'payment',
+    'line_items[0][quantity]': '1',
+    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][unit_amount]': String(input.amountMicros / MICROS_PER_CENT),
+    'line_items[0][price_data][product_data][name]': 'Credits',
+    success_url: input.returnUrl,
+    cancel_url: input.returnUrl,
+  });
+  for (const [key, value] of Object.entries(input.metadata)) {
+    form.set(`metadata[${key}]`, value);
+    form.set(`payment_intent_data[metadata][${key}]`, value);
+  }
+  if (input.customerId) {
+    form.set('customer', input.customerId);
+  } else {
+    form.set('customer_creation', 'always');
+    if (input.email) {
+      form.set('customer_email', input.email);
+    }
+  }
+  if (input.saveCard) {
+    form.set('payment_intent_data[setup_future_usage]', 'off_session');
+  }
+  return startCheckout(env, form, fetcher);
+}
+
+export const MICROS_PER_CENT = 10_000;
+
+export type Charge =
+  | { status: 'succeeded' | 'processing'; paymentIntentId: string }
+  | { status: 'failed'; reason: string };
+
+/**
+ * Charges a saved card with nobody present. The idempotency key makes a retry of the same charge
+ * answer the first result instead of charging again.
+ */
+export async function chargeSavedCard(
+  env: StripeEnv,
+  input: {
+    customerId: string;
+    paymentMethodId: string;
+    amountMicros: number;
+    metadata: Record<string, string>;
+    idempotencyKey: string;
+  },
+  fetcher: typeof fetch = fetch,
+): Promise<Charge> {
+  const form = new URLSearchParams({
+    amount: String(input.amountMicros / MICROS_PER_CENT),
+    currency: 'usd',
+    customer: input.customerId,
+    payment_method: input.paymentMethodId,
+    confirm: 'true',
+    off_session: 'true',
+  });
+  for (const [key, value] of Object.entries(input.metadata)) {
+    form.set(`metadata[${key}]`, value);
+  }
+  const response = await fetcher('https://api.stripe.com/v1/payment_intents', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${stripeSecretKey(env)}`,
+      'content-type': 'application/x-www-form-urlencoded',
+      'idempotency-key': input.idempotencyKey,
+    },
+    body: form,
+  });
+  const body = (await response.json().catch(() => null)) as {
+    id?: string;
+    status?: string;
+    error?: { type?: string; code?: string; decline_code?: string };
+  } | null;
+  if (response.ok && body?.id && (body.status === 'succeeded' || body.status === 'processing')) {
+    return { status: body.status, paymentIntentId: body.id };
+  }
+  // Decision: Only an answer about the card turns auto top-up off. Anything else is thrown, and the same key retries it.
+  if (body?.error?.type === 'card_error' || (response.ok && body?.status)) {
+    return {
+      status: 'failed',
+      reason:
+        body.error?.code === 'authentication_required' || body.status === 'requires_action'
+          ? 'authentication_required'
+          : 'card_declined',
+    };
+  }
+  throw new BillingUnavailableError('Stripe refused the request.');
+}
+
+/** The card a payment was made with, so it can be charged again. */
+export async function paymentMethodOf(
+  env: StripeEnv,
+  paymentIntentId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<string | null> {
+  const response = await fetcher(
+    `https://api.stripe.com/v1/payment_intents/${encodeURIComponent(paymentIntentId)}`,
+    { headers: { authorization: `Bearer ${stripeSecretKey(env)}` } },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    payment_method?: string | { id?: string } | null;
+  } | null;
+  if (!response.ok || !body) {
+    throw new BillingUnavailableError('Stripe refused the request.');
+  }
+  const method = body.payment_method;
+  return (typeof method === 'string' ? method : method?.id) ?? null;
 }
 
 /** A link to Stripe's customer portal, where a person changes or cancels their subscription. */
@@ -346,6 +475,12 @@ export async function verifyStripeSignature(
   if (Math.abs(now / 1000 - Number(timestamp)) > TOLERANCE_SECONDS) {
     return false;
   }
+  const expected = await hmacHex(secret, `${timestamp}.${body}`);
+  return signatures.some((s) => sameText(s, expected));
+}
+
+/** HMAC-SHA256 of the text, as hex. Stripe signs its events this way, and Platform signs its own the same way. */
+export async function hmacHex(secret: string, text: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
@@ -353,8 +488,5 @@ export async function verifyStripeSignature(
     false,
     ['sign'],
   );
-  const expected = hex(
-    await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${timestamp}.${body}`)),
-  );
-  return signatures.some((s) => sameText(s, expected));
+  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)));
 }

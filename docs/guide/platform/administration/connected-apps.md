@@ -111,6 +111,89 @@ An application with no plan list has nothing on sale. Its plan list answers an e
 
 If you remove a plan from the list later, people who hold it keep their Stripe subscription, and Stripe keeps charging them. They get no credits, and only the plan's limits in the catalog hold their use, until you move them to a plan in the list or cancel the subscription in Stripe.
 
+## Sell credits
+
+People can also buy credits once, with or without a plan. Fill in **Credits people can buy once** for the application, with amounts in millionths of a dollar:
+
+```json
+{ "minMicros": 20000000, "stepMicros": 20000000, "lifeDays": 365 }
+```
+
+This sells $20, $40, $60 and so on, and each purchase lasts 365 days. Leave it empty to sell none. Bought credits go on the same balance as a plan's credits, and the credits that end soonest are spent first.
+
+The application starts a purchase with `POST /app-billing/credits.checkout` and `{ buyer, amountMicros, returnUrl }`, then sends the person to the returned `url`. `buyer` is the application's id for the person who pays. An amount under the smallest one or off the step answers `bad_amount`. Credits are added once Stripe confirms the payment, for the amount before tax. A second purchase reuses the buyer's Stripe customer.
+
+### Auto top-up
+
+Auto top-up is off until the person turns it on. It needs a card saved for later charges, so first send them through a credits Checkout with `saveCard: true`. Then turn it on:
+
+```json
+{
+  "payer": "<person id>",
+  "thresholdMicros": 5000000,
+  "amountMicros": 20000000,
+  "monthlyLimitMicros": 60000000
+}
+```
+
+Send it to `POST /app-billing/credits.autoTopUp`, or send `{ payer, enabled: false }` to turn it off. Without a saved card it answers `needs_saved_card`. When the balance drops under the threshold, Platform charges the saved card once for the amount. Auto top-up turns itself off when a charge would go past the monthly limit or the card is declined, and `usage.status` says why in `autoTopUp.offReason` (`monthly_limit`, `card_declined` or `authentication_required`). Hosted use is read once an hour, so a top-up caused by a hosted project can come up to an hour later.
+
+In Stripe, send `payment_intent.succeeded` and `payment_intent.payment_failed` to the webhook as well as the Checkout events.
+
+## Billing events
+
+Platform can tell an application when something changes for a person who pays, so the application doesn't have to ask at the right moment. Under **Admin → Connected apps**, fill in the application's **Address for billing events** with an HTTPS URL. The first time you save an address, Platform shows a signing secret once. Save it on the application's server. Tick **Make a new signing secret** to replace it.
+
+Platform sends each event as a `POST` with a JSON body:
+
+```json
+{
+  "id": "evt_…",
+  "type": "credits.low",
+  "person": "<the application's id for the payer>",
+  "occurredAt": "2026-11-22T18:00:00.000Z",
+  "data": { "balanceMicros": 1500000 }
+}
+```
+
+| Type                   | When                                                   | `data`                                                                                   |
+| ---------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `credits.low`          | The balance went under the low mark                    | `balanceMicros`                                                                          |
+| `credits.out`          | The balance reached zero                               | `balanceMicros`, `pausesAt` (when the payer's hosted apps pause)                         |
+| `credits.restored`     | The balance went back above zero                       | `balanceMicros`                                                                          |
+| `apps.paused`          | Hosted apps the payer pays for were paused             | `projects` (project ids)                                                                 |
+| `apps.resumed`         | Paused hosted apps answer again                        | `projects` (project ids)                                                                 |
+| `credits.bought`       | Credits were bought at Checkout or by auto top-up      | `amountMicros`, `buyer`, `expiresAt`, `autoTopUp`                                        |
+| `payment.failed`       | A subscription renewal or an auto top-up charge failed | `for` (`subscription` or `auto_top_up`), and for auto top-up `amountMicros` and `reason` |
+| `subscription.started` | A plan was bought                                      | `plan`                                                                                   |
+| `subscription.ended`   | The subscription ended                                 | none                                                                                     |
+
+Amounts are in millionths of a dollar. Low and out are sent once each time the balance crosses the line. The low mark is $2 unless you set **A balance under this many micros is low**; 0 sends no low event. Hosted use is read once an hour, so an event caused by a hosted project can come up to an hour late.
+
+Answer with any 2xx status. Platform tries a failed delivery again, waiting longer each time, for about a day and a half, and then stops. The same event keeps its `id`, so use it to skip one you've already handled. `usage.status` always has the same facts (`credits.outSince`, `credits.lowSince`, `autoTopUp`, `subscriptionStatus`), so read it to catch up after your address was down.
+
+Each request carries a `Billing-Signature` header in the form `t=<unix seconds>,v1=<hex>`, where the hex is the HMAC-SHA256 of `<t>.<body>` with the signing secret. Check it against the raw body and refuse an old timestamp:
+
+```ts
+async function verify(body: string, header: string, secret: string): Promise<boolean> {
+  const parts = new Map(header.split(',').map((part) => part.split('=') as [string, string]));
+  const t = parts.get('t') ?? '';
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) {
+    return false;
+  }
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  );
+  const hex = parts.get('v1') ?? '';
+  const signature = new Uint8Array(hex.match(/../g)?.map((byte) => parseInt(byte, 16)) ?? []);
+  return crypto.subtle.verify('HMAC', key, signature, new TextEncoder().encode(`${t}.${body}`));
+}
+```
+
 ## Charge for use
 
 Platform counts what an application reports for its people (AI and sandbox time) and what the hosted projects they pay for use. Once an hour it reads each project's use from Cloudflare's analytics for today and yesterday and stores it under the project's payer. If one reading fails, Platform keeps the numbers it stored before for that reading and stores the others.
@@ -170,3 +253,11 @@ One month of a busy hosted app, at the default prices:
 | **Charged to the payer** |         | **$25.25** |
 
 Cloudflare charges you the same $25.25 for this use, less what your plan includes. With Workers Logs on, the app's 10 million invocation events can add up to $6.00 more, so turn them off or add them to the request price as shown above. At twice each default price, the payer pays $50.50.
+
+## When a payer runs out of credits
+
+When a payer's balance reaches zero, AI and sandbox time in the hosted apps they pay for stop at once. Each app keeps answering requests at a lower rate, 120 requests a minute, for the grace days. After that the app is paused: a visitor sees a page that says the app is paused, and its cron jobs and queues stop. Its data is kept.
+
+The grace days are 3 unless you change them under **Admin → Connected apps → Grace days at zero**. When the payer gets credits again, their apps answer normally within a few minutes. An app you took down yourself stays down until you restore it.
+
+A payer with no credits is held to their plan's monthly limits on hosted requests, AI and sandbox time instead. Platform adds up the use of every hosted app they pay for, whoever owns it, and checks it once an hour. Past the request limit, those apps are paused until the next month or until the payer buys a plan. Past the AI or sandbox limit, only AI or sandbox time stops. Apps under the same owner with another payer keep running.

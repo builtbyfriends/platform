@@ -140,7 +140,12 @@ describe('operator view of an app’s people', () => {
     ]);
     expect(listed.total).toBe(3);
     expect(listed.people[1]).toMatchObject({ balanceMicros: null, usedMicros: 100_000 });
-    expect(listed.people[2]).toMatchObject({ plan: 'free', subscriptionStatus: 'active' });
+    expect(listed.people[2]).toMatchObject({
+      plan: 'free',
+      subscriptionStatus: 'active',
+      autoTopUp: null,
+      creditsPause: null,
+    });
 
     const found = await json(operator(`${client.client.id}/people?search=GRANT`));
     expect(found.people).toEqual([

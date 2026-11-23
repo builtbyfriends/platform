@@ -10,8 +10,9 @@ import {
   it,
   vi,
 } from 'vite-plus/test';
-import { addProjectUse, payerOutOfCredits } from '../../src/app-credits.ts';
+import { addProjectUse, addUse, payerOutOfCredits, type Meter } from '../../src/app-credits.ts';
 import {
+  accountPlanLimits,
   billedAccountPlanId,
   billedAccountPlanLimits,
   billedPlanId,
@@ -20,11 +21,13 @@ import {
 import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import { grantCredits } from '../../src/credit-ledger.ts';
+import { setAutoTopUp } from '../../src/credit-purchase.ts';
 import rawApp from '../../src/index.ts';
-import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
+import { installationDefaultPlan, resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
-import { setProjectAiBlock } from '../../src/routing.ts';
+import { projectRouteKey, setProjectAiBlock } from '../../src/routing.ts';
 import {
+  appBuyers,
   appCreditGrants,
   appPayers,
   appPeople,
@@ -33,6 +36,7 @@ import {
   resources,
   users,
 } from '../../src/schema.ts';
+import { projectSuspensionKey } from '../../src/suspension.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -297,7 +301,7 @@ describe('app billing', () => {
   });
 
   it('sells nothing when the application has no plan list', async () => {
-    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [] });
+    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [], creditPurchase: null });
     const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
     const checkout = await call('/billing.checkout', order);
     expect(checkout.status).toBe(400);
@@ -625,6 +629,120 @@ describe('app billing', () => {
     await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
     expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBeNull();
     expect((await dataOf(call('/usage.status', { person: 'p1' }))).withinCaps).toBe(true);
+  });
+
+  it('slows a payer’s hosted apps at zero, pauses them after the grace days, and lifts both on a new grant', async () => {
+    const give = (amountMicros: number) =>
+      grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'boss',
+        livemode: false,
+        source: 'given',
+        amountMicros,
+      });
+    await give(100_000);
+    await call('/usage.record', { person: 'boss', aiNeurons: 1 });
+    const mine = (await preview('p1', { workspace: 'w1', payer: 'boss' })).project!;
+    const taken = (await preview('p1', { workspace: 'w2', payer: 'boss' })).project!;
+    const theirs = (await preview('p1', { workspace: 'w3' })).project!;
+    for (const project of [mine, taken, theirs]) {
+      await env.ROUTING.put(
+        projectRouteKey(project),
+        JSON.stringify({ workerName: 'w', projectId: project.id }),
+      );
+    }
+    const state = async (project: typeof mine) => {
+      const [row] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+      const route = JSON.parse((await env.ROUTING.get(projectRouteKey(project)))!);
+      return {
+        row: row!.suspended_reason,
+        route: route.suspended ?? null,
+        background: await env.ROUTING.get(projectSuspensionKey(project.id)),
+      };
+    };
+    const outFor = async (days: number) => {
+      await env.db
+        .update(appPayers)
+        .set({ out_since: new Date(Date.now() - days * 86_400_000).toISOString() })
+        .where(eq(appPayers.payer_id, 'boss'));
+      await call('/usage.status', { person: 'boss' });
+    };
+    const grace = { row: 'credits_grace', route: 'credits_grace', background: null };
+    const paused = { row: 'credits_paused', route: 'credits_paused', background: 'credits_paused' };
+    const clear = { row: null, route: null, background: null };
+
+    await call('/usage.record', { person: 'boss', aiNeurons: 20_000 });
+    expect(await state(mine)).toEqual(grace);
+    expect(await state(theirs)).toEqual(clear);
+    await outFor(1);
+    expect(await state(mine)).toEqual(grace);
+    await outFor(4);
+    expect(await state(mine)).toEqual(paused);
+    expect(await state(taken)).toEqual(paused);
+    expect(await state(theirs)).toEqual(clear);
+
+    const takedown = 'operator_takedown';
+    await env.db
+      .update(projects)
+      .set({ suspended_reason: takedown })
+      .where(eq(projects.id, taken.id));
+    await env.ROUTING.put(
+      projectRouteKey(taken),
+      JSON.stringify({ workerName: 'w', projectId: taken.id, suspended: takedown }),
+    );
+    await env.ROUTING.put(projectSuspensionKey(taken.id), takedown);
+
+    await give(1_000_000);
+    await call('/usage.status', { person: 'boss' });
+    expect(await state(mine)).toEqual(clear);
+    expect(await state(taken)).toEqual({ row: takedown, route: takedown, background: takedown });
+  });
+
+  it('holds each payer to their own plan’s monthly caps, across owners, and leaves the others running', async () => {
+    const limits = await resolvePlanLimits(env.db, (await installationDefaultPlan(env.db, env)).id);
+    expect(limits.requestsPerMonth).toBeGreaterThan(0);
+    expect(limits.aiNeuronsPerMonth).toBeGreaterThan(0);
+    for (const person of ['a', 'b']) {
+      await call('/usage.record', { person, aiNeurons: 1 });
+    }
+    const aOfP1 = (await preview('p1', { workspace: 'w1', payer: 'a' })).project!;
+    const bOfP1 = (await preview('p1', { workspace: 'w2', payer: 'b' })).project!;
+    const aOfP2 = (await preview('p2', { workspace: 'w1', payer: 'a' })).project!;
+    const reason = async (project: typeof aOfP1) =>
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+        .suspended_reason;
+    const use = (project: typeof aOfP1, payer: string, meter: Meter, quantity: number) =>
+      addUse(env.db, {
+        clientId: registration.client.id,
+        person: payer,
+        projectId: project.id,
+        meter,
+        quantity,
+      });
+    const owner = (await env.db.select().from(users).where(eq(users.id, aOfP1.user_id)))[0]!;
+    expect(await accountPlanLimits(env.db, owner, owner.plan)).toMatchObject({
+      requestsPerMonth: 0,
+      aiNeuronsPerMonth: 0,
+      sandboxRuntimeSecondsPerMonth: 0,
+    });
+    expect(await accountPlanLimits(env.db, { provider: 'github' }, owner.plan)).toEqual(
+      await resolvePlanLimits(env.db, owner.plan),
+    );
+
+    const half = Math.ceil(limits.requestsPerMonth / 2);
+    await use(aOfP1, 'a', 'hostedRequests', half);
+    await call('/usage.status', { person: 'a' });
+    expect(await reason(aOfP1)).toBeNull();
+    await use(aOfP2, 'a', 'hostedRequests', half);
+    await use(bOfP1, 'b', 'hostedAiNeurons', limits.aiNeuronsPerMonth);
+    await call('/usage.status', { person: 'a' });
+    await call('/usage.status', { person: 'b' });
+    expect(await reason(aOfP1)).toBe('credits_paused');
+    expect(await reason(aOfP2)).toBe('credits_paused');
+    expect(await reason(bOfP1)).toBeNull();
+    expect(await payerOutOfCredits(env.db, bOfP1.id)).toBe(true);
+    expect(await payerOutOfCredits(env.db, bOfP1.id, 'sandbox')).toBe(false);
+    expect(await payerOutOfCredits(env.db, aOfP1.id)).toBe(false);
   });
 
   it('counts a hosted app’s database rows and storage operations, and keeps the others when one read fails', async () => {
@@ -1147,6 +1265,7 @@ describe('app billing', () => {
         dryRun: true,
         subscription: 'sub_p1',
         stripeCustomer: true,
+        autoTopUp: false,
         plan: 'solo',
         unspentMicros: 19_000_000,
         grants: [expect.objectContaining({ source: 'plan', remainingMicros: 19_000_000 })],
@@ -1194,6 +1313,52 @@ describe('app billing', () => {
       });
       expect(stripeCalls).toEqual([]);
       expect(await env.db.select().from(appCreditGrants)).toEqual(grants);
+    });
+
+    it('ends bought credits and auto top-up with the subscription, and deletes the buyer’s card', async () => {
+      await grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'p1',
+        source: 'bought',
+        amountMicros: 5_000_000,
+        livemode: false,
+        stripePaymentIntentId: 'pi_bought',
+      });
+      await setAutoTopUp(
+        env.db,
+        { clientId: registration.client.id, payer: 'p1' },
+        {
+          buyer: 'p1',
+          thresholdMicros: 1_000_000,
+          amountMicros: 5_000_000,
+          monthlyLimitMicros: 20_000_000,
+        },
+      );
+      await env.db.insert(appBuyers).values({
+        client_id: registration.client.id,
+        buyer_id: 'p1',
+        livemode: false,
+        stripe_customer_id: 'cus_buyer',
+        stripe_payment_method_id: 'pm_1',
+      });
+      expect(await dataOf(forget({ dryRun: true }))).toMatchObject({
+        autoTopUp: true,
+        unspentMicros: 24_000_000,
+        grants: expect.arrayContaining([expect.objectContaining({ source: 'bought' })]),
+      });
+      expect((await forget()).status).toBe(200);
+      expect(stripeCalls).toEqual([
+        'DELETE https://api.stripe.com/v1/subscriptions/sub_p1',
+        'DELETE https://api.stripe.com/v1/customers/cus_1',
+        'DELETE https://api.stripe.com/v1/customers/cus_buyer',
+      ]);
+      expect(await env.db.select().from(appBuyers)).toEqual([]);
+      expect(
+        (await env.db.select().from(appCreditGrants)).every(
+          (grant) => grant.void_reason === 'account_deleted' && grant.remaining_micros === 0,
+        ),
+      ).toBe(true);
+      expect(await env.db.select().from(appPayers).where(eq(appPayers.payer_id, 'p1'))).toEqual([]);
     });
 
     it('keeps a late subscription event from bringing the person back', async () => {

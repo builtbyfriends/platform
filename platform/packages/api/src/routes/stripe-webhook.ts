@@ -1,10 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { applyCredits, clientPlans, dropTestPlans, paidOwnerIds } from '../app-credits.ts';
+import { queueBillingEvent, type BillingEventType } from '../billing-events.ts';
 import {
   cancelSubscription,
   fetchSubscription,
   invoicePaymentIntent,
+  MICROS_PER_CENT,
+  paymentMethodOf,
   PAID_PLANS,
   stripeLiveMode,
   type StripeSubscription,
@@ -18,6 +21,14 @@ import {
   refundGrant,
   restoreDisputedGrant,
 } from '../credit-ledger.ts';
+import {
+  boughtEvent,
+  boughtUntil,
+  grantTopUp,
+  saveBuyer,
+  topUpFailed,
+  topUpFailedEvent,
+} from '../credit-purchase.ts';
 import type { Tx } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan, reconcileOperatorUserPlan } from '../operator/tenant-service.ts';
@@ -39,6 +50,9 @@ type StripeObject = {
   subscription?: string;
   id?: string;
   payment_status?: string;
+  mode?: string;
+  amount_subtotal?: number;
+  last_payment_error?: { code?: string } | null;
   status?: string;
   amount?: number;
   amount_refunded?: number;
@@ -358,6 +372,105 @@ async function applyAppPersonEvent(
   return false;
 }
 
+/** What an applied subscription event tells the application, if anything. */
+function subscriptionNews(event: StripeEvent): { type: BillingEventType; data: object } | null {
+  if (event.type === 'invoice.payment_failed') {
+    return { type: 'payment.failed', data: { for: 'subscription' } };
+  }
+  if (event.type === 'customer.subscription.deleted') {
+    return { type: 'subscription.ended', data: {} };
+  }
+  if (checkoutPaid(event)) {
+    return { type: 'subscription.started', data: { plan: event.data.object.metadata?.plan } };
+  }
+  return null;
+}
+
+/** Metadata on a credits Checkout and an auto top-up charge: who pays, who the credits are for, and how long they last. */
+type CreditMetadata = Metadata & {
+  kind: 'credits' | 'top_up';
+  clientId: string;
+  buyerId: string;
+  payerId: string;
+  lifeDays: string;
+};
+
+const isCreditMetadata = (metadata: Metadata): metadata is CreditMetadata =>
+  (metadata.kind === 'credits' || metadata.kind === 'top_up') &&
+  Boolean(metadata.clientId && metadata.buyerId && metadata.payerId) &&
+  Number.isSafeInteger(Number(metadata.lifeDays));
+
+/**
+ * Bought credits. A paid credits Checkout grants what was paid before tax, so tax doesn't change the credits, and
+ * keeps the buyer's Stripe customer and saved card. An auto top-up's charge is granted from its payment intent,
+ * which its own Stripe reply may already have done. Answers the payer, or null when nothing applies.
+ */
+async function applyCreditEvent(
+  context: Context<ApiEnv>,
+  tx: Tx,
+  event: StripeEvent,
+  metadata: CreditMetadata,
+  paymentMethodId: string | null,
+) {
+  const object = event.data.object;
+  const payer = { clientId: metadata.clientId, payer: metadata.payerId };
+  const paymentIntentId = idOf(object.payment_intent) ?? object.id ?? null;
+  if (metadata.kind === 'credits' && checkoutPaid(event) && object.mode === 'payment') {
+    if (object.customer) {
+      await saveBuyer(tx, {
+        clientId: metadata.clientId,
+        buyer: metadata.buyerId,
+        livemode: event.livemode,
+        customerId: object.customer,
+        paymentMethodId,
+      });
+    }
+    const amountMicros = (object.amount_subtotal ?? 0) * MICROS_PER_CENT;
+    if (amountMicros <= 0 || !paymentIntentId) {
+      return null;
+    }
+    const added = await grantCredits(tx, {
+      ...payer,
+      source: 'bought',
+      amountMicros,
+      livemode: event.livemode,
+      giverId: metadata.buyerId,
+      stripePaymentIntentId: paymentIntentId,
+      expiresAt: boughtUntil(new Date(), Number(metadata.lifeDays)),
+    });
+    if (added) {
+      await queueBillingEvent(tx, context.env, boughtEvent(added, false));
+    }
+    return payer;
+  }
+  if (metadata.kind === 'top_up' && object.id && event.type === 'payment_intent.succeeded') {
+    const added = await grantTopUp(tx, {
+      ...payer,
+      buyer: metadata.buyerId,
+      amountMicros: (object.amount ?? 0) * MICROS_PER_CENT,
+      paymentIntentId: object.id,
+      lifeDays: Number(metadata.lifeDays),
+      livemode: event.livemode,
+    });
+    if (added) {
+      await queueBillingEvent(tx, context.env, boughtEvent(added, true));
+    }
+    return payer;
+  }
+  if (metadata.kind === 'top_up' && event.type === 'payment_intent.payment_failed') {
+    const amountMicros = (object.amount ?? 0) * MICROS_PER_CENT;
+    const reason =
+      object.last_payment_error?.code === 'authentication_required'
+        ? 'authentication_required'
+        : 'card_declined';
+    if (await topUpFailed(tx, payer, amountMicros, reason)) {
+      await queueBillingEvent(tx, context.env, topUpFailedEvent(payer, amountMicros, reason));
+    }
+    return payer;
+  }
+  return null;
+}
+
 /**
  * Stripe tells the platform when a subscription starts or ends, and the account's plan follows.
  * Plan limits, usage counters and suspension are the platform's own, so nothing else changes here.
@@ -412,6 +525,28 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
     return context.json({ ok: true });
   }
 
+  if (isCreditMetadata(metadata)) {
+    const paid = idOf(event.data.object.payment_intent);
+    const paymentMethodId =
+      paid && metadata.kind === 'credits' && metadata.saveCard === 'true' && checkoutPaid(event)
+        ? await paymentMethodOf(context.env, paid)
+        : null;
+    const outcome = await db.transaction(async (tx) => {
+      const fresh = await tx.insert(stripeEvents).values(seen).onConflictDoNothing().returning();
+      return fresh.length === 0
+        ? ('duplicate' as const)
+        : applyCreditEvent(context, tx, event, metadata, paymentMethodId);
+    });
+    if (typeof outcome === 'string') {
+      return context.json({ ok: true, duplicate: true });
+    }
+    if (!outcome) {
+      return context.json({ ok: true, ignored: true });
+    }
+    await applyCredits(context.env, db, outcome.clientId, outcome.payer);
+    return context.json({ ok: true });
+  }
+
   if (metadata.clientId && metadata.personId) {
     const key = { client_id: metadata.clientId, person_id: metadata.personId };
     const subscriptionId = SUBSCRIPTION_EVENTS.has(event.type) ? subscriptionOf(event) : undefined;
@@ -426,9 +561,18 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
       if (fresh.length === 0) {
         return 'duplicate';
       }
-      return (await applyAppPersonEvent(context, tx, event, key, subscription, paymentIntentId))
-        ? 'applied'
-        : 'ignored';
+      if (!(await applyAppPersonEvent(context, tx, event, key, subscription, paymentIntentId))) {
+        return 'ignored';
+      }
+      const news = subscriptionNews(event);
+      if (news) {
+        await queueBillingEvent(tx, context.env, {
+          ...news,
+          clientId: key.client_id,
+          person: key.person_id,
+        });
+      }
+      return 'applied';
     });
     if (outcome === 'applied') {
       await reconcilePaidProjects(context, key.client_id, key.person_id);
