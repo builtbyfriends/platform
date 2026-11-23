@@ -111,6 +111,35 @@ An application with no plan list has nothing on sale. Its plan list answers an e
 
 If you remove a plan from the list later, people who hold it keep their Stripe subscription, and Stripe keeps charging them. They get no credits, and only the plan's limits in the catalog hold their use, until you move them to a plan in the list or cancel the subscription in Stripe.
 
+## Sell credits
+
+People can also buy credits once, with or without a plan. Fill in **Credits people can buy once** for the application, with amounts in millionths of a dollar:
+
+```json
+{ "minMicros": 20000000, "stepMicros": 20000000, "lifeDays": 365 }
+```
+
+This sells $20, $40, $60 and so on, and each purchase lasts 365 days. Leave it empty to sell none. Bought credits go on the same balance as a plan's credits, and the credits that end soonest are spent first.
+
+The application starts a purchase with `POST /app-billing/credits.checkout` and `{ buyer, amountMicros, returnUrl }`, then sends the person to the returned `url`. `buyer` is the application's id for the person who pays. An amount under the smallest one or off the step answers `bad_amount`. Credits are added once Stripe confirms the payment, for the amount before tax. A second purchase reuses the buyer's Stripe customer.
+
+### Auto top-up
+
+Auto top-up is off until the person turns it on. It needs a card saved for later charges, so first send them through a credits Checkout with `saveCard: true`. Then turn it on:
+
+```json
+{
+  "payer": "<person id>",
+  "thresholdMicros": 5000000,
+  "amountMicros": 20000000,
+  "monthlyLimitMicros": 60000000
+}
+```
+
+Send it to `POST /app-billing/credits.autoTopUp`, or send `{ payer, enabled: false }` to turn it off. Without a saved card it answers `needs_saved_card`. When the balance drops under the threshold, Platform charges the saved card once for the amount. Auto top-up turns itself off when a charge would go past the monthly limit or the card is declined, and `usage.status` says why in `autoTopUp.offReason` (`monthly_limit`, `card_declined` or `authentication_required`). Hosted use is read once an hour, so a top-up caused by a hosted project can come up to an hour later.
+
+In Stripe, send `payment_intent.succeeded` and `payment_intent.payment_failed` to the webhook as well as the Checkout events.
+
 ## Charge for use
 
 Platform counts what an application reports for its people (AI and sandbox time) and what the hosted projects they pay for use. Once an hour it reads each project's use from Cloudflare's analytics for today and yesterday and stores it under the project's payer. If one reading fails, Platform keeps the numbers it stored before for that reading and stores the others.

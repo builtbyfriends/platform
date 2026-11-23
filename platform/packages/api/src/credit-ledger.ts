@@ -3,10 +3,10 @@ import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
 import { appCreditGrants, appPayers, type CreditSource } from './schema.ts';
 
-type Payer = { clientId: string; payer: string };
+export type Payer = { clientId: string; payer: string };
 
 /** Locks the payer's row, made if missing, so two charges or grants for one payer run one after the other. */
-async function lockPayer(tx: Tx, { clientId, payer }: Payer) {
+export async function lockPayer(tx: Tx, { clientId, payer }: Payer) {
   await tx.insert(appPayers).values({ client_id: clientId, payer_id: payer }).onConflictDoNothing();
   const [row] = await tx
     .select()

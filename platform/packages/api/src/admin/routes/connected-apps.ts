@@ -14,6 +14,7 @@ import {
   setOAuthPreviewPermission,
   OAuthError,
 } from '../../auth/oauth.ts';
+import { parseCreditPurchase } from '../../credit-purchase.ts';
 import { isDevBypass, type ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { readPlanCatalog } from '../../plans.ts';
@@ -90,14 +91,31 @@ app.post('/:id/plans', async (context) => {
       'Give each plan from the plan catalog a stripePriceId and a creditMicros amount.',
     );
   }
-  const input = { id: context.req.param('id'), plans, starterCreditMicros: starter || null };
+  const purchaseText = String(body.creditPurchase ?? '').trim();
+  const creditPurchase = purchaseText ? parseCreditPurchase(json(purchaseText)) : null;
+  if (purchaseText && !creditPurchase) {
+    throw new OAuthError(
+      'invalid_request',
+      'Give credit sales a minMicros and stepMicros in whole cents, and lifeDays, each above 0.',
+    );
+  }
+  const input = {
+    id: context.req.param('id'),
+    plans,
+    starterCreditMicros: starter || null,
+    creditPurchase,
+  };
   return executeAuditedMutation(
     context,
     operatorAuditIntent('oauth/clients/plans', input),
     async () => {
       await db
         .update(oauthClients)
-        .set({ plans, starter_credit_micros: input.starterCreditMicros })
+        .set({
+          plans,
+          starter_credit_micros: input.starterCreditMicros,
+          credit_purchase: input.creditPurchase,
+        })
         .where(eq(oauthClients.id, input.id));
       return { succeeded: true, response: context.redirect('/admin/connected-apps') };
     },

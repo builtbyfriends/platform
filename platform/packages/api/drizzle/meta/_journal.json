@@ -505,6 +505,13 @@
       "when": 1795390838901,
       "tag": "0078_starter_credit",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1795392333767,
+      "tag": "0079_credit_purchase",
+      "breakpoints": true
     }
   ]
 }

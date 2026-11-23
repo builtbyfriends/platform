@@ -82,6 +82,8 @@ export const oauthClients = pgTable('oauth_clients', {
   plans: jsonb('plans').$type<Record<string, { stripePriceId: string; creditMicros: number }>>(),
   /** The one-time credit each person can be given once, set by an operator. Null gives none. */
   starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
+  /** How people buy credits once: the smallest amount, the step above it, and how many days bought credits last. Null sells none. */
+  credit_purchase: jsonb('credit_purchase').$type<CreditPurchase>(),
   created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -203,6 +205,16 @@ export const appUsageEvents = pgTable(
   (table) => [primaryKey({ columns: [table.client_id, table.event_id] })],
 );
 
+export type CreditPurchase = { minMicros: number; stepMicros: number; lifeDays: number };
+
+/** The payer's auto top-up: who pays for it, the balance that starts a charge, its size, and the most it charges in a calendar month. */
+export type AutoTopUp = {
+  buyer: string;
+  thresholdMicros: number;
+  amountMicros: number;
+  monthlyLimitMicros: number;
+};
+
 export type CreditSource = 'plan' | 'bought' | 'given' | 'starter';
 
 /**
@@ -267,8 +279,38 @@ export const appPayers = pgTable(
     /** Set by a card dispute. A blocked payer can't buy until an operator clears it. */
     blocked_at: timestamp('blocked_at', { mode: 'string', withTimezone: true }),
     blocked_reason: text('blocked_reason'),
+    top_up: jsonb('top_up').$type<AutoTopUp>(),
+    top_up_enabled: boolean('top_up_enabled').notNull().default(false),
+    /** Why auto top-up turned itself off, such as a declined card or the monthly limit. */
+    top_up_off_reason: text('top_up_off_reason'),
+    /** Counts charges, so each one has its own Stripe idempotency key and a retry reuses it. */
+    top_up_count: integer('top_up_count').notNull().default(0),
+    /** Set while a charge is out with Stripe, so a second debit doesn't start another. */
+    top_up_started_at: timestamp('top_up_started_at', { mode: 'string', withTimezone: true }),
+    /** The calendar month, `YYYY-MM`, that top_up_month_micros counts. */
+    top_up_month: text('top_up_month'),
+    top_up_month_micros: bigint('top_up_month_micros', { mode: 'number' }).notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
+);
+
+/** The Stripe customer and saved card of a person who buys credits, apart from whoever the credits are for. */
+export const appBuyers = pgTable(
+  'app_buyers',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    buyer_id: text('buyer_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    stripe_customer_id: text('stripe_customer_id').notNull(),
+    /** The card saved for charges with nobody present, such as auto top-up. */
+    stripe_payment_method_id: text('stripe_payment_method_id'),
+    updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.client_id, table.buyer_id, table.livemode] })],
 );
 
 export const oauthGrants = pgTable(

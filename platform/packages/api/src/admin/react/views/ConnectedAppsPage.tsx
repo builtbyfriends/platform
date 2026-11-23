@@ -27,6 +27,7 @@ export function ConnectedAppsPage({
     scopes: Array<string>;
     plans?: Record<string, { stripePriceId: string; creditMicros: number }> | null;
     starter_credit_micros?: number | null;
+    credit_purchase?: { minMicros: number; stepMicros: number; lifeDays: number } | null;
   }>;
   meterPrices?: Record<string, number>;
   meterUnits?: Record<string, number>;
@@ -139,6 +140,14 @@ export function ConnectedAppsPage({
                   placeholder="2000000"
                   initialValue={
                     client.starter_credit_micros ? String(client.starter_credit_micros) : ''
+                  }
+                />
+                <FormTextInput
+                  label="Credits people can buy once (JSON): the smallest amount and the step in micros, and how many days they last. Empty sells none."
+                  name="creditPurchase"
+                  placeholder='{ "minMicros": 20000000, "stepMicros": 20000000, "lifeDays": 365 }'
+                  initialValue={
+                    client.credit_purchase ? JSON.stringify(client.credit_purchase) : ''
                   }
                 />
                 <Button type="submit" label="Save plans" />

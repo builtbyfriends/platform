@@ -1,6 +1,7 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
-import { stripeLiveMode } from './billing/stripe.ts';
+import { stripeLiveMode, type StripeEnv } from './billing/stripe.ts';
 import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
+import { topUpIfLow } from './credit-purchase.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { installationDefaultPlan } from './plans.ts';
@@ -402,20 +403,14 @@ export async function dropTestPlans(
  * the accounts they pay for stamp or lift the AI pause on their hosted projects.
  */
 export async function applyCredits(
-  env: Pick<
-    Bindings,
-    | 'USAGE_COUNTER'
-    | 'STRIPE_PRICE_SOLO'
-    | 'STRIPE_PRICE_PRO'
-    | 'PLATFORM_INSTALLATION_ID'
-    | 'STRIPE_SECRET_KEY'
-  >,
+  env: StripeEnv & Pick<Bindings, 'USAGE_COUNTER' | 'PLATFORM_INSTALLATION_ID'>,
   db: Db,
   clientId: string,
   person: string,
 ) {
   const period = currentPeriod();
   const payer = { clientId, payer: person };
+  await topUpIfLow(env, db, payer);
   const [[stored], plans, prices, use, balance, defaultPlan] = await Promise.all([
     db
       .select()

@@ -296,7 +296,7 @@ describe('app billing', () => {
   });
 
   it('sells nothing when the application has no plan list', async () => {
-    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [] });
+    expect(await dataOf(call('/plans.list', {}))).toEqual({ plans: [], creditPurchase: null });
     const order = { person: 'p1', plan: 'solo', returnUrl: 'https://example.com/plan' };
     const checkout = await call('/billing.checkout', order);
     expect(checkout.status).toBe(400);
