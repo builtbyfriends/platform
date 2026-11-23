@@ -4,15 +4,19 @@ import { Hono } from 'hono';
 import { oauthBearer, OAuthError } from '../auth/oauth.ts';
 import type { ApiEnv } from '../env.ts';
 import { rememberAppCaller } from './app-procedure.ts';
-import * as previews from './procedures/previews.ts';
-import * as publish from './procedures/publish.ts';
+import {
+  create as previewsCreate,
+  deploy as previewsDeploy,
+  launch as previewsLaunch,
+} from './procedures/previews.ts';
+import { request as publishRequest } from './procedures/publish.ts';
 
 /** Procedures for OAuth-connected applications such as a bot platform's workspaces. */
 const appRegistry = defineRegistry([
-  previews.create,
-  previews.deploy,
-  previews.launch,
-  publish.request,
+  previewsCreate,
+  previewsDeploy,
+  previewsLaunch,
+  publishRequest,
 ]);
 
 const rpc = rpcHandler(appRegistry, {

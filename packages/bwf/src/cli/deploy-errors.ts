@@ -1,3 +1,4 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import {
   DEPLOY_POST_ATTEMPTS,
   isCliOutdatedError,
@@ -40,7 +41,7 @@ function appendTrailingLines(
 function describeRootCause(err: Error): string | null {
   let root: unknown = err;
   for (let depth = 0; depth < 6; depth++) {
-    const cause = (root as { cause?: unknown }).cause;
+    const cause = isRecord(root) ? root.cause : undefined;
     if (cause === null || typeof cause !== 'object') {
       break;
     }
@@ -49,7 +50,8 @@ function describeRootCause(err: Error): string | null {
   if (root === err) {
     return null;
   }
-  const { code, message } = root as { code?: unknown; message?: unknown };
+  const code = isRecord(root) ? root.code : undefined;
+  const message = isRecord(root) ? root.message : undefined;
   const text = typeof message === 'string' ? message.trim() : '';
   const codeText = typeof code === 'string' ? code : '';
   if (!text) {

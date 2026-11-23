@@ -5,6 +5,7 @@ import type {
   CloudflareCommandResult,
   ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import { isCI as ciInfoIsCI } from 'ci-info';
 import {
@@ -79,7 +80,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
       // Decision: Authentication works. Keep the original Worker or permission error.
       throw error;
     }
-    const loggedOut = (identity.data as { loggedIn?: unknown } | undefined)?.loggedIn === false;
+    const loggedOut = isRecord(identity.data) && identity.data.loggedIn === false;
     const authenticationError =
       loggedOut ||
       wrongAccount ||
@@ -195,6 +196,23 @@ export type WranglerAuthTokenResult =
   | { ok: true; token: string }
   | { ok: false; failure: CloudflareCommandResult };
 
+function fail(
+  status: number,
+  signal: NodeJS.Signals | null | undefined,
+  stderr: string,
+): WranglerAuthTokenResult {
+  return {
+    ok: false,
+    // Decision: A clean status here would read as a successful upload.
+    failure: {
+      status: status === 0 ? 1 : status,
+      ...(!!signal && { signal }),
+      stdout: '',
+      stderr,
+    },
+  };
+}
+
 /**
  * Read the current Cloudflare session bearer through the pinned deploy runner, for API calls
  * bwf makes itself. The token goes only to the caller. A failure is built fresh from the
@@ -205,20 +223,6 @@ export async function readWranglerAuthToken(
   runWrangler: DeployWranglerRun,
   configPath: string,
 ): Promise<WranglerAuthTokenResult> {
-  const fail = (
-    status: number,
-    signal: NodeJS.Signals | null | undefined,
-    stderr: string,
-  ): WranglerAuthTokenResult => ({
-    ok: false,
-    // Decision: A clean status here would read as a successful upload.
-    failure: {
-      status: status === 0 ? 1 : status,
-      ...(!!signal && { signal }),
-      stdout: '',
-      stderr,
-    },
-  });
   let result: DeployWranglerRunResult;
   try {
     result = await Promise.resolve(
@@ -231,7 +235,7 @@ export async function readWranglerAuthToken(
       `${describeCloudflareChildFailure({ status: 1, error: getErrorMessage(error) })}.`,
     );
   }
-  const parsed = result.data as { type?: unknown; token?: unknown } | null | undefined;
+  const parsed = isRecord(result.data) ? result.data : undefined;
   if (!isCleanCloudflareExit(result)) {
     // Decision: A Global API Key session has no bearer; the child marks it so the next step can be named.
     if (parsed?.type === 'api_key' && !result.error && !result.signal) {

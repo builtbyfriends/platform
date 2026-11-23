@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'pathslash';
 
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- arbitrary package.json content; cli callers pass Record<string, unknown>
 export type PackageJson = Record<string, unknown>;
 
 export type PackageDependencyField =
@@ -61,7 +62,7 @@ export function getPackageDependencies(
       }
     }
   }
-  return dependencies;
+  return Object.assign({}, dependencies);
 }
 
 export function hasPackageDependency(

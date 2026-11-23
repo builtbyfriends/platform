@@ -49,7 +49,11 @@ export async function chooseCloudflareQueueNames(input: {
         `deploy: could not read Cloudflare queue ${name} and its consumers. Retry \`bwf deploy --platform cloudflare\`.`,
       );
     }
-    return { consumers: data.consumers as Array<string | null> };
+    return {
+      consumers: data.consumers.map((consumer: unknown) =>
+        typeof consumer === 'string' ? consumer : null,
+      ),
+    };
   };
 
   // Decision: Names come from unsanitized file paths. Report all invalid ones before any lookup.
@@ -109,7 +113,7 @@ export async function chooseCloudflareQueueNames(input: {
       tooLong.push(`  • ${choice.name} (${choice.name.length} characters)`);
       continue;
     }
-    const state = choice.kept ? plain! : scoped;
+    const state = (choice.kept ? plain : scoped) ?? null;
     if (state === null) {
       absent.push(choice.name);
     }

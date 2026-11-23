@@ -32,8 +32,12 @@ type Scope = {
 
 type WalkNode = Parameters<typeof walk>[0];
 
-function isWalkNode(value: unknown): value is WalkNode {
+function isWalkNode(value: AstNode | WalkNode): value is WalkNode {
   return isAstNode(value);
+}
+
+function toAstNode(value: WalkNode | null | undefined): AstNode | undefined {
+  return isAstNode(value) ? value : undefined;
 }
 
 const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
@@ -61,8 +65,9 @@ export function bindingResolver(
     return () => undefined;
   }
   walk(program, {
-    enter(node, rawParent, key) {
-      if (!isAstNode(node)) {
+    enter(raw, rawParent, key) {
+      const node = toAstNode(raw);
+      if (!node) {
         return;
       }
       const parent = isAstNode(rawParent) ? rawParent : null;
@@ -140,7 +145,8 @@ export function bindingResolver(
       }
     },
     leave(raw) {
-      const outer = isAstNode(raw) ? outerScopes.get(raw) : undefined;
+      const node = toAstNode(raw);
+      const outer = node ? outerScopes.get(node) : undefined;
       if (outer) {
         scope = outer;
       }

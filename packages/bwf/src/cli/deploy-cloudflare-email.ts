@@ -1,3 +1,4 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { basename } from 'pathslash';
 import { runWranglerAuthToken } from './deploy-cloudflare-auth.ts';
 import { log } from './deploy-helpers.ts';
@@ -25,8 +26,8 @@ import type { ProvisionedWranglerPatch } from './wrangler.ts';
 export function hasBwfSendEmailBinding(rootConfig: Record<string, unknown>): boolean {
   return (
     Array.isArray(rootConfig.send_email) &&
-    (rootConfig.send_email as Array<{ name?: unknown } | null>).some(
-      (binding) => binding?.name === SEND_EMAIL_BINDING,
+    rootConfig.send_email.some(
+      (binding: unknown) => isRecord(binding) && binding.name === SEND_EMAIL_BINDING,
     )
   );
 }

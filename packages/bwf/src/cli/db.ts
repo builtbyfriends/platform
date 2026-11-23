@@ -908,7 +908,7 @@ async function executeExternalRemoteSql(
     try {
       const result = await pgClient.query(sql);
       if (result.rows && result.rows.length > 0) {
-        printTable(result.rows);
+        printTable(result.rows.flatMap((row: unknown) => (isRecord(row) ? [row] : [])));
       }
     } finally {
       await pgClient.end();

@@ -105,11 +105,18 @@ function mutationCode(error: unknown): ErrorCode {
   if (!(error instanceof ProjectTeamMutationError)) {
     throw error;
   }
-  return (
+  const code =
     error.reason === 'forbidden'
       ? 'MEMBERSHIP_FORBIDDEN'
-      : error.reason.toUpperCase().replaceAll('-', '_')
-  ) as ErrorCode;
+      : error.reason.toUpperCase().replaceAll('-', '_');
+  if (!isErrorCode(code)) {
+    throw error;
+  }
+  return code;
+}
+
+function isErrorCode(code: string): code is ErrorCode {
+  return code in ERRORS;
 }
 
 const role = type("'reader' | 'collaborator' | 'admin'");
@@ -128,8 +135,13 @@ const invitationView = type({
 });
 const delivery = type({ status: "'sent' | 'not_configured' | 'rate_limited' | 'failed'" });
 
-function summary(user: User): { id: string; login: string } {
+function summary(user: User) {
   return { id: user.id, login: user.login };
+}
+
+interface MembersResult {
+  members: Array<ReturnType<typeof memberJson>>;
+  warnings?: Array<string>;
 }
 
 function memberJson(member: ProjectMember, user: User) {
@@ -235,13 +247,16 @@ export const listMembers = procedure('team.members')
       access.role,
       !!ctx.credential.project,
     );
-    return {
+    const result: MembersResult = {
       members: [
         { user: summary(access.owner), role: 'owner', created_at: access.project.created_at },
         ...rows.map(({ member, user }) => memberJson(member, user)),
       ],
-      ...(warnings.length > 0 ? { warnings: [...warnings] } : {}),
     };
+    if (warnings.length > 0) {
+      result.warnings = [...warnings];
+    }
+    return result;
   });
 
 export const listInvitations = procedure('team.invitations')

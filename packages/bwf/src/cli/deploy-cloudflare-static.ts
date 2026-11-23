@@ -337,39 +337,44 @@ export async function runCloudflareStaticDeploy(
     verifyCompatibilityRunner: assertUploaderStillPinned,
     reporter,
   });
-  const execution = await activateCloudflareVersionWithProgress(
-    deps.activateVersion ?? activateCloudflareVersion,
-    {
-      ...cloudflareCandidateActivationOptions({
-        root,
-        rootConfigPath: configPath,
-        uploadConfigPath: staticConfigPath,
-        accountId,
-        apiBaseUrl,
-        complianceRegion,
-        workerName,
-        workersDevSubdomain,
-        readinessAccessOrigin,
-        runWrangler,
-        readExistingWorker: deps.readExistingWorker,
-        existingWorker,
-        pinnedHandoffLink,
-        initialCloudflareCandidate,
-        assertUploaderStillPinned,
-        staticAssetsBinding: 'ASSETS',
-        queueConsumerCleanup,
-      }),
-      runWrangler: activationRunner,
-      verifyUploader: cfOutput ? cfUploaderIsPinned : assertUploaderStillPinned,
-      requireVersionMetadata: existingWorker === null || versionMetadataBinding !== undefined,
-      requirePreviewForReadiness: existingWorker !== null && versionMetadataBinding === undefined,
-      message: encodeCloudflareVersionMessage([], {
-        ...readCloudflareTriggerConfig(staticConfigPath, configPath),
-        ...(!!existingWorker && { preserve: true }),
-      }),
-      assetsDirectoryOverride: stagedAssetsDirectory,
-    },
-  ).finally(() => cfOutput?.dispose());
+  let execution: Awaited<ReturnType<typeof activateCloudflareVersionWithProgress>>;
+  try {
+    execution = await activateCloudflareVersionWithProgress(
+      deps.activateVersion ?? activateCloudflareVersion,
+      {
+        ...cloudflareCandidateActivationOptions({
+          root,
+          rootConfigPath: configPath,
+          uploadConfigPath: staticConfigPath,
+          accountId,
+          apiBaseUrl,
+          complianceRegion,
+          workerName,
+          workersDevSubdomain,
+          readinessAccessOrigin,
+          runWrangler,
+          readExistingWorker: deps.readExistingWorker,
+          existingWorker,
+          pinnedHandoffLink,
+          initialCloudflareCandidate,
+          assertUploaderStillPinned,
+          staticAssetsBinding: 'ASSETS',
+          queueConsumerCleanup,
+        }),
+        runWrangler: activationRunner,
+        verifyUploader: cfOutput ? cfUploaderIsPinned : assertUploaderStillPinned,
+        requireVersionMetadata: existingWorker === null || versionMetadataBinding !== undefined,
+        requirePreviewForReadiness: existingWorker !== null && versionMetadataBinding === undefined,
+        message: encodeCloudflareVersionMessage([], {
+          ...readCloudflareTriggerConfig(staticConfigPath, configPath),
+          ...(!!existingWorker && { preserve: true }),
+        }),
+        assetsDirectoryOverride: stagedAssetsDirectory,
+      },
+    );
+  } finally {
+    await cfOutput?.dispose();
+  }
   if (!execution.ok) {
     await reportCloudflareActivationFailure(
       reporter,

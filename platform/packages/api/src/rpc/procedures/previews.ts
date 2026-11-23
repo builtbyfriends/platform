@@ -81,6 +81,7 @@ export const deploy = appProcedure('previews.deploy')
     try {
       return await requestPreviewDeployment(
         await permitted(ctx),
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the callee validates the artifact at runtime
         input as Parameters<typeof requestPreviewDeployment>[1],
       );
     } catch (error) {

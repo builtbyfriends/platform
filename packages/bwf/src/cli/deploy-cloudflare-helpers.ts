@@ -88,6 +88,12 @@ export function discoverRootWranglerConfig(root: string): string {
   return materializeCloudflareConfig(root);
 }
 
+type CloudflareUploaderPins = {
+  usesCf: boolean;
+  cfUploaderIsPinned: () => boolean;
+  assertUploaderStillPinned: () => boolean;
+};
+
 /**
  * Pin both uploaders before the first authenticated command. Every later credentialed run
  * checks the same baseline, so project code can never swap the executable under the session.
@@ -96,11 +102,7 @@ export function discoverRootWranglerConfig(root: string): string {
 function createCloudflareUploaderPins(
   root: string,
   deps: CloudflareDeployDeps,
-): {
-  usesCf: boolean;
-  cfUploaderIsPinned: () => boolean;
-  assertUploaderStillPinned: () => boolean;
-} {
+): CloudflareUploaderPins {
   const usesCf = !deps.activateVersion && !deps.runWrangler;
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const wranglerUploaderHashBefore = hashUploader(root);
@@ -391,8 +393,12 @@ export function cloudflareCandidateActivationOptions(options: {
         }
       : undefined,
     recordVerifiedCandidate: existingWorker
-      ? (versionId) =>
-          recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
+      ? (versionId) => {
+          if (!pinnedHandoffLink) {
+            throw new Error('A Cloudflare handoff link is required to record a candidate.');
+          }
+          recordCloudflareCandidate(root, pinnedHandoffLink, existingWorker.versionId, versionId);
+        }
       : (versionId, parentVersionId) => {
           if (parentVersionId) {
             recordCloudflareCandidateUpload(
@@ -437,6 +443,11 @@ export function cloudflareCandidateActivationOptions(options: {
   };
 }
 
+type CloudflareEmptyTriggerPublishers = {
+  publishEmptyCustomDomains: ReturnType<typeof createCloudflareEmptyDomainPublisher>;
+  publishEmptyCrons: ReturnType<typeof createCloudflareEmptyCronPublisher>;
+};
+
 /** Activation callbacks that clear custom domains and crons when the config removes them. */
 function createCloudflareEmptyTriggerPublishers(options: {
   accountId: string;
@@ -444,10 +455,7 @@ function createCloudflareEmptyTriggerPublishers(options: {
   configPath: string;
   workerName: string;
   runWrangler: DeployWranglerRun;
-}): {
-  publishEmptyCustomDomains: ReturnType<typeof createCloudflareEmptyDomainPublisher>;
-  publishEmptyCrons: ReturnType<typeof createCloudflareEmptyCronPublisher>;
-} {
+}): CloudflareEmptyTriggerPublishers {
   return {
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(options),
     publishEmptyCrons: createCloudflareEmptyCronPublisher(options),

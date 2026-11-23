@@ -218,14 +218,18 @@ export function parseRedirectsFile(dir: string): ParsedRedirects | undefined {
   return { rules, redundantForceOn3xx };
 }
 
+export type SplitRedirectRules = {
+  always: Array<DevRedirectRule>;
+  fallbacks: Array<DevRedirectRule>;
+};
+
 /**
  * Split `_redirects` rules into rules that always apply and fallbacks: unforced
  * 200 rewrites, which apply only when no static asset matches.
  */
-export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefined): {
-  always: Array<DevRedirectRule>;
-  fallbacks: Array<DevRedirectRule>;
-} {
+export function splitRedirectRulesByForce(
+  rules: Array<DevRedirectRule> | undefined,
+): SplitRedirectRules {
   const always: Array<DevRedirectRule> = [];
   const fallbacks: Array<DevRedirectRule> = [];
   if (!rules) {
@@ -241,6 +245,13 @@ export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefi
   return { always, fallbacks };
 }
 
+export type MergedRoutingRules = {
+  headerRules: Array<HeaderRule>;
+  redirectRules: Array<DevRedirectRule>;
+  fallbackRules: Array<DevRedirectRule> | undefined;
+  redundantForceOn3xx: number;
+};
+
 /**
  * Merge `_redirects` and `_headers` in `dir` with `routing` from bwf.config.ts.
  * Deploy and dev share it so both build the same rule tables; callers lint them.
@@ -248,12 +259,7 @@ export function splitRedirectRulesByForce(rules: Array<DevRedirectRule> | undefi
 export function mergeRoutingRules(opts: {
   dir: string | null;
   routing: RoutingConfig | undefined;
-}): {
-  headerRules: Array<HeaderRule>;
-  redirectRules: Array<DevRedirectRule>;
-  fallbackRules: Array<DevRedirectRule> | undefined;
-  redundantForceOn3xx: number;
-} {
+}): MergedRoutingRules {
   const { dir, routing } = opts;
   // Decision: `dir === null` when the user set `publicDir: false` in the Vite config. Skip file-based rule reads
   // but still merge config-based rules below.

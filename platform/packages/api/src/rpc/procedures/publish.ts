@@ -34,6 +34,7 @@ export const request = appProcedure('publish.request')
   .noCli({ reason: 'There is no CLI for connected applications' })
   .handler(async ({ env, ctx, input, fail }) => {
     try {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the callee validates the artifact at runtime
       return await requestPublishApproval(ctx.db, env, ctx.grant, input as PublishRequestBody);
     } catch (error) {
       const refusal = previewRefusal(error);

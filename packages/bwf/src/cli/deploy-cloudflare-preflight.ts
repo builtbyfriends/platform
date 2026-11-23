@@ -410,7 +410,6 @@ export async function preflightCloudflareWorker(input: {
     if (!pinnedHandoffLink) {
       throw new Error('The pending Cloudflare handoff was not saved before deployment.');
     }
-    rootConfig = parseRootWranglerConfig(configPath);
   }
 
   // Decision: Sandbox needs Workers Paid. A read-only Containers probe checks the plan and token before
@@ -483,13 +482,13 @@ export async function preflightCloudflareWorker(input: {
     // Decision: A skipped resource (for example Hyperdrive with no connection source) would ship a Worker that
     // fails on first use.
     const skipped = result.resources.filter((r) => r.action === 'skipped');
+    const resourceLabels = new Map<string, string>(Object.entries(CLOUDFLARE_RESOURCE_LABELS));
     if (skipped.length > 0) {
       log.error(
         [
           'deploy: these required resources were skipped during provisioning and are NOT available:',
           ...skipped.map((r) => {
-            const label =
-              CLOUDFLARE_RESOURCE_LABELS[r.kind as ProvisionDriftEntry['kind']] ?? r.kind;
+            const label = resourceLabels.get(r.kind) ?? r.kind;
             return `  • ${r.binding ?? r.name} (${label})${r.reason ? ` — ${r.reason}` : ''}`;
           }),
           'Resolve the connection source (e.g. set DATABASE_URL for Hyperdrive, or adopt an',

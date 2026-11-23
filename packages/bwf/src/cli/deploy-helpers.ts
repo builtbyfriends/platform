@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { isCancel, log as clackLog, text } from '@voidzero-dev/vite-plus-prompts';
 import { join, resolve } from 'pathslash';
 import { findEnvFile } from '../codegen/env-types.ts';
@@ -61,21 +62,23 @@ function readLiveBindingConfigFromDeployment(
   if (!deployment?.manifest) {
     return undefined;
   }
-  let manifest: DeployManifest;
+  let manifest: unknown;
   try {
-    manifest = JSON.parse(deployment.manifest) as DeployManifest;
+    manifest = JSON.parse(deployment.manifest);
   } catch {
     return undefined;
   }
+  const live = isRecord(manifest) ? manifest.live : undefined;
   if (
-    typeof manifest.live?.bindingName !== 'string' ||
-    typeof manifest.live.className !== 'string'
+    !isRecord(live) ||
+    typeof live.bindingName !== 'string' ||
+    typeof live.className !== 'string'
   ) {
     return undefined;
   }
   return {
-    bindingName: manifest.live.bindingName,
-    className: manifest.live.className,
+    bindingName: live.bindingName,
+    className: live.className,
   };
 }
 
@@ -136,7 +139,7 @@ export function getExitCode(error: unknown): number {
     'status' in error &&
     typeof error.status === 'number'
   ) {
-    return (error as { status: number }).status;
+    return error.status;
   }
   return 1;
 }
@@ -168,10 +171,10 @@ export function resolveDeployWorkerMain(
   buildOutputDir: string,
 ): string | undefined {
   try {
-    const wrangler = JSON.parse(readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf8')) as {
-      main?: unknown;
-    };
-    return typeof wrangler.main === 'string' && wrangler.main.length > 0
+    const wrangler: unknown = JSON.parse(
+      readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf8'),
+    );
+    return isRecord(wrangler) && typeof wrangler.main === 'string' && wrangler.main.length > 0
       ? wrangler.main
       : undefined;
   } catch {
@@ -448,11 +451,11 @@ export function toManifestSchedulesAndQueues(
     queues: queues.map((q) => ({
       name: q.name,
       bindingName: q.bindingName,
-      ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
-      ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
-      ...(q.maxConcurrency != null && { maxConcurrency: q.maxConcurrency }),
-      ...(q.maxRetries != null && { maxRetries: q.maxRetries }),
-      ...(q.retryDelay != null && { retryDelay: q.retryDelay }),
+      ...(q.maxBatchSize !== undefined && { maxBatchSize: q.maxBatchSize }),
+      ...(q.maxBatchTimeout !== undefined && { maxBatchTimeout: q.maxBatchTimeout }),
+      ...(q.maxConcurrency !== undefined && { maxConcurrency: q.maxConcurrency }),
+      ...(q.maxRetries !== undefined && { maxRetries: q.maxRetries }),
+      ...(q.retryDelay !== undefined && { retryDelay: q.retryDelay }),
     })),
   };
 }
@@ -468,7 +471,7 @@ export async function assertEnvSchemaValid(
   projectId: string,
   workerVars: Record<string, string> | undefined,
 ): Promise<void> {
-  if (findEnvFile(root) == null) {
+  if (findEnvFile(root) === null) {
     return;
   }
 
