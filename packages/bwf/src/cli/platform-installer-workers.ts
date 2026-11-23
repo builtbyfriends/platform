@@ -13,16 +13,16 @@ import {
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import type { readCloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
 import {
   encodeCloudflareVersionMessage,
-  readCloudflareTriggerConfig,
   stabilizeCloudflareVersionTriggers,
   type CloudflareCommandResult,
   type CloudflareOperation,
   type CloudflareTriggerConfig,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { createPlatformWorkerConfigs } from '@builtbyfriends/platform';
 import {
-  createPlatformWorkerConfigs,
   PLATFORM_DISABLED_KEY,
   PLATFORM_DISABLED_VALUE,
   type PlatformInstallationManifest,
@@ -32,8 +32,8 @@ import { getErrorMessage } from './output.ts';
 import {
   PlatformWorkerCustomDomainsChangedError,
   PlatformWorkerRoutesChangedError,
-  type CloudflareWorkerCustomDomainOrigin,
 } from './platform-cloudflare.ts';
+import type { CloudflareWorkerCustomDomainOrigin } from './platform-cloudflare.ts';
 import {
   readTriggerConfigFromObject,
   recordWorkerCutoverResolution,
@@ -60,8 +60,8 @@ import {
   PlatformWorkerOwnershipError,
   samePlatformWorkerTraffic,
 } from './platform-installer-inspection.ts';
+import type { runPlatformWrangler } from './platform-installer-process.ts';
 import {
-  runPlatformWrangler,
   platformWorkerCommandRunner,
   runPlatformWranglerForConditionalCreate,
 } from './platform-installer-process.ts';
@@ -75,18 +75,18 @@ import {
   validateReplannedWorkerActions,
   withoutPlatformWorkerTrafficAttachments,
 } from './platform-installer-resources.ts';
-import {
-  type InstallerClient,
-  type PlatformInstallerDependencies,
-  type InstallationCheckpointWriter,
-  type InterruptedWorkerCutover,
-  type PlatformWorkerKey,
-  type PlatformWorkerDeploymentOptions,
-  type PlatformWorkerRollback,
-  type PlatformWorkerDeployment,
-  PlatformWorkerRecoveryIncompleteError,
+import { PlatformWorkerRecoveryIncompleteError } from './platform-installer-types.ts';
+import type {
+  InstallerClient,
+  PlatformInstallerDependencies,
+  InstallationCheckpointWriter,
+  InterruptedWorkerCutover,
+  PlatformWorkerKey,
+  PlatformWorkerDeploymentOptions,
+  PlatformWorkerRollback,
+  PlatformWorkerDeployment,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan, type PlatformInstallPlanAction } from './platform-plan.ts';
+import type { PlatformInstallPlan, PlatformInstallPlanAction } from './platform-plan.ts';
 import { writeInstallationManifest } from './platform-registry.ts';
 import { platformWorkerLiveTriggersMatch } from './platform-trigger-proof.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
@@ -842,11 +842,11 @@ export async function deployPlatformWorker(
       await delay(wait);
       try {
         deploymentsAfterActivation = await readDeploymentHistory();
-      } catch (cause) {
+      } catch (error) {
         activatedVersionId = null;
         throw new PlatformWorkerRecoveryIncompleteError(
-          `platform: could not confirm activation of ${workerName} because rereading its deployment history failed: ${getErrorMessage(cause)}`,
-          { cause },
+          `platform: could not confirm activation of ${workerName} because rereading its deployment history failed: ${getErrorMessage(error)}`,
+          { error },
         );
       }
     }

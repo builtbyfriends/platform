@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import {
   BillingUnavailableError,
@@ -7,8 +8,8 @@ import {
   createCheckoutSession,
   createPortalSession,
   subscriptionRenewsAt,
-  type PaidPlan,
 } from '../billing/stripe.ts';
+import type { PaidPlan } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
 import { appPeople, appUsage, appUsageEvents } from '../schema.ts';

@@ -9,8 +9,8 @@ import {
   getDomainByHostname,
   getDomainByHostnameOrCfHostnameId,
   getDomainsByProjectId,
-  type Db,
 } from '../../db.ts';
+import type { Db } from '../../db.ts';
 import {
   ProjectAccessDeniedError,
   ProjectNotFoundError,
@@ -22,8 +22,8 @@ import {
   createCustomHostname,
   deleteCustomHostname,
   getCustomHostnameByHostname,
-  type CustomHostnameInfo,
 } from '../../provisioning/cloudflare-api.ts';
+import type { CustomHostnameInfo } from '../../provisioning/cloudflare-api.ts';
 import type { DomainVerificationData } from '../../schema.ts';
 import { ZeroTrustUnavailableError } from '../../zero-trust/errors.ts';
 import { lockZeroTrustConfiguration } from '../../zero-trust/lock.ts';
@@ -34,7 +34,8 @@ import {
   MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT,
 } from '../../zero-trust/state.ts';
 import { canOnProject, grantedAccess } from '../access.ts';
-import { member, procedure, type Caller } from '../procedure.ts';
+import { member, procedure } from '../procedure.ts';
+import type { Caller } from '../procedure.ts';
 
 const ORPHAN_ADOPTION_MIN_AGE_MS = 60_000;
 const DOMAIN_LIMIT_MESSAGE = `Protected projects support at most ${MAX_ZERO_TRUST_CUSTOM_DOMAINS_PER_PROJECT} custom domains`;

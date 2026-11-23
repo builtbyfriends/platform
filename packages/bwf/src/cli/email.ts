@@ -12,13 +12,8 @@ import { readConfig } from '../config.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import { scanEmailHandlersSync } from '../router/email.ts';
 import { getToken, openBrowser } from './auth.ts';
-import {
-  PlatformApiError,
-  PlatformClient,
-  type EmailDomainResponse,
-  type EmailOperationResponse,
-  type EmailSharedInbound,
-} from './client.ts';
+import { PlatformApiError, PlatformClient } from './client.ts';
+import type { EmailDomainResponse, EmailOperationResponse, EmailSharedInbound } from './client.ts';
 import {
   createDeployWranglerRunner,
   deriveWorkerName,
@@ -38,11 +33,13 @@ import {
   probeMx,
   renderAddressMap,
   renderEmailChecklist,
-  type EmailCloudflareInputs,
-  type EmailDns,
-  type EmailFetch,
-  type EmailPreflight,
-  type EmailWranglerRun,
+} from './email-cloudflare.ts';
+import type {
+  EmailCloudflareInputs,
+  EmailDns,
+  EmailFetch,
+  EmailPreflight,
+  EmailWranglerRun,
 } from './email-cloudflare.ts';
 import { printSuccess, createSpinner, formatUrl, note, pc } from './output.ts';
 import { resolveCommandProjectId } from './resolve-project.ts';
@@ -909,6 +906,7 @@ export async function emailDomainRotateSecret(
     if (!operation) {
       throw new Error(
         `email: secret rotation outcome is unknown (operation key ${attemptId}); inspect \`bwf email domain status ${domain}\` before starting another rotation.`,
+        { cause: error },
       );
     }
     if (operation.status !== 'completed') {
@@ -1092,8 +1090,8 @@ async function runEmailCloudflareCommandInConfig(
   let apiBaseUrl: string;
   try {
     apiBaseUrl = resolveDeployTransport(root, rootConfig);
-  } catch (err) {
-    return fail(`email: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    return fail(`email: ${error instanceof Error ? error.message : String(error)}`);
   }
   const accountId =
     readWranglerTopLevelString(rootConfig, 'account_id') ??
@@ -1128,8 +1126,8 @@ async function runEmailCloudflareCommandInConfig(
   let pre: EmailPreflight;
   try {
     pre = await preflightEmail(inputs);
-  } catch (err) {
-    return fail(`email: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    return fail(`email: ${error instanceof Error ? error.message : String(error)}`);
   }
   print(renderEmailChecklist(pre));
   const sendingOnly = pre.usage.handlers.length === 0;
@@ -1196,9 +1194,9 @@ async function runEmailCloudflareCommandInConfig(
   }
   try {
     writeProvisionedWranglerConfig(root, out.patch, { configPath });
-  } catch (err) {
+  } catch (error) {
     return fail(
-      `email: could not update ${configPath} — ${err instanceof Error ? err.message : String(err)}`,
+      `email: could not update ${configPath} — ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 

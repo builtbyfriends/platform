@@ -25,12 +25,8 @@ import type {
   WebSocketManifestMeta,
 } from './types.ts';
 export type { DeployAssetManifestEntry as AssetManifestEntry } from './types.ts';
-import {
-  DEFAULT_LIVE_BINDING,
-  DEFAULT_LIVE_CLASS,
-  LIVE_MIGRATION_TAG,
-  type LiveBindingConfig,
-} from './wrangler.ts';
+import { DEFAULT_LIVE_BINDING, DEFAULT_LIVE_CLASS, LIVE_MIGRATION_TAG } from './wrangler.ts';
+import type { LiveBindingConfig } from './wrangler.ts';
 
 const textEncoder = new TextEncoder();
 
@@ -153,7 +149,7 @@ async function tickProgress(
  */
 export function computeAssetHash(content: Buffer, filePath: string): string {
   const base64 = content.toString('base64');
-  const ext = extname(filePath).substring(1);
+  const ext = extname(filePath).slice(1);
   const input = textEncoder.encode(base64 + ext);
   return Buffer.from(blake3hash(input)).toString('hex').slice(0, 32);
 }
@@ -199,7 +195,7 @@ function createAssetsIgnoreFunction(
   let assetsIgnoreFilePresent = false;
   if (existsSync(assetsIgnorePath)) {
     assetsIgnoreFilePresent = true;
-    const content = readFileSync(assetsIgnorePath, 'utf-8');
+    const content = readFileSync(assetsIgnorePath, 'utf8');
     patterns.push(...content.split('\n'));
   }
   const ig = ignore().add(patterns);
@@ -275,11 +271,11 @@ export async function collectAndHashAssets(
       };
       assetFiles.set(relativePath, content);
     }
-  } catch (err) {
+  } catch (error) {
     // Decision: Only swallow directory-not-found errors; rethrow everything else (such as the _worker.js safety
     // guard).
-    if (!isNotFoundError(err)) {
-      throw err;
+    if (!isNotFoundError(error)) {
+      throw error;
     }
   }
 
@@ -601,11 +597,11 @@ export function collectWorkerFiles(workerDir: string): Map<string, Buffer> {
   let workerPaths: Array<string>;
   try {
     workerPaths = collectFiles(workerDir);
-  } catch (err) {
-    if (isNotFoundError(err)) {
+  } catch (error) {
+    if (isNotFoundError(error)) {
       return out;
     }
-    throw err;
+    throw error;
   }
   for (const filePath of workerPaths) {
     const relativePath = relative(workerDir, filePath);
@@ -704,7 +700,7 @@ export function buildStaticManifest(opts: {
  * Skips build metadata and files with extensions CF Workers can't handle as modules.
  */
 function isWorkerModule(relativePath: string): boolean {
-  const norm = relativePath.replace(/\\/g, '/');
+  const norm = relativePath.replaceAll('\\', '/');
   if (norm.includes('/.vite/') || norm.startsWith('.vite/')) {
     return false;
   }

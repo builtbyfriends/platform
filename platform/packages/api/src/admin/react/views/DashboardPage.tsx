@@ -11,7 +11,8 @@ import {
 } from '@astryxdesign/core/Table';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { Suspense, useSyncExternalStore } from 'react';
-import { useListView, useRequest, useView, type Deferred, type ViewRef } from 'react-fate';
+import { useListView, useRequest, useView } from 'react-fate';
+import type { Deferred, ViewRef } from 'react-fate';
 import { DashboardView, dashboardRequest, TopProjectView } from '../../fate/views.ts';
 import { Link } from '../spa.tsx';
 import { AdminCard } from './AdminCard.tsx';

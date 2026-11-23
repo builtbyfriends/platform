@@ -9,11 +9,8 @@ import {
   getWorkerBundleDir,
   readBuildOutput,
 } from '@cloudflare/build-output-utils';
-import {
-  convertToWranglerConfig,
-  type ParsedCloudflareConfig,
-  type ParsedBuildOutputWorkerConfig,
-} from '@cloudflare/config';
+import { convertToWranglerConfig } from '@cloudflare/config';
+import type { ParsedCloudflareConfig, ParsedBuildOutputWorkerConfig } from '@cloudflare/config';
 import ignore from 'ignore';
 import mime from 'mime';
 import { extname, join, relative } from 'pathslash';
@@ -367,7 +364,7 @@ export function exportsFromOutput(exports: unknown, bindings: Array<Json>): Json
     }
   }
   // Decision: The converter reads only `worker.exports` for this field.
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+  // oxlint-disable-next-line quality/no-chained-type-assertions
   const workerExportsOnly = {
     worker: { exports: entries },
     containers: [],
@@ -408,11 +405,11 @@ async function preflightWorkflowExports(options: {
         undefined,
         options.verifyUploader,
       );
-    } catch (cause) {
-      if (cause instanceof CloudflareApiError && cause.status === 404 && cause.code === 10200) {
+    } catch (error) {
+      if (error instanceof CloudflareApiError && error.status === 404 && error.code === 10200) {
         continue;
       }
-      throw cause;
+      throw error;
     }
     // Decision: The canonical uploader prompts before reassigning an account-wide name.
     // The pinned path mustn't quietly adopt another Worker's Workflow.
@@ -646,13 +643,13 @@ async function preflightContainerApplications(
       );
       assertContainerApplicationIdentity(application, plan, namespace);
       assertContainerApplicationSettings(application, plan);
-    } catch (cause) {
+    } catch (error) {
       if (
-        !(cause instanceof CloudflareApiError) ||
-        cause.status !== 404 ||
+        !(error instanceof CloudflareApiError) ||
+        error.status !== 404 ||
         Object.keys(plan.images).length === 0
       ) {
-        throw cause;
+        throw error;
       }
     }
   }
@@ -867,7 +864,7 @@ async function prepareContainerMetadata(options: {
               'Cloudflare Container image preparation failed or returned an unsupported state.',
             );
           }
-          await delay(Math.min(2_000, remaining()));
+          await delay(Math.min(2000, remaining()));
         }
         prepared.set(reference, image);
       }
@@ -907,15 +904,15 @@ async function ensureContainerApplications(options: {
         Math.max(1, Math.min(30_000, deadline - Date.now())),
       );
       break;
-    } catch (cause) {
+    } catch (error) {
       if (
-        !(cause instanceof CloudflareApiError) ||
-        cause.code !== 100146 ||
+        !(error instanceof CloudflareApiError) ||
+        error.code !== 100146 ||
         Date.now() >= deadline
       ) {
-        throw cause;
+        throw error;
       }
-      await delay(Math.min(2_000, deadline - Date.now()));
+      await delay(Math.min(2000, deadline - Date.now()));
     }
   }
   const versionBindings = object(version.resources)?.bindings;
@@ -961,9 +958,9 @@ async function ensureContainerApplications(options: {
     let application: Json;
     try {
       application = await apiResult(url, options.token, 'GET', undefined, options.verifyUploader);
-    } catch (cause) {
-      if (!(cause instanceof CloudflareApiError) || cause.status !== 404) {
-        throw cause;
+    } catch (error) {
+      if (!(error instanceof CloudflareApiError) || error.status !== 404) {
+        throw error;
       }
       application = await apiResult(
         `${options.accountUrl}/containers/applications`,
@@ -994,11 +991,11 @@ function readAssetHeaders(output: CfBuildOutput): string | undefined {
   }
   try {
     return readFileSync(join(getWorkerAssetsDir(output.directory), '_headers'), 'utf8');
-  } catch (cause) {
-    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') {
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return undefined;
     }
-    throw cause;
+    throw error;
   }
 }
 
@@ -1019,9 +1016,9 @@ async function uploadAssets(options: {
   const ignorePath = join(directory, '.assetsignore');
   try {
     ignored.add(readFileSync(ignorePath, 'utf8'));
-  } catch (cause) {
-    if (!(cause instanceof Error && 'code' in cause && cause.code === 'ENOENT')) {
-      throw cause;
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw error;
     }
   }
   ignored.add(['/.assetsignore', '/_headers', '/_redirects']);

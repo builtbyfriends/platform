@@ -36,11 +36,11 @@ import {
   cfSuccess,
   cfError,
   captureQueries,
-  type TestEnv,
   rpcRequest,
   rpcData,
   rpcError,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 

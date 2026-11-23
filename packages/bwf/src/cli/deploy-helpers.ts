@@ -3,34 +3,24 @@ import { readFileSync } from 'node:fs';
 import { isCancel, log as clackLog, text } from '@voidzero-dev/vite-plus-prompts';
 import { join, resolve } from 'pathslash';
 import { findEnvFile } from '../codegen/env-types.ts';
-import { type DatabaseDialect, type BwfConfig } from '../config.ts';
+import type { DatabaseDialect, BwfConfig } from '../config.ts';
 import type { JobDefinition } from '../crons/scan.ts';
-import {
-  assertJournalCoherence,
-  validateMigrations,
-  type MigrationFile,
-} from '../migrations/validate.ts';
+import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
+import type { MigrationFile } from '../migrations/validate.ts';
 import type { QueueDefinition } from '../queues/scan.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
-import { PlatformClient, type DeploymentResponse, type ProjectResponse } from './client.ts';
+import type { PlatformClient } from './client.ts';
+import { type DeploymentResponse, type ProjectResponse } from './client.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { promptAndCreateProject, reportProjectCreationWarnings } from './create-project.ts';
-import { type ResourceSummary, type RunDeployOptions } from './deploy-types.ts';
+import type { ResourceSummary, RunDeployOptions } from './deploy-types.ts';
 import { fetchRemoteSecretNames, formatEnvReport, validateProdEnv } from './env-validation.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CliLogger } from './log-file.ts';
 import { formatCount, getErrorMessage, pc } from './output.ts';
-import {
-  detectPreset,
-  formatProjectCommand,
-  resolveProjectCommand,
-  type StaticPreset,
-} from './preset.ts';
-import {
-  attachSelectedPlatform,
-  shouldLinkDeployProject,
-  writeProjectConfig,
-  type ProjectConfig,
-} from './project.ts';
+import { detectPreset, formatProjectCommand, resolveProjectCommand } from './preset.ts';
+import type { StaticPreset } from './preset.ts';
+import { attachSelectedPlatform, shouldLinkDeployProject, writeProjectConfig } from './project.ts';
+import type { ProjectConfig } from './project.ts';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt.ts';
 import type { DeployManifest, QueueMeta, ScheduleMeta } from './types.ts';
 import {
@@ -39,9 +29,8 @@ import {
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
-  type LiveBindingConfig,
-  type WranglerCompat,
 } from './wrangler.ts';
+import type { LiveBindingConfig, WranglerCompat } from './wrangler.ts';
 
 export const log: Record<
   'error' | 'info' | 'message' | 'step' | 'warn',
@@ -179,7 +168,7 @@ export function resolveDeployWorkerMain(
   buildOutputDir: string,
 ): string | undefined {
   try {
-    const wrangler = JSON.parse(readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf-8')) as {
+    const wrangler = JSON.parse(readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf8')) as {
       main?: unknown;
     };
     return typeof wrangler.main === 'string' && wrangler.main.length > 0
@@ -365,13 +354,13 @@ export function getGitCommit(root: string): string | null {
     execSync('git rev-parse --is-inside-work-tree', { cwd: root, stdio: 'ignore', env: gitEnv });
     const status = execSync('git status --porcelain', {
       cwd: root,
-      encoding: 'utf-8',
+      encoding: 'utf8',
       env: gitEnv,
     }).trim();
     if (status !== '') {
       return null;
     }
-    return execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8', env: gitEnv }).trim();
+    return execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', env: gitEnv }).trim();
   } catch {
     return null;
   }
@@ -388,8 +377,8 @@ export function validateDeployMigrations(
 ): Array<MigrationFile> | undefined {
   try {
     assertJournalCoherence(migrationsDir, rawMigrations, sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
   if (rawMigrations.length === 0) {
@@ -399,8 +388,8 @@ export function validateDeployMigrations(
     const validated = validateMigrations(rawMigrations);
     log.info(`Found ${formatCount(validated.length, 'migration')}`);
     return validated;
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 }

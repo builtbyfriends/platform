@@ -81,9 +81,9 @@ export async function promptForLoginToken(
     savePlatformToken(token, apiUrl);
     s.stop('Logged in!');
     return token;
-  } catch (err) {
+  } catch (error) {
     s.stop('Login failed');
-    throw err;
+    throw error;
   }
 }
 

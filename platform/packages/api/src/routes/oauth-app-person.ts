@@ -1,9 +1,11 @@
 import { and, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import type { Context } from 'hono';
 import type { OAuthScope, OAuthSession } from '../auth/oauth-types.ts';
-import { activeOAuthClient, authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
+import type { authenticateOAuthClient } from '../auth/oauth.ts';
+import { activeOAuthClient, OAuthError } from '../auth/oauth.ts';
 import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
-import { createUser, getProject, type Db } from '../db.ts';
+import { createUser, getProject } from '../db.ts';
+import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { projectUrl } from '../project-url.ts';
 import { oauthGrants, oauthRequests, users } from '../schema.ts';

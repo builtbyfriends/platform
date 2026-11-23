@@ -102,7 +102,7 @@ export function getOrCreateDevTriggerToken(root: string): string {
   const tokenPath = join(root, '.bwf', 'dev-trigger-token');
   const readExisting = (): string | undefined => {
     try {
-      const existing = readFileSync(tokenPath, 'utf-8').trim();
+      const existing = readFileSync(tokenPath, 'utf8').trim();
       return existing.length > 0 ? existing : undefined;
     } catch {
       return undefined;
@@ -141,9 +141,9 @@ export function getOrCreateDevTriggerToken(root: string): string {
       closeSync(fd);
     }
     return fresh;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw err;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
     }
     const winner = readExisting();
     if (winner) {
@@ -230,7 +230,7 @@ export function warnIfPackageJsonIsNotEsm(root: string): void {
   }
   let pkg: { type?: unknown };
   try {
-    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   } catch {
     return;
   }

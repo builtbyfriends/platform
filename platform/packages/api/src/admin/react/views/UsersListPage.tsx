@@ -1,13 +1,14 @@
 /** @jsxImportSource react */
 
 import { Button } from '@astryxdesign/core/Button';
-import { Table, pixel, proportional, type TableColumn } from '@astryxdesign/core/Table';
+import { Table, pixel, proportional } from '@astryxdesign/core/Table';
+import type { TableColumn } from '@astryxdesign/core/Table';
 import { Text } from '@astryxdesign/core/Text';
 import { useState } from 'react';
 import { useRequest, useView } from 'react-fate';
 import type { AdminUsersPage } from '../../fate/server.ts';
 import { UsersPageView, usersPageRequest } from '../../fate/views.ts';
-import { type AdminPageProps } from '../page-utils.ts';
+import type { AdminPageProps } from '../page-utils.ts';
 import { Link } from '../spa.tsx';
 import { formatDateTime } from './format.ts';
 import { Layout } from './Layout.tsx';

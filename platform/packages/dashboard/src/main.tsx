@@ -1,4 +1,5 @@
-import { StrictMode, useEffect, useState, type ReactNode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { platformPageTitle } from '../lib/platform-title.ts';
 import type { Props as AccountProps } from '../server/account.ts';
@@ -79,7 +80,7 @@ function App() {
           setPage(loaded);
         }
       },
-      (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)),
+      (error_: unknown) => setError(error_ instanceof Error ? error_.message : String(error_)),
     );
   }, [id]);
 

@@ -78,11 +78,11 @@ export async function generateValidatedSqliteMigrations(
   // Decision: An existing invalid migration needs repair; generating from its target snapshot cannot fix it.
   try {
     (await openMigrationValidationDatabase(collectMigrations(migrationsDir))).close();
-  } catch (cause) {
+  } catch (error) {
     throw new Error(
-      `${cause instanceof Error ? cause.message : String(cause)}\n` +
+      `${error instanceof Error ? error.message : String(error)}\n` +
         'Repair the unapplied migration before generating again. Drizzle diffs snapshots; rerunning generation does not repair existing SQL.',
-      { cause },
+      { error },
     );
   }
 
@@ -91,7 +91,7 @@ export async function generateValidatedSqliteMigrations(
   try {
     generate();
     (await openMigrationValidationDatabase(collectMigrations(migrationsDir))).close();
-  } catch (cause) {
+  } catch (error) {
     if (!existed) {
       rmSync(migrationsDir, { recursive: true, force: true });
     } else {
@@ -106,9 +106,9 @@ export async function generateValidatedSqliteMigrations(
       }
     }
     throw new Error(
-      `${cause instanceof Error ? cause.message : String(cause)}\n` +
+      `${error instanceof Error ? error.message : String(error)}\n` +
         'Migration generation failed; previous SQL, snapshots and journal were restored. Review the schema change before retrying. For additive changes, use an additive migration rather than rebuilding existing tables.',
-      { cause },
+      { error },
     );
   }
 }

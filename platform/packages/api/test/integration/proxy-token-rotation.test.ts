@@ -34,17 +34,19 @@ import {
   requestBulkProxyTokenRotations,
   requestProxyTokenRotation,
   requestRotationIfReplacingUntrustedCode,
-  type ProjectRotationOutcome,
-  type ProxyTokenRotationEnv,
-  type ProxyTokenRotationReason,
+} from '../../src/proxy-token-rotation.ts';
+import type {
+  ProjectRotationOutcome,
+  ProxyTokenRotationEnv,
+  ProxyTokenRotationReason,
 } from '../../src/proxy-token-rotation.ts';
 import {
   deriveProxyInternalAuth,
   deriveProxyToken,
   PROXY_INTERNAL_AUTH_HEADER,
   proxyTokenStateKey,
-  type ProxyInternalRoute,
 } from '../../src/proxy-token.ts';
+import type { ProxyInternalRoute } from '../../src/proxy-token.ts';
 import {
   deployments,
   projectCleanupJobs,
@@ -69,12 +71,10 @@ import {
   readAllEvents,
   setupEnv,
   teardownEnv,
-  type CfApiMocks,
-  type MockCfApiHandle,
-  type TestEnv,
   rpcRequest,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { CfApiMocks, MockCfApiHandle, TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -139,7 +139,7 @@ function cfApi(overrides: Partial<CfApiMocks> = {}): MockCfApiHandle {
       const script = handle.state.hostScripts.get(scriptNameOf(url));
       return script
         ? cfSuccess(script.bindings)
-        : cfError('workers.api.error.script_not_found', 404, 10007);
+        : cfError('workers.api.error.script_not_found', 404, 10_007);
     },
     ...overrides,
   });

@@ -1,32 +1,33 @@
 import { appendSqliteClassMigration } from '@builtbyfriends/deploy-core';
-import { type ApplicationAnalysis } from './application-analysis.ts';
+import type { ApplicationAnalysis } from './application-analysis.ts';
 import { SEND_EMAIL_BINDING } from './cli/email-cloudflare.ts';
+import type { resolveLiveBindingConfig } from './cli/wrangler.ts';
 import {
   findBindingNameOwner,
   hasDurableObjectSqliteMigration,
   LIVE_MIGRATION_TAG,
   nextDurableObjectMigrationTag,
-  resolveLiveBindingConfig,
 } from './cli/wrangler.ts';
 import { finalizeDurableObjectPatch } from './cloudflare-durable-patch.ts';
-import { readConfig } from './config.ts';
+import type { readConfig } from './config.ts';
 import {
   resolveWorkersAiBindingName,
   shouldBindWorkersAi,
   readBwfDevCredentials,
 } from './plugin-ai-setup.ts';
 import { hasBinding, shouldInjectEmailDevInboxVar } from './plugin-binding-utils.ts';
-import { type WorkerConfig } from './plugin-cloudflare-config.ts';
-import { type EnvSchemaFacts } from './plugin-env-schema.ts';
+import type { WorkerConfig } from './plugin-cloudflare-config.ts';
+import type { EnvSchemaFacts } from './plugin-env-schema.ts';
 import { readAppIdentity } from './procedures/scan.ts';
 import { cloudflareQueueName, readDeployBuildQueueNames } from './queues/cloudflare-names.ts';
-import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
+import { isRouteEnabledForEnvironment } from './router/parse-filename.ts';
+import type { RouteEnvironment } from './router/parse-filename.ts';
 import { DEV_INBOX_ENV_VAR, DEV_INBOX_TOKEN_ENV_VAR } from './runtime/email/dev-inbox.ts';
+import type { resolveSandboxConfig } from './sandbox/config.ts';
 import {
   SANDBOX_MIGRATION_TAG,
   hasSandboxSqliteMigration,
   isSandboxAttached,
-  resolveSandboxConfig,
   sandboxContainerConfig,
   assertSandboxNamespaceConfig,
 } from './sandbox/config.ts';
@@ -201,7 +202,7 @@ export function mergeWorkerBindings(
     const configured = (workerConfig.name as string | undefined) || resolved.name;
     const workerName = configured || readAppIdentity(root).name;
     result.analytics_engine_datasets = [
-      { binding: 'ANALYTICS', dataset: `${workerName.replace(/[^A-Za-z0-9_]/g, '_')}_events` },
+      { binding: 'ANALYTICS', dataset: `${workerName.replaceAll(/[^A-Za-z0-9_]/g, '_')}_events` },
     ];
   }
 

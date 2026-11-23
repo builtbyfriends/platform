@@ -24,7 +24,7 @@ export type AuxiliaryWorkerConfig = (
 };
 
 /** Match the old plugin's patch semantics, including its array concatenation. */
-// oxlint-disable-next-line anti-slop/no-object-parameters
+// oxlint-disable-next-line quality/no-object-parameters
 export function mergeCloudflareConfig(patch: object, fallback: object): Record<string, unknown> {
   const result: Record<string, unknown> = { ...fallback };
   for (const [key, value] of Object.entries(patch)) {
@@ -59,8 +59,8 @@ export function toNativeCloudflareConfig(raw: WorkerConfig, root: string): Cloud
   const name =
     String(packageName ?? basename(root))
       .replaceAll('_', '-')
-      .replace(/[^a-z0-9- ]/g, '-')
-      .replace(/^(-+)|(-+)$/g, '')
+      .replaceAll(/[^a-z0-9- ]/g, '-')
+      .replaceAll(/^(-+)|(-+)$/g, '')
       .slice(0, 63) || 'my-worker';
   const { env, vars, ...base } = raw;
   const selected = process.env.CLOUDFLARE_ENV ? env?.[process.env.CLOUDFLARE_ENV] : undefined;

@@ -1,8 +1,5 @@
-import {
-  matchLiteralPattern,
-  redirectToHttps,
-  type ProjectZeroTrustRouting,
-} from '@builtbyfriends/edge';
+import { matchLiteralPattern, redirectToHttps } from '@builtbyfriends/edge';
+import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import {
   PLATFORM_HEALTH_HOSTNAME_LABEL,
   platformHealthHostname,
@@ -13,19 +10,16 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { projectAccessVerifier } from './access.ts';
 import type { Env } from './env.ts';
 import { createErrorResponse, createMaintenanceResponse } from './error-page.ts';
-import { applyHeaderRules, type HeaderRule } from './headers.ts';
+import { applyHeaderRules } from './headers.ts';
+import type { HeaderRule } from './headers.ts';
 import { createLimitResponse } from './limit-response.ts';
-import {
-  recordPlatformLog,
-  recordRequest,
-  sendUsageEvent,
-  type FailureKind,
-  type RequestType,
-} from './metering.ts';
+import { recordPlatformLog, recordRequest, sendUsageEvent } from './metering.ts';
+import type { FailureKind, RequestType } from './metering.ts';
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from './platform-lifecycle.ts';
 import { applicationEdgeCache, resolveProjectHostname } from './project-hostname.ts';
 import { classifyDynamicRequestType, hasExtension, isApiPath } from './request-type.ts';
-import { applyRoutingRules, mergeQueryIntoLocation, type RedirectRule } from './routing-rules.ts';
+import { applyRoutingRules, mergeQueryIntoLocation } from './routing-rules.ts';
+import type { RedirectRule } from './routing-rules.ts';
 import {
   bypassesSharedCache,
   clientRevalidateResponse,
@@ -119,7 +113,7 @@ function platformHealthExceptionPath(request: Request, url: URL): boolean {
       decoded = decodeURIComponent(path);
     } catch {}
     return decoded
-      .replace(/[\\/]+/g, '/')
+      .replaceAll(/[\\/]+/g, '/')
       .toLowerCase()
       .startsWith('/health');
   });
@@ -270,7 +264,7 @@ async function fetchAssetManifest(
   const hedgeDelayMs = staticAssetHedgeDelayMs(timeoutMs);
   try {
     const raw = await withDelayedHedge(
-      () => env.ROUTING.get(`manifest:${deploymentId}`, { cacheTtl: 86400 }),
+      () => env.ROUTING.get(`manifest:${deploymentId}`, { cacheTtl: 86_400 }),
       {
         delayMs: hedgeDelayMs,
         timeoutMs,
@@ -324,7 +318,7 @@ async function serveWfpAssetFallback(
   env: Env,
   routing: RoutingEntry,
   pathname: string,
-  timeoutMs = 10000,
+  timeoutMs = 10_000,
   fallbackPathname?: string,
 ): Promise<{ response: Response; pathname: string } | null> {
   if (!routing.assetManifestId) {
@@ -410,7 +404,7 @@ async function maybeServeWfpAssetFallback(opts: {
   fallbackPathname?: string;
 }): Promise<{ response: Response; failureKind?: FailureKind; pathname: string }> {
   const startedAt = opts.deadline?.startedAt ?? Date.now();
-  const timeoutMs = opts.deadline?.timeoutMs ?? opts.timeoutMs ?? 10000;
+  const timeoutMs = opts.deadline?.timeoutMs ?? opts.timeoutMs ?? 10_000;
   if (isEventStreamResponse(opts.response)) {
     return { response: opts.response, pathname: opts.pathname };
   }
@@ -874,14 +868,14 @@ const dispatcher = {
               routing.projectId,
               remainingTimeoutBudget(staticAssetStartedAt, timeoutMs),
             );
-          } catch (err) {
-            if (err instanceof DispatchTimeoutError) {
+          } catch (error) {
+            if (error instanceof DispatchTimeoutError) {
               return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_TIMEOUT);
             }
-            if (err instanceof StaticAssetReadError) {
+            if (error instanceof StaticAssetReadError) {
               return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_ERROR);
             }
-            throw err;
+            throw error;
           }
           if (!assetManifest) {
             return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_MISSING);
@@ -913,16 +907,16 @@ const dispatcher = {
                 return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_MISSING);
               }
               response = assetResponse;
-            } catch (err) {
+            } catch (error) {
               // Decision: This hashed-asset branch has no `resolved.notFound`: a storage failure is a real asset read, so
               // it returns a fast 503.
-              if (err instanceof DispatchTimeoutError) {
+              if (error instanceof DispatchTimeoutError) {
                 return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_TIMEOUT);
               }
-              if (err instanceof StaticAssetReadError) {
+              if (error instanceof StaticAssetReadError) {
                 return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_ERROR);
               }
-              throw err;
+              throw error;
             }
           } else {
             response = createErrorResponse(request, 404, 'Not Found');
@@ -964,14 +958,14 @@ const dispatcher = {
             return finalizeAsset(res, failureKind);
           }
           return finalizeAsset(response, failureKind);
-        } catch (err) {
-          if (err instanceof DispatchTimeoutError) {
+        } catch (error) {
+          if (error instanceof DispatchTimeoutError) {
             return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_TIMEOUT);
           }
-          if (err instanceof Error && err.message.includes('Worker exceeded')) {
+          if (error instanceof Error && error.message.includes('Worker exceeded')) {
             return meter(await limitResponse('execution'));
           }
-          throw err;
+          throw error;
         }
       }
     }
@@ -1053,14 +1047,14 @@ const dispatcher = {
           routing.projectId,
           remainingTimeoutBudget(staticAssetStartedAt, timeoutMs),
         );
-      } catch (err) {
-        if (err instanceof DispatchTimeoutError) {
+      } catch (error) {
+        if (error instanceof DispatchTimeoutError) {
           return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_TIMEOUT);
         }
-        if (err instanceof StaticAssetReadError) {
+        if (error instanceof StaticAssetReadError) {
           return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_ERROR);
         }
-        throw err;
+        throw error;
       }
       if (!assetManifest) {
         return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_MISSING);
@@ -1106,16 +1100,16 @@ const dispatcher = {
           routing.staticDeploymentId,
           remainingTimeoutBudget(staticAssetStartedAt, timeoutMs),
         );
-      } catch (err) {
+      } catch (error) {
         // Decision: A stalled read of the not-found asset would have been a 404 anyway, so it returns a fast 404
         // (which mustn't trip the 5xx alert). A real asset read that stalled returns a fast 503.
-        if (err instanceof DispatchTimeoutError) {
+        if (error instanceof DispatchTimeoutError) {
           return meter(
             timeoutResponse(resolved.notFound ? 404 : 503, 'static-asset'),
             resolved.notFound ? undefined : PLATFORM_STATIC_ASSET_TIMEOUT,
           );
         }
-        if (err instanceof StaticAssetReadError) {
+        if (error instanceof StaticAssetReadError) {
           return meter(
             resolved.notFound
               ? createErrorResponse(request, 404, 'Not Found')
@@ -1123,7 +1117,7 @@ const dispatcher = {
             resolved.notFound ? undefined : PLATFORM_STATIC_ASSET_ERROR,
           );
         }
-        throw err;
+        throw error;
       }
       if (!assetResponse) {
         if (resolved.notFound) {
@@ -1267,9 +1261,9 @@ const dispatcher = {
       }
 
       return meter(applyHeaderRules(response, pathname, routing.headerRules), responseFailureKind);
-    } catch (err) {
-      if (err instanceof DispatchTimeoutError) {
-        if (err.label === 'static-asset') {
+    } catch (error) {
+      if (error instanceof DispatchTimeoutError) {
+        if (error.label === 'static-asset') {
           return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_TIMEOUT);
         }
         // Decision: The request was still running when the budget ran out. It counts as the app's when the worker,
@@ -1287,13 +1281,13 @@ const dispatcher = {
         }
         return meterWorkerTimeout();
       }
-      if (err instanceof StaticAssetReadError) {
+      if (error instanceof StaticAssetReadError) {
         return meterStaticAssetFailure(PLATFORM_STATIC_ASSET_ERROR);
       }
-      if (err instanceof Error && err.message.includes('Worker exceeded')) {
+      if (error instanceof Error && error.message.includes('Worker exceeded')) {
         return meter(await limitResponse('execution'));
       }
-      throw err;
+      throw error;
     }
   },
 
@@ -1443,8 +1437,8 @@ const dispatcher = {
       }
       // Decision: When ok is true, undecided messages are acked implicitly (Cloudflare's default when the consumer
       // returns successfully).
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       console.error(
         `[queue-relay] relay threw queue="${queueName}" worker="${workerName}" error=${JSON.stringify(msg)}`,
       );
@@ -1502,7 +1496,7 @@ async function fetchStaticAsset(
   path: string,
   projectId?: string,
   deploymentId?: string,
-  timeoutMs = 10000,
+  timeoutMs = 10_000,
 ): Promise<Response | null> {
   const hedgeDelayMs = staticAssetHedgeDelayMs(timeoutMs);
   const startedAt = Date.now();
@@ -1608,7 +1602,7 @@ async function fetchStaticAssetOnce(
   const readKvAsset = async (key: string): Promise<Response | null> => {
     const { value, metadata } = await env.STATIC_ASSETS.getWithMetadata<{ ct: string }>(key, {
       type: 'arrayBuffer',
-      cacheTtl: 86400,
+      cacheTtl: 86_400,
     });
     if (!value) {
       return null;

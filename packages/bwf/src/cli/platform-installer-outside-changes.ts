@@ -1,12 +1,11 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import type { PlatformRuntime } from '@builtbyfriends/platform/installer';
-import { confirm, isCancel, log, type SpinnerResult } from '@voidzero-dev/vite-plus-prompts';
+import { confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
+import type { SpinnerResult } from '@voidzero-dev/vite-plus-prompts';
 import { note } from './output.ts';
-import {
-  PlatformCloudflareApiError,
-  type PlatformCloudflareClient,
-} from './platform-cloudflare.ts';
+import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
+import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import {
   interruptedWorkerCutover,
   workerCutoverUpdatesSecrets,
@@ -16,17 +15,17 @@ import {
   readActivePlatformWorkerDeployment,
 } from './platform-installer-inspection.ts';
 import { runPlatformWranglerAtApiBase } from './platform-installer-process.ts';
-import {
-  PLATFORM_BILLING_SECRET_NAMES,
-  type PlatformBillingSecretName,
-  type PlatformDatabaseLifecycleLock,
-  type PlatformWorkerKey,
+import { PLATFORM_BILLING_SECRET_NAMES } from './platform-installer-types.ts';
+import type {
+  PlatformBillingSecretName,
+  PlatformDatabaseLifecycleLock,
+  PlatformWorkerKey,
 } from './platform-installer-types.ts';
 import {
   platformWorkerResourceKey,
   uploadPlatformWorkerForReview,
-  type runPlatformWrangler,
 } from './platform-installer-workers.ts';
+import type { runPlatformWrangler } from './platform-installer-workers.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
 const OUTSIDE_SOURCES = {

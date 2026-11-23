@@ -4,13 +4,15 @@ import {
   isIdentifier,
   isMemberExpression,
   isObjectExpression,
-  type AstImportDeclaration,
-  type AstImportNamespaceSpecifier,
-  type AstImportSpecifier,
-  type AstNode,
   isAstProgram,
-  type AstProgram,
-  type AstVariableDeclaration,
+} from './ast.ts';
+import type {
+  AstImportDeclaration,
+  AstImportNamespaceSpecifier,
+  AstImportSpecifier,
+  AstNode,
+  AstProgram,
+  AstVariableDeclaration,
 } from './ast.ts';
 import { isResourceName } from './resource-name.ts';
 import { staticLiteral, unwrapStaticExpression } from './static-exports.ts';

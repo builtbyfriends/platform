@@ -4,13 +4,13 @@ import {
   isPlatformAccessIdentityRule,
   parsePlatformAccessProtection,
   parsePlatformLoginConfiguration,
-  type PlatformAccessProtection,
-  type PlatformLoginConfiguration,
 } from '@builtbyfriends/platform';
-import {
-  PlatformCloudflareApiError,
-  type PlatformCloudflareClient,
-} from './platform-cloudflare.ts';
+import type {
+  PlatformAccessProtection,
+  PlatformLoginConfiguration,
+} from '@builtbyfriends/platform';
+import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
+import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 
 type ObjectValue = Record<string, unknown>;
 type AccessResource = {
@@ -277,7 +277,7 @@ function platformAccessOverlapsOrigin(destination: string, origin: string): bool
     '^' +
     host
       .split('*')
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .map((part) => part.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
       .join('.*') +
     '$';
   return new RegExp(pattern, 'i').test(new URL(origin).hostname);

@@ -257,8 +257,8 @@ describe('assertJournalCoherence', () => {
       assertJournalCoherence(migrationsDir, [
         { name: '0000_create_posts.sql', sql: 'CREATE TABLE posts (id TEXT);' },
       ]);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('has no entries');
     expect(message).toContain('db/migrations/meta/0000_snapshot.json');
@@ -273,8 +273,8 @@ describe('assertJournalCoherence', () => {
     let message = '';
     try {
       assertJournalCoherence(migrationsDir, []);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('has no entries');
     expect(message).toContain('db/migrations/meta/0000_snapshot.json');
@@ -288,8 +288,8 @@ describe('assertJournalCoherence', () => {
     let message = '';
     try {
       assertJournalCoherence(migrationsDir, []);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('has no entries');
     expect(message).toContain('db/migrations/migrations.js');
@@ -305,8 +305,8 @@ describe('assertJournalCoherence', () => {
       assertJournalCoherence(migrationsDir, [
         { name: '0000_create_posts.sql', sql: 'CREATE TABLE posts (id TEXT);' },
       ]);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('db/migrations/meta/_journal.json is missing');
     expect(message).toContain('db/migrations/meta/0000_snapshot.json');
@@ -322,8 +322,8 @@ describe('assertJournalCoherence', () => {
       assertJournalCoherence(migrationsDir, [
         { name: '0000_create_posts.sql', sql: 'CREATE TABLE posts (id TEXT);' },
       ]);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('db/migrations/meta/_journal.json is missing');
     expect(message).toContain('db/migrations/migrations.js');
@@ -397,8 +397,8 @@ describe('assertJournalCoherence', () => {
         { name: '0000_first.sql', sql: 'SELECT 1;' },
         { name: '0002_orphan.sql', sql: 'SELECT 1;' },
       ]);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('0002_orphan.sql');
     expect(message).toContain('0001_second.sql');
@@ -433,8 +433,8 @@ describe('assertJournalCoherence', () => {
       assertJournalCoherence(migrationsDir, [
         { name: '0000_initial.sql', sql: 'CREATE TABLE posts (id TEXT);' },
       ]);
-    } catch (err) {
-      message = (err as Error).message;
+    } catch (error) {
+      message = (error as Error).message;
     }
     expect(message).toContain('duplicate');
     expect(message).toContain('0000_initial');

@@ -7,7 +7,8 @@ import {
   requestPreviewDeployment,
   requirePreviewPermission,
 } from '../../routes/previews.ts';
-import { appProcedure, connectedApp, type AppCaller } from '../app-procedure.ts';
+import { appProcedure, connectedApp } from '../app-procedure.ts';
+import type { AppCaller } from '../app-procedure.ts';
 
 const PREVIEW_ERRORS = {
   ACCESS_DENIED: { status: 403, message: 'preview access denied' },

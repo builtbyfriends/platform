@@ -10,14 +10,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  createServer,
-  normalizePath,
-  type ConfigEnv,
-  type ResolvedConfig,
-  type RunnableDevEnvironment,
-  type UserConfig,
-} from 'vite';
+import { createServer, normalizePath } from 'vite';
+import type { ConfigEnv, ResolvedConfig, RunnableDevEnvironment, UserConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { analyzeApplicationSync } from '../../src/application-analysis.ts';
 import { GENERATED_ASSET_HEADERS_MARKER } from '../../src/asset-worker-bypass.ts';
@@ -154,7 +148,7 @@ describe('routingPlugin', () => {
     resolveConfig(plugin, 'build');
     await runBuildStart(plugin);
 
-    const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf-8');
+    const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
     expect(entry).toContain('app, assets: serveWithAssets');
     expect(entry).toContain(
       'const serveWithAssets = __createAssetFallback({"assetsDir":"assets","serveSpaFallback":true,"notFound":"none"});',
@@ -169,7 +163,7 @@ describe('routingPlugin', () => {
     resolveConfig(plugin, 'build');
     await runBuildStart(plugin);
 
-    const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf-8');
+    const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
     expect(entry).toContain(
       'const serveWithAssets = __createAssetFallback({"assetsDir":"assets","serveSpaFallback":false,"notFound":"single-page-application"});',
     );
@@ -457,7 +451,7 @@ describe('routingPlugin', () => {
     await runBuildStart(plugin);
 
     const typesPath = join(root, '.bwf', 'routes.d.ts');
-    const previousTypes = readFileSync(typesPath, 'utf-8');
+    const previousTypes = readFileSync(typesPath, 'utf8');
     const { server, emit, invalidated, logError } = await startDevServer(plugin, [
       'virtual:platform-routes',
     ]);
@@ -501,7 +495,7 @@ describe('routingPlugin', () => {
     await emit('change', routePath);
 
     expect(invalidated).toEqual(['virtual:platform-routes']);
-    expect(readFileSync(typesPath, 'utf-8').includes('POST: {')).toBe(changesExports);
+    expect(readFileSync(typesPath, 'utf8').includes('POST: {')).toBe(changesExports);
 
     writeFileSync(
       routePath,
@@ -753,7 +747,7 @@ describe('routingPlugin', () => {
         expect(await resolve(specifier, appFile)).toBe(fileOf(specifier));
       }
       // Decision: A deeper subpath passes the aliases and resolves where better-auth is installed.
-      expect(await resolve('better-auth/client/plugins', fileURLToPath(import.meta.url))).toBe(
+      expect(await resolve('better-auth/client/plugins', import.meta.filename)).toBe(
         fileOf('better-auth/client/plugins'),
       );
     } finally {
@@ -866,7 +860,7 @@ describe('routingPlugin', () => {
 
     expect(onPolicyChange).toHaveBeenCalled();
     expect(invalidated).toEqual(['virtual:platform-routes']);
-    expect(readFileSync(join(root, '.bwf', 'routes.d.ts'), 'utf-8')).toContain(
+    expect(readFileSync(join(root, '.bwf', 'routes.d.ts'), 'utf8')).toContain(
       '../src/routes/api.ts',
     );
   });
@@ -918,13 +912,13 @@ describe('routingPlugin', () => {
         live: { bindingName: 'BWF_LIVE', className: 'PlatformLiveStreamDurableObject' },
       });
       const entryPath = join(root, '.bwf', 'entry.ts');
-      expect(readFileSync(entryPath, 'utf-8')).not.toContain('__setLiveDev');
+      expect(readFileSync(entryPath, 'utf8')).not.toContain('__setLiveDev');
 
       runConfig(plugin, { command, mode: 'development', isPreview });
       resolveConfig(plugin, command);
       await runBuildStart(plugin);
 
-      const entry = readFileSync(entryPath, 'utf-8');
+      const entry = readFileSync(entryPath, 'utf8');
       expect(entry).toContain('__setLiveBindingName("BWF_LIVE")');
       if (dev) {
         expect(entry).toContain('__setLiveDev(true);');
@@ -954,7 +948,7 @@ describe('routingPlugin', () => {
       resolveConfig(plugin, command);
       await runBuildStart(plugin);
 
-      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf-8');
+      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
       expect(entry.includes('alwaysUseHttps: true')).toBe(emitted);
       // Decision: The app itself doesn't redirect, so in-process `fetch` stays on HTTP.
       const load = getHookHandler(plugin.load) as (id: string) => Promise<string | undefined>;

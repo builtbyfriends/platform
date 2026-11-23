@@ -393,7 +393,7 @@ describe('GitHub Actions deployment workflows', () => {
 });
 
 function expectPnpmAllowBuilds(root: string): void {
-  const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
+  const yaml = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');
   expect(yaml.match(/^allowBuilds:\n(?: {2}.*\n)*/m)?.[0]).toBe(
     'allowBuilds:\n  better-sqlite3: false\n  core-js-pure: false\n  esbuild: true\n  sharp: true\n  workerd: true\n',
   );
@@ -474,7 +474,7 @@ function withTempDir(run: (root: string) => void): void {
 }
 
 function writeMockGeneratedMigration(root: string): void {
-  const schema = readFileSync(join(root, 'db', 'schema.ts'), 'utf-8');
+  const schema = readFileSync(join(root, 'db', 'schema.ts'), 'utf8');
   const isPostgres = schema.includes('from "@builtbyfriends/bwf/schema-pg"');
   const migrationsDir = join(root, 'db', 'migrations');
   const metaDir = join(migrationsDir, 'meta');
@@ -621,7 +621,7 @@ async function runInitWithDemo(root: string): Promise<void> {
 }
 
 function expectBwfDeclared(root: string): void {
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const bwfSpec =
     pkg.devDependencies?.['@builtbyfriends/bwf'] ??
     pkg.dependencies?.['@builtbyfriends/bwf'] ??
@@ -1406,7 +1406,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.scripts).toMatchObject({
         dev: 'vite',
         build: 'vite build',
@@ -1456,7 +1456,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.dependencies.react).toBeDefined();
       expect(pkg.dependencies['react-dom']).toBeDefined();
       expect(pkg.dependencies.hono).toBeDefined();
@@ -1474,51 +1474,49 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.scripts.preview).toBe('vp preview');
       expect(pkg.scripts.postinstall).toBe('bwf prepare');
 
-      const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      const reactViteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf8');
       expect(reactViteConfig).toContain('from "@vitejs/plugin-react"');
       expect(reactViteConfig).toContain('plugins: [react(), bwfPlugin()]');
-      expect(readFileSync(join(root, 'index.html'), 'utf-8')).toContain('src="/src/main.tsx"');
-      expect(readFileSync(join(root, 'src', 'main.tsx'), 'utf-8')).toContain(
-        'import "./style.css"',
-      );
-      const page = readFileSync(join(root, 'src', 'App.tsx'), 'utf-8');
+      expect(readFileSync(join(root, 'index.html'), 'utf8')).toContain('src="/src/main.tsx"');
+      expect(readFileSync(join(root, 'src', 'main.tsx'), 'utf8')).toContain('import "./style.css"');
+      const page = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
       expect(page).toContain('Welcome to bwf');
       expect(page).toContain('The list below is loaded from');
       expect(page).toContain('href="/api/hello"');
       expect(page).toContain('src="/react.svg"');
       expect(page).toContain('fetch("/api/messages")');
-      expect(readFileSync(join(root, 'src', 'style.css'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'src', 'style.css'), 'utf8')).toContain(
         'prefers-color-scheme: dark',
       );
-      expect(readFileSync(join(root, 'src', 'vite-env.d.ts'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'src', 'vite-env.d.ts'), 'utf8')).toContain(
         'reference types="vite/client"',
       );
-      expect(readFileSync(join(root, 'public', 'bwf.svg'), 'utf-8')).toContain('<svg');
-      expect(readFileSync(join(root, 'public', 'react.svg'), 'utf-8')).toContain('<svg');
-      expect(readFileSync(join(root, 'public', 'stack.svg'), 'utf-8')).toContain('<svg');
+      expect(readFileSync(join(root, 'public', 'bwf.svg'), 'utf8')).toContain('<svg');
+      expect(readFileSync(join(root, 'public', 'react.svg'), 'utf8')).toContain('<svg');
+      expect(readFileSync(join(root, 'public', 'stack.svg'), 'utf8')).toContain('<svg');
       expect(page).toContain('src="/stack.svg"');
-      expect(readFileSync(join(root, 'public', 'icons.svg'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'public', 'icons.svg'), 'utf8')).toContain(
         'id="documentation-icon"',
       );
-      expect(readFileSync(join(root, 'routes', 'api', 'messages.ts'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'routes', 'api', 'messages.ts'), 'utf8')).toContain(
         'import { messages } from "@schema";',
       );
-      expect(readFileSync(join(root, 'routes', 'api', 'hello.ts'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'routes', 'api', 'hello.ts'), 'utf8')).toContain(
         'export const GET = defineHandler',
       );
-      expect(readFileSync(join(root, 'db', 'schema.ts'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'db', 'schema.ts'), 'utf8')).toContain(
         'from "@builtbyfriends/bwf/schema-d1"',
       );
-      expect(readFileSync(join(root, 'db', 'seed.ts'), 'utf-8')).toContain('defineSeed');
+      expect(readFileSync(join(root, 'db', 'seed.ts'), 'utf8')).toContain('defineSeed');
       expect(listMigrationSqlFiles(root)).toEqual(['0000_generated.sql']);
-      expect(readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf8')).toContain(
         'CREATE TABLE',
       );
       expect(
-        readFileSync(join(root, 'db', 'migrations', 'meta', '_journal.json'), 'utf-8'),
+        readFileSync(join(root, 'db', 'migrations', 'meta', '_journal.json'), 'utf8'),
       ).toContain('"entries"');
 
-      expect(() => readFileSync(join(root, 'routes', 'api', 'hello.get.ts'), 'utf-8')).toThrow(
+      expect(() => readFileSync(join(root, 'routes', 'api', 'hello.get.ts'), 'utf8')).toThrow(
         /ENOENT/,
       );
       expect(readConfig(root)).toEqual({
@@ -1528,10 +1526,10 @@ describe('isScaffoldableEmptyProject', () => {
         },
       });
       expect(() =>
-        readFileSync(join(root, 'db', 'migrations', '0000_initial.sql'), 'utf-8'),
+        readFileSync(join(root, 'db', 'migrations', '0000_initial.sql'), 'utf8'),
       ).toThrow(/ENOENT/);
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.compilerOptions.jsx).toBe('react-jsx');
       expect(tsconfig.include).toContain('src');
       expect(tsconfig.include).toContain('db');
@@ -1552,7 +1550,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.dependencies.react).toBeDefined();
       expect(pkg.dependencies['react-dom']).toBeDefined();
       expect(pkg.dependencies.hono).toBeDefined();
@@ -1568,19 +1566,19 @@ describe('isScaffoldableEmptyProject', () => {
       expect(installerOf(installCalls()[0]!)).toBe('vp');
       expect(pkg.scripts.dev).toBe('vp dev');
 
-      const page = readFileSync(join(root, 'src', 'App.tsx'), 'utf-8');
+      const page = readFileSync(join(root, 'src', 'App.tsx'), 'utf8');
       expect(page).toContain('Welcome to bwf');
       expect(page).toContain('This starter is a React single-page app with no backend yet.');
       expect(page).toContain('features.');
       expect(page).not.toContain('href="/api/hello"');
       expect(page).not.toContain('@builtbyfriends/bwf/client');
 
-      expect(() => readFileSync(join(root, 'routes', 'api', 'messages.ts'), 'utf-8')).toThrow();
-      expect(() => readFileSync(join(root, 'routes', 'api', 'hello.ts'), 'utf-8')).toThrow();
-      expect(() => readFileSync(join(root, 'db', 'schema.ts'), 'utf-8')).toThrow();
-      expect(() => readFileSync(join(root, 'db', 'seed.ts'), 'utf-8')).toThrow();
+      expect(() => readFileSync(join(root, 'routes', 'api', 'messages.ts'), 'utf8')).toThrow();
+      expect(() => readFileSync(join(root, 'routes', 'api', 'hello.ts'), 'utf8')).toThrow();
+      expect(() => readFileSync(join(root, 'db', 'schema.ts'), 'utf8')).toThrow();
+      expect(() => readFileSync(join(root, 'db', 'seed.ts'), 'utf8')).toThrow();
       expect(() =>
-        readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf-8'),
+        readFileSync(join(root, 'db', 'migrations', '0000_generated.sql'), 'utf8'),
       ).toThrow();
       expect(readConfig(root)).toEqual({
         routing: { typedRoutes: true },
@@ -1692,13 +1690,13 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.devDependencies['vite-plus']).toBe(
         SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus'],
       );
       expect(pkg.devDependencies['@builtbyfriends/bwf']).toBe('^0.8.9');
-      expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, 'vite.config.ts'), 'utf8')).toContain(
         'plugins: [react(), bwfPlugin()]',
       );
       expectPnpmAllowBuilds(root);
@@ -1729,12 +1727,12 @@ describe('isScaffoldableEmptyProject', () => {
       expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
 
       const appRoot = join(root, 'my-new-app');
-      const pkg = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8'));
       expect(pkg.devDependencies['vite-plus']).toBe(
         SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus'],
       );
       expect(pkg.scripts.dev).toBe('vp dev');
-      expect(readFileSync(join(appRoot, 'src', 'App.tsx'), 'utf-8')).toContain('Welcome to bwf');
+      expect(readFileSync(join(appRoot, 'src', 'App.tsx'), 'utf8')).toContain('Welcome to bwf');
 
       const locationPrompt = mockSelect.mock.calls[0]?.[0];
       expect(locationPrompt.message).toBe('This folder is not empty. Where should bwf initialize?');
@@ -1772,7 +1770,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.type).toBe('module');
       expect(pkg.devDependencies['@builtbyfriends/bwf']).toBeDefined();
       expect(pkg.scripts.dev).toBe('vite');
@@ -1796,7 +1794,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.type).toBeUndefined();
       expect(pkg.scripts.dev).toBe('vite');
       expect(pkg.scripts.build).toBe('vite build');
@@ -1804,7 +1802,7 @@ describe('isScaffoldableEmptyProject', () => {
       expect(pkg.devDependencies.vite).toBe('^8.0.10');
 
       expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
-      const viteConfig = readFileSync(join(root, 'vite.config.mts'), 'utf-8');
+      const viteConfig = readFileSync(join(root, 'vite.config.mts'), 'utf8');
       expect(viteConfig).toContain('import { bwfPlugin } from "@builtbyfriends/bwf";');
       expect(viteConfig).toContain('plugins: [bwfPlugin()]');
       expect(mockConfirm).toHaveBeenCalledWith({
@@ -1834,7 +1832,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root, { github: true, tsconfig: false });
 
-      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf-8');
+      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf8');
       expect(yaml).not.toContain('secrets.BWF_TOKEN');
       expect(yaml).toContain('id-token: write');
       expect(yaml).toContain('contents: read');
@@ -1871,7 +1869,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root, { github: true, tsconfig: false });
 
-      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf-8');
+      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf8');
       expect(yaml).toContain('BWF_PROJECT: my-app');
       expect(yaml).not.toContain('vars.BWF_PROJECT');
       expect(yaml).toContain('concurrency:');
@@ -1925,7 +1923,7 @@ describe('isScaffoldableEmptyProject', () => {
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
         applicationDomain: 'void.app',
         platform: 'platform',
         platformUrl: 'https://platform.buildwithfriends.dev',
@@ -1933,7 +1931,7 @@ describe('isScaffoldableEmptyProject', () => {
         projectId: 'proj_789',
         slug: 'linked-app',
       });
-      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf-8');
+      const yaml = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf8');
       expect(yaml).toContain('BWF_PROJECT: linked-app');
       expect(yaml).not.toContain('vars.BWF_PROJECT');
       expect(yaml).not.toContain('Set a BWF_PROJECT repository variable');
@@ -1967,10 +1965,10 @@ jobs:
       await runInitCommand(root, { github: true, tsconfig: false });
 
       expect(existsSync(existingPath)).toBe(true);
-      expect(readFileSync(existingPath, 'utf-8')).toBe(existing);
+      expect(readFileSync(existingPath, 'utf8')).toBe(existing);
       const workflows = readdirSync(join(root, '.github', 'workflows')).sort();
       expect(workflows).toEqual(['bwf-deploy.yml', 'deploy.yml']);
-      const oidc = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf-8');
+      const oidc = readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf8');
       expect(oidc).toContain('name: Deploy to bwf');
       expect(oidc).toContain('npx bwf deploy --platform bwf --project "$BWF_PROJECT"');
     } finally {
@@ -2016,13 +2014,13 @@ export default defineConfig({
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.type).toBeUndefined();
       expect(pkg.scripts.dev).toBe('custom-dev');
       expect(pkg.scripts.build).toBe('vite build');
       expect(pkg.scripts.test).toBe('vitest');
 
-      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf8');
       expect(viteConfig).toContain('import { bwfPlugin } from "@builtbyfriends/bwf";');
       expect(viteConfig).toContain(`plugins: [
     bwfPlugin(),
@@ -2081,7 +2079,7 @@ export default defineConfig({
 
       await runInitCommand(root);
 
-      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf8');
       expect(viteConfig).toContain(`rollupOptions: {
       plugins: [legacy()],
     },`);
@@ -2129,7 +2127,7 @@ export default defineConfig({
 
       await runInitCommand(root);
 
-      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf-8');
+      const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf8');
       expect(viteConfig).toContain(`export default defineConfig({
   plugins: [bwfPlugin()],
   build: {`);
@@ -2170,8 +2168,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8'))
-        .toBe(`const config = buildConfig();
+      expect(readFileSync(join(root, 'vite.config.ts'), 'utf8')).toBe(`const config = buildConfig();
 
 export default config;
 `);
@@ -2219,7 +2216,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(readFileSync(join(root, 'vite.config.ts'), 'utf-8')).toBe(`const config = {
+      expect(readFileSync(join(root, 'vite.config.ts'), 'utf8')).toBe(`const config = {
   build: {
     rollupOptions: {
       plugins: [legacy()],
@@ -2249,7 +2246,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.scripts).toBeUndefined();
       expect(pkg.devDependencies).toBeUndefined();
       expect(existsSync(join(root, 'vite.config.ts'))).toBe(false);
@@ -2286,7 +2283,7 @@ export default config;
       try {
         await runInitCommand(root, { tsconfig: true, github: false });
 
-        const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+        const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf8');
         expect(instructions).toContain('## bwf');
         expect(instructions).toContain('node_modules/@builtbyfriends/bwf/docs/');
         expect(instructions.match(/^- /gm)).toHaveLength(2);
@@ -2295,7 +2292,7 @@ export default config;
         expect(mockConfirm).not.toHaveBeenCalled();
 
         await runInitCommand(root, { tsconfig: true, github: false });
-        expect(readFileSync(join(root, 'AGENTS.md'), 'utf-8')).toBe(instructions);
+        expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(instructions);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -2319,12 +2316,12 @@ export default config;
 
           await runInitCommand(root, { tsconfig: true, github: false });
 
-          const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+          const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf8');
           expect(instructions).toContain('## bwf');
           if (hasAgentsFile) {
             expect(instructions.startsWith(projectInstructions)).toBe(true);
           }
-          expect(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')).toBe(claudeInstructions);
+          expect(readFileSync(join(root, 'CLAUDE.md'), 'utf8')).toBe(claudeInstructions);
           expect(existsSync(join(root, '.claude/skills/bwf/SKILL.md'))).toBe(true);
           expect(mockSelect).not.toHaveBeenCalled();
           expect(mockConfirm).toHaveBeenCalledExactlyOnceWith({
@@ -2345,7 +2342,7 @@ export default config;
         const root = mkdtempSync(join(tmpdir(), 'platform-init-'));
         try {
           const currentVersion = JSON.parse(
-            readFileSync(join(process.cwd(), 'packages/bwf/package.json'), 'utf-8'),
+            readFileSync(join(process.cwd(), 'packages/bwf/package.json'), 'utf8'),
           ).version;
           const before = '# Project guidance\n\nKeep this user-authored introduction.\n\n';
           const after = '\n\nKeep this user-authored footer.\n';
@@ -2358,7 +2355,7 @@ export default config;
 
           await runInitCommand(root, { tsconfig: true, github: false });
 
-          const updated = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
+          const updated = readFileSync(join(root, 'AGENTS.md'), 'utf8');
           expect(updated.startsWith(before)).toBe(true);
           expect(updated.endsWith(after)).toBe(true);
           expect(updated).toContain(`<!--injected-by-platform-v${currentVersion}-->`);
@@ -2448,7 +2445,7 @@ export default config;
     try {
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+      const gitignore = readFileSync(join(root, '.gitignore'), 'utf8');
       expect(gitignore).toContain('node_modules');
       expect(gitignore).toContain('.bwf');
       expect(gitignore).toContain('.wrangler');
@@ -2467,7 +2464,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const gitignore = readFileSync(join(root, '.gitignore'), 'utf-8');
+      const gitignore = readFileSync(join(root, '.gitignore'), 'utf8');
       expect(gitignore).toContain('custom-cache');
       expect(gitignore).toContain('.bwf');
       expect(gitignore).toContain('.wrangler');
@@ -2496,7 +2493,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.extends).toBeDefined();
       expect(tsconfig.compilerOptions.types).toContain('@builtbyfriends/bwf/env');
     } finally {
@@ -2530,7 +2527,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.bwf/tsconfig.json']);
       expect(tsconfig.files).toEqual(['./src/main.ts', './.bwf/routes.d.ts']);
       expect(tsconfig.compilerOptions.paths).toEqual({
@@ -2577,7 +2574,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.bwf/tsconfig.json']);
       expect(tsconfig.files).toEqual(['./base.d.ts', './.bwf/routes.d.ts']);
       expect(tsconfig.compilerOptions.paths).toEqual({
@@ -2623,7 +2620,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.extends).toEqual(['../../tsconfig.base.json', './.bwf/tsconfig.json']);
       expect(tsconfig.compilerOptions.paths).toEqual({
         '@shared/*': ['./shared/*'],
@@ -2672,7 +2669,7 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
       expect(tsconfig.extends).toEqual(['./tsconfig.base.json', './.bwf/tsconfig.json']);
       expect(tsconfig.files).toEqual(['./.bwf/routes.d.ts']);
       expect(tsconfig.compilerOptions.paths).toEqual({
@@ -2710,7 +2707,7 @@ export default config;
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expect(pkg.scripts.dev).toBe('vp dev');
       expect(pkg.devDependencies['vite-plus']).toBe(
         SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus'],
@@ -2884,7 +2881,7 @@ export default config;
       );
       expect(mockListProjects).toHaveBeenCalledOnce();
       expect(mockCreateProject).toHaveBeenCalledWith('my-live-app');
-      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
         applicationDomain: 'void.app',
         platform: 'platform',
         platformUrl: 'https://platform.buildwithfriends.dev',
@@ -2958,7 +2955,7 @@ export default config;
       expect(mockRunLogin).not.toHaveBeenCalled();
       expect(mockSaveToken).not.toHaveBeenCalled();
       expect(mockCreateProject).not.toHaveBeenCalled();
-      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
         applicationDomain: 'void.app',
         platform: 'platform',
         platformUrl: 'https://platform.buildwithfriends.dev',
@@ -2986,7 +2983,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
         platform: 'none',
       });
       expect(mockGetToken).not.toHaveBeenCalled();
@@ -3227,12 +3224,12 @@ export default config;
         await runInitCommand(root);
 
         expect(readConfig(root).database).toBe(configValue);
-        const schema = readFileSync(join(root, 'db', 'schema.ts'), 'utf-8');
+        const schema = readFileSync(join(root, 'db', 'schema.ts'), 'utf8');
         expect(schema).toContain(`from "${schemaModule}"`);
         expect(schema).not.toContain('@builtbyfriends/bwf/schema-d1');
         expect(drizzleGenerateCalls()).toHaveLength(1);
         const drizzleConfig = JSON.parse(
-          readFileSync(join(root, '.bwf', 'drizzle.config.json'), 'utf-8'),
+          readFileSync(join(root, '.bwf', 'drizzle.config.json'), 'utf8'),
         );
         expect(drizzleConfig.dialect).toBe(dialect);
       } finally {
@@ -3257,7 +3254,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(readFileSync(join(root, existingFile), 'utf-8')).toBe(authored);
+      expect(readFileSync(join(root, existingFile), 'utf8')).toBe(authored);
       expect(mockLogInfo).toHaveBeenCalledWith(message);
       const prompts = mockConfirm.mock.calls.map(([options]) => String(options?.message));
       expect(prompts.some((prompt) => prompt.startsWith('Scaffold demo code?'))).toBe(false);
@@ -3366,7 +3363,7 @@ export default config;
 
       await runInitCommand(subpkgRoot);
 
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf8'));
       expect(pkg.devDependencies['@builtbyfriends/bwf']).toBeDefined();
       expect(pkg.devDependencies['@vitejs/plugin-react']).toBeDefined();
       expect(installCalls()).toHaveLength(0);
@@ -3403,7 +3400,7 @@ export default config;
 
       const outroCalls = mockOutro.mock.calls;
       expect(outroCalls.length).toBeGreaterThan(0);
-      const outroText = String(outroCalls[outroCalls.length - 1][0]);
+      const outroText = String(outroCalls.at(-1)[0]);
       expect(outroText).not.toMatch(/bwf db generate/);
       expect(outroText).toMatch(/Run your workspace install/);
 
@@ -3570,7 +3567,7 @@ export default config;
 
       await runInitCommand(subpkgRoot);
 
-      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(subpkgRoot, 'package.json'), 'utf8'));
       expectPnpmAllowBuilds(wsroot);
       expect(pkg.pnpm).toBeUndefined();
       expect(pkg.packageManager).toBeUndefined();
@@ -3589,7 +3586,7 @@ export default config;
 
       await runInitCommand(root);
 
-      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
       expectPnpmAllowBuilds(root);
       expect(pkg.packageManager).toBeUndefined();
     } finally {
@@ -3608,7 +3605,7 @@ export default config;
       mockSelect.mockResolvedValueOnce('none');
       mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
       await runInitCommand(root);
-      return readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf-8');
+      return readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');
     };
     try {
       expect(
@@ -3647,7 +3644,7 @@ export default config;
 
       await runInitCommand(root);
 
-      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf-8'))).toEqual({});
+      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf8'))).toEqual({});
       expect(
         mockSpawnSync.mock.calls.filter(
           ([, args]) => cloudflareOperationType(args) === 'auth.whoami',
@@ -3686,10 +3683,10 @@ export default config;
         ([options]) => options.message === 'Where should this project deploy?',
       )?.[0];
       expect(platformPrompt).toMatchObject({ initialValue: 'cloudflare' });
-      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
         platform: 'cloudflare',
       });
-      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf-8'))).toEqual({});
+      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf8'))).toEqual({});
       expect(mockSpawnSync).toHaveBeenCalledWith(
         process.execPath,
         expect.arrayContaining([
@@ -3711,7 +3708,7 @@ export default config;
       );
       expect(mockGetToken).not.toHaveBeenCalled();
       expect(mockListProjects).not.toHaveBeenCalled();
-      expect(readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, '.github', 'workflows', 'bwf-deploy.yml'), 'utf8')).toContain(
         'bwf deploy --platform cloudflare',
       );
     } finally {
@@ -3746,7 +3743,7 @@ export default config;
       expect(mockSelect).not.toHaveBeenCalledWith(
         expect.objectContaining({ message: 'Choose a Cloudflare account:' }),
       );
-      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf-8'))).toEqual({
+      expect(JSON.parse(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf8'))).toEqual({
         compatibility_date: '2026-01-02',
         account_id: 'account-2',
         name: 'my-worker',
@@ -3791,7 +3788,7 @@ export default config;
         { value: 'account-1', label: 'First account', hint: 'account-1' },
         { value: 'account-2', label: 'Second account', hint: 'account-2' },
       ]);
-      expect(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf-8')).toContain(
+      expect(readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf8')).toContain(
         '"account_id": "account-2"',
       );
     } finally {
@@ -3816,7 +3813,7 @@ export default config;
 
       await runInitCommand(root);
 
-      const wrangler = readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf-8');
+      const wrangler = readFileSync(join(root, '.bwf-wrangler.jsonc'), 'utf8');
       expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false);
       expect(readConfig(root).cloudflare?.name).toBe('existing-worker');
       expect(wrangler).toContain('// Keep this comment.');
@@ -4045,7 +4042,7 @@ describe('generateStarterMigration', () => {
         /Failed to generate the starter database migration/,
       );
 
-      expect(readFileSync(join(metaDir, '_journal.json'), 'utf-8')).toBe(originalJournal);
+      expect(readFileSync(join(metaDir, '_journal.json'), 'utf8')).toBe(originalJournal);
       expect(existsSync(join(metaDir, '0000_snapshot.json'))).toBe(true);
       expect(existsSync(join(migrationsDir, '0000_prev.sql'))).toBe(true);
       expect(existsSync(join(metaDir, '0001_snapshot.json'))).toBe(false);

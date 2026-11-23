@@ -396,7 +396,7 @@ describe('direct-to-R2 deploy flow', () => {
     await deploy({ client, cliLog });
 
     await cliLog.close();
-    const lines = readFileSync(logPath as string, 'utf-8')
+    const lines = readFileSync(logPath as string, 'utf8')
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l) as { msg: string; before?: number; after?: number });
@@ -416,7 +416,7 @@ describe('direct-to-R2 deploy flow', () => {
     await deploy({ client, cliLog });
 
     await cliLog.close();
-    const lines = readFileSync(logPath as string, 'utf-8')
+    const lines = readFileSync(logPath as string, 'utf8')
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l) as { msg: string });
@@ -494,7 +494,7 @@ describe('direct-to-R2 deploy flow', () => {
     await deploy({ client, cliLog });
 
     await cliLog.close();
-    const lines = readFileSync(capturedLogPath as string, 'utf-8')
+    const lines = readFileSync(capturedLogPath as string, 'utf8')
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l) as { msg: string });
@@ -751,5 +751,5 @@ describe('D1 read replication', () => {
 });
 
 function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }

@@ -21,7 +21,7 @@ import {
 import { runFullDeploy } from './deploy-managed-full.ts';
 import { runStaticDeploy } from './deploy-managed-static.ts';
 import { printDeployContext } from './deploy-summary.ts';
-import { type RunDeployOptions, type RunDeployTargetAdapter } from './deploy-types.ts';
+import type { RunDeployOptions, RunDeployTargetAdapter } from './deploy-types.ts';
 import { collectGitDeployMetadata } from './git-metadata.ts';
 import {
   exchangeGithubOidcForDeployToken,
@@ -29,18 +29,15 @@ import {
   maskGithubActionsSecret,
 } from './github-oidc.ts';
 import { assertInstalledBwfMatchesCli } from './installed-platform.ts';
-import { openDeployLog, type CliLogger } from './log-file.ts';
+import { openDeployLog } from './log-file.ts';
+import type { CliLogger } from './log-file.ts';
 import { buildDeployLogSummary } from './log-summary.ts';
 import { promptForLoginToken } from './login.ts';
 import { migrateLegacyBwfConfig } from './migrate.ts';
 import { listPlatformConnections } from './platform-registry.ts';
 import { detectPreset } from './preset.ts';
-import {
-  readDeploymentPlatform,
-  readProjectConfig,
-  type DeploymentPlatform,
-  type ProjectConfig,
-} from './project.ts';
+import { readDeploymentPlatform, readProjectConfig } from './project.ts';
+import type { DeploymentPlatform, ProjectConfig } from './project.ts';
 import { getRequestedProjectSlug } from './resolve-project.ts';
 import type { DeployTarget } from './types.ts';
 
@@ -76,17 +73,17 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
   try {
     await runDeployInner(root, options, cliLog);
     cliLog.info('deploy_end', { ok: true });
-  } catch (err) {
-    cliLog.error('deploy_end', err, { ok: false });
+  } catch (error) {
+    cliLog.error('deploy_end', error, { ok: false });
     // Decision: Flush before reading the file back. The `Detailed log:` path is useless on a CI runner that's
     // destroyed with the job, so inline the errors and the trailing timeline into the message the caller
     // prints.
     await cliLog.close().catch(() => {});
     try {
-      if (err instanceof Error) {
+      if (error instanceof Error) {
         const summary = buildDeployLogSummary(cliLog.path);
         if (summary) {
-          err.message = `${err.message}\n${summary}`;
+          error.message = `${error.message}\n${summary}`;
         }
       }
     } catch {
@@ -94,7 +91,7 @@ export async function runDeploy(root: string, options?: RunDeployOptions): Promi
       // `message` is read-only on a frozen Error and getter-only on a DOMException, which an aborted fetch
       // produces. Losing the summary is fine; losing the deploy error isn't.
     }
-    throw err;
+    throw error;
   } finally {
     await cliLog.close().catch(() => {});
   }
@@ -357,7 +354,10 @@ async function runManagedDeploy(
     } catch (error) {
       if (isExpiredTokenError(error)) {
         if (getTokenSource() === 'ci') {
-          throw new Error('`BWF_TOKEN` is invalid or expired. Generate a new token and try again.');
+          throw new Error(
+            '`BWF_TOKEN` is invalid or expired. Generate a new token and try again.',
+            { cause: error },
+          );
         }
         if (!process.stdin.isTTY || reauthenticated) {
           throw new Error('Auth token expired. Run `bwf account login` and try again.');

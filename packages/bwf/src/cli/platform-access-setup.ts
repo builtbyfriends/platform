@@ -1,8 +1,6 @@
 import { stripVTControlCharacters } from 'node:util';
-import {
-  isPlatformAccessEmailDomain,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import { isPlatformAccessEmailDomain } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { confirm, log, multiselect, password, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { note, pc } from './output.ts';
@@ -13,8 +11,10 @@ import {
   platformAccessNonce,
   provisionPlatformAccess,
   verifySelectedAccessPolicies,
-  type PlatformAccessCheckpoint,
-  type PlatformAccessProvisionResult,
+} from './platform-access-provision.ts';
+import type {
+  PlatformAccessCheckpoint,
+  PlatformAccessProvisionResult,
 } from './platform-access-provision.ts';
 import { PlatformCloudflareApiError, PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';

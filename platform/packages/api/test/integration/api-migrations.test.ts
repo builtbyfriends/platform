@@ -11,7 +11,8 @@ import {
   afterEach,
   vi,
 } from 'vite-plus/test';
-import { deleteRollbackLease, type Db } from '../../src/db.ts';
+import { deleteRollbackLease } from '../../src/db.ts';
+import type { Db } from '../../src/db.ts';
 import app from '../../src/index.ts';
 import * as projectAccess from '../../src/project-access.ts';
 import {
@@ -33,8 +34,8 @@ import {
   mockCfApi,
   cfSuccess,
   cfError,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { setTestDb } from './setup.ts';
 
 let env: TestEnv;
@@ -307,7 +308,7 @@ function buildTestExecutionPlan(input: {
     dialect: 'sqlite',
     kind: input.kind,
     name: input.name,
-    sqlHash: sha256Hex(input.sql.replace(/\r\n?/g, '\n')),
+    sqlHash: sha256Hex(input.sql.replaceAll(/\r\n?/g, '\n')),
     stability: input.stability,
   };
   if (input.kind === 'breakpoint-framed') {

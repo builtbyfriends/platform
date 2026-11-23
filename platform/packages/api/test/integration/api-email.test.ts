@@ -60,10 +60,10 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
   rpcRequest,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 

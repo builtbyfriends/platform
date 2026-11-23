@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,8 +26,8 @@ import {
   platformDatabaseSchemaDigest,
   readPlatformRuntimeManifest,
   resolvePlatformRuntime,
-  type PlatformRuntimeDatabaseManifest,
 } from '@builtbyfriends/platform/installer';
+import type { PlatformRuntimeDatabaseManifest } from '@builtbyfriends/platform/installer';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { AiLoggingProjectionKv } from '../../src/cli/platform-ai-logging-projection.ts';
@@ -2540,7 +2541,7 @@ describe('platform installer', () => {
         fetcher,
       );
 
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(2000);
 
       expect(await result).toBe('eop-resume');
       expect(fetcher).toHaveBeenCalledTimes(3);
@@ -2565,7 +2566,7 @@ describe('platform installer', () => {
         fetcher,
       ).catch((error: unknown) => error);
 
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(2000);
 
       const error = String(await result);
       expect(error).toContain('Shared email bootstrap did not finish within five minutes');
@@ -2628,7 +2629,7 @@ describe('platform installer', () => {
         fetcher,
       ).catch((error: unknown) => error);
 
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1000);
 
       expect(String(await result)).toContain('operation identity changed');
       expect(fetcher).toHaveBeenCalledTimes(2);
@@ -3694,7 +3695,7 @@ describe('platform installer', () => {
     await expect(
       resolveBootstrapGitHubId('Octocat', async (input) => {
         requests.push(String(input));
-        return Response.json({ id: 583231 });
+        return Response.json({ id: 583_231 });
       }),
     ).resolves.toBe('583231');
     expect(requests).toEqual(['https://api.github.com/users/Octocat']);
@@ -5429,7 +5430,7 @@ describe('platform installer', () => {
         verifyHealth: async () => {},
       }).then(
         () => null,
-        (failure: unknown) => failure as Error,
+        (error_: unknown) => error_ as Error,
       );
       return { created, deployment, directory, error, events, source };
     }

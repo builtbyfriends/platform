@@ -1,8 +1,5 @@
-import {
-  isR2LocationHint,
-  R2_LOCATION_HINTS,
-  type R2LocationHint,
-} from '@builtbyfriends/deploy-core';
+import { isR2LocationHint, R2_LOCATION_HINTS } from '@builtbyfriends/deploy-core';
+import type { R2LocationHint } from '@builtbyfriends/deploy-core';
 import type { PlatformDeploymentManifest } from '@builtbyfriends/platform';
 
 export type PlatformStorageLocation = R2LocationHint | 'automatic';

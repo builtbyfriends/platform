@@ -9,8 +9,10 @@ import {
   recordInstallationStep,
   setInstallationEndpoints,
   transitionInstallation,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResourceKind,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { hyperdriveOriginConfigHash } from '../../src/cli/platform-cloudflare.ts';

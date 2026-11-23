@@ -7,8 +7,10 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   setInstallationEndpoints,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResourceKind,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { pc } from '../../src/cli/output.ts';
@@ -25,8 +27,8 @@ import {
   formatPlatformInstallPlan,
   platformProvisionIntentHash,
   revalidatePlatformInstallAction,
-  type PlatformInstallPlan,
 } from '../../src/cli/platform-plan.ts';
+import type { PlatformInstallPlan } from '../../src/cli/platform-plan.ts';
 import { ownershipMarker } from '../helpers/platform-installation.ts';
 
 function client(overrides: Record<string, unknown> = {}) {
@@ -766,7 +768,7 @@ describe('platform installation planning', () => {
       fetcher: async (input, init) => {
         const path = new URL(String(input)).pathname;
         requests.push({ path, method: init?.method ?? 'GET' });
-        const code = path.endsWith('/r2/buckets') ? 10042 : 10121;
+        const code = path.endsWith('/r2/buckets') ? 10_042 : 10_121;
         return Response.json(
           { success: false, errors: [{ code, message: 'Account prerequisite missing' }] },
           { status: 403 },
@@ -813,7 +815,7 @@ describe('platform installation planning', () => {
       const provider = new PlatformCloudflareClient('token', {
         fetcher: async () =>
           Response.json(
-            { success: false, errors: [{ code: 10042, message: 'Please enable R2' }] },
+            { success: false, errors: [{ code: 10_042, message: 'Please enable R2' }] },
             { status: 403 },
           ),
       });

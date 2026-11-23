@@ -153,8 +153,8 @@ export class ErrorAlertMonitor extends DurableObject<ApiEnv['Bindings']> {
       this.resetWindow(state);
       await this.ctx.storage.deleteAlarm();
       await this.saveState(state);
-    } catch (err) {
-      console.error('[error-alert-monitor] failed to send alert:', err);
+    } catch (error) {
+      console.error('[error-alert-monitor] failed to send alert:', error);
       await this.ctx.storage.setAlarm(Date.now() + DEBOUNCE_MS);
       await this.saveState(state);
     }

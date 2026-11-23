@@ -2,7 +2,8 @@ import { and, asc, count, eq, inArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { capabilityMiddleware } from '../capabilities.ts';
-import { getProject, getProjectBySlug, type Db } from '../db.ts';
+import { getProject, getProjectBySlug } from '../db.ts';
+import type { Db } from '../db.ts';
 import {
   emailActionRecipients,
   emailProjectControls,
@@ -54,8 +55,8 @@ import {
   repairEmailRecipientPolicyMirror,
   setEmailDomainManagement,
   setEmailRecipientPolicy,
-  type EmailRecipientPolicy,
 } from '../email/settings.ts';
+import type { EmailRecipientPolicy } from '../email/settings.ts';
 import {
   inspectSharedEmailRecipientRecovery,
   resolveSharedEmailRecipientCreation,
@@ -100,11 +101,11 @@ export async function setOperatorEmailPolicy(
   let policy: EmailRecipientPolicy;
   try {
     policy = normalizeEmailRecipientPolicy(input);
-  } catch (err) {
-    if (err instanceof EmailSettingsError) {
-      throw new OperatorError(400, err.message, 'invalid_argument');
+  } catch (error) {
+    if (error instanceof EmailSettingsError) {
+      throw new OperatorError(400, error.message, 'invalid_argument');
     }
-    throw err;
+    throw error;
   }
   const db = context.get('db');
   const previous = await getEmailRecipientPolicy(db);
@@ -118,8 +119,12 @@ export async function setOperatorEmailPolicy(
   }
   try {
     await setEmailRecipientPolicy(db, context.env.ROUTING, policy);
-  } catch (err) {
-    throw new OperatorError(503, err instanceof Error ? err.message : String(err), 'mirror_failed');
+  } catch (error) {
+    throw new OperatorError(
+      503,
+      error instanceof Error ? error.message : String(error),
+      'mirror_failed',
+    );
   }
   return { action, target, policy: target };
 }

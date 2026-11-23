@@ -144,7 +144,7 @@ export function openDeployLog(opts?: { mirrorToStderr?: boolean }): CliLogger {
   try {
     const dir = join(homedir(), '.bwf', 'logs');
     mkdirSync(dir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const ts = new Date().toISOString().replaceAll(/[:.]/g, '-');
     // Decision: Deploys started in the same millisecond (parallel deploys from one machine) mustn't share a file,
     // so add the pid and a random suffix and refuse to open a file that already exists.
     const suffix = randomBytes(3).toString('hex');

@@ -142,7 +142,7 @@ describe('bwf db reset on PostgreSQL', () => {
     `);
 
     const error = await runDbCommand(root, { action: 'reset', yes: true }).catch(
-      (err: unknown) => err,
+      (error_: unknown) => error_,
     );
 
     const message = String(error);
@@ -175,7 +175,7 @@ describe('bwf db reset on PostgreSQL', () => {
     `);
 
     const error = await runDbCommand(root, { action: 'reset', yes: true }).catch(
-      (err: unknown) => err,
+      (error_: unknown) => error_,
     );
 
     expect(String(error)).toContain('rule _RETURN on view analytics.versions uses view app_info');

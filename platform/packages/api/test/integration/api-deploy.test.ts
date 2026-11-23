@@ -20,8 +20,8 @@ import {
   removeProjectMember,
   updateDeploymentStatus,
   updateUserPlan,
-  type Db,
 } from '../../src/db.ts';
+import type { Db } from '../../src/db.ts';
 import rawApp from '../../src/index.ts';
 import { writePlanCatalog } from '../../src/plans.ts';
 import * as projectAccess from '../../src/project-access.ts';
@@ -57,12 +57,11 @@ import {
   readAllEvents,
   CF_ACCOUNT_ID,
   JWT_SECRET,
-  type MockCfApiHandle,
-  type TestEnv,
   rpcData,
   rpcRequest,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { MockCfApiHandle, TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 import { setTestDb } from './setup.ts';
@@ -1204,7 +1203,7 @@ describe('POST /projects/:id/deploy', () => {
     mockCfApi({
       uploadWorker: () =>
         Response.json(
-          { success: false, errors: [{ code: 10021, message: 'script validation failed' }] },
+          { success: false, errors: [{ code: 10_021, message: 'script validation failed' }] },
           { status: 400 },
         ),
     });
@@ -2322,7 +2321,7 @@ describe('POST /projects/:id/deploy', () => {
     const eventNames = events.filter(isDeployEvent).map((event) => event.event);
 
     expect(eventNames[0]).toBe('start');
-    expect(eventNames[eventNames.length - 1]).toBe('done');
+    expect(eventNames.at(-1)).toBe('done');
     expect(eventNames).toContain('worker_upload');
     expect(eventNames).toContain('worker_upload_done');
   });
@@ -2813,9 +2812,9 @@ describe('POST /projects/:id/deploy', () => {
       }).migration_tag;
     }
 
-    const tokenConsumed = () => cfError('Completion token has already been consumed', 400, 100312);
+    const tokenConsumed = () => cfError('Completion token has already been consumed', 400, 100_312);
     const tagMoved = () =>
-      cfError("Actor migration tag precondition failed, got tag ''", 412, 10079);
+      cfError("Actor migration tag precondition failed, got tag ''", 412, 10_079);
 
     const websocketManifest = {
       version: 3,
@@ -2871,7 +2870,7 @@ describe('POST /projects/:id/deploy', () => {
           maxAttempts: 4,
           latencyMs: expect.any(Number),
           status: 400,
-          cfCode: 100312,
+          cfCode: 100_312,
           bodyPreview: expect.stringContaining('100312'),
         }),
       ]);
@@ -3245,7 +3244,7 @@ describe('POST /projects/:id/deploy', () => {
           uploadCalls++;
           return uploadCalls === 1
             ? new Response('service unavailable', { status: 503 })
-            : cfError('Uncaught SyntaxError', 400, 10021);
+            : cfError('Uncaught SyntaxError', 400, 10_021);
         },
       });
 
@@ -5693,7 +5692,7 @@ describe('POST /projects/:id/deploy (streaming response headers / heartbeat)', (
     const order = nonHeartbeat.map((e) => e.event);
     expect(order).toContain('asset_upload');
     expect(order).toContain('asset_upload_done');
-    expect(order[order.length - 1]).toBe('done');
+    expect(order.at(-1)).toBe('done');
 
     const doneEvent = nonHeartbeat.find((e) => e.event === 'done') as {
       event: 'done';

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { join, resolve } from 'pathslash';
-import { loadEnv, normalizePath, resolveEnvPrefix, type Plugin, type ResolvedConfig } from 'vite';
+import { loadEnv, normalizePath, resolveEnvPrefix } from 'vite';
+import type { Plugin, ResolvedConfig } from 'vite';
 import { findEnvFile, generateEnvTypes } from './codegen/env-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import { loadUserEnvFile } from './host/load-user-env.ts';
@@ -123,7 +124,7 @@ function envFileIdsFor(envFile: string | null): Set<string> {
 
 /** A hook filter pattern that matches exactly `id`. */
 function exactId(id: string): RegExp {
-  return new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  return new RegExp(`^${id.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}$`);
 }
 
 /** Patterns Vite's `define` typically uses for env-shaped constants. */
@@ -214,11 +215,11 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     }
     try {
       await loadUserEnvFile(envFile);
-    } catch (err) {
+    } catch (error) {
       if (strict) {
-        throw err;
+        throw error;
       }
-      bwfWarn((err as Error).message);
+      bwfWarn((error as Error).message);
     }
   }
 

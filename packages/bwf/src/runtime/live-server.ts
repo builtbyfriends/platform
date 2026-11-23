@@ -4,16 +4,17 @@ import {
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
-import {
-  __getLiveBindingName,
-  type LiveClientEvent,
-  type LiveControlErrorCode,
-  type LiveControlOperation,
-  type LiveControlOperationResult,
-  type LiveControlResponse,
-  type LiveLimits,
+import { __getLiveBindingName } from './live.ts';
+import type {
+  LiveClientEvent,
+  LiveControlErrorCode,
+  LiveControlOperation,
+  LiveControlOperationResult,
+  LiveControlResponse,
+  LiveLimits,
 } from './live.ts';
-import { eventStream, type SseStream } from './sse.ts';
+import { eventStream } from './sse.ts';
+import type { SseStream } from './sse.ts';
 
 type LiveDurableObjectEnv = Record<string, unknown>;
 
@@ -487,7 +488,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
     private async pruneAllSubscribers(): Promise<void> {
       const rows = await this.state.storage.list<SubscriberRow>({ prefix: 'sub:' });
       const staleKeys = await this.findStaleSubscriberKeys([...rows], {
-        deliveryAttemptTimeoutMs: 1_500,
+        deliveryAttemptTimeoutMs: 1500,
       });
       if (staleKeys.length > 0) {
         await this.state.storage.delete(staleKeys);

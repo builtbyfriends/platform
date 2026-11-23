@@ -2,7 +2,8 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import type { BuildArgs } from './build-args.ts';
-import { PlatformApiError, PlatformClient, type BuildLogsResponse } from './client.ts';
+import { PlatformApiError, PlatformClient } from './client.ts';
+import type { BuildLogsResponse } from './client.ts';
 import { dim, pc, printSuccess } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
@@ -73,11 +74,11 @@ export async function followBuildLogs(opts: {
     let pageResult: BuildLogsResponse;
     try {
       pageResult = await opts.fetchPage(cursor);
-    } catch (err) {
-      if (opts.isFatal?.(err)) {
-        throw err;
+    } catch (error) {
+      if (opts.isFatal?.(error)) {
+        throw error;
       }
-      opts.onRetry?.(err);
+      opts.onRetry?.(error);
       continue;
     }
     for (const l of pageResult.lines) {
@@ -170,20 +171,20 @@ async function runBuildLogsCommand(
     try {
       first = await client.getBuildLogs(projectId, buildId, 0);
       break;
-    } catch (err) {
-      if (isFatalFollowError(err)) {
-        if (err instanceof PlatformApiError && err.status === 404) {
+    } catch (error) {
+      if (isFatalFollowError(error)) {
+        if (error instanceof PlatformApiError && error.status === 404) {
           log.error(`build: Build '${buildId}' not found for this project.`);
         } else {
-          log.error(err instanceof Error ? err.message : String(err));
+          log.error(error instanceof Error ? error.message : String(error));
         }
         process.exit(1);
       }
       if (!args.follow) {
-        log.error(err instanceof Error ? err.message : String(err));
+        log.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-      onRetry(err);
+      onRetry(error);
       await sleep(POLL_MS);
     }
   }

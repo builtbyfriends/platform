@@ -1,4 +1,5 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const mocks = vi.hoisted(() => ({
@@ -10,18 +11,10 @@ vi.mock('better-auth', () => ({
   betterAuth: mocks.betterAuth,
 }));
 
-import {
-  getAuth,
-  getUser,
-  requireAuth,
-  type AuthState,
-  type AuthUser,
-} from '../../src/runtime/auth.ts';
-import {
-  createBwfAuthRuntime,
-  privateCachePolicy,
-  type BwfAuthRuntimeOptions,
-} from '../../src/runtime/better-auth-shared.ts';
+import { getAuth, getUser, requireAuth } from '../../src/runtime/auth.ts';
+import type { AuthState, AuthUser } from '../../src/runtime/auth.ts';
+import { createBwfAuthRuntime, privateCachePolicy } from '../../src/runtime/better-auth-shared.ts';
+import type { BwfAuthRuntimeOptions } from '../../src/runtime/better-auth-shared.ts';
 import { createRoutingRuntime } from '../../src/runtime/routing.ts';
 import { markStaticAsset } from '../../src/runtime/static-asset-marker.ts';
 
@@ -758,7 +751,7 @@ describe('privateCachePolicy', () => {
     ['', 'private, no-store'],
     [null, 'private, no-store'],
     ['no-cache="a,private", public, max-age=60', 'private, no-cache="a,private", max-age=60'],
-    ['no-cache="a\\",no-store", public', 'private, no-cache="a\\",no-store"'],
+    [String.raw`no-cache="a\",no-store", public`, String.raw`private, no-cache="a\",no-store"`],
   ])('%j -> %j', (policy, expected) => {
     expect(privateCachePolicy(policy)).toBe(expected);
   });

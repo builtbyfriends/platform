@@ -3,11 +3,14 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   assertExistingCloudflareConfig,
   readExistingCloudflareWorker,
-  type ExistingCloudflareWorker,
-  type CloudflareCommandRunner,
+} from '@builtbyfriends/deploy-cloudflare';
+import type {
+  ExistingCloudflareWorker,
+  CloudflareCommandRunner,
 } from '@builtbyfriends/deploy-cloudflare';
 import { confirm, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
-import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
+import { applyEdits, modify, parse } from 'jsonc-parser';
+import type { ParseError } from 'jsonc-parser';
 import { basename, join } from 'pathslash';
 import { materializeCloudflareConfig, persistCloudflareConfig } from '../cloudflare-config.ts';
 import { isVersionIdChain } from './cloudflare-candidate.ts';

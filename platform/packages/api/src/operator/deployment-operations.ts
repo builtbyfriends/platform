@@ -1,6 +1,8 @@
 import { and, count, desc, eq, getTableColumns, ilike, or } from 'drizzle-orm';
-import { cancelDeployment, getDeployment, getProject, type Db } from '../db.ts';
-import { type ApiEnv, isDevBypass } from '../env.ts';
+import { cancelDeployment, getDeployment, getProject } from '../db.ts';
+import type { Db } from '../db.ts';
+import { isDevBypass } from '../env.ts';
+import type { ApiEnv } from '../env.ts';
 import { LOG_ROW_GROUP_BY, runtimeLogsField } from '../observability/log-rows.ts';
 import { deployments, projects } from '../schema.ts';
 import { OperatorError } from './common.ts';
@@ -107,13 +109,13 @@ export async function requestDeploymentCancellation(db: Db, id: string, dryRun =
 
 function parseSince(since: string): number {
   const duration = /^(\d+)([mhd])$/.exec(since);
-  const multipliers: Record<string, number> = { m: 60000, h: 3600000, d: 86400000 };
+  const multipliers: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
   const parsed = duration
     ? Date.now() - Number(duration[1]) * multipliers[duration[2]]
     : /^\d+$/.test(since)
       ? Number(since)
       : Date.parse(since);
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 8640000000000000) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 8_640_000_000_000_000) {
     throw new OperatorError(
       400,
       'since must be a duration (such as 1h), ISO date, or epoch milliseconds.',
@@ -123,7 +125,7 @@ function parseSince(since: string): number {
 }
 
 function sqlString(value: string) {
-  return "'" + value.replaceAll('\\', '\\\\').replaceAll("'", "''") + "'";
+  return "'" + value.replaceAll('\\', String.raw`\\`).replaceAll("'", "''") + "'";
 }
 function tryParse(value: string): ReadonlyArray<unknown> {
   try {
@@ -223,7 +225,7 @@ export async function deploymentLogs(
         ![parsed.since, parsed.until, parsed.offset].every(
           (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
         ) ||
-        Number(parsed.offset) > 1000000 ||
+        Number(parsed.offset) > 1_000_000 ||
         Number(parsed.since) > Number(parsed.until) ||
         Number(parsed.until) > Date.now()
       ) {
@@ -272,7 +274,7 @@ export async function deploymentLogs(
       method: 'POST',
       headers: { Authorization: `Bearer ${env.CF_API_TOKEN}`, 'Content-Type': 'text/plain' },
       body: query,
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(10_000),
     },
   );
   if (!response.ok) {
@@ -326,7 +328,7 @@ function mockLogData() {
       status: '200',
     },
     {
-      timestamp: now - 12000,
+      timestamp: now - 12_000,
       outcome: 'exception',
       logs: [
         {
@@ -343,7 +345,7 @@ function mockLogData() {
       status: '500',
     },
     {
-      timestamp: now - 30000,
+      timestamp: now - 30_000,
       outcome: 'ok',
       logs: [
         {
@@ -357,7 +359,7 @@ function mockLogData() {
       status: '200',
     },
     {
-      timestamp: now - 45000,
+      timestamp: now - 45_000,
       outcome: 'ok',
       logs: [],
       exceptions: [],
@@ -366,7 +368,7 @@ function mockLogData() {
       status: '204',
     },
     {
-      timestamp: now - 60000,
+      timestamp: now - 60_000,
       outcome: 'ok',
       logs: [
         {
@@ -382,7 +384,7 @@ function mockLogData() {
       status: '200',
     },
     {
-      timestamp: now - 90000,
+      timestamp: now - 90_000,
       outcome: 'canceled',
       logs: [{ level: 'warn', message: 'Request canceled by client before completion' }],
       exceptions: [],

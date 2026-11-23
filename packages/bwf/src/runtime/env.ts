@@ -6,13 +6,8 @@
  * from getRuntimeEnv() and blocked in getRuntimeBinding().
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import {
-  envContext,
-  asEnv,
-  getRawRuntimeEnv,
-  INTERNAL_BINDING_PREFIXES,
-  type RuntimeEnv,
-} from './env-raw.ts';
+import { envContext, asEnv, getRawRuntimeEnv, INTERNAL_BINDING_PREFIXES } from './env-raw.ts';
+import type { RuntimeEnv } from './env-raw.ts';
 
 export type { RuntimeEnv };
 
@@ -28,7 +23,7 @@ const runtimeRequestContext = shared[REQUEST_SCOPE_SYMBOL];
 
 /** @internal Reuse a resource only within the current runtime request. */
 export function getRuntimeRequestResource<T>(
-  // oxlint-disable-next-line anti-slop/no-object-parameters
+  // oxlint-disable-next-line quality/no-object-parameters
   key: object,
   initialize: () => T,
   outsideScope?: () => T,

@@ -81,26 +81,28 @@ async function runSubcommandGroup<T>(
       const parsed = parse(args.slice(1));
       await run(root, parsed);
     }
-  } catch (err) {
+  } catch (error) {
     if (command === 'platform' && args.includes('--json')) {
       console.error(
         JSON.stringify(
-          err instanceof OperatorClientError
-            ? err.toJSON()
+          error instanceof OperatorClientError
+            ? error.toJSON()
             : {
                 error: 'invalid_command',
-                message: err instanceof Error ? err.message : String(err),
+                message: error instanceof Error ? error.message : String(error),
               },
         ),
       );
       process.exit(1);
     }
-    const message = formatCloudflareUserMessage(err instanceof Error ? err.message : String(err));
+    const message = formatCloudflareUserMessage(
+      error instanceof Error ? error.message : String(error),
+    );
     if (command === 'platform') {
       const platformMessage = message.replace(/^platform:/, pc.bold(pc.red('platform:')));
       console.error(
-        err instanceof OperatorClientError && err.details !== undefined
-          ? `${platformMessage}\nPartial result:\n${JSON.stringify(err.details, null, 2)}`
+        error instanceof OperatorClientError && error.details !== undefined
+          ? `${platformMessage}\nPartial result:\n${JSON.stringify(error.details, null, 2)}`
           : platformMessage,
       );
     } else {
@@ -179,8 +181,10 @@ if (helpPath) {
   } else {
     try {
       printHelpPage(helpPath);
-    } catch (err) {
-      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+    } catch (error) {
+      log.error(
+        formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)),
+      );
       process.exit(1);
     }
   }
@@ -189,14 +193,14 @@ if (helpPath) {
   let deployArgs;
   try {
     deployArgs = parseDeployArgs(args.slice(1));
-  } catch (err) {
-    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+  } catch (error) {
+    log.error(formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)));
     process.exit(1);
   }
 
   import('./deploy.ts').then(({ runDeploy }) => {
-    runDeploy(root, deployArgs).catch((err) => {
-      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
+    runDeploy(root, deployArgs).catch((error) => {
+      log.error(formatCloudflareUserMessage(error.message ?? String(error)));
       process.exit(1);
     });
   });
@@ -205,8 +209,8 @@ if (helpPath) {
     const parsed = parseConnectArgs(args.slice(1));
     const { runConnectCommand } = await import('./connect.ts');
     await runConnectCommand(process.cwd(), parsed);
-  })().catch((err) => {
-    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+  })().catch((error) => {
+    log.error(formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)));
     process.exit(1);
   });
 } else if (command && Object.hasOwn(subcommandGroups, command)) {
@@ -215,8 +219,10 @@ if (helpPath) {
   import('./info.ts').then(async ({ runInfoCommand }) => {
     try {
       await runInfoCommand(process.cwd(), parseInfoArgs(args.slice(1)));
-    } catch (err) {
-      const message = formatCloudflareUserMessage(err instanceof Error ? err.message : String(err));
+    } catch (error) {
+      const message = formatCloudflareUserMessage(
+        error instanceof Error ? error.message : String(error),
+      );
       if (args.includes('--json')) {
         console.error(JSON.stringify({ error: 'invalid_command', message }));
       } else {
@@ -229,14 +235,14 @@ if (helpPath) {
   const root = process.cwd();
   try {
     parsePrepareArgs(args.slice(1));
-  } catch (err) {
-    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+  } catch (error) {
+    log.error(formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)));
     process.exit(1);
   }
 
   import('./prepare.ts').then(({ runPrepareCommand }) => {
-    runPrepareCommand(root).catch((err) => {
-      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
+    runPrepareCommand(root).catch((error) => {
+      log.error(formatCloudflareUserMessage(error.message ?? String(error)));
       process.exit(1);
     });
   });
@@ -246,12 +252,14 @@ if (helpPath) {
     let initArgs;
     try {
       initArgs = parseInitArgs(args.slice(1));
-    } catch (err) {
-      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+    } catch (error) {
+      log.error(
+        formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)),
+      );
       process.exit(1);
     }
-    runInitCommand(root, initArgs).catch((err) => {
-      log.error(formatCloudflareUserMessage(err.message ?? String(err)));
+    runInitCommand(root, initArgs).catch((error) => {
+      log.error(formatCloudflareUserMessage(error.message ?? String(error)));
       process.exit(1);
     });
   });
@@ -261,8 +269,10 @@ if (helpPath) {
     process.exit(1);
   }
   import('./migrate.ts').then(({ runMigrateCommand }) => {
-    runMigrateCommand(process.cwd()).catch((err) => {
-      log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+    runMigrateCommand(process.cwd()).catch((error) => {
+      log.error(
+        formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)),
+      );
       process.exit(1);
     });
   });
@@ -406,8 +416,8 @@ if (helpPath) {
         printGlobalHelp();
         return;
     }
-  })().catch((err) => {
-    log.error(formatCloudflareUserMessage(err instanceof Error ? err.message : String(err)));
+  })().catch((error) => {
+    log.error(formatCloudflareUserMessage(error instanceof Error ? error.message : String(error)));
     process.exit(1);
   });
 } else {

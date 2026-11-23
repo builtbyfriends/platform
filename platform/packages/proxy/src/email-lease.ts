@@ -3,7 +3,7 @@ import type { Env } from './types.ts';
 
 export type EmailDomainLease = { kind: 'api_token'; token: string; accountId: string };
 
-const LEASE_DEADLINE_MS = 5_000;
+const LEASE_DEADLINE_MS = 5000;
 const MAX_LEASE_RESPONSE_BYTES = 4 * 1024;
 
 export function leaseBearer(lease: EmailDomainLease): string {

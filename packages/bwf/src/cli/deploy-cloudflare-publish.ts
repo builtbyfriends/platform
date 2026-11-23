@@ -6,10 +6,8 @@ import {
 } from '@builtbyfriends/deploy-cloudflare';
 import { readVersionMetadataBinding } from '../shared/version-metadata.ts';
 import { createActiveSecretPinner } from './cf-version-runner.ts';
-import {
-  clearCloudflareCandidate,
-  type CloudflareCandidateReceipt,
-} from './cloudflare-candidate.ts';
+import { clearCloudflareCandidate } from './cloudflare-candidate.ts';
+import type { CloudflareCandidateReceipt } from './cloudflare-candidate.ts';
 import type { CloudflareChildReporter } from './cloudflare-child-report.ts';
 import type { CloudflareBuild } from './deploy-cloudflare-build.ts';
 import {
@@ -26,8 +24,8 @@ import type { CloudflareDeploySource, CloudflarePreflight } from './deploy-cloud
 import { log } from './deploy-helpers.ts';
 import { formatCloudflareSandboxUnavailable, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { formatDeploySummary } from './deploy-summary.ts';
-import { type CloudflareDeployDeps } from './deploy-types.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CloudflareDeployDeps } from './deploy-types.ts';
+import type { CliLogger } from './log-file.ts';
 import { note } from './output.ts';
 import { readWranglerManagedQueueCleanupCandidates } from './wrangler.ts';
 

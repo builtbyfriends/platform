@@ -1,11 +1,7 @@
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
 import { applyMySqlAuthMigrations, mysqlMigrationRunner } from './auth-migrations.ts';
-import {
-  createBwfAuthRuntime,
-  resolveConnectionString,
-  type BwfAuthEnv,
-  type BwfAuthRuntimeApi,
-} from './better-auth-shared.ts';
+import { createBwfAuthRuntime, resolveConnectionString } from './better-auth-shared.ts';
+import type { BwfAuthEnv, BwfAuthRuntimeApi } from './better-auth-shared.ts';
 
 async function applyMigrations(
   env: BwfAuthEnv,

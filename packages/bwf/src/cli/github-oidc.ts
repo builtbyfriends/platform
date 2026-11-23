@@ -49,8 +49,10 @@ async function requestGithubOidcToken(requestUrl: string, requestToken: string):
       headers: { Authorization: `Bearer ${requestToken}` },
       redirect: 'manual',
     });
-  } catch (err) {
-    throw new Error(`github-oidc: Failed to reach the GitHub OIDC token endpoint: ${errText(err)}`);
+  } catch (error) {
+    throw new Error(
+      `github-oidc: Failed to reach the GitHub OIDC token endpoint: ${errText(error)}`,
+    );
   }
 
   if (!res.ok) {
@@ -92,8 +94,8 @@ async function exchangeOidcTokenAtApi(
       body: JSON.stringify({ oidcToken, project }),
       redirect: 'manual',
     });
-  } catch (err) {
-    throw new Error(`github-oidc: Failed to reach ${url}: ${errText(err)}`);
+  } catch (error) {
+    throw new Error(`github-oidc: Failed to reach ${url}: ${errText(error)}`);
   }
 
   if (!res.ok) {

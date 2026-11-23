@@ -1,8 +1,5 @@
-import {
-  parsePlatformInstallationManifest,
-  type InstallationStatus,
-  type PlatformLifecycleOperation,
-} from '@builtbyfriends/platform';
+import { parsePlatformInstallationManifest } from '@builtbyfriends/platform';
+import type { InstallationStatus, PlatformLifecycleOperation } from '@builtbyfriends/platform';
 import { sql } from 'drizzle-orm';
 import type { Context } from 'hono';
 import type { ApiEnv } from '../env.ts';

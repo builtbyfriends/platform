@@ -1,6 +1,7 @@
 import { redirectToHttps } from '@builtbyfriends/edge';
 import type { ExecutionContext } from 'hono';
-import { createManifestLoader, type ManifestLoader } from './routing-assets.ts';
+import { createManifestLoader } from './routing-assets.ts';
+import type { ManifestLoader } from './routing-assets.ts';
 
 // Decision: Native bwf routing records intentional 404s before Hono wraps HEAD responses.
 export const intentionalNotFoundRequests: WeakSet<Request> = new WeakSet();
@@ -58,7 +59,7 @@ export function applyAssetCachePolicy(
   const providerDefault = directives.join(',') === 'max-age=0,must-revalidate,public';
   const hashed =
     fingerprinted &&
-    pathname.startsWith('/' + assetsDir.replace(/^\/+|\/+$/g, '') + '/') &&
+    pathname.startsWith('/' + assetsDir.replaceAll(/^\/+|\/+$/g, '') + '/') &&
     extension !== '.html' &&
     !(headers.get('Content-Type') ?? '').toLowerCase().includes('text/html');
   if (!headers.has('Set-Cookie') && hashed && (!policy || providerDefault)) {
@@ -82,7 +83,7 @@ export function createAssetCachePolicy(
     if (
       !['GET', 'HEAD'].includes(request.method) ||
       ![200, 206, 304].includes(asset.status) ||
-      !path.startsWith('/' + (assetsDir ?? 'assets').replace(/^\/+|\/+$/g, '') + '/')
+      !path.startsWith('/' + (assetsDir ?? 'assets').replaceAll(/^\/+|\/+$/g, '') + '/')
     ) {
       return applyAssetCachePolicy(request, asset, assetsDir);
     }

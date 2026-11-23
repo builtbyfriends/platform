@@ -17,10 +17,12 @@ import {
   renderEmailChecklist,
   subdomainDashboardFallback,
   SENDING_FREE_PLAN_HINT,
-  type EmailCloudflareInputs,
-  type EmailDns,
-  type EmailPreflight,
-  type EmailWranglerRunResult,
+} from '../../src/cli/email-cloudflare.ts';
+import type {
+  EmailCloudflareInputs,
+  EmailDns,
+  EmailPreflight,
+  EmailWranglerRunResult,
 } from '../../src/cli/email-cloudflare.ts';
 import type { EmailHandlersScan } from '../../src/router/email.ts';
 import { compileEmailPattern } from '../../src/router/email.ts';
@@ -92,7 +94,7 @@ function routingSettings(
   return {
     status: 0,
     stdout: '',
-    data: { name, enabled: enabled, status, tag: tag },
+    data: { name, enabled, status, tag },
     stderr: BETA_WARNING,
   };
 }
@@ -627,7 +629,7 @@ describe('preflightEmail', () => {
           data: { loggedIn: true, authType: 'Account API Token' },
           stderr: '',
         },
-        'email routing settings mail.acme.com': apiFailure(10000, '/zones'),
+        'email routing settings mail.acme.com': apiFailure(10_000, '/zones'),
       },
     });
     const pre = await preflightEmail(inputs);
@@ -1413,10 +1415,10 @@ describe('sending-only Cloudflare email', () => {
     expect(out.ready).toBe(true);
   });
 
-  it.each([notListed, refused(10000)])(
+  it.each([notListed, refused(10_000)])(
     'does not mistake a binding for verified sending',
     async (list) => {
-      const { inputs } = sendingOnly('mail.acme.com', { list, enable: refused(10105) });
+      const { inputs } = sendingOnly('mail.acme.com', { list, enable: refused(10_105) });
       const pre = await preflightEmail(inputs);
       expect(pre.ready).toBe(false);
       const out = await applyEmailSetup(pre, inputs);
@@ -1427,7 +1429,7 @@ describe('sending-only Cloudflare email', () => {
   );
 
   it('names Workers Paid, its link and the token permissions when onboarding is refused', async () => {
-    const { inputs } = sendingOnly('mail.acme.com', { list: notListed, enable: refused(10105) });
+    const { inputs } = sendingOnly('mail.acme.com', { list: notListed, enable: refused(10_105) });
     const pre = await preflightEmail(inputs);
     expect(isAwaitingSendingOnboarding(pre)).toBe(true);
     const checklist = renderEmailChecklist(pre);
@@ -1449,7 +1451,7 @@ describe('sending-only Cloudflare email', () => {
   });
 
   it('does not treat an unreadable sending row as waiting for onboarding', async () => {
-    const { inputs } = sendingOnly('mail.acme.com', { list: refused(10000) });
+    const { inputs } = sendingOnly('mail.acme.com', { list: refused(10_000) });
     const pre = await preflightEmail(inputs);
     expect(isAwaitingSendingOnboarding(pre)).toBe(false);
     const fresh = sendingOnly('mail.acme.com', { list: notListed });
@@ -1701,7 +1703,7 @@ describe('applyEmailSetup', () => {
         [ROUTING_PATCH]: () =>
           jsonResponse(403, {
             success: false,
-            errors: [{ code: 10000, message: 'Authentication error' }],
+            errors: [{ code: 10_000, message: 'Authentication error' }],
           }),
       },
     });
@@ -1862,7 +1864,7 @@ describe('applyEmailSetup', () => {
     const { inputs } = transcriptInputs({
       runnerTable: {
         'email sending enable mail.acme.com': apiFailure(
-          10105,
+          10_105,
           `/zones/${ZONE_ID}/email/sending/subdomains`,
         ),
       },
@@ -1981,7 +1983,7 @@ describe('applyEmailSetup', () => {
     const echo = () =>
       jsonResponse(403, {
         success: false,
-        errors: [{ code: 10000, message: `bad token Bearer ${BEARER}` }],
+        errors: [{ code: 10_000, message: `bad token Bearer ${BEARER}` }],
       });
     const tables: Array<Record<string, (call: FetchCall) => Response>> = [
       { [ROUTING_DNS_POST]: leaky },
@@ -2001,8 +2003,8 @@ describe('applyEmailSetup', () => {
       let thrown: unknown;
       try {
         out = await applyEmailSetup(pre, inputs);
-      } catch (err) {
-        thrown = err;
+      } catch (error) {
+        thrown = error;
       }
       expect(thrown).toBeUndefined();
       const serialised = JSON.stringify(out);

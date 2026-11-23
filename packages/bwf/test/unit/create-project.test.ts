@@ -94,7 +94,7 @@ describe('promptAndCreateProject', () => {
 
     expect(config).toEqual({ projectId: 'proj_new', slug: 'new-app' });
     expect(mockInfo).not.toHaveBeenCalled();
-    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
       platform: 'platform',
       ...config,
       applicationDomain: 'void.app',

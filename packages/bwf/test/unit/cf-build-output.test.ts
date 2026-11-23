@@ -30,7 +30,8 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { toSlash } from 'pathslash';
 import { createBuilder } from 'vite';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
-import { type CfBuildOutput, prepareCfStaticBuildOutput } from '../../src/cli/cf-build-output.ts';
+import { prepareCfStaticBuildOutput } from '../../src/cli/cf-build-output.ts';
+import type { CfBuildOutput } from '../../src/cli/cf-build-output.ts';
 import { prepareCfBuildOutput } from '../../src/deploy.ts';
 
 const roots: Array<string> = [];
@@ -349,7 +350,7 @@ it('preserves native auxiliary Workers and already-built Container declarations'
   );
 });
 
-it.each(['../outside.js', '/outside.js', 'C:/outside.js', 'assets\\outside.js'])(
+it.each(['../outside.js', '/outside.js', 'C:/outside.js', String.raw`assets\outside.js`])(
   'rejects a native manifest module outside its portable bundle: %s',
   async (module) => {
     const root = await nativeBuild();
@@ -666,7 +667,7 @@ it(
   CF_BUILD_TIMEOUT_MS,
 );
 
-it.each(['../index.js', '/index.js', 'C:\\index.js'])(
+it.each(['../index.js', '/index.js', String.raw`C:\index.js`])(
   'rejects an out-of-bundle entry %s',
   async (main) => {
     const output = worker({ name: 'platform-test', compatibility_date: '2026-09-29', main });
@@ -900,7 +901,7 @@ it('keeps Durable Objects, Queue triggers, and Containers in cf prebuilt output'
 }, 15_000);
 
 it('bundles a generated static Worker and staged assets into prebuilt cf output', async () => {
-  const root = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '.tmp-cf-static-'));
+  const root = mkdtempSync(join(import.meta.dirname, '.tmp-cf-static-'));
   roots.push(root);
   writeFileSync(join(root, 'package.json'), '{"name":"static-app","type":"module"}');
   mkdirSync(join(root, 'node_modules', '@builtbyfriends'), { recursive: true });

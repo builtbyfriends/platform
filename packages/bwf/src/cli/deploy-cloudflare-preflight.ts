@@ -4,13 +4,14 @@ import {
   parseRootWranglerConfig,
   readStoredResourceName,
   readWranglerTopLevelString,
-  type ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { ExistingCloudflareWorker } from '@builtbyfriends/deploy-cloudflare';
 import { confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { basename, dirname, relative } from 'pathslash';
-import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
+import { analyzeApplicationSync } from '../application-analysis.ts';
+import type { ApplicationAnalysis } from '../application-analysis.ts';
 import { MATERIALIZED_CLOUDFLARE_FILE } from '../cloudflare-config.ts';
-import { type BwfConfig } from '../config.ts';
+import type { BwfConfig } from '../config.ts';
 import {
   assertSandboxNamespaceConfig,
   isSandboxAttached,
@@ -18,7 +19,8 @@ import {
 } from '../sandbox/config.ts';
 import type { CloudflareChildReporter } from './cloudflare-child-report.ts';
 import { classifyCloudflareDeployApp } from './cloudflare-deploy/classify.ts';
-import { readCloudflareLink, type CloudflareLink } from './cloudflare-link.ts';
+import { readCloudflareLink } from './cloudflare-link.ts';
+import type { CloudflareLink } from './cloudflare-link.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import { resolveEnvSchemaFactsDefault } from './deploy-artifact-validation.ts';
 import {
@@ -52,22 +54,19 @@ import {
 } from './deploy-resources.ts';
 import { printDeployContext } from './deploy-summary.ts';
 import { buildSchemaProbeEnv } from './deploy-transport.ts';
-import {
-  type RunDeployOptions,
-  type CloudflareDeployDeps,
-  type EmailAddressMapInput,
+import type {
+  RunDeployOptions,
+  CloudflareDeployDeps,
+  EmailAddressMapInput,
 } from './deploy-types.ts';
 import { createNodeEmailDns, SEND_EMAIL_BINDING } from './email-cloudflare.ts';
 import type { EnvSchemaProbeResult } from './env-schema-probe.ts';
-import { selfHostSchemaFailureMessage, type SelfHostSchemaFacts } from './env-validation.ts';
-import { type CliLogger } from './log-file.ts';
+import { selfHostSchemaFailureMessage } from './env-validation.ts';
+import type { SelfHostSchemaFacts } from './env-validation.ts';
+import type { CliLogger } from './log-file.ts';
 import { getErrorMessage } from './output.ts';
-import {
-  checkCloudflareProvisionDrift,
-  provisionCloudflareResources,
-  type ComplianceRegion,
-  type ProvisionDriftEntry,
-} from './provision.ts';
+import { checkCloudflareProvisionDrift, provisionCloudflareResources } from './provision.ts';
+import type { ComplianceRegion, ProvisionDriftEntry } from './provision.ts';
 import { sameMigrationsDir, writeProvisionedWranglerConfig } from './wrangler.ts';
 
 /** Validate source-level native deploy inputs before account operations or project code. */
@@ -352,8 +351,8 @@ export async function preflightCloudflareWorker(input: {
       { root },
       schemaProbeEnv,
     );
-  } catch (err) {
-    log.error(`deploy: could not derive the env schema — ${getErrorMessage(err)}`);
+  } catch (error) {
+    log.error(`deploy: could not derive the env schema — ${getErrorMessage(error)}`);
     return exit(1);
   }
   if (schemaResult.kind === 'schema-error') {
@@ -477,8 +476,8 @@ export async function preflightCloudflareWorker(input: {
       cliLog.info('cloudflare_provisioned', {
         resources: result.resources.map((r) => `${r.kind}:${r.action}`),
       });
-    } catch (err) {
-      log.error(`deploy: provisioning failed — ${getErrorMessage(err)}`);
+    } catch (error) {
+      log.error(`deploy: provisioning failed — ${getErrorMessage(error)}`);
       return exit(1);
     }
     // Decision: A skipped resource (for example Hyperdrive with no connection source) would ship a Worker that

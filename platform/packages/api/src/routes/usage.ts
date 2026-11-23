@@ -1,7 +1,8 @@
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { uploadPool } from '../concurrency.ts';
 import type { Db } from '../db.ts';
-import { type ApiEnv, isDevBypass } from '../env.ts';
+import { isDevBypass } from '../env.ts';
+import type { ApiEnv } from '../env.ts';
 import { deriveAiUsageTag } from '../proxy-token.ts';
 import { projectOwnershipPeriods, projects as projectsTable } from '../schema.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
@@ -288,7 +289,7 @@ async function getAccountUsageProjectWindows(
 }
 
 function analyticsStringLiteral(value: string): string {
-  return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+  return `'${value.replaceAll('\\', String.raw`\\`).replaceAll("'", String.raw`\'`)}'`;
 }
 
 async function queryBatchProjectUsageWindows(
@@ -562,8 +563,8 @@ function aiUsageGraphqlErrors(errors: ReadonlyArray<unknown>, apiToken: string):
       }
       return (
         message
-          .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
-          .replace(/\s+/g, ' ')
+          .replaceAll(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+          .replaceAll(/\s+/g, ' ')
           .replace(/\{.*$/, '[query omitted]')
           .trim()
           .slice(0, 200) || 'Unknown GraphQL error'
@@ -626,7 +627,7 @@ async function queryProjectAiUsage(
     result = (await response.json()) as AiGatewayResponse | null;
   } catch (error) {
     if (failOnError) {
-      throw new Error('AI usage query returned invalid JSON');
+      throw new Error('AI usage query returned invalid JSON', { cause: error });
     }
     throw error;
   }

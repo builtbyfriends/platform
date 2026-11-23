@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve } from 'pathslash';
-import { readProjectPaths, type ProjectPaths } from '../project-paths.ts';
+import { readProjectPaths } from '../project-paths.ts';
+import type { ProjectPaths } from '../project-paths.ts';
 import {
   getPackageDependencies,
   hasPackageDependency,
@@ -85,12 +86,12 @@ function shellQuoteExecutable(value: string): string {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) {
     return value;
   }
-  return `'${value.replace(/'/g, "'\\''")}'`;
+  return `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 /** Resolve the bundled cf transport without consulting project dependencies. */
 export function resolveCloudflareOperationArgv(): Array<string> {
-  const directory = dirname(fileURLToPath(import.meta.url));
+  const directory = dirname(import.meta.filename);
   const entry = [
     join(directory, 'cloudflare-operation-process.ts'),
     join(directory, 'cloudflare-operation-process.mjs'),

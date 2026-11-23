@@ -746,7 +746,7 @@ describe('routeInbound — action enaction', () => {
     const { env, apiFetch } = makeEnv({
       emailReturn: [
         { type: 'forward', to: 'not-an-email' },
-        { type: 'forward', to: 'has\x00control@example.com' },
+        { type: 'forward', to: 'has\u0000control@example.com' },
         { type: 'forward', to: 'no-at-sign-here' },
         { type: 'forward', to: 'admin@example.com' },
       ],
@@ -788,7 +788,7 @@ describe('routeInbound — action enaction', () => {
       emailReturn: [
         {
           type: 'reject',
-          reason: 'spam\r\nX-Inject: foo\nbar\x00null',
+          reason: 'spam\r\nX-Inject: foo\nbar\u0000null',
         },
       ],
     });
@@ -798,7 +798,7 @@ describe('routeInbound — action enaction', () => {
     expect(rejectCalls).toHaveLength(1);
     // Decision: Built with RegExp() to satisfy oxlint's no-control-regex rule, like the production code.
     // oxlint-disable-next-line no-control-regex
-    expect(rejectCalls[0]).not.toMatch(new RegExp('[\\r\\n\\u0000]'));
+    expect(rejectCalls[0]).not.toMatch(new RegExp(String.raw`[\r\n\u0000]`));
   });
 
   it('a throwing forward is logged and does not abort the list', async () => {
@@ -941,7 +941,7 @@ describe('routeInbound — envelope header bag (prototype pollution guard)', () 
     await routeInbound(message, env, ctx);
     const envelope = emailFn.mock.calls[0]?.[0] as { headers: Record<string, string> };
     expect(Object.getPrototypeOf(envelope.headers)).toBe(Object.prototype);
-    expect(Object.prototype.hasOwnProperty.call(envelope.headers, '__proto__')).toBe(true);
+    expect(Object.hasOwn(envelope.headers, '__proto__')).toBe(true);
     expect(envelope.headers['__proto__']).toBe('evil');
     expect(Object.getPrototypeOf({})).toBe(Object.prototype);
     expect(({} as Record<string, unknown>)['evil']).toBeUndefined();

@@ -103,9 +103,9 @@ export async function runRollbackCommand(
       log.error(result.error ?? 'Rollback failed.');
       process.exit(1);
     }
-  } catch (err) {
+  } catch (error) {
     s.stop('Rollback failed.');
-    log.error(err instanceof Error ? err.message : String(err));
+    log.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 }

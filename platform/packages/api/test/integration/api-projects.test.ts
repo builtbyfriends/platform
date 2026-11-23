@@ -43,10 +43,10 @@ import {
   mockCfApi,
   cfSuccess,
   cfError,
-  type TestEnv,
   rpcData,
   rpcRequest,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { setTestDb } from './setup.ts';
 
 let env: TestEnv;
@@ -905,7 +905,7 @@ describe('PUT /projects/:id/database-url', () => {
             database: 'appdb',
             host: 'db.example.com',
             password: 'p@ss',
-            port: 25060,
+            port: 25_060,
             scheme: 'postgresql',
             user: 'void_user',
           },
@@ -2548,7 +2548,7 @@ describe('POST /projects/:id/rollback', () => {
         return new Response(
           JSON.stringify({
             success: false,
-            errors: [{ code: 10013, message: 'rate limited' }],
+            errors: [{ code: 10_013, message: 'rate limited' }],
           }),
           { status: 429 },
         );
@@ -3512,7 +3512,7 @@ describe('POST /projects — owner email destination auto-add', () => {
         return Response.json(
           {
             success: false,
-            errors: [{ code: 10037, message: 'destination address already exists' }],
+            errors: [{ code: 10_037, message: 'destination address already exists' }],
             messages: [],
             result: null,
           },
@@ -3626,7 +3626,7 @@ describe('POST /projects — owner email destination auto-add', () => {
         return Response.json(
           {
             success: false,
-            errors: [{ code: 10037, message: 'destination address already exists' }],
+            errors: [{ code: 10_037, message: 'destination address already exists' }],
             messages: [],
             result: null,
           },
@@ -3812,7 +3812,7 @@ describe('POST /projects — owner email destination auto-add', () => {
         return Response.json(
           {
             success: false,
-            errors: [{ code: 10037, message: 'destination address already exists' }],
+            errors: [{ code: 10_037, message: 'destination address already exists' }],
             messages: [],
             result: null,
           },

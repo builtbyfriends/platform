@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { join, dirname, relative } from 'pathslash';
-import { readConfig, getDatabaseDialect, type DatabaseDialect } from '../config.ts';
+import { readConfig, getDatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { PLACEHOLDER_DB_URL, writeDrizzleConfig } from '../drizzle/config.ts';
 import { snapshotDrizzleOutputs } from '../drizzle/generate.ts';
 import { collectMigrations, readJournal } from '../migrations/collect.ts';
@@ -152,7 +153,7 @@ export function detectValidator(root: string): Validator | null {
     return null;
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
 
   if ('valibot' in allDeps) {
@@ -429,7 +430,7 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
 
   const exportLine = `export * from "./schema/${name}";`;
   if (existsSync(barrelPath)) {
-    const existing = readFileSync(barrelPath, 'utf-8');
+    const existing = readFileSync(barrelPath, 'utf8');
     if (!existing.includes(exportLine)) {
       writeFileSync(barrelPath, existing.trimEnd() + '\n' + exportLine + '\n');
     }
@@ -464,8 +465,8 @@ function runMigration(root: string, name: string): void {
   const currentMigrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, currentMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(err instanceof Error ? err.message : String(err));
+  } catch (error: unknown) {
+    log.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 
@@ -487,7 +488,7 @@ function runMigration(root: string, name: string): void {
   // schema, so the next `bwf db generate` doesn't emit again DDL that the custom migration applies.
   const existingJournal = readJournal(migrationsDir, paths.sourceRelative);
   if (existingJournal !== undefined && existingJournal.entries.length > 0) {
-    const lastEntry = existingJournal.entries[existingJournal.entries.length - 1];
+    const lastEntry = existingJournal.entries.at(-1);
     const metaDir = join(migrationsDir, 'meta');
     // Decision: Use the snapshot named by the last journal tag, not the newest file in meta/, which may be a
     // stale leftover.
@@ -549,7 +550,7 @@ function runMigration(root: string, name: string): void {
       {
         cwd: root,
         stdio: 'pipe',
-        encoding: 'utf-8',
+        encoding: 'utf8',
         // Decision: Yarn PnP projects need the PnP loader to resolve `@builtbyfriends/bwf/schema-*`.
         env: buildDrizzleKitSpawnEnv(root),
       },

@@ -77,14 +77,14 @@ function accepts(kind: Token['kind'], code: number): boolean {
   if (kind === 'seg') {
     return code !== 47;
   }
-  return code !== 10 && code !== 13 && code !== 0x2028 && code !== 0x2029;
+  return code !== 10 && code !== 13 && code !== 0x20_28 && code !== 0x20_29;
 }
 
 function pushText(tokens: Array<Token>, text: string): void {
   if (!text) {
     return;
   }
-  const last = tokens[tokens.length - 1];
+  const last = tokens.at(-1);
   if (last?.kind === 'text') {
     last.text += text;
   } else {
@@ -154,7 +154,7 @@ function parseStars(tokens: Array<Token>, text: string): void {
 function prepare(tokens: ReadonlyArray<Token>): Prepared {
   const steps: Array<Token> = [];
   for (const token of tokens) {
-    if (!(token.kind === 'any' && steps[steps.length - 1]?.kind === 'any')) {
+    if (!(token.kind === 'any' && steps.at(-1)?.kind === 'any')) {
       steps.push(token);
     }
   }
@@ -224,7 +224,7 @@ function endRow(width: number): Uint8Array {
 /** Checks that reject most paths before any row is built. */
 function quickReject({ steps, minLength }: Prepared, path: string): boolean {
   const first = steps[0];
-  const last = steps[steps.length - 1];
+  const last = steps.at(-1);
   return (
     path.length < minLength ||
     (first?.kind === 'text' && !path.startsWith(first.text)) ||
@@ -333,7 +333,7 @@ function toRegExp(tokens: ReadonlyArray<Token>): RegExp {
   let body = '';
   for (const token of tokens) {
     if (token.kind === 'text') {
-      body += token.text.replace(/[.+?^${}()|[\]\\:]/g, '\\$&');
+      body += token.text.replaceAll(/[.+?^${}()|[\]\\:]/g, String.raw`\$&`);
     } else if (token.kind === 'seg') {
       body += `(?<${token.name}>[^/]+)`;
     } else {
@@ -464,7 +464,7 @@ export function matchLiteralPattern(pattern: string, pathname: string): boolean 
  * because `compilePattern` captures anonymous `*` as `splat`.
  */
 export function substituteParams(destination: string, params: Record<string, string>): string {
-  const result = destination.replace(/:([A-Za-z0-9_]+)\*?/g, (whole, name: string) => {
+  const result = destination.replaceAll(/:([A-Za-z0-9_]+)\*?/g, (whole, name: string) => {
     return params[name] ?? whole;
   });
   // Decision: A capture can start with '/', so a path destination has to stay on this site.

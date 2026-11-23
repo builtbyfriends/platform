@@ -12,9 +12,11 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
-  type ResourceOwnership,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResourceKind,
+  PlatformInstallationManifest,
+  ResourceOwnership,
 } from '@builtbyfriends/platform';
 import { log, note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -1135,7 +1137,7 @@ describe('uninstall --purge-resources', () => {
     fake.live.serviceBindings.push({ from: 'customer-worker', to: names.proxyWorker as string });
 
     const error = await uninstallPlatform(fake, manifest, purgeResourcesArgs, dependencies()).catch(
-      (caught: unknown) => caught as Error,
+      (error_: unknown) => error_ as Error,
     );
     expect(error?.message).toContain(
       `Cloudflare refused to delete worker ${names.proxyWorker}: Cloudflare API error: Cannot delete service`,
@@ -1199,7 +1201,7 @@ describe('uninstall --purge-resources', () => {
     const fake = cloudflare(recorded);
 
     const error = await uninstallPlatform(fake, manifest, purgeResourcesArgs, dependencies()).catch(
-      (caught: unknown) => caught as Error,
+      (error_: unknown) => error_ as Error,
     );
     expect(error?.message).toContain(
       `Workers outside this installation still use it: ${names.apiWorker}.`,
@@ -1217,7 +1219,7 @@ describe('uninstall --purge-resources', () => {
     };
 
     const error = await uninstallPlatform(fake, manifest, purgeResourcesArgs, dependencies()).catch(
-      (caught: unknown) => caught as Error,
+      (error_: unknown) => error_ as Error,
     );
     expect(error?.message).toContain(`Cloudflare refused to delete worker ${names.proxyWorker}`);
     expect(fake.calls.some((call) => call.includes('force'))).toBe(false);
@@ -1231,7 +1233,7 @@ describe('uninstall --purge-resources', () => {
     fake.live.foreignTailProducer = true;
 
     const error = await uninstallPlatform(fake, manifest, purgeResourcesArgs, dependencies()).catch(
-      (caught: unknown) => caught as Error,
+      (error_: unknown) => error_ as Error,
     );
     expect(error?.message).toContain(
       `Cloudflare refused to delete worker ${names.tailWorker}: Cloudflare API error: Cannot delete this Worker as it is a Tail Worker consumer for other Workers. (code 100109)`,

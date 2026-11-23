@@ -24,7 +24,7 @@ describe('isDevTriggerSecretRequest', () => {
     '/@fs/Users/me/app/.bwf/dev-trigger-token',
     '/.bwf/dev-triggers.ts?import',
     '/@id/.bwf/dev-triggers.ts',
-    '\\.bwf\\dev-trigger-token',
+    String.raw`\.bwf\dev-trigger-token`,
     '/.bwf/drizzle.config.json',
     '/.BWF/Drizzle.Config.json',
     '/%2ebwf/drizzle.config.json',

@@ -162,11 +162,7 @@ export function patchViteConfigWithBwfPlugin(filePath: string, code: string): st
 
   if (!importedName) {
     const insertAt =
-      imports.length > 0
-        ? imports[imports.length - 1]!.end
-        : code.startsWith('#!')
-          ? code.indexOf('\n') + 1
-          : 0;
+      imports.length > 0 ? imports.at(-1)!.end : code.startsWith('#!') ? code.indexOf('\n') + 1 : 0;
     const prefix = insertAt > 0 && code[insertAt - 1] !== '\n' ? '\n' : '';
     ms.appendLeft(insertAt, `${prefix}import { bwfPlugin } from "@builtbyfriends/bwf";\n`);
   }

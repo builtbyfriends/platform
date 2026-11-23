@@ -2,8 +2,8 @@ import {
   getPlatformRuntimeDirectory,
   platformDatabaseSchemaDigest,
   readPlatformRuntimeManifest,
-  type PlatformRuntimeDatabaseManifest,
 } from '@builtbyfriends/platform/installer';
+import type { PlatformRuntimeDatabaseManifest } from '@builtbyfriends/platform/installer';
 import { PGlite } from '@electric-sql/pglite';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {

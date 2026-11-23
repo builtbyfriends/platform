@@ -6,11 +6,8 @@ import { getApiUrl } from './auth.ts';
 import { ensurePlatformAccessToken, isCloudflareAccessChallenge } from './cf-access.ts';
 import type { CliLogger } from './log-file.ts';
 import { readPlatformDiscoveryResponse } from './platform-discovery.ts';
-import {
-  formatPlatformApiError,
-  parsePlatformErrorBody,
-  type ProjectPermission,
-} from './platform-errors.ts';
+import { formatPlatformApiError, parsePlatformErrorBody } from './platform-errors.ts';
+import type { ProjectPermission } from './platform-errors.ts';
 import { normalizePlatformApiUrl } from './platform-registry.ts';
 import type {
   DeployAssetUploadRequest,
@@ -24,7 +21,7 @@ import type {
 function readCliVersion(): string | null {
   try {
     const pkgPath = join(getPackageDir(), 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: unknown };
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: unknown };
     return typeof pkg.version === 'string' ? pkg.version : null;
   } catch {
     return null;
@@ -575,7 +572,7 @@ export type ManifestOnlyDeployPayload = DeployUploadPayload;
 // final. All attempts send the same idempotency key, so the platform answers a replay with the
 // earlier deployment's receipt or a 409.
 const DEPLOY_POST_MAX_RETRIES = 3;
-const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10000];
+const DEPLOY_POST_BACKOFF_MS = [1000, 5000, 10_000];
 /**
  * Every transport failure is retried, so a `TypeError` thrown by the deploy
  * POST always comes after this many attempts.
@@ -1258,9 +1255,9 @@ export class PlatformClient {
           { permission: 'deploy' },
         ));
         break;
-      } catch (err) {
-        if (err instanceof PlatformApiError) {
-          const parsed = err.status === 409 ? parsePlatformErrorBody(err.body) : null;
+      } catch (error) {
+        if (error instanceof PlatformApiError) {
+          const parsed = error.status === 409 ? parsePlatformErrorBody(error.body) : null;
           const inFlight = /deployment ([A-Za-z0-9_-]{1,128})$/.exec(parsed?.message ?? '')?.[1];
           if (parsed?.error === 'deploy_in_progress' && inFlight) {
             // Decision: A deployment is in flight: possibly an earlier attempt of this deploy.
@@ -1274,17 +1271,17 @@ export class PlatformClient {
             };
             return;
           }
-          throw err;
+          throw error;
         }
-        if (!(err instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
-          cliLog?.error('deploy_fetch_rejected', err, { projectId, attempts: attempt + 1 });
-          throw err;
+        if (!(error instanceof TypeError) || attempt >= DEPLOY_POST_MAX_RETRIES) {
+          cliLog?.error('deploy_fetch_rejected', error, { projectId, attempts: attempt + 1 });
+          throw error;
         }
         cliLog?.warn('deploy_fetch_retry', {
           projectId,
           attempt: attempt + 1,
           delayMs: DEPLOY_POST_BACKOFF_MS[attempt],
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         await sleep(DEPLOY_POST_BACKOFF_MS[attempt]);
         attempt++;
@@ -1362,13 +1359,13 @@ export class PlatformClient {
         if (Date.now() >= deadline) {
           throw new DeploymentObservationTimeoutError(deploymentId);
         }
-      } catch (err) {
+      } catch (error) {
         const transient =
-          err instanceof TypeError ||
-          (err instanceof DOMException && err.name === 'TimeoutError') ||
-          (err instanceof PlatformApiError && (err.status === 429 || err.status >= 500));
+          error instanceof TypeError ||
+          (error instanceof DOMException && error.name === 'TimeoutError') ||
+          (error instanceof PlatformApiError && (error.status === 429 || error.status >= 500));
         if (!transient || failures >= DEPLOY_OBSERVATION_BACKOFF_MS.length) {
-          throw err;
+          throw error;
         }
         const delayMs = DEPLOY_OBSERVATION_BACKOFF_MS[failures++];
         this.cliLog?.warn('deploy_observation_retry', { deploymentId, cursor, delayMs });

@@ -5,7 +5,7 @@ import {
   projectGitHubInstallations,
 } from '../schema.ts';
 import type { ProjectCredential, ProjectGitHubInstallation } from '../types.ts';
-import { type Db } from './client.ts';
+import type { Db } from './client.ts';
 
 export async function listProjectCredentials(
   db: Db,

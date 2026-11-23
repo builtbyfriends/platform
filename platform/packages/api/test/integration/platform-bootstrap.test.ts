@@ -1,7 +1,5 @@
-import {
-  platformAuthenticationRecoveryMessage,
-  type PlatformAuthenticationRecovery,
-} from '@builtbyfriends/platform';
+import { platformAuthenticationRecoveryMessage } from '@builtbyfriends/platform';
+import type { PlatformAuthenticationRecovery } from '@builtbyfriends/platform';
 import { eq, sql } from 'drizzle-orm';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { calculatePKCECodeChallenge } from 'oauth4webapi';
@@ -48,8 +46,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const origin = 'https://api.example.com';
 const issuer = 'https://identity.bootstrap-example.com';

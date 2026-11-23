@@ -47,10 +47,10 @@ import {
   createMockExecutionContext,
   mockCfApi,
   readAllEvents,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -880,7 +880,7 @@ describe('registered OAuth applications', () => {
           return Response.json([{ email: 'alice@example.com', primary: true, verified: true }]);
         }
         if (url.endsWith('/user')) {
-          return Response.json({ id: 12345, login: 'alice', email: null });
+          return Response.json({ id: 12_345, login: 'alice', email: null });
         }
         throw new Error('Unexpected provider URL');
       }),

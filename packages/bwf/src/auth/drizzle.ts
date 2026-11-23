@@ -1,17 +1,10 @@
 import type { BetterAuthOptions } from 'better-auth';
-import {
-  getAuthTables,
-  getSchema as getBetterAuthSchema,
-  type BetterAuthDBSchema,
-  type DBFieldAttribute,
-} from 'better-auth/db';
+import { getAuthTables, getSchema as getBetterAuthSchema } from 'better-auth/db';
+import type { BetterAuthDBSchema, DBFieldAttribute } from 'better-auth/db';
 import type { BwfAuthConfig } from '../runtime/auth.ts';
 import type { BwfAuthRuntimeOptions } from '../runtime/better-auth-shared.ts';
-import {
-  BWF_EMAIL_AUTH_PROVIDER,
-  isBwfSocialAuthProvider,
-  type BwfAuthProvider,
-} from './providers.ts';
+import { BWF_EMAIL_AUTH_PROVIDER, isBwfSocialAuthProvider } from './providers.ts';
+import type { BwfAuthProvider } from './providers.ts';
 
 type AuthIdStrategy = 'serial' | 'text' | 'uuid';
 const DEFAULT_TABLE_ORDER = Number.MAX_SAFE_INTEGER;
@@ -148,7 +141,7 @@ function resolveIdStrategy(options: BetterAuthOptions): AuthIdStrategy {
 }
 
 function sanitizeIdentifier(name: string): string {
-  const value = name.replace(/[^A-Za-z0-9_$]/g, '_');
+  const value = name.replaceAll(/[^A-Za-z0-9_$]/g, '_');
   return /^[A-Za-z_$]/.test(value) ? value : `_${value}`;
 }
 
@@ -562,8 +555,8 @@ export function generateBwfAuthDrizzleSchema(
       `  ${JSON.stringify(defaultModelName)}: ${defaultToVariable.get(defaultModelName)},`,
     );
   }
-  lines.push('} as const;');
   lines.push(
+    '} as const;',
     `export const migrationSchema = ${JSON.stringify(migrationSchema, null, 2)} as const;`,
   );
   lines.push('');

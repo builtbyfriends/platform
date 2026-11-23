@@ -1,5 +1,5 @@
-import { type ApplicationAnalysis } from '../../application-analysis.ts';
-import { type BwfConfig } from '../../config.ts';
+import type { ApplicationAnalysis } from '../../application-analysis.ts';
+import type { BwfConfig } from '../../config.ts';
 import { assertNoRootSourceConventionConflicts } from '../../project-paths.ts';
 import { getErrorMessage } from '../output.ts';
 import { detectPreset, hasBackendFiles } from '../preset.ts';

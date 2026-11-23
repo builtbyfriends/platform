@@ -191,8 +191,8 @@ describe('redaction', () => {
       try {
         void env.STRIPE_KEY;
         throw new Error('expected throw');
-      } catch (e) {
-        const msg = (e as Error).message;
+      } catch (error) {
+        const msg = (error as Error).message;
         expect(msg).not.toContain('sk_live_abc_not_a_url');
         expect(msg).toContain('STRIPE_KEY');
         expect(msg).toContain('<redacted>');
@@ -272,8 +272,8 @@ describe('_validateEnvOnce (boot-time worker check)', () => {
     await expect(_validateEnvOnce({ PORT: 'oops' })).rejects.toBeInstanceOf(EnvValidationError);
     try {
       await _validateEnvOnce({ PORT: 'oops' });
-    } catch (err) {
-      const msg = (err as Error).message;
+    } catch (error) {
+      const msg = (error as Error).message;
       expect(msg).toContain('STRIPE_KEY is required');
       expect(msg).toContain('PORT');
     }
@@ -305,13 +305,13 @@ describe('_validateEnvOnce (boot-time worker check)', () => {
     let secondError: unknown;
     try {
       await _validateEnvOnce({});
-    } catch (e) {
-      firstError = e;
+    } catch (error) {
+      firstError = error;
     }
     try {
       await _validateEnvOnce({});
-    } catch (e) {
-      secondError = e;
+    } catch (error) {
+      secondError = error;
     }
     expect(firstError).toBe(secondError);
   });

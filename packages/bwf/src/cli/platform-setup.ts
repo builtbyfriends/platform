@@ -1,5 +1,6 @@
 import type { PlatformDeploymentManifest } from '@builtbyfriends/platform';
-import { type CANCEL_SYMBOL, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
+import { isCancel, log } from '@voidzero-dev/vite-plus-prompts';
+import type { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
 import { openBrowser } from './auth.ts';
 import { formatLink, pc } from './output.ts';
 import type { PlatformManagementAccess } from './platform-auth.ts';
@@ -376,7 +377,7 @@ export function formatPlatformInstallCommand(options: PlatformInstallCommandOpti
       }
       return process.platform === 'win32'
         ? `'${value.replaceAll("'", "''")}'`
-        : `'${value.replaceAll("'", "'\\''")}'`;
+        : `'${value.replaceAll("'", String.raw`'\''`)}'`;
     })
     .join(' ');
 }

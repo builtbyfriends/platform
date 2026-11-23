@@ -46,11 +46,11 @@ export async function cancelContainerBuildDos(
     }
     try {
       const ns = buildManagerNamespace(env, build.instance_type);
-      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+      // oxlint-disable-next-line quality/no-chained-type-assertions
       const stub = ns.get(ns.idFromName(build.id)) as unknown as DurableObjectStub<BuildManager>;
       await stub.cancelBuild(reason);
-    } catch (err) {
-      console.warn(`[github] best-effort cancel of build ${build.id} failed:`, err);
+    } catch (error) {
+      console.warn(`[github] best-effort cancel of build ${build.id} failed:`, error);
     }
   }
 }

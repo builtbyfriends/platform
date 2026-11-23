@@ -108,7 +108,7 @@ it('rejects non-HTTPS upload URLs without sending SQL or credentials', async () 
 async function importError(): Promise<Error> {
   const error = await importD1SqlFile(fixture()).then(
     () => undefined,
-    (reason: unknown) => reason,
+    (error_: unknown) => error_,
   );
   expect(error).toBeInstanceOf(Error);
   return error as Error;

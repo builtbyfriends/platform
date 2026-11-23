@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import {
   parseRootWranglerConfig,
   readWranglerTopLevelString,
-  type CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
 import { dirname, join, resolve } from 'pathslash';
 import { findEnvFile } from '../codegen/env-types.ts';
 import { loadUserEnvFile } from '../host/load-user-env.ts';
@@ -372,7 +372,7 @@ function readGeneratedWranglerConfig(
   }
   let redirectedPath: string;
   try {
-    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf-8')) as { configPath?: unknown };
+    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf8')) as { configPath?: unknown };
     if (typeof parsed.configPath !== 'string' || parsed.configPath.length === 0) {
       return { ok: false, reason: `${deployConfigPath} has no "configPath" pointer.` };
     }
@@ -637,7 +637,7 @@ async function fetchSelfHostSecretNames(
     if (
       Number.isSafeInteger(result.status) &&
       result.status! > 0 &&
-      ([10007, 10090].includes(result.errorCode ?? 0) || result.failure === 'not-found')
+      ([10_007, 10_090].includes(result.errorCode ?? 0) || result.failure === 'not-found')
     ) {
       throw new SelfHostFirstDeployError(firstDeployMessage(missingKeys));
     }
@@ -715,8 +715,8 @@ export function createDefaultSecretListRunner(
       let settled = false;
       let timedOut = false;
       let killFallbackTimer: ReturnType<typeof setTimeout> | undefined;
-      child.stdout?.setEncoding('utf-8');
-      child.stderr?.setEncoding('utf-8');
+      child.stdout?.setEncoding('utf8');
+      child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         stdout += chunk;
       });
@@ -748,7 +748,7 @@ export function createDefaultSecretListRunner(
             signal: 'SIGKILL',
             error: 'timed out and termination could not be confirmed',
           });
-        }, 5_000);
+        }, 5000);
       }, timeoutMs);
       child.on('error', (error: Error) => {
         settle({ stdout, stderr, status: -1, signal: null, error: error.message });

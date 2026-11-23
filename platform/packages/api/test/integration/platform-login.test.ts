@@ -31,7 +31,8 @@ import {
 } from '../../src/schema.ts';
 import { putAllowlist } from '../../src/signup-allowlist.ts';
 import { adminHtml } from '../helpers/admin-html.tsx';
-import { clearTables, createTestUser, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let privateKey: CryptoKey;

@@ -1,5 +1,7 @@
-import { anyOf, bearerAuth, createProcedures, type AuthProvider } from '@builtbyfriends/realtime';
-import { getUser, type AuthUser } from './auth.ts';
+import { anyOf, bearerAuth, createProcedures } from '@builtbyfriends/realtime';
+import type { AuthProvider } from '@builtbyfriends/realtime';
+import { getUser } from './auth.ts';
+import type { AuthUser } from './auth.ts';
 import type { CloudBindings } from './handler.ts';
 
 /**

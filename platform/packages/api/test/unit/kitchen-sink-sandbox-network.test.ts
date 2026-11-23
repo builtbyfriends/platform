@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { createServer, type Socket } from 'node:net';
+import { createServer } from 'node:net';
+import type { Socket } from 'node:net';
 import { promisify } from 'node:util';
 import { expect, it } from 'vite-plus/test';
 import { internetAccessProbe } from '../../../../scripts/fixtures/kitchen-sink-sandbox/lib/internet-probe.ts';
@@ -17,7 +18,7 @@ it('closes a stalled network connection so the denial probe exits without being 
       throw new Error('Probe server did not bind a port.');
     }
     const args = [...internetAccessProbe.slice(1, -2), `https://127.0.0.1:${address.port}/`, '50'];
-    const result = await promisify(execFile)(process.execPath, args, { timeout: 2_000 });
+    const result = await promisify(execFile)(process.execPath, args, { timeout: 2000 });
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
   } finally {

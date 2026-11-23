@@ -557,8 +557,8 @@ export const githubRoutes = new Hono<ApiEnv>()
       // the link.
       try {
         await linkGitHubInstallationToUser(context.get('db'), linkCode.providerId, user.id);
-      } catch (err) {
-        console.error(`[github-link] Failed to backfill installations for ${user.id}:`, err);
+      } catch (error) {
+        console.error(`[github-link] Failed to backfill installations for ${user.id}:`, error);
       }
 
       return context.json({ status: result });

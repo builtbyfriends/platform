@@ -106,8 +106,8 @@ describe('bwf platform config billing', () => {
     const error = (() => {
       try {
         parsePlatformArgs(['config', 'billing', `STRIPE_SECRET_KEY=${SECRET_KEY}`]);
-      } catch (caught) {
-        return caught as Error;
+      } catch (error_) {
+        return error_ as Error;
       }
       return null;
     })();

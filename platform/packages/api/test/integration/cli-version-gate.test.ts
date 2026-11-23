@@ -10,10 +10,10 @@ import {
   clearTables,
   createTestUser,
   createTestProject,
-  type TestEnv,
   rpcRequest,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 import { setTestDb } from './setup.ts';

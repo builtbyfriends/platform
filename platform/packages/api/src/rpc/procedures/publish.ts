@@ -1,5 +1,6 @@
 import { type } from 'arktype';
-import { requestPublishApproval, type PublishRequestBody } from '../../routes/oauth.ts';
+import { requestPublishApproval } from '../../routes/oauth.ts';
+import type { PublishRequestBody } from '../../routes/oauth.ts';
 import { appProcedure, connectedApp } from '../app-procedure.ts';
 import { previewRefusal } from './previews.ts';
 

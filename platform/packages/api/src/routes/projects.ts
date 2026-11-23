@@ -1,7 +1,8 @@
 import { tokenizeSql } from '@builtbyfriends/deploy-core';
 import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import { sql as drizzleSql } from 'drizzle-orm';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import {
   AiLoggingPublishError,
   lockNewProjectAiLoggingInputs,
@@ -51,7 +52,7 @@ import {
   tryCreateEmailDestination,
 } from '../db.ts';
 import { databaseTimestampMs } from '../deploy/recovery.ts';
-import { type ApiEnv } from '../env.ts';
+import type { ApiEnv } from '../env.ts';
 import { validateSubmittedExecutionPlans } from '../migrations/execution-plan.ts';
 import { ensureTrackingTable, queryD1, runRemoteMigrations } from '../migrations/remote-runner.ts';
 import { getProjectDeploymentWorkerName, getProjectQueueName } from '../naming.ts';
@@ -1075,6 +1076,7 @@ const app = new Hono<ApiEnv>()
               throw new AggregateError(
                 [externalError, ...compensationErrors],
                 'rollback failed and external state compensation was incomplete',
+                { cause: externalError },
               );
             }
             externalCompensated = true;
@@ -1222,6 +1224,7 @@ const app = new Hono<ApiEnv>()
             throw new AggregateError(
               [err, ...compensationErrors],
               'rollback transaction failed and external state compensation was incomplete',
+              { cause: err },
             );
           }
         } else if (ambiguousCommitOutcome === 'unknown') {
@@ -1373,9 +1376,9 @@ const app = new Hono<ApiEnv>()
       for (const r of legacy.results) {
         byName.set(r.name as string, r.applied_at as string);
       }
-    } catch (err) {
-      if (!isMissingTableError(err)) {
-        return context.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    } catch (error) {
+      if (!isMissingTableError(error)) {
+        return context.json({ error: error instanceof Error ? error.message : String(error) }, 500);
       }
     }
 
@@ -1391,9 +1394,9 @@ const app = new Hono<ApiEnv>()
       for (const r of result.results) {
         byName.set(r.name as string, r.applied_at as string);
       }
-    } catch (err) {
-      if (!isMissingTableError(err)) {
-        return context.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    } catch (error) {
+      if (!isMissingTableError(error)) {
+        return context.json({ error: error instanceof Error ? error.message : String(error) }, 500);
       }
     }
 
@@ -1556,9 +1559,9 @@ const app = new Hono<ApiEnv>()
         };
       });
       return context.json(outcome.body, outcome.status);
-    } catch (err) {
+    } catch (error) {
       return context.json(
-        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
         500,
       );
     }
@@ -1741,12 +1744,12 @@ const app = new Hono<ApiEnv>()
                 params: [to, from],
               },
             );
-          } catch (err) {
+          } catch (error) {
             pairFailure = {
               kind: 'error',
               from,
               to,
-              error: err instanceof Error ? err.message : String(err),
+              error: error instanceof Error ? error.message : String(error),
             };
             break;
           }
@@ -1765,12 +1768,12 @@ const app = new Hono<ApiEnv>()
                 params: [from, to],
               },
             );
-          } catch (err) {
+          } catch (error) {
             pairFailure = {
               kind: 'error',
               from,
               to,
-              error: err instanceof Error ? err.message : String(err),
+              error: error instanceof Error ? error.message : String(error),
             };
             break;
           }
@@ -1825,9 +1828,9 @@ const app = new Hono<ApiEnv>()
         return { status: 200 as const, body: { ok: true } };
       });
       return context.json(outcome.body, outcome.status);
-    } catch (err) {
+    } catch (error) {
       return context.json(
-        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { ok: false, error: error instanceof Error ? error.message : String(error) },
         500,
       );
     }
@@ -2180,7 +2183,7 @@ function parseDuration(input: string): number | null {
   if (!match) {
     return null;
   }
-  const value = parseInt(match[1], 10);
+  const value = Number.parseInt(match[1], 10);
   const unit = match[2];
   const multipliers: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
   const ms = value * multipliers[unit];
@@ -2230,13 +2233,13 @@ export async function scheduleAfterResponse(
 ): Promise<void> {
   try {
     context.executionCtx.waitUntil(work);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
     if (/has no ExecutionContext|ExecutionContext is not available/i.test(message)) {
       await work;
       return;
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -2276,14 +2279,14 @@ async function autoAddOwnerDestination(
     let cfRow;
     try {
       cfRow = await addDestination(accountId, apiToken, address);
-    } catch (err) {
-      if (!isDestinationAlreadyExistsError(err)) {
-        throw err;
+    } catch (error) {
+      if (!isDestinationAlreadyExistsError(error)) {
+        throw error;
       }
       const all = await listDestinations(accountId, apiToken);
       const found = all.find((row) => row.email.toLowerCase() === address);
       if (!found) {
-        throw err;
+        throw error;
       }
       cfRow = found;
     }
@@ -2320,8 +2323,8 @@ async function autoAddOwnerDestination(
       // row they revoked.
       throw new Error('owner destination row vanished between insert and read-back');
     }
-  } catch (err) {
-    console.error('[projects] auto-add owner email destination failed:', err);
+  } catch (error) {
+    console.error('[projects] auto-add owner email destination failed:', error);
     if (allocatedTag) {
       // Decision: Roll back on any error, not only the FK violation from project teardown's cascade. This runs after
       // the 201, so nothing retries or reports it: once CF allocated the address, a failure means no row
@@ -2464,15 +2467,15 @@ export async function createProjectForUser(context: CreateProjectContext, slug: 
       ...(zeroTrust ? { zero_trust: publicProjectZeroTrustState(zeroTrust) } : {}),
       ...(zeroTrustWarning ? { warnings: [zeroTrustWarning] } : {}),
     };
-  } catch (err) {
+  } catch (error) {
     // Decision: Only the configuration lock above throws this here: the uninstall record exists.
-    if (err instanceof AiLoggingPublishError) {
+    if (error instanceof AiLoggingPublishError) {
       throw new ProjectCreateError(
         'AI_LOGGING_UNAVAILABLE',
         'The AI logging setting for the new project could not be applied. Retry.',
       );
     }
-    if (err instanceof ZeroTrustUnavailableError) {
+    if (error instanceof ZeroTrustUnavailableError) {
       throw new ProjectCreateError(
         'PLATFORM_UNINSTALLING',
         'The platform is being uninstalled, so new projects cannot be created.',
@@ -2480,9 +2483,9 @@ export async function createProjectForUser(context: CreateProjectContext, slug: 
     }
     // Decision: Unique violation: the slug, or an alias with that name, was taken between the check and the
     // insert.
-    if (hasSqlState(err, '23505')) {
+    if (hasSqlState(error, '23505')) {
       throw new ProjectCreateError('SLUG_TAKEN', 'slug already taken');
     }
-    throw err;
+    throw error;
   }
 }

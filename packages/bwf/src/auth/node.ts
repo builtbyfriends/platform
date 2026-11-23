@@ -11,12 +11,8 @@ import {
 } from '../runtime/auth-migrations.ts';
 import type { BwfAuthDialect, BwfAuthEnv } from '../runtime/better-auth-shared.ts';
 import { loadLocalEnv } from '../shared/env.ts';
-import {
-  findBwfAuthConfig,
-  loadBwfAuthConfig,
-  projectAuthConfigImporter,
-  type ModuleImporter,
-} from './config.ts';
+import { findBwfAuthConfig, loadBwfAuthConfig, projectAuthConfigImporter } from './config.ts';
+import type { ModuleImporter } from './config.ts';
 import { resolveBwfAuthMigrationSchema } from './drizzle.ts';
 
 export async function runLocalBwfAuthMigrations(

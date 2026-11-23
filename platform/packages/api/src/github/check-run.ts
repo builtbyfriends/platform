@@ -155,14 +155,14 @@ export async function createCheckRun(
     let token: string;
     try {
       token = await getInstallationToken(env, installationId);
-    } catch (err) {
+    } catch (error) {
       logFailure('check-run-create', 'token-mint-failed', {
         installationId,
         repoFullName,
         headSha: opts.headSha,
         externalId: opts.externalId,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
       if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, CHECK_RUN_RETRY_DELAY_MS));
@@ -210,13 +210,13 @@ export async function createCheckRun(
         body: errBody,
       });
       return null;
-    } catch (err) {
+    } catch (error) {
       logFailure('check-run-create', 'network-error', {
         installationId,
         repoFullName,
         externalId: opts.externalId,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
       return null;
     }
@@ -277,14 +277,14 @@ export async function completeCheckRun(
     let token: string;
     try {
       token = await getInstallationToken(env, installationId);
-    } catch (err) {
+    } catch (error) {
       logFailure('check-run-complete', 'token-mint-failed', {
         installationId,
         repoFullName,
         checkRunId,
         conclusion: opts.conclusion,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
       if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, CHECK_RUN_RETRY_DELAY_MS));
@@ -350,14 +350,14 @@ export async function completeCheckRun(
         status: res.status,
         body: errBody,
       });
-    } catch (err) {
+    } catch (error) {
       logFailure('check-run-complete', 'network-error', {
         installationId,
         repoFullName,
         checkRunId,
         conclusion: opts.conclusion,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
     }
     if (attempt < CHECK_RUN_RETRY_ATTEMPTS) {

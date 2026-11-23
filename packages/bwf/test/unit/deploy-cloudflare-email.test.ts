@@ -6,7 +6,8 @@ import { log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { runCloudflareEmailStep } from '../../src/cli/deploy-cloudflare-email.ts';
 import type { DeployWranglerRunResult } from '../../src/cli/deploy-types.ts';
-import { renderAddressMap, type EmailDns } from '../../src/cli/email-cloudflare.ts';
+import { renderAddressMap } from '../../src/cli/email-cloudflare.ts';
+import type { EmailDns } from '../../src/cli/email-cloudflare.ts';
 
 // Decision: A sending-only app (no `email/` handlers) deployed from CI with an API token, from a
 // real report: `email.from` on a subdomain of the zone, Email Sending onboarded, Email Routing

@@ -29,20 +29,12 @@
  *   expect(result.params).toEqual({ ticket: "abc-1" });
  */
 
-import {
-  compareEmailRoutes,
-  compileEmailPattern,
-  type CompiledEmailPattern,
-} from '../../router/email.ts';
-import { registerEmailSink, type CapturedMessage } from './dev-inbox.ts';
-import {
-  createMessageProxy,
-  type EmailAction,
-  type EmailHandler,
-  type EmailHandlerInfo,
-  MAX_INBOUND_BYTES,
-  MAX_INBOUND_HEADERS,
-} from './inbound.ts';
+import { compareEmailRoutes, compileEmailPattern } from '../../router/email.ts';
+import type { CompiledEmailPattern } from '../../router/email.ts';
+import { registerEmailSink } from './dev-inbox.ts';
+import type { CapturedMessage } from './dev-inbox.ts';
+import { createMessageProxy, MAX_INBOUND_BYTES, MAX_INBOUND_HEADERS } from './inbound.ts';
+import type { EmailAction, EmailHandler, EmailHandlerInfo } from './inbound.ts';
 import { buildMime, normalizeEmail } from './mime.ts';
 
 export interface EmailTestHarness {
@@ -276,11 +268,11 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       }
       try {
         headers = parseHeaderBlock(raw, MAX_INBOUND_HEADERS);
-      } catch (e) {
-        if (e instanceof InboundTooManyHeadersError) {
+      } catch (error) {
+        if (error instanceof InboundTooManyHeadersError) {
           return refuse(`${label}: too many headers (max ${MAX_INBOUND_HEADERS})`);
         }
-        throw e;
+        throw error;
       }
     }
     // Decision: The caller's own headers win, applied after admission: they are not on
@@ -325,7 +317,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       { slug },
     );
 
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+    // oxlint-disable-next-line quality/no-chained-type-assertions
     const ctx = {
       waitUntil() {
         // Decision: Nothing to extend: the harness has no request lifetime.

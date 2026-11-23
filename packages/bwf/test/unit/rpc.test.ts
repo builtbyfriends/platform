@@ -41,7 +41,7 @@ describe('createRpc', () => {
       rpc as unknown as { contacts: { get(input: object): Promise<unknown> } }
     ).contacts
       .get({ id: 'x' })
-      .catch((caught: unknown) => caught);
+      .catch((error_: unknown) => error_);
     expect(error).toBeInstanceOf(RpcError);
     expect(error).toMatchObject({ code: 'NOT_FOUND', status: 404, message: 'No such contact' });
   });

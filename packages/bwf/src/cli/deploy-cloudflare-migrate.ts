@@ -13,8 +13,8 @@ import {
   logD1RestoreAfterDeployFailure,
 } from './deploy-migrations.ts';
 import { CloudflareAuthSecretError } from './deploy-resources.ts';
-import { type CloudflareDeployDeps } from './deploy-types.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CloudflareDeployDeps } from './deploy-types.ts';
+import type { CliLogger } from './log-file.ts';
 import { getErrorMessage } from './output.ts';
 import { readDeploymentPlatform } from './project.ts';
 
@@ -155,8 +155,8 @@ export async function migrateCloudflareWorker(input: {
       if (applied.length > 0) {
         log.step(`Applied ${applied.length} ${label} migration${applied.length === 1 ? '' : 's'}.`);
       }
-    } catch (err) {
-      log.error(`deploy: ${label} migrations failed — ${getErrorMessage(err)}`);
+    } catch (error) {
+      log.error(`deploy: ${label} migrations failed — ${getErrorMessage(error)}`);
       return exit(1);
     }
   }

@@ -17,8 +17,8 @@ import {
   CloudflareWorkerInspectionError,
   parseCloudflareVersionMessage,
   parseRootWranglerConfig,
-  type CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
 import { log } from '@voidzero-dev/vite-plus-prompts';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -66,24 +66,29 @@ import type {
   DeployWranglerRunResult,
 } from '../../src/cli/deploy-types.ts';
 import { runDeploy } from '../../src/cli/deploy.ts';
-import { SENDING_FREE_PLAN_HINT, type EmailDns } from '../../src/cli/email-cloudflare.ts';
+import { SENDING_FREE_PLAN_HINT } from '../../src/cli/email-cloudflare.ts';
+import type { EmailDns } from '../../src/cli/email-cloudflare.ts';
 import { runEmailCloudflareCommand } from '../../src/cli/email.ts';
 import {
   resolveEnvSchemaFactsViaSubprocess,
   validateEmittedVarsViaSubprocess,
-  type EnvSchemaProbeResult,
-  type EnvSchemaProbeSpawnResult,
 } from '../../src/cli/env-schema-probe.ts';
-import {
-  dischargeSelfHostEnvContext,
-  type EmittedWorkerVarsResult,
-  type SelfHostEnvContext,
-  type SelfHostSchemaFacts,
+import type {
+  EnvSchemaProbeResult,
+  EnvSchemaProbeSpawnResult,
+} from '../../src/cli/env-schema-probe.ts';
+import { dischargeSelfHostEnvContext } from '../../src/cli/env-validation.ts';
+import type {
+  EmittedWorkerVarsResult,
+  SelfHostEnvContext,
+  SelfHostSchemaFacts,
 } from '../../src/cli/env-validation.ts';
-import { openDeployLog, type CliLogger } from '../../src/cli/log-file.ts';
+import { openDeployLog } from '../../src/cli/log-file.ts';
+import type { CliLogger } from '../../src/cli/log-file.ts';
 import { migrateLegacyBwfConfig } from '../../src/cli/migrate.ts';
 import { parseProjectArgs } from '../../src/cli/project-args.ts';
-import { provisionCloudflareResources, type ProvisionResult } from '../../src/cli/provision.ts';
+import { provisionCloudflareResources } from '../../src/cli/provision.ts';
+import type { ProvisionResult } from '../../src/cli/provision.ts';
 import {
   FRIENDLY_BINDING_NAMES,
   readWranglerPublishedTrafficSnapshot,
@@ -315,7 +320,7 @@ describe('Cloudflare activation diagnostics', () => {
           ok: false,
           reason: 'upload-failed',
           status: 1,
-          cloudflareErrorCode: 10021,
+          cloudflareErrorCode: 10_021,
           diagnostic,
         }),
         exit: (code) => {
@@ -336,7 +341,7 @@ describe('Cloudflare activation diagnostics', () => {
           expect.objectContaining({
             reason: 'upload-failed',
             status: 1,
-            cloudflareErrorCode: 10021,
+            cloudflareErrorCode: 10_021,
           }),
         );
         expect(error).toHaveBeenLastCalledWith('deploy_end', undefined, {
@@ -458,7 +463,7 @@ describe('Cloudflare activation diagnostics', () => {
         ok: false,
         reason,
         status: 1,
-        cloudflareErrorCode: 10021,
+        cloudflareErrorCode: 10_021,
         diagnostic: 'Uncaught TypeError: Cannot read properties of undefined\n  at index.js:42:1',
       });
       expect(message).toContain('Cloudflare error code: 10021');
@@ -645,7 +650,7 @@ describe('Cloudflare activation diagnostics', () => {
       ok: false,
       reason: 'readiness-staging-failed',
       status: 1,
-      cloudflareErrorCode: 10210,
+      cloudflareErrorCode: 10_210,
       diagnostic: 'The version depends on Durable Object migration fate-live-v1.',
     });
     expect(message).toContain('bwf deploy --platform cloudflare --atomic');
@@ -657,7 +662,7 @@ describe('Cloudflare activation diagnostics', () => {
       ok: false,
       reason: 'readiness-staging-failed',
       status: 1,
-      cloudflareErrorCode: 100405,
+      cloudflareErrorCode: 100_405,
       diagnostic:
         '[100405] All versions in a multi-version deployment must declare identical `exports`.',
     });
@@ -2623,7 +2628,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
   const generatedStaticConfig = (root: string) =>
     join(root, '.bwf/deploy/cloudflare/wrangler-static.json');
   const staticEntry = (root: string) =>
-    readFileSync(join(root, '.bwf/deploy/cloudflare/static-edge.mjs'), 'utf-8');
+    readFileSync(join(root, '.bwf/deploy/cloudflare/static-edge.mjs'), 'utf8');
   const stagedHeaders = (root: string) => join(root, '.bwf/deploy/cloudflare/assets/_headers');
 
   it('links an assets-only SPA and validates the static adapter before activation, including retries', async () => {
@@ -2752,7 +2757,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     expect(parseRootWranglerConfig(generatedStaticConfig(root))).toMatchObject({
       assets: { run_worker_first: true },
     });
-    expect(readFileSync(join(root, '.bwf/deploy/cloudflare/static-edge.mjs'), 'utf-8')).toContain(
+    expect(readFileSync(join(root, '.bwf/deploy/cloudflare/static-edge.mjs'), 'utf8')).toContain(
       '"alwaysUseHttps":true',
     );
   });
@@ -2783,7 +2788,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     );
 
     expect(exitCalls).toEqual([]);
-    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')).toBe(canonical);
+    expect(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')).toBe(canonical);
     const generated = parseRootWranglerConfig(generatedStaticConfig(root));
     expect(generated.durable_objects).toEqual({ bindings: [] });
     expect(generated.queues).toEqual({ producers: [], consumers: [] });
@@ -3175,7 +3180,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
     });
     expect(staticEntry(root)).toContain('"X-Test","yes"');
     const stagedAssets = join(root, '.bwf/deploy/cloudflare/assets');
-    expect(readFileSync(join(stagedAssets, 'index.html'), 'utf-8')).toBe('<h1>Static</h1>');
+    expect(readFileSync(join(stagedAssets, 'index.html'), 'utf8')).toBe('<h1>Static</h1>');
     expect(existsSync(join(stagedAssets, '_headers'))).toBe(false);
     expect(existsSync(join(stagedAssets, '_redirects'))).toBe(false);
     expect(wranglerArgs.at(-1)).toContain(toSlash(stagedAssets));
@@ -3272,7 +3277,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
       expect(parseRootWranglerConfig(generatedStaticConfig(root))).toMatchObject({
         assets: { run_worker_first: ['/__platform', '/__platform/*'] },
       });
-      expect(readFileSync(stagedHeaders(root), 'utf-8')).toBe(generatedHeaders);
+      expect(readFileSync(stagedHeaders(root), 'utf8')).toBe(generatedHeaders);
       expect(staticEntry(root)).not.toContain('headerRules');
     });
 
@@ -3349,7 +3354,7 @@ describe('runCloudflareDeploy — static, SPA, and SSG apps', () => {
         }
         if (operation.type === 'versions.upload') {
           if (scenario === 'first deployment') {
-            return { ...cleanExit, status: 1, failure: 'not-found', errorCode: 10007 };
+            return { ...cleanExit, status: 1, failure: 'not-found', errorCode: 10_007 };
           }
           history.push({ id: next, number: 2 });
           return {
@@ -4029,7 +4034,7 @@ describe('runCloudflareDeploy — secrets gate', () => {
           ...cleanExit,
           status: 1,
           failure: 'durable-migration',
-          errorCode: 10211,
+          errorCode: 10_211,
           stderr: 'Durable Object migrations require deploy. [code: 10211]',
         };
       }
@@ -4156,7 +4161,7 @@ describe('runCloudflareDeploy — D1 migrations_dir gate', () => {
     ['db/migrations', undefined],
     ['db/migrations/', undefined],
     ['./db/migrations/', undefined],
-    ['db\\migrations', undefined],
+    [String.raw`db\migrations`, undefined],
     ['<root>/db/migrations', undefined],
     ['src/db/migrations', 'src'],
   ])('accepts migrations_dir %s naming the same folder without provisioning', async (dir, src) => {
@@ -4769,7 +4774,7 @@ describe('runCloudflareDeploy — worker-name override (WRANGLER_CI_OVERRIDE_NAM
     await runCloudflareDeploy(root, { platform: 'cloudflare' }, cliLog, deps);
     expect(trace).toContain('wrangler:deploy');
     expect(deployedWorker).toBe('myapp');
-    const written = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')) as {
+    const written = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as {
       name?: string;
     };
     expect(written.name).toBe('myapp');
@@ -6384,7 +6389,7 @@ describe('runCloudflareDeploy — id-bearing binding identity pin', () => {
     mutate: (config: Record<string, unknown>) => void,
   ): void {
     const configPath = join(root, 'wrangler.jsonc');
-    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
     mutate(config);
     writeFileSync(configPath, JSON.stringify(config, null, 2));
   }
@@ -6762,7 +6767,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
     mutate: (config: Record<string, unknown>) => void,
   ): void {
     const configPath = join(root, 'wrangler.jsonc');
-    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
     mutate(config);
     writeFileSync(configPath, JSON.stringify(config, null, 2));
   }
@@ -6866,7 +6871,7 @@ describe('runCloudflareDeploy — config laundering by a build-adjacent probe', 
 describe('runCloudflareDeploy — env-schema probe loads lazily', () => {
   const deploySource = readdirSync(join(import.meta.dirname, '../../src/cli'))
     .filter((file) => file === 'deploy.ts' || (file.startsWith('deploy-') && file.endsWith('.ts')))
-    .map((file) => readFileSync(join(import.meta.dirname, '../../src/cli', file), 'utf-8'))
+    .map((file) => readFileSync(join(import.meta.dirname, '../../src/cli', file), 'utf8'))
     .join('\n');
 
   it('loads the env-schema probe via a dynamic import() (never a static module-scope import)', () => {
@@ -6884,10 +6889,10 @@ describe('runCloudflareDeploy — env-schema probe loads lazily', () => {
   it('the env-schema probe imports env-validation only dynamically and no backend statically', () => {
     const probeSource = readFileSync(
       join(import.meta.dirname, '../../src/cli/env-schema-probe.ts'),
-      'utf-8',
+      'utf8',
     );
     const staticEnvValidation = new RegExp(
-      "^import\\s+(?!type\\b)[^;]*?\\s+from\\s+'\\./env-validation\\.ts';",
+      String.raw`^import\s+(?!type\b)[^;]*?\s+from\s+'\./env-validation\.ts';`,
       'gm',
     );
     expect(probeSource).not.toMatch(staticEnvValidation);
@@ -6952,7 +6957,7 @@ describe('runCloudflareDeploy — env-only account pin', () => {
     const { deps, trace } = harness();
     await runCloudflareDeploy(root, { platform: 'cloudflare' }, silentCliLog, deps);
     expect(trace).toContain('wrangler:deploy');
-    const written = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')) as {
+    const written = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as {
       account_id?: string;
     };
     expect(written.account_id).toBe('env-acc-999');
@@ -8973,7 +8978,7 @@ describe('env-schema probe (real subprocess)', () => {
     delete env.CLOUDFLARE_API_TOKEN;
     delete env.CF_ACCESS_CLIENT_ID;
     await resolveEnvSchemaFactsViaSubprocess({ root }, env);
-    const leaked = JSON.parse(readFileSync(leakFile, 'utf-8')) as {
+    const leaked = JSON.parse(readFileSync(leakFile, 'utf8')) as {
       token: string | null;
       id: string | null;
     };
@@ -9006,7 +9011,7 @@ describe('env-schema probe (real subprocess)', () => {
       silentCliLog,
       harness({ resolveSchemaFacts: undefined }).deps,
     );
-    const leaked = JSON.parse(readFileSync(leakFile, 'utf-8')) as {
+    const leaked = JSON.parse(readFileSync(leakFile, 'utf8')) as {
       token: string | null;
       id: string | null;
       secret: string | null;
@@ -9147,7 +9152,7 @@ describe('env-schema probe (real subprocess)', () => {
       silentCliLog,
       harness({ resolveSchemaFacts: undefined }).deps,
     );
-    const leaked = JSON.parse(readFileSync(leakFile, 'utf-8')) as Record<string, string | null>;
+    const leaked = JSON.parse(readFileSync(leakFile, 'utf8')) as Record<string, string | null>;
     for (const name of authVars) {
       expect(leaked[name]).toBeNull();
     }
@@ -9356,7 +9361,7 @@ describe('runCloudflareDeploy — native Cloudflare email step', () => {
   }
 
   function readRootConfig(root: string): Record<string, unknown> {
-    return JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf-8')) as Record<
+    return JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as Record<
       string,
       unknown
     >;
@@ -9675,7 +9680,9 @@ describe('runCloudflareDeploy — native Cloudflare email step', () => {
                 new Response(
                   JSON.stringify({
                     success: false,
-                    errors: [{ code: 10105, message: 'Email Sending is unavailable on this plan' }],
+                    errors: [
+                      { code: 10_105, message: 'Email Sending is unavailable on this plan' },
+                    ],
                   }),
                   { status: 403 },
                 ),
@@ -9955,7 +9962,7 @@ describe('runCloudflareDeploy — native Cloudflare email step', () => {
 
   it('CI / non-TTY: prints the checklist + `bwf email setup` line, asks nothing, writes nothing, deploys without email', async () => {
     const root = emailProject();
-    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf-8');
+    const before = readFileSync(join(root, 'wrangler.jsonc'), 'utf8');
     const { deps, spawns, fetchCalls, exitCalls, trace } = emailHarness({
       isCI: true,
       confirm: async () => {
@@ -10885,7 +10892,7 @@ describe('readWranglerAuthToken — keeps the helper child failure', () => {
       status: 1,
       stderr:
         "SyntaxError: The requested module 'node:http' does not provide an export named 'setGlobalProxyFromEnv'\n\nNode.js v22.23.4",
-      errorCode: 10007,
+      errorCode: 10_007,
       failure: 'not-found',
     });
     expect(crashed).toEqual({

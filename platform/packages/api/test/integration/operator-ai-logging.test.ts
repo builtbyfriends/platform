@@ -47,9 +47,9 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 // Decision: Hosted Platform doesn't set PLATFORM_AUTH_DATABASE_UNCACHED, so nothing here can depend on it.
 let env: TestEnv;

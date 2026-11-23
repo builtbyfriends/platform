@@ -3,10 +3,9 @@ import { readFileSync } from 'node:fs';
 import {
   parsePlatformInstallationManifest,
   recordInstallationStep,
-  type PlatformInstallationManifest,
   parsePlatformAccessProtection,
-  type PlatformLoginKind,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest, PlatformLoginKind } from '@builtbyfriends/platform';
 import type {
   PlatformRuntimeDatabaseManifest,
   PlatformRuntimeManifest,
@@ -16,24 +15,26 @@ import { join } from 'pathslash';
 import type { Pool } from 'pg';
 import { projectPlatformAiLoggingConnection } from './platform-ai-logging-projection.ts';
 import { verifyPlatformDatabaseArtifacts } from './platform-installer-runtime.ts';
-import {
-  type PlatformAdministratorSetupState,
-  type PlatformInstallerDependencies,
-  type PlatformDatabaseLifecycleLock,
-  type InstallationCheckpointWriter,
-  type PlatformDatabaseState,
-  type PlatformDatabaseMigrationResult,
-  type PlatformSandboxDrainPreparation,
+import type {
+  PlatformAdministratorSetupState,
+  PlatformInstallerDependencies,
+  PlatformDatabaseLifecycleLock,
+  InstallationCheckpointWriter,
+  PlatformDatabaseState,
+  PlatformDatabaseMigrationResult,
+  PlatformSandboxDrainPreparation,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan } from './platform-plan.ts';
+import type { PlatformInstallPlan } from './platform-plan.ts';
 import { writeInstallationManifest } from './platform-registry.ts';
 import {
   fencePlatformProjectZeroTrustConnection,
   liftPlatformProjectZeroTrustFenceConnection,
   lockPlatformProjectZeroTrustConnection,
   readPlatformProjectZeroTrustStateConnection,
-  type PlatformProjectZeroTrustState,
-  type QueryConnection,
+} from './platform-zero-trust-uninstall.ts';
+import type {
+  PlatformProjectZeroTrustState,
+  QueryConnection,
 } from './platform-zero-trust-uninstall.ts';
 
 // Decision: onManifestChange keeps migration checkpoints visible to the outer failure handler.
@@ -254,6 +255,7 @@ export async function readPlatformDatabaseLifecycleManifest(
       }
       throw new Error(
         `platform: Could not read the PostgreSQL lifecycle checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   });
@@ -588,6 +590,7 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
     }
     throw new Error(
       `platform: The PostgreSQL lifecycle checkpoint is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   let released = false;

@@ -7,7 +7,8 @@ import {
   getProjectResources,
 } from '../../db.ts';
 import { isDevBypass } from '../../env.ts';
-import { type ProjectListItem, sortProjectList } from '../../project-list.ts';
+import { sortProjectList } from '../../project-list.ts';
+import type { ProjectListItem } from '../../project-list.ts';
 import { projectWithUrl } from '../../project-url.ts';
 import { ProjectCreateError, createProjectForUser } from '../../routes/projects.ts';
 import { getRequestsDataset, queryProjectRequestOverview } from '../../routes/usage.ts';

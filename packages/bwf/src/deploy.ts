@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { createDeployArtifact, type DeployArtifact } from '@builtbyfriends/deploy-core';
+import { createDeployArtifact } from '@builtbyfriends/deploy-core';
+import type { DeployArtifact } from '@builtbyfriends/deploy-core';
 import { resolve, join } from 'pathslash';
 import { analyzeApplication } from './application-routing.ts';
 import { resolveAssetConfig, hasApiRoutes, hasDocumentRoutes } from './asset-routing.ts';

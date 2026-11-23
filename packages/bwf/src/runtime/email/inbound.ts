@@ -9,8 +9,8 @@ import {
   EMAIL_MAX_METADATA_BYTES,
   EMAIL_MAX_REPLY_BYTES,
   EMAIL_MAX_RESPONSE_BYTES,
-  type EmailWireAction,
 } from '@builtbyfriends/platform/email-protocol';
+import type { EmailWireAction } from '@builtbyfriends/platform/email-protocol';
 import type { Email as PostalMimeEmail } from 'postal-mime';
 import { base64ToBytes } from '../base64.ts';
 import { withTimeout } from '../email-protocol.ts';
@@ -148,11 +148,11 @@ export async function parseEmail(message: ForwardableEmailMessage): Promise<Pars
     // Decision: Inside the try: a native one-shot `raw` stream can fail mid-read.
     const source = cached ? await cached.read() : message.raw;
     return await PostalMime.parse(source);
-  } catch (cause) {
+  } catch (error) {
     throw new ParseEmailError(
       'PARSE_FAILED',
-      `parseEmail: could not parse the message body. ${cause instanceof Error ? cause.message : String(cause)}`,
-      { cause },
+      `parseEmail: could not parse the message body. ${error instanceof Error ? error.message : String(error)}`,
+      { error },
     );
   }
 }
@@ -304,7 +304,7 @@ function normalizeRejectReason(reason: string): string {
     raw
       .slice(0, MAX_REJECT_REASON_LENGTH)
       // eslint-disable-next-line no-control-regex -- C0 controls and DEL are the point
-      .replace(/[\x00-\x1f\x7f]+/g, ' ')
+      .replaceAll(/[\u0000-\u001f\x7f]+/g, ' ')
   );
 }
 
@@ -439,7 +439,7 @@ export function createMessageProxy(
     }
   }
 
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+  // oxlint-disable-next-line quality/no-chained-type-assertions
   const message = {
     from: envelope.from,
     to: userVisibleTo,
@@ -505,8 +505,8 @@ export function createMessageProxy(
         // Decision: Validate now so native replay cannot fail after earlier actions fired.
         try {
           void new Headers(fwdHeaders);
-        } catch (e) {
-          throw invalidForwardHeaders(e);
+        } catch (error) {
+          throw invalidForwardHeaders(error);
         }
         headersObj = { ...fwdHeaders };
       }
@@ -707,15 +707,15 @@ function prefixReplySubject(original: string): string {
   }
   const cleaned = decoded
     // eslint-disable-next-line no-control-regex -- C0 controls and DEL are the point
-    .replace(/[\x00-\x1f\x7f]+/g, ' ')
-    .replace(/ {2,}/g, ' ')
+    .replaceAll(/[\u0000-\u001f\x7f]+/g, ' ')
+    .replaceAll(/ {2,}/g, ' ')
     .trim();
   if (!cleaned) {
     return 'Re:';
   }
   const prefixed = /^re:/i.test(cleaned) ? cleaned : `Re: ${cleaned}`;
   // Decision: Non-ASCII goes through `encodeWord`, whose words always fold.
-  if (/^[\x20-\x7e]*$/.test(prefixed) && !fitsHeaderLine('Subject', prefixed)) {
+  if (/^[\u0020-\u007e]*$/.test(prefixed) && !fitsHeaderLine('Subject', prefixed)) {
     return 'Re:';
   }
   return prefixed;
@@ -742,7 +742,7 @@ function decodeRfc2047(value: string): string {
       // TextDecoder rejects.
       let decoder: TextDecoder;
       try {
-        decoder = new TextDecoder(charset || 'utf-8', { fatal: false });
+        decoder = new TextDecoder(charset || 'utf8', { fatal: false });
       } catch {
         decoder = new TextDecoder('utf-8', { fatal: false });
       }
@@ -770,7 +770,7 @@ function quotedPrintableDecode(qp: string): Uint8Array {
       // stays literal.
       const hex = qp.slice(i + 1, i + 3);
       if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
-        out[kept++] = parseInt(hex, 16);
+        out[kept++] = Number.parseInt(hex, 16);
         i += 2;
       } else {
         out[kept++] = ch;

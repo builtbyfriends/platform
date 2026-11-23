@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import {
-  CloudflareWorkerInspectionError,
-  type CloudflareCommandResult,
-  type ExistingCloudflareWorker,
+import { CloudflareWorkerInspectionError } from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
 import { isCancel, select } from '@voidzero-dev/vite-plus-prompts';
 import { isCI as ciInfoIsCI } from 'ci-info';
@@ -22,7 +22,7 @@ import { createCloudflareProcessRunner, isCleanCloudflareExit } from './cloudfla
 import { log } from './deploy-helpers.ts';
 import { CloudflareAuthSecretError, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { deployChildEnv } from './deploy-transport.ts';
-import { type DeployWranglerRun, type DeployWranglerRunResult } from './deploy-types.ts';
+import type { DeployWranglerRun, DeployWranglerRunResult } from './deploy-types.ts';
 import {
   listSelfHostSecretNames,
   SelfHostFirstDeployError,
@@ -89,6 +89,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
     if (!authenticationError || identity.signal || identity.error) {
       throw new Error(
         'Could not verify the Cloudflare session after the Worker check failed. Run `bwf cloudflare status` and retry.',
+        { cause: error },
       );
     }
     const overrides = cloudflareCredentialOverrides();

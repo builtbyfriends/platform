@@ -88,7 +88,7 @@ function simulateDrizzleCustom(
   nodeFs.writeFileSync(nodePath.join(migrationsDir, `${tag}.sql`), '');
 
   const journalPath = nodePath.join(metaDir, '_journal.json');
-  const journal = JSON.parse(nodeFs.readFileSync(journalPath, 'utf-8')) as {
+  const journal = JSON.parse(nodeFs.readFileSync(journalPath, 'utf8')) as {
     version: string;
     dialect: string;
     entries: Array<{
@@ -99,7 +99,7 @@ function simulateDrizzleCustom(
       breakpoints: boolean;
     }>;
   };
-  const lastEntry = journal.entries[journal.entries.length - 1];
+  const lastEntry = journal.entries.at(-1);
   const nextIdx =
     journal.entries.length > 0 ? Math.max(...journal.entries.map((e) => e.idx)) + 1 : 0;
   journal.entries.push({
@@ -115,7 +115,7 @@ function simulateDrizzleCustom(
     const prevPrefix = lastEntry.tag.split('_')[0];
     const prevSnapshotPath = nodePath.join(metaDir, `${prevPrefix}_snapshot.json`);
     if (nodeFs.existsSync(prevSnapshotPath)) {
-      const prevSnapshot = JSON.parse(nodeFs.readFileSync(prevSnapshotPath, 'utf-8')) as Record<
+      const prevSnapshot = JSON.parse(nodeFs.readFileSync(prevSnapshotPath, 'utf8')) as Record<
         string,
         unknown
       >;
@@ -134,7 +134,7 @@ function simulateDrizzleCustom(
 const TMP = join(import.meta.dirname, '.tmp-gen-test');
 
 function read(path: string): string {
-  return readFileSync(join(TMP, path), 'utf-8');
+  return readFileSync(join(TMP, path), 'utf8');
 }
 
 function writePkg(deps: Record<string, string>): void {
@@ -512,7 +512,7 @@ describe('gen model', () => {
       columns: [],
     });
 
-    expect(readFileSync(routePath, 'utf-8')).toBe('existing content');
+    expect(readFileSync(routePath, 'utf8')).toBe('existing content');
   });
 
   it('generates zod routes when zod is in package.json', async () => {
@@ -691,7 +691,7 @@ describe('gen migration', () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^\d{14}_add_avatar_to_users\.sql$/);
 
-    const sql = readFileSync(join(TMP, 'db', 'migrations', files[0]), 'utf-8');
+    const sql = readFileSync(join(TMP, 'db', 'migrations', files[0]), 'utf8');
     expect(sql).toBe('-- add_avatar_to_users\n');
   });
 
@@ -760,7 +760,7 @@ describe('gen migration', () => {
     const files = listSql(migrationsDir);
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^\d{14}_add_table\.sql$/);
-    expect(readFileSync(journalPath, 'utf-8')).toBe(placeholder);
+    expect(readFileSync(journalPath, 'utf8')).toBe(placeholder);
   });
 
   it('refuses to scaffold when _journal.json is missing but meta/*_snapshot.json is present', async () => {
@@ -796,7 +796,7 @@ describe('gen migration', () => {
     expect(sqlFiles[0]).toBe('20200101000000_initial.sql');
     expect(sqlFiles[1]).toMatch(/^\d{14}_backfill_users\.sql$/);
 
-    const updatedJournal = JSON.parse(readFileSync(journalPath, 'utf-8'));
+    const updatedJournal = JSON.parse(readFileSync(journalPath, 'utf8'));
     expect(updatedJournal.entries).toHaveLength(2);
     expect(updatedJournal.entries[0]).toEqual(journal.entries[0]);
     expect(updatedJournal.entries[1].tag).toMatch(/_backfill_users$/);
@@ -807,7 +807,7 @@ describe('gen migration', () => {
     expect(snapshotFiles).toHaveLength(2);
     const newSnapshot = snapshotFiles.find((f) => f !== '20200101000000_snapshot.json')!;
     expect(
-      JSON.parse(readFileSync(join(migrationsDir, 'meta', newSnapshot), 'utf-8')).tables,
+      JSON.parse(readFileSync(join(migrationsDir, 'meta', newSnapshot), 'utf8')).tables,
     ).toEqual({ fresh: { name: 'fresh' } });
   });
 
@@ -838,7 +838,7 @@ describe('gen migration', () => {
     expect(errors).toContain('_journal.json');
     expect(findGenerateCall()).toBeUndefined();
     expect(listSql(migrationsDir)).toEqual(['20200101000000_initial.sql']);
-    expect(JSON.parse(readFileSync(journalPath, 'utf-8'))).toEqual(journal);
+    expect(JSON.parse(readFileSync(journalPath, 'utf8'))).toEqual(journal);
   });
 
   it('proceeds when the journal dialect matches the bwf.json dialect (postgresql)', async () => {
@@ -863,7 +863,7 @@ describe('gen migration', () => {
     expect(errors).toContain('mariadb');
     expect(errors).toContain('_journal.json');
     expect(findGenerateCall()).toBeUndefined();
-    expect(JSON.parse(readFileSync(journalPath, 'utf-8'))).toEqual(journal);
+    expect(JSON.parse(readFileSync(journalPath, 'utf8'))).toEqual(journal);
   });
 
   it('refuses when the journal tag has no matching snapshot (even if unrelated snapshots exist)', async () => {
@@ -905,19 +905,19 @@ describe('gen migration', () => {
 
   it('refuses to scaffold a migration when db/migrations/migrations.js exists (bundled mode)', async () => {
     const { migrationsDir, journalPath } = seedJournalBackedProject();
-    const journalBefore = readFileSync(journalPath, 'utf-8');
+    const journalBefore = readFileSync(journalPath, 'utf8');
     writeFileSync(join(migrationsDir, 'migrations.js'), 'export default {};\n');
 
     await expectExit({ subcommand: 'migration', name: 'should_refuse' });
 
     expect(listSql(migrationsDir)).toEqual(['20200101000000_initial.sql']);
-    expect(readFileSync(journalPath, 'utf-8')).toBe(journalBefore);
+    expect(readFileSync(journalPath, 'utf8')).toBe(journalBefore);
   });
 
   it('rolls back any partial artifacts when drizzle-kit fails mid-run', async () => {
     const { migrationsDir, journalPath, snapshotPath } = seedJournalBackedProject();
-    const journalBefore = readFileSync(journalPath, 'utf-8');
-    const snapshotBefore = readFileSync(snapshotPath, 'utf-8');
+    const journalBefore = readFileSync(journalPath, 'utf8');
+    const snapshotBefore = readFileSync(snapshotPath, 'utf8');
     spawnMockState.handler = () => {
       writeFileSync(join(migrationsDir, '99999999_partial.sql'), '');
       writeFileSync(join(migrationsDir, 'meta', '99999999_snapshot.json'), '{}');
@@ -932,8 +932,8 @@ describe('gen migration', () => {
       f.endsWith('_snapshot.json'),
     );
     expect(snapshotFiles).toEqual(['20200101000000_snapshot.json']);
-    expect(readFileSync(journalPath, 'utf-8')).toBe(journalBefore);
-    expect(readFileSync(snapshotPath, 'utf-8')).toBe(snapshotBefore);
+    expect(readFileSync(journalPath, 'utf8')).toBe(journalBefore);
+    expect(readFileSync(snapshotPath, 'utf8')).toBe(snapshotBefore);
   });
 
   // Decision: Under Yarn PnP there's no node_modules, so drizzle-kit needs the PnP loaders to resolve

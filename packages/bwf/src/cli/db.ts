@@ -18,11 +18,11 @@ import {
   getDatabaseCasing,
   getDatabaseDialect,
   resolveBindingNames,
-  type DatabaseCasing,
-  type DatabaseDialect,
 } from '../config.ts';
+import type { DatabaseCasing, DatabaseDialect } from '../config.ts';
 import type { DatabaseProviderAdapter, DatabaseProviderDialect } from '../database-provider.ts';
-import { resolveLocalD1Target, type LocalD1Target } from '../local-d1.ts';
+import { resolveLocalD1Target } from '../local-d1.ts';
+import type { LocalD1Target } from '../local-d1.ts';
 import {
   collectMigrations,
   readJournal,
@@ -220,8 +220,8 @@ export async function runDbCommand(root: string, args: DbArgs): Promise<void> {
 
 export function writeLocalDatabaseUrl(root: string, connectionString: string): void {
   const envPath = join(root, '.env');
-  const original = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
-  const lines = original ? original.replace(/\r\n/g, '\n').split('\n') : [];
+  const original = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+  const lines = original ? original.replaceAll('\r\n', '\n').split('\n') : [];
   const assignment = `DATABASE_URL=${JSON.stringify(connectionString)}`;
   const index = lines.findIndex((line) => /^\s*(?:export\s+)?DATABASE_URL\s*=/.test(line));
   if (index === -1) {
@@ -423,8 +423,8 @@ async function runStatus(root: string, dialect: DatabaseDialect): Promise<void> 
 
   try {
     assertJournalCoherence(migrationsDir, allMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -672,8 +672,8 @@ async function resetDatabase(
   const migrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, migrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
   await confirmReset(root, dialect, yes);
@@ -766,7 +766,7 @@ async function runSeed(
   // Decision: Load the seed before the reset, so a wrong path or a broken module stops the command before any
   // data is dropped. Importing a module runs its code, so ask about the database first.
   const seed = resolveSeedTarget(root, file);
-  const sql = seed.kind === 'sql' ? readFileSync(seed.path, 'utf-8') : undefined;
+  const sql = seed.kind === 'sql' ? readFileSync(seed.path, 'utf8') : undefined;
   await confirmReset(root, dialect, yes);
   const seedFn = sql === undefined ? await loadSeedFunction(seed.path) : undefined;
 
@@ -821,7 +821,7 @@ function isSafeStatement(sql: string): boolean {
   if (sql.replace(/;\s*$/, '').includes(';')) {
     return false;
   }
-  const decommented = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+  const decommented = sql.replaceAll(/\/\*[\s\S]*?\*\//g, ' ').replaceAll(/--[^\n]*/g, ' ');
   const stripped = decommented.replace(/;\s*$/, '');
   if (/^\s*SELECT\b/i.test(stripped)) {
     return true;
@@ -869,14 +869,14 @@ async function fetchRemoteDatabaseUrl(client: PlatformClient, projectId: string)
   try {
     const result = await client.getDatabaseUrl(projectId);
     return result.url;
-  } catch (err) {
-    if (err instanceof PlatformApiError && err.status === 404) {
+  } catch (error) {
+    if (error instanceof PlatformApiError && error.status === 404) {
       log.error(
         "This project's database URL isn't stored on the platform yet. Run `bwf db set-url` once to populate it, then retry.",
       );
       process.exit(1);
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -949,7 +949,7 @@ async function runExecute(
 ): Promise<void> {
   if (remote) {
     const directCloudflare = readDeploymentPlatform(root) === 'cloudflare';
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = file ? readFileSync(resolve(root, file), 'utf8') : command!;
 
     if (directCloudflare) {
       const bulkImport =
@@ -1091,7 +1091,7 @@ async function runExecute(
   }
 
   if (dialect === 'postgresql') {
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = file ? readFileSync(resolve(root, file), 'utf8') : command!;
     await withPgClient(root, async (client) => {
       const result = await client.query(sql);
       if (result.rows && result.rows.length > 0) {
@@ -1103,7 +1103,7 @@ async function runExecute(
   }
 
   if (dialect === 'mysql') {
-    const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+    const sql = file ? readFileSync(resolve(root, file), 'utf8') : command!;
     await withMySqlClient(root, async (client) => {
       const rows = await client.query(sql);
       if (rows.length > 0) {
@@ -1122,7 +1122,7 @@ async function runExecute(
     process.exit(1);
   }
 
-  const sql = file ? readFileSync(resolve(root, file), 'utf-8') : command!;
+  const sql = file ? readFileSync(resolve(root, file), 'utf8') : command!;
 
   const db = await openSqliteDatabase(dbPath);
   try {
@@ -1176,8 +1176,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
 
   try {
     assertJournalCoherence(migrationsDir, rawMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1330,9 +1330,9 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
     try {
       const status = await client.getMigrationStatus(config.projectId, dialect);
       remoteApplied = new Set(status.applied.map((m) => m.name));
-    } catch (err) {
+    } catch (error) {
       log.error(
-        `db: Failed to fetch remote migration status: '${err instanceof Error ? err.message : String(err)}'.`,
+        `db: Failed to fetch remote migration status: '${error instanceof Error ? error.message : String(error)}'.`,
       );
       process.exit(1);
     }
@@ -1346,8 +1346,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
 
     try {
       validateMigrations(pendingMigrations);
-    } catch (err: unknown) {
-      log.error(getErrorMessage(err));
+    } catch (error: unknown) {
+      log.error(getErrorMessage(error));
       process.exit(1);
     }
 
@@ -1385,8 +1385,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       const appliedNames = await readPgAppliedMigrations(client).catch(() => []);
       try {
         validatePendingMigrations(rawMigrations, new Set(appliedNames));
-      } catch (err: unknown) {
-        log.error(getErrorMessage(err));
+      } catch (error: unknown) {
+        log.error(getErrorMessage(error));
         process.exit(1);
       }
 
@@ -1412,8 +1412,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
       const appliedNames = await readMySqlAppliedMigrations(client).catch(() => []);
       try {
         validatePendingMigrations(rawMigrations, new Set(appliedNames));
-      } catch (err: unknown) {
-        log.error(getErrorMessage(err));
+      } catch (error: unknown) {
+        log.error(getErrorMessage(error));
         process.exit(1);
       }
 
@@ -1438,8 +1438,8 @@ async function runMigrate(root: string, dialect: DatabaseDialect, remote?: boole
   try {
     const existingRows = await getAppliedMigrations(dbPath);
     validatePendingMigrations(rawMigrations, new Set(existingRows.map((row) => row.name)));
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1638,8 +1638,8 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
   const currentMigrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, currentMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 
@@ -1771,12 +1771,12 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
       await client.renameMigrations(config.projectId, renames);
       remoteRenamed = true;
       log.info('Remote migration records updated.');
-    } catch (err) {
+    } catch (error) {
       log.error(
         'db: Failed to update remote migration records. No local changes were made.\n' +
           'Fix the connection and run `bwf db rename-migrations` again.',
       );
-      log.error(String(err));
+      log.error(String(error));
       process.exit(1);
     }
   }
@@ -1841,8 +1841,8 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         renamedSnapshots.push({ from: snapshotFrom, to: snapshotTo });
       }
     }
-  } catch (err) {
-    await rollback('db: Failed to rename migration files. All changes have been reverted.', err);
+  } catch (error) {
+    await rollback('db: Failed to rename migration files. All changes have been reverted.', error);
   }
 
   // Decision: Rewrite journal tags before the tracking tables, so a tracking failure also restores it.
@@ -1869,10 +1869,10 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         dialect: current.dialect,
         entries: updatedEntries,
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         `db: Failed to update ${dir}/meta/_journal.json. File renames have been reverted.`,
-        err,
+        error,
       );
     }
   }
@@ -1892,16 +1892,16 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
             await client.query('UPDATE _void_migrations SET name = $1 WHERE name = $2', [to, from]);
           }
           await client.query('COMMIT');
-        } catch (err) {
+        } catch (error) {
           await client.query('ROLLBACK');
-          throw err;
+          throw error;
         }
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         'db: Failed to update PostgreSQL tracking table. File renames have been reverted.\n' +
           'Fix the database connection and run `bwf db rename-migrations` again.',
-        err,
+        error,
       );
     }
   } else if (dialect === 'mysql') {
@@ -1922,17 +1922,17 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
             ]);
           }
           await client.query('COMMIT');
-        } catch (err) {
+        } catch (error) {
           // Decision: A lost connection also rolls back on the server, so report the first error.
           await client.query('ROLLBACK').catch(() => {});
-          throw err;
+          throw error;
         }
       });
-    } catch (err) {
+    } catch (error) {
       await rollback(
         'db: Failed to update MySQL tracking table. File renames have been reverted.\n' +
           'Fix the database connection and run `bwf db rename-migrations` again.',
-        err,
+        error,
       );
     }
   } else {
@@ -1963,11 +1963,11 @@ async function runRenameMigrations(root: string, dialect: DatabaseDialect): Prom
         } finally {
           db.close();
         }
-      } catch (err) {
+      } catch (error) {
         await rollback(
           'db: Failed to update SQLite tracking table. File renames have been reverted.\n' +
             'Fix the database issue and run `bwf db rename-migrations` again.',
-          err,
+          error,
         );
       }
     }
@@ -2009,7 +2009,9 @@ function formatMySqlExportValue(value: unknown): string {
   if (value instanceof Uint8Array) {
     return `X'${Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')}'`;
   }
-  return `'${String(value).replaceAll('\\', '\\\\').replaceAll("'", "''")}'`;
+  return `'${String(value)
+    .replaceAll('\\', String.raw`\\`)
+    .replaceAll("'", "''")}'`;
 }
 
 function formatSqliteExportValue(value: unknown): string {
@@ -2117,7 +2119,7 @@ async function runExport(
               if (typeof value === 'number') {
                 return String(value);
               }
-              return `'${String(value).replace(/'/g, "''")}'`;
+              return `'${String(value).replaceAll("'", "''")}'`;
             });
             parts.push(
               `INSERT INTO ${tableName} (${cols.map(quoteSqlIdentifier).join(', ')})${overriding} VALUES (${vals.join(', ')});`,
@@ -2288,8 +2290,10 @@ async function runExport(
       for (const sequence of sequences) {
         if (tables.includes(sequence.name)) {
           const name = quoteSqlString(sequence.name);
-          parts.push(`DELETE FROM sqlite_sequence WHERE name = ${name};`);
-          parts.push(`INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`);
+          parts.push(
+            `DELETE FROM sqlite_sequence WHERE name = ${name};`,
+            `INSERT INTO sqlite_sequence (name, seq) VALUES (${name}, ${sequence.seq});`,
+          );
         }
       }
     }

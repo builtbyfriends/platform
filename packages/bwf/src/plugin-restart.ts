@@ -250,7 +250,7 @@ export function restartPlugin(): Plugin {
 }
 
 function scriptJson(value: unknown): string {
-  return JSON.stringify(value).replace(
+  return JSON.stringify(value).replaceAll(
     /[<>&\u2028\u2029]/g,
     (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
   );

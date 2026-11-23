@@ -37,8 +37,8 @@ import type {
   Project,
   User,
 } from '../types.ts';
-import { type TerminatedBuild } from './builds.ts';
-import { type Db } from './client.ts';
+import type { TerminatedBuild } from './builds.ts';
+import type { Db } from './client.ts';
 import { invalidateGitHubConnectionAuthorizedBy } from './github.ts';
 
 export async function createProject(db: Db, userId: string, slug: string): Promise<Project> {

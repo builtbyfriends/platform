@@ -29,7 +29,7 @@ const CF_EMAIL_ERROR_CODES: Readonly<Record<number, string>> = {
   2062: 'Email Routing is not enabled on this zone',
   2040: 'already onboarded for Email Sending',
   2036: 'account is not entitled to Email Sending',
-  10105: 'account is not entitled to Email Sending',
+  10_105: 'account is not entitled to Email Sending',
 };
 
 /** The one-time dashboard step printed when the subdomain routing call cannot be made. */
@@ -127,8 +127,8 @@ export function findEmailConfigConflicts(config: Record<string, unknown>): Array
     let owner: string | undefined;
     try {
       owner = findBindingNameOwner(config, field, name);
-    } catch (err) {
-      conflicts.add(`Cloudflare config: ${err instanceof Error ? err.message : String(err)}`);
+    } catch (error) {
+      conflicts.add(`Cloudflare config: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
     if (owner !== undefined) {
@@ -559,8 +559,8 @@ export async function probeMx(
       .sort((a, b) => a.priority - b.priority)
       .map((r) => r.exchange.toLowerCase());
     return { state: mxState(exchanges), exchanges };
-  } catch (err) {
-    if (isNoRecord(err)) {
+  } catch (error) {
+    if (isNoRecord(error)) {
       return { state: 'empty', exchanges: [] };
     }
     return { state: 'unknown', exchanges: [] };
@@ -571,8 +571,8 @@ async function probeTxt(dns: EmailDns, name: string): Promise<'present' | 'absen
   try {
     const records = await dns.resolveTxt(name);
     return records.length > 0 ? 'present' : 'absent';
-  } catch (err) {
-    return isNoRecord(err) ? 'absent' : 'unknown';
+  } catch (error) {
+    return isNoRecord(error) ? 'absent' : 'unknown';
   }
 }
 
@@ -1307,12 +1307,12 @@ export async function fetchWithSessionBearer(
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch (err) {
+  } catch (error) {
     return {
       ok: false,
       status: 0,
       result: null,
-      errors: [{ code: 0, message: scrub(err instanceof Error ? err.message : String(err)) }],
+      errors: [{ code: 0, message: scrub(error instanceof Error ? error.message : String(error)) }],
     };
   }
   let payload: {
@@ -1478,8 +1478,8 @@ export async function applyEmailSetup(
       // itself and lock MX over the apex's live mail, so no call is made.
       lines.push(
         `  ✘ routing   ${pre.domain}: Email Routing is not enabled on ${apex} — a subdomain can only be added to a zone that already routes; bwf never enables routing on the apex from the subdomain path`,
+        `    ${subdomainDashboardFallback(apex, pre.domain)}`,
       );
-      lines.push(`    ${subdomainDashboardFallback(apex, pre.domain)}`);
     } else {
       // Decision: Per the OpenAPI spec, POST …/email/routing/dns { name } enables routing on a subdomain; the
       // `email.routing.enable` operation is apex-only.
@@ -1490,8 +1490,10 @@ export async function applyEmailSetup(
         result.routingReady = true;
         lines.push(`  ✔ routing   ${pre.domain} enabled`);
       } else {
-        lines.push(`  ✘ routing   ${pre.domain}: ${describeFailure(response)}`);
-        lines.push(`    ${subdomainDashboardFallback(apex, pre.domain)}`);
+        lines.push(
+          `  ✘ routing   ${pre.domain}: ${describeFailure(response)}`,
+          `    ${subdomainDashboardFallback(apex, pre.domain)}`,
+        );
       }
     }
   }
@@ -1505,8 +1507,8 @@ export async function applyEmailSetup(
       result.subaddressingReady = true;
       lines.push(`  ✔ routing   subaddressing on for ${apex}`);
     } else {
-      lines.push(`  ✘ routing   subaddressing on ${apex}: ${describeFailure(response)}`);
       lines.push(
+        `  ✘ routing   subaddressing on ${apex}: ${describeFailure(response)}`,
         `    turn it on in the Cloudflare dashboard → ${apex} → Email → Settings → Subaddressing`,
       );
     }

@@ -152,7 +152,9 @@ describe('validateProdEnv — deploy-time schema enforcement', () => {
         'API_URL=http://localhost\n__PLATFORM_PROXY_TOKEN=x\n__PLATFORM_EMAIL_FROM=y\n',
       );
 
-      const error = await validateProdEnv(root, { productionOnly: false }).catch((e: Error) => e);
+      const error = await validateProdEnv(root, { productionOnly: false }).catch(
+        (error_: Error) => error_,
+      );
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toContain(
         '.env defines names reserved for bwf: __PLATFORM_PROXY_TOKEN, __PLATFORM_EMAIL_FROM.',

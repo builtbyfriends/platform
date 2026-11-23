@@ -116,7 +116,7 @@ describe('runLink', () => {
       message:
         'Linking to an existing project. Running `bwf deploy` will overwrite the current deployment of existing-app.void.app. Continue?',
     });
-    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf-8'))).toEqual({
+    expect(JSON.parse(readFileSync(join(root, '.bwf', 'project.json'), 'utf8'))).toEqual({
       applicationDomain: 'void.app',
       platform: 'platform',
       platformUrl: 'https://platform.buildwithfriends.dev',

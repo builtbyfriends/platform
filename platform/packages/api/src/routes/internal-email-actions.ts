@@ -1,14 +1,15 @@
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { hmacVerifyState } from '../auth/hmac.ts';
 import {
   admitEmailAction,
   claimRelayedEmailReceipt,
   completeRelayedEmailReceipt,
-  type EmailReceiptRouteFence,
   EmailAdmissionError,
   recordEmailReceipt,
   transitionEmailRecipients,
 } from '../email/admission.ts';
+import type { EmailReceiptRouteFence } from '../email/admission.ts';
 import type { EmailAdmissionInput } from '../email/admission.ts';
 import type { ApiEnv } from '../env.ts';
 
@@ -66,7 +67,7 @@ app.use('*', async (context, next) => {
   }
   const chunks: Array<Uint8Array> = [];
   let size = 0;
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 5000;
   try {
     for (;;) {
       const remaining = deadline - Date.now();

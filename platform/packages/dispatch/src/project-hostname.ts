@@ -2,8 +2,8 @@ import {
   platformProjectWorkersDevHostname,
   platformWorkersDevAliasKey,
   readPlatformApplication,
-  type PlatformApplicationProject,
 } from '@builtbyfriends/platform';
+import type { PlatformApplicationProject } from '@builtbyfriends/platform';
 import type { Env } from './env.ts';
 import { extractSlug } from './hostname.ts';
 

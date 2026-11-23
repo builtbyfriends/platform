@@ -52,10 +52,10 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -164,7 +164,7 @@ async function getEvents(
     new Request(`https://api.test/rpc/deployments.events`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: targetProject, deploymentId: id, since: since }),
+      body: JSON.stringify({ projectId: targetProject, deploymentId: id, since }),
     }),
     queuedEnv,
   );

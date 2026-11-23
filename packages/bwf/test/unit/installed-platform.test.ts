@@ -72,7 +72,7 @@ describe('assertInstalledBwfMatchesCli', () => {
       {
         encoding: 'utf8',
         env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' },
-        timeout: 10000,
+        timeout: 10_000,
       },
     );
     expect(result.status).toBe(1);

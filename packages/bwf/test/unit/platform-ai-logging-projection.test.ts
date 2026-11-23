@@ -11,8 +11,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-
 import {
   projectPlatformAiLoggingConnection,
   publishInstallationAiLogging,
-  type AiLoggingProjectionKv,
 } from '../../src/cli/platform-ai-logging-projection.ts';
+import type { AiLoggingProjectionKv } from '../../src/cli/platform-ai-logging-projection.ts';
 import type { CloudflareKvBulkEntry } from '../../src/cli/platform-cloudflare.ts';
 import { preparePlatformDatabaseConnection } from '../../src/cli/platform-installer-database.ts';
 import type { QueryConnection } from '../../src/cli/platform-zero-trust-uninstall.ts';
@@ -149,7 +149,7 @@ describe('installer AI logging projection', () => {
       'ai-logging:p-gone-bare': { value: 'off' },
       'ai-logging:p-just-created': {
         value: 'off',
-        metadata: { mode: 'off', at: NOW - AI_LOGGING_ORPHAN_GRACE_MS + 1_000 },
+        metadata: { mode: 'off', at: NOW - AI_LOGGING_ORPHAN_GRACE_MS + 1000 },
       },
       'ai-block:p-plan': { value: '1' },
     });
@@ -171,7 +171,7 @@ describe('installer AI logging projection', () => {
       // Decision: Too young to call an orphan: its create transaction may still commit.
       'ai-logging:p-just-created': {
         value: 'off',
-        metadata: { mode: 'off', at: NOW - AI_LOGGING_ORPHAN_GRACE_MS + 1_000 },
+        metadata: { mode: 'off', at: NOW - AI_LOGGING_ORPHAN_GRACE_MS + 1000 },
       },
       'ai-block:p-plan': { value: '1' },
       // Decision: A project that now inherits leaves a short-lived marker so readback says pending.

@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { PAID_PLANS, verifyStripeSignature, type PaidPlan } from '../billing/stripe.ts';
+import { PAID_PLANS, verifyStripeSignature } from '../billing/stripe.ts';
+import type { PaidPlan } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { changeOperatorUserPlan } from '../operator/tenant-service.ts';
 import { getDefaultPlan } from '../plans.ts';

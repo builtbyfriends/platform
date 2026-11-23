@@ -66,7 +66,9 @@ async function authenticateConnection(
         throw error;
       }
       if (matchingEnv) {
-        throw new Error('connect: BWF_TOKEN is invalid or expired. Replace it before connecting.');
+        throw new Error('connect: BWF_TOKEN is invalid or expired. Replace it before connecting.', {
+          cause: error,
+        });
       }
     }
   }

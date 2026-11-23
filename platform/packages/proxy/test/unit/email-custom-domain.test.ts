@@ -28,7 +28,7 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 async function signHmac(data: string, secret: string): Promise<string> {
@@ -220,7 +220,7 @@ describe('POST /email/send — custom sender domain', () => {
     const stringify = JSON.stringify;
     const stringifySpy = vi.spyOn(JSON, 'stringify').mockImplementation((value: unknown) => {
       if (typeof value === 'object' && value !== null && 'mime_message' in value) {
-        vi.setSystemTime(5_001);
+        vi.setSystemTime(5001);
       }
       return stringify(value);
     });
@@ -234,7 +234,7 @@ describe('POST /email/send — custom sender domain', () => {
           recipients: ['dev@example.com'],
           mimeMessage: 'mime',
         },
-        5_000,
+        5000,
       ),
     ).rejects.toThrow('email sending request timed out');
     stringifySpy.mockRestore();
@@ -358,7 +358,7 @@ describe('POST /email/send — custom sender domain', () => {
       const pending = postSend(env, await sendBody());
       await leaseStarted;
       await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(5000);
       const response = await pending;
 
       expect(response.status).toBe(502);

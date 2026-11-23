@@ -9,7 +9,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { dirname, join, relative } from 'pathslash';
-import { type DatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { PLACEHOLDER_DB_URL, writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
 import { collectMigrations } from '../migrations/collect.ts';
@@ -83,7 +83,7 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
 
     return !snapshotsEqual;
   } catch (error) {
-    throw new Error(formatDeploySchemaDriftCheckError(error));
+    throw new Error(formatDeploySchemaDriftCheckError(error), { cause: error });
   } finally {
     rmSync(driftRoot, { recursive: true, force: true });
     cleanupDeployDriftCheckRoot(root);
@@ -93,7 +93,7 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
 function runDrizzleKitGenerate(root: string, configPath: string): string {
   const result = spawnSync(process.execPath, [drizzleKitBin, 'generate', '--config', configPath], {
     cwd: root,
-    encoding: 'utf-8',
+    encoding: 'utf8',
     // Decision: drizzle-kit runs project code, so it gets no credentials.
     env: buildEnv(),
   });
@@ -210,7 +210,7 @@ function collectSnapshotFiles(
       collectSnapshotFiles(fullPath, root, snapshot);
       continue;
     }
-    snapshot[relative(root, fullPath)] = readFileSync(fullPath, 'utf-8');
+    snapshot[relative(root, fullPath)] = readFileSync(fullPath, 'utf8');
   }
 }
 

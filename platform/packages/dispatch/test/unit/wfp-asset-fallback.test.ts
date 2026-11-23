@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Env } from '../../src/env.ts';
 import app from '../../src/index.ts';
-import { SHARED_CACHE_POLICY_VERSION, markSharedCachePolicy } from '../../src/shared-cache.ts';
+import type { SHARED_CACHE_POLICY_VERSION } from '../../src/shared-cache.ts';
+import { markSharedCachePolicy } from '../../src/shared-cache.ts';
 
 const edgeCacheStore = new Map<string, Response>();
 

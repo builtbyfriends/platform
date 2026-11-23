@@ -8,8 +8,8 @@ import {
   createMockExecutionContext,
   rpcData,
   withLegacyDeploy,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 const origin = 'https://platform.example.com';

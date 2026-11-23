@@ -1,12 +1,8 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { hasStandalonePragma } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
-import {
-  readJournal,
-  stripSqlExt,
-  type DrizzleJournal,
-  type DrizzleJournalEntry,
-} from './collect.ts';
+import { readJournal, stripSqlExt } from './collect.ts';
+import type { DrizzleJournal, DrizzleJournalEntry } from './collect.ts';
 import { DESTRUCTIVE_PRAGMA, getExecutableSql } from './plan.ts';
 
 export type MigrationFile = {
@@ -79,7 +75,7 @@ function hasUnboundedWrite(statement: string): boolean {
 }
 
 export function isDestructive(sql: string): boolean {
-  const executable = getExecutableSql(sql.replace(/\r\n?/g, '\n'));
+  const executable = getExecutableSql(sql.replaceAll(/\r\n?/g, '\n'));
   return splitExecutableStatements(executable).some((statement) => {
     return (
       DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(statement)) ||

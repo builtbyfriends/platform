@@ -1,5 +1,6 @@
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import cloudflare from '@cloudflare/oxlint-config';
 import { defineConfig } from 'vite-plus';
 import { SuiteSequencer } from './test/sequencer.ts';
 
@@ -118,6 +119,7 @@ export default defineConfig({
     ],
   },
   lint: {
+    ...cloudflare,
     categories: {
       correctness: 'off',
     },
@@ -128,6 +130,7 @@ export default defineConfig({
       node: true,
     },
     jsPlugins: [
+      ...(cloudflare.jsPlugins ?? []),
       {
         name: 'vite-plus',
         specifier: 'vite-plus/oxlint-plugin',
@@ -140,13 +143,9 @@ export default defineConfig({
         name: 'bwf',
         specifier: './scripts/lint-plugin.mjs',
       },
-      {
-        name: 'anti-slop',
-        specifier: 'oxlint-anti-slop',
-      },
       'eslint-plugin-react-you-might-not-need-an-effect',
     ],
-    plugins: ['typescript', 'import', 'react', 'unicorn', 'vitest', 'node', 'jsdoc', 'oxc'],
+    plugins: [...new Set([...(cloudflare.plugins ?? []), 'node', 'jsdoc'] as const)],
     ignorePatterns: [
       'eeaao/**',
       '**/node_modules/**',
@@ -164,6 +163,7 @@ export default defineConfig({
       'platform/packages/api/src/admin/fate/client.generated.ts',
     ],
     overrides: [
+      ...(cloudflare.overrides ?? []),
       {
         files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
         rules: {
@@ -232,10 +232,6 @@ export default defineConfig({
       {
         files: ['**/test/**/*.{js,jsx,ts,tsx,mjs,cjs}'],
         rules: {
-          // Decision: Tests reach into mocks and pass loose fixtures.
-          'anti-slop/no-chained-type-assertions': 'off',
-          'anti-slop/no-object-parameters': 'off',
-          'anti-slop/no-narrowing-after-widening': 'off',
           // Decision: Tests derive expected paths independently of production's forward-slash wrapper, including on
           // Windows.
           'no-restricted-imports': [
@@ -261,25 +257,53 @@ export default defineConfig({
           ],
         },
       },
+      {
+        // Decision: Tests call mocks and loose fixtures, cast test doubles and wait with bare promises.
+        files: [
+          '**/test/**',
+          '**/tests/**',
+          '**/e2e/**',
+          '**/__mocks__/**',
+          '**/fixtures/**',
+          '**/*.test.*',
+          '**/*.test-d.*',
+        ],
+        rules: {
+          'no-promise-executor-return': 'off',
+          'quality/no-chained-type-assertions': 'off',
+          'quality/no-known-value-widening': 'off',
+          'quality/no-unknown-returns': 'off',
+          'quality/no-unknown-type-aliases': 'off',
+          'quality/no-unsafe-dictionary-type': 'off',
+          'quality/no-widen-then-assert': 'off',
+          'typescript/no-explicit-any': 'off',
+          'typescript/no-non-null-assertion': 'off',
+          'typescript/no-unsafe-argument': 'off',
+          'typescript/no-unsafe-assignment': 'off',
+          'typescript/no-unsafe-call': 'off',
+          'typescript/no-unsafe-member-access': 'off',
+          'typescript/no-unsafe-return': 'off',
+          'typescript/no-unsafe-type-assertion': 'off',
+          'typescript/unbound-method': 'off',
+          'unicorn/consistent-function-scoping': 'off',
+        },
+      },
     ],
     rules: {
+      ...cloudflare.rules,
       'bwf/no-comments': 'error',
-      // Decision: A rule here that is 'warn' still has older code to work through. It moves to 'error' when that code
-      // is fixed.
-      'anti-slop/no-chained-type-assertions': 'warn',
-      'anti-slop/no-object-parameters': 'error',
-      'anti-slop/no-reduce-accumulator-copy': 'error',
-      'anti-slop/no-meaningless-unknown-aliases': 'error',
-      'anti-slop/no-unsafe-dictionary-values': 'error',
-      'anti-slop/no-narrowing-after-widening': 'error',
+      // Decision: Workers send their logs through console, and the command line tool and scripts print on purpose.
+      'no-console': 'off',
+      // Decision: The error classes here are checked with instanceof, in our code and in the upstream code we merge.
+      '@nkzw/no-instanceof': 'off',
       'react-you-might-not-need-an-effect/no-derived-state': 'error',
       'react-you-might-not-need-an-effect/no-chain-state-updates': 'error',
       'react-you-might-not-need-an-effect/no-event-handler': 'error',
-      'react-you-might-not-need-an-effect/no-adjust-state-on-prop-change': 'warn',
-      'react-you-might-not-need-an-effect/no-reset-all-state-on-prop-change': 'warn',
+      'react-you-might-not-need-an-effect/no-adjust-state-on-prop-change': 'error',
+      'react-you-might-not-need-an-effect/no-reset-all-state-on-prop-change': 'error',
       'react-you-might-not-need-an-effect/no-pass-live-state-to-parent': 'error',
       'react-you-might-not-need-an-effect/no-pass-data-to-parent': 'error',
-      'react-you-might-not-need-an-effect/no-external-store-subscription': 'warn',
+      'react-you-might-not-need-an-effect/no-external-store-subscription': 'error',
       'react-you-might-not-need-an-effect/no-initialize-state': 'error',
       '@typescript-eslint/array-type': [
         'error',
@@ -425,7 +449,7 @@ export default defineConfig({
       'vitest/no-focused-tests': 'error',
     },
     options: {
-      typeAware: false,
+      ...cloudflare.options,
       typeCheck: false,
     },
   },

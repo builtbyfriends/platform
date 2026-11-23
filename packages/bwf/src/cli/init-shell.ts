@@ -13,7 +13,7 @@ export function quoteShellPath(path: string): string {
   if (/^[A-Za-z0-9_@./:-]+$/.test(path)) {
     return path;
   }
-  return process.platform === 'win32' ? `"${path}"` : `'${path.replaceAll("'", "'\\''")}'`;
+  return process.platform === 'win32' ? `"${path}"` : `'${path.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 /** Prefix `command` with a `cd` from the user's shell into `root` when they differ. */

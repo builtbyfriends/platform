@@ -42,5 +42,5 @@ export function platformConnectCommand(apiUrl: string): string {
   // Decision: Keep an explicit protocol when it differs from the CLI's hostname default.
   const address = url.protocol === (local ? 'http:' : 'https:') ? url.host : url.origin;
   // Decision: Quote even unusual but valid URL hostnames so the command is safe to paste into a shell.
-  return `bwf connect '${address.replaceAll("'", "'\\''")}'`;
+  return `bwf connect '${address.replaceAll("'", String.raw`'\''`)}'`;
 }

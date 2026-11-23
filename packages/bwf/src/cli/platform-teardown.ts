@@ -2,13 +2,10 @@ import {
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
   recordInstallationResource,
   recordInstallationStep,
-  type InstallationResource,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
-import {
-  PlatformCloudflareApiError,
-  type PlatformCloudflareClient,
-} from './platform-cloudflare.ts';
+import type { InstallationResource, PlatformInstallationManifest } from '@builtbyfriends/platform';
+import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
+import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { platformTrafficAttachmentWorker } from './platform-traffic.ts';
 import { readPlatformDatabase } from './platform-zero-trust-uninstall.ts';
 
@@ -814,8 +811,8 @@ export async function runPurgeResourcesTeardown(
       }
       try {
         await client.forceDeleteWorker(accountId, resource.name);
-      } catch (forced) {
-        throw cloudflareRefusal(next, `${resource.kind} ${resource.name}`, forced, workerHint);
+      } catch (error_) {
+        throw cloudflareRefusal(next, `${resource.kind} ${resource.name}`, error_, workerHint);
       }
     }
     await markDeleted(resource.key);

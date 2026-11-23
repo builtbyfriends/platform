@@ -196,7 +196,7 @@ describe('email admission payload digest', () => {
     const digest = (raw: Uint8Array) =>
       emailPayloadDigest('direct', 'acme@mail.example.com', ['recipient@example.com'], raw);
 
-    const ideographicSpace = String.fromCodePoint(0x3000);
+    const ideographicSpace = String.fromCodePoint(0x30_00);
 
     const space = await digest(folded(' ', '=_parts_alternative_AAAA'));
     expect(await digest(folded('\t', '=_parts_alternative_BBBB'))).toBe(space);
@@ -255,7 +255,7 @@ describe('email admission service deadline', () => {
                   ],
                 }),
               ),
-            6_000,
+            6000,
           );
         });
       });
@@ -273,7 +273,7 @@ describe('email admission service deadline', () => {
       );
 
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(6000);
       await expect(pending).resolves.toMatchObject({ operationId: 'emailact_1' });
       expect(signal?.aborted).toBe(false);
     } finally {
@@ -301,7 +301,7 @@ describe('email admission service deadline', () => {
                     ],
                   }),
                 ),
-              6_000,
+              6000,
             );
           }),
       );
@@ -314,7 +314,7 @@ describe('email admission service deadline', () => {
       );
 
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(6000);
       await expect(pending).resolves.toMatchObject({
         recipients: [{ state: 'provider_accepted' }],
       });

@@ -179,7 +179,7 @@ export async function getBranchHeadComparisonStatus(
     let token: string;
     try {
       token = await getInstallationToken(env, installationId);
-    } catch (err) {
+    } catch (error) {
       // Decision: Minting the installation token failed (broken App key, GitHub 401/5xx on the access-token POST).
       // Treat it as transient: log the cause, which would otherwise be a silent unhandled rejection, then
       // retry.
@@ -189,7 +189,7 @@ export async function getBranchHeadComparisonStatus(
         baseSha,
         branch,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
       if (attempt < COMPARE_RETRY_ATTEMPTS) {
         await new Promise((r) => setTimeout(r, COMPARE_RETRY_DELAY_MS));
@@ -238,14 +238,14 @@ export async function getBranchHeadComparisonStatus(
         status: res.status,
         body,
       });
-    } catch (err) {
+    } catch (error) {
       logCompareFailure('network-error', {
         installationId,
         repoFullName,
         baseSha,
         branch,
         attempt,
-        err: errInfo(err),
+        err: errInfo(error),
       });
     }
     if (attempt < COMPARE_RETRY_ATTEMPTS) {

@@ -2,18 +2,18 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   parseCloudflareVersionMessage,
   readCloudflareVersionMigrationTag,
-  type CloudflareTriggerConfig,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { CloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
 import {
   createPlatformResourceOwnershipMarker,
   parsePlatformResourceOwnershipMarker,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { assertCleanPlatformWrangler } from './platform-installer-errors.ts';
 import { runPlatformWrangler } from './platform-installer-process.ts';
-import {
-  type PlatformWorkerDeployment,
-  type WorkerInspectionClient,
+import type {
+  PlatformWorkerDeployment,
+  WorkerInspectionClient,
 } from './platform-installer-types.ts';
 
 export class PlatformWorkerOwnershipError extends Error {}

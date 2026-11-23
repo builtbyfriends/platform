@@ -288,10 +288,10 @@ export async function runMigrations(
       let applied: boolean;
       try {
         applied = tx.immediate();
-      } catch (err) {
+      } catch (error) {
         throw new Error(
-          `migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err },
+          `migration ${migration.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         );
       }
       if (applied) {

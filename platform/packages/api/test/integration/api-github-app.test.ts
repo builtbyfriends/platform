@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import { getProjectGitHubInstallation, upsertProjectGitHubInstallation } from '../../src/db.ts';
 import app from '../../src/index.ts';
-import { deriveProxyInternalAuth, type ProxyInternalRoute } from '../../src/proxy-token.ts';
+import { deriveProxyInternalAuth } from '../../src/proxy-token.ts';
+import type { ProxyInternalRoute } from '../../src/proxy-token.ts';
 import {
   clearTables,
   createTestProject,
@@ -10,8 +11,8 @@ import {
   JWT_SECRET,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 vi.mock('../../src/github/installation-token.ts', async (original) => ({
   ...(await original<typeof import('../../src/github/installation-token.ts')>()),

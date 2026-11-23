@@ -14,9 +14,11 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
-  type ResourceOwnership,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResourceKind,
+  PlatformInstallationManifest,
+  ResourceOwnership,
 } from '@builtbyfriends/platform';
 import { note } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -391,7 +393,7 @@ describe('uninstall with project Zero Trust', () => {
         projectZeroTrustUninstallState(zeroTrustSetting(), [
           projectApplications('proj_public', 'platform-example-public-proj_public', null),
         ]),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
 
     expect(error).toBeInstanceOf(Error);
     expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
@@ -440,7 +442,7 @@ describe('uninstall with project Zero Trust', () => {
           }),
           [],
         ),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
     expect(error!.message).toContain(`shared project application: ${wildcardName}`);
     expectNothingChanged(fake);
@@ -456,7 +458,7 @@ describe('uninstall with project Zero Trust', () => {
         projectZeroTrustUninstallState(disabledZeroTrust, [
           projectApplications('proj_skipped', 'platform-example-public-proj_skipped', null),
         ]),
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain(
       'Refusing to uninstall while Platform-managed Access applications from project Zero Trust remain',
     );
@@ -476,7 +478,7 @@ describe('uninstall with project Zero Trust', () => {
         interactive: false,
         ...unlockedProjectZeroTrust,
         readProjectZeroTrust: async () => projectZeroTrustUninstallState(disabledZeroTrust, rows),
-      }).catch((reason: unknown) => reason as Error);
+      }).catch((error: unknown) => error as Error);
     const deleting = {
       ...projectApplications('proj_gone', 'platform-example-public-proj_gone', null),
       project_slug: 'gone-app',
@@ -514,7 +516,7 @@ describe('uninstall with project Zero Trust', () => {
       readProjectZeroTrust: async () => {
         throw new Error('platform: connect ECONNREFUSED');
       },
-    }).catch((reason: unknown) => reason as Error);
+    }).catch((error_: unknown) => error_ as Error);
     expect(error!.message).toContain(
       'Refusing to uninstall because the project Zero Trust state could not be read from the platform database: connect ECONNREFUSED',
     );
@@ -815,7 +817,7 @@ describe('uninstall with project Zero Trust', () => {
         interactive: false,
         ...unlockedProjectZeroTrust,
         readProjectZeroTrust: async () => noUser(),
-      }).catch((reason: unknown) => reason as Error);
+      }).catch((error_: unknown) => error_ as Error);
       expect(error!.message).toContain('Refusing to uninstall while project Zero Trust is enabled');
       expect(error!.message).toContain(
         'No platform user exists yet. Run this command on the computer that installed the platform',

@@ -1,4 +1,5 @@
-import { getUser, type AuthUser } from './auth.ts';
+import { getUser } from './auth.ts';
+import type { AuthUser } from './auth.ts';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import type { CloudContext, CloudEnv } from './handler.ts';
 import {
@@ -162,7 +163,7 @@ const DEFAULT_LIMITS: LiveLimits = {
   maxOperationsPerControlRequest: 100,
   maxQueuedEventsPerConnection: 100,
   maxEncodedEventSize: 64 * 1024,
-  deliveryAttemptTimeoutMs: 1_500,
+  deliveryAttemptTimeoutMs: 1500,
 };
 const MAX_SUBSCRIPTIONS_PER_TOPIC = 256;
 
@@ -596,6 +597,7 @@ function assertJsonSerializable(value: unknown): void {
   } catch (error) {
     throw new Error(
       `live: payload must be JSON-serializable. ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }

@@ -1,12 +1,7 @@
 import type { parseSync } from 'vite';
 import { bindingResolver } from '../shared/ast-bindings.ts';
-import {
-  isAstProgram,
-  isIdentifier,
-  isMemberExpression,
-  type AstNode,
-  type AstProgram,
-} from '../shared/ast.ts';
+import { isAstProgram, isIdentifier, isMemberExpression } from '../shared/ast.ts';
+import type { AstNode, AstProgram } from '../shared/ast.ts';
 import { staticLiteral, unwrapStaticExpression } from '../shared/static-exports.ts';
 
 export const CLIENT_MODULES: ReadonlySet<string> = new Set([

@@ -3,9 +3,9 @@ import {
   createPlatformDeploymentManifest,
   platformDashboardUrl,
   transitionInstallation,
-  type PlatformDeploymentManifest,
   parsePlatformAuthenticationSetup,
 } from '@builtbyfriends/platform';
+import type { PlatformDeploymentManifest } from '@builtbyfriends/platform';
 import type { PlatformRuntimeManifest } from '@builtbyfriends/platform/installer';
 import { ensurePlatformAccessHealthChecks } from './platform-access-health.ts';
 import { verifyInstalledPlatformAccessProtection } from './platform-access-preflight.ts';
@@ -22,11 +22,11 @@ import {
   checkpointAuthenticationResources,
   createPlatformHealthProbeToken,
 } from './platform-installer-secrets.ts';
-import {
-  type PlatformDatabaseLifecycleLock,
-  type PlatformInstallerDependencies,
-  type PlatformInstallRunState,
-  mergePlatformLiveAuthenticationDeployment,
+import { mergePlatformLiveAuthenticationDeployment } from './platform-installer-types.ts';
+import type {
+  PlatformDatabaseLifecycleLock,
+  PlatformInstallerDependencies,
+  PlatformInstallRunState,
 } from './platform-installer-types.ts';
 import {
   readPendingInstallationSecrets,

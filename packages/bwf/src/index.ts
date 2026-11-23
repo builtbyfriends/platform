@@ -1,16 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'pathslash';
 import pc from 'picocolors';
-import { type Plugin } from 'vite';
-import { analyzeApplicationSync, type ApplicationAnalysis } from './application-analysis.ts';
+import type { Plugin } from 'vite';
+import { analyzeApplicationSync } from './application-analysis.ts';
+import type { ApplicationAnalysis } from './application-analysis.ts';
 import { applyBindingOverrides } from './application-features.ts';
 import {
   edgeRulesNeedWorker,
   hasApiRoutes as routeScanHasApiRoutes,
   hasDocumentRoutes as routeScanHasDocumentRoutes,
   resolveAssetRoutingPolicy,
-  type AssetRoutingPolicy,
 } from './asset-routing.ts';
+import type { AssetRoutingPolicy } from './asset-routing.ts';
 import { parseJsoncObject } from './cli/generated-wrangler-config.ts';
 import { mergeRoutingRules } from './cli/headers.ts';
 import { readDeploymentPlatform } from './cli/project.ts';
@@ -36,7 +37,8 @@ import { bwfLog, bwfWarn } from './log.ts';
 import { readBwfDevCredentials, runAiSetupPrompt } from './plugin-ai-setup.ts';
 import { bindingRuntimePlugin } from './plugin-binding-runtime.ts';
 import { createClientStubsPlugin } from './plugin-client-stubs.ts';
-import { cloudflare, type WorkerConfig, type AuxiliaryWorkerConfig } from './plugin-cloudflare.ts';
+import { cloudflare } from './plugin-cloudflare.ts';
+import type { WorkerConfig, AuxiliaryWorkerConfig } from './plugin-cloudflare.ts';
 import {
   afterServerReady,
   warnIfPackageJsonIsNotEsm,
@@ -51,7 +53,8 @@ import { drizzlePlugin } from './plugin-drizzle.ts';
 import { emailDevInboxPlugin } from './plugin-email-dev-inbox.ts';
 import { envClientFoldPlugin } from './plugin-env-client-fold.ts';
 import { envClientGuardPlugin } from './plugin-env-client-guard.ts';
-import { envSchemaPlugin, type EnvSchemaFacts } from './plugin-env-schema.ts';
+import { envSchemaPlugin } from './plugin-env-schema.ts';
+import type { EnvSchemaFacts } from './plugin-env-schema.ts';
 import { DEFAULT_SCAN_DIRS } from './plugin-inference.ts';
 import { migrationPlugin } from './plugin-migration.ts';
 import { restartPlugin } from './plugin-restart.ts';
@@ -69,7 +72,8 @@ import {
   createSandboxSdkResolvePlugin,
 } from './plugin-worker-environment.ts';
 import { assertNoRootSourceConventionConflicts } from './project-paths.ts';
-import { isRouteEnabledForEnvironment, type RouteEnvironment } from './router/parse-filename.ts';
+import { isRouteEnabledForEnvironment } from './router/parse-filename.ts';
+import type { RouteEnvironment } from './router/parse-filename.ts';
 import { isSandboxAttached, resolveSandboxConfig } from './sandbox/config.ts';
 import { CLOUDFLARE_DEPLOY_BUILD_ENV, loadLocalEnv, resolveRemoteMode } from './shared/env.ts';
 
@@ -464,7 +468,7 @@ export function bwfPlugin(options?: {
           return;
         }
         try {
-          const code = readFileSync(path, 'utf-8');
+          const code = readFileSync(path, 'utf8');
           const fileBindings = applyBindingOverrides(
             inferBindingsFromSource(code, path.split('/').pop()!),
             config.inference?.bindings,

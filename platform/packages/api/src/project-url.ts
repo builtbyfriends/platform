@@ -1,8 +1,5 @@
-import {
-  platformProjectHostname,
-  readPlatformApplication,
-  type PlatformApplicationProject,
-} from '@builtbyfriends/platform';
+import { platformProjectHostname, readPlatformApplication } from '@builtbyfriends/platform';
+import type { PlatformApplicationProject } from '@builtbyfriends/platform';
 import type { ApiEnv } from './env.ts';
 
 export function projectUrl(project: PlatformApplicationProject, env: ApiEnv['Bindings']): string {

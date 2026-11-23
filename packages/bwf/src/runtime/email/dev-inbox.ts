@@ -219,10 +219,10 @@ export function dispatchToSinks(message: CapturedMessage): void {
   for (const sink of registry().sinks) {
     try {
       sink(message);
-    } catch (err) {
+    } catch (error) {
       // Decision: Sinks are best-effort observers — never let one break send, but
       // surface the error so a misbehaving sink is noticed.
-      console.warn('[email-dev-inbox] sink error:', err);
+      console.warn('[email-dev-inbox] sink error:', error);
     }
   }
 }

@@ -28,8 +28,8 @@ import {
   parseEmail,
   ParseEmailError,
   replyEmail,
-  type EmailEnvelope,
 } from '../../src/runtime/email/inbound.ts';
+import type { EmailEnvelope } from '../../src/runtime/email/inbound.ts';
 import { MAX_MESSAGE_BYTES, MimeError } from '../../src/runtime/email/mime.ts';
 
 const INVALID_ADDRESS =
@@ -194,7 +194,7 @@ describe('compileEmailPattern', () => {
   it('compiles static + tag', () => {
     expect(compileEmailPattern('support+[ticket]')).toEqual({
       kind: 'static-tag',
-      regexSource: '^support\\+([^+@]+)$',
+      regexSource: String.raw`^support\+([^+@]+)$`,
       paramNames: ['ticket'],
     });
   });
@@ -210,7 +210,7 @@ describe('compileEmailPattern', () => {
   it('compiles dynamic + tag', () => {
     expect(compileEmailPattern('[user]+[tag]')).toEqual({
       kind: 'dynamic-tag',
-      regexSource: '^([^+@]+)\\+([^+@]+)$',
+      regexSource: String.raw`^([^+@]+)\+([^+@]+)$`,
       paramNames: ['user', 'tag'],
     });
   });
@@ -218,7 +218,7 @@ describe('compileEmailPattern', () => {
   it('escapes literal dots', () => {
     expect(compileEmailPattern('alerts.ops')).toEqual({
       kind: 'static',
-      regexSource: '^alerts\\.ops$',
+      regexSource: String.raw`^alerts\.ops$`,
       paramNames: [],
     });
   });
@@ -336,7 +336,7 @@ function buildEmailDispatcher(
   const body = code
     .slice(start, fnEnd + 3)
     .replace('export async function __emailHandler', 'async function __emailHandler')
-    .replace(/\(\) => import\((".*?")\)/g, '() => __modules[$1]');
+    .replaceAll(/\(\) => import\((".*?")\)/g, '() => __modules[$1]');
 
   // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
   return new Function('__modules', `${body}\nreturn __emailHandler;`)(modules) as never;
@@ -355,7 +355,7 @@ describe('generated __emailHandler dispatch (behavioural)', () => {
         filePath: 'support+[ticket].ts',
         pattern: {
           kind: 'dynamic-tag',
-          regexSource: '^support\\+([^+@]+)$',
+          regexSource: String.raw`^support\+([^+@]+)$`,
           paramNames: ['ticket'],
         },
       },
@@ -942,8 +942,8 @@ describe('harness enforces the proxy action bounds, like production', () => {
       }
       try {
         await message.forward('overflow@example.com');
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
     });
     await harness.deliver(DELIVERY);
@@ -964,8 +964,8 @@ describe('harness enforces the proxy action bounds, like production', () => {
         await message.forward('archive@example.com', {
           'X-Trace': 'abc\r\nBcc: leak@evil.test',
         } as unknown as Headers);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
       await message.forward('archive@example.com', {
         'X-Forwarded-By': 'platform-test',
@@ -1542,7 +1542,7 @@ describe('reply threading survives a hostile inbound header', () => {
   const REFERENCES_BUDGET = 8192;
 
   function referencesOf(text: string): string | undefined {
-    const headers = text.split('\r\n\r\n')[0].replace(/\r\n(?=[ \t])/g, '');
+    const headers = text.split('\r\n\r\n')[0].replaceAll(/\r\n(?=[ \t])/g, '');
     return headers
       .split('\r\n')
       .find((line) => line.startsWith('References: '))
@@ -1655,14 +1655,14 @@ describe('reply threading survives a hostile inbound header', () => {
     // Decision: `\x01` or DEL pass a WHATWG `Headers`, but an RFC 5322 section 3.6.4 `msg-id` admits no
     // control: such an id is dropped on its own, without a throw.
     // eslint-disable-next-line no-control-regex -- C0 controls and DEL are the point
-    const rawControl = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+    const rawControl = /[\u0000-\u0008\x0b\u000c\x0e-\u001f\x7f]/;
 
     function headersOf(text: string): string {
       return text.slice(0, text.indexOf('\r\n\r\n'));
     }
 
     it('drops a parent Message-ID carrying one: no In-Reply-To, absent from References, reply still sent', async () => {
-      const parent = '<abc\x01def@remote.dev>';
+      const parent = '<abc\u0001def@remote.dev>';
       const text = await replyText('<r1@remote.dev>', parent);
       expect(text).toContain('Subject: Re: hi');
       expect(text).not.toContain('In-Reply-To:');
@@ -1676,7 +1676,9 @@ describe('reply threading survives a hostile inbound header', () => {
 
     it('drops only the id carrying DEL from a References chain; the rest and the parent stay in order', async () => {
       for (const separator of [' ', '\t']) {
-        const chain = ['<r1@remote.dev>', '<r\x7f2@remote.dev>', '<r3@remote.dev>'].join(separator);
+        const chain = ['<r1@remote.dev>', '<r\u007f2@remote.dev>', '<r3@remote.dev>'].join(
+          separator,
+        );
         const text = await replyText(chain);
         expect(text).toContain(`In-Reply-To: ${MESSAGE_ID}\r\n`);
         expect(referencesOf(text)).toBe(`<r1@remote.dev> <r3@remote.dev> ${MESSAGE_ID}`);
@@ -1819,7 +1821,7 @@ describe('reply subject survives a hostile inbound header', () => {
   // the bound is still repaired, one character over falls back. `\x01` instead of a tab, because
   // `Headers` strips leading and trailing HTTP whitespace and the count has to be exact.
   it('repairs a subject exactly at the bound and falls back one character over', async () => {
-    const atBound = 'a\x01'.repeat(2048);
+    const atBound = 'a\u0001'.repeat(2048);
     const kept = await buildReplyMessage(inbound(atBound), { text: 'thanks', from: FROM });
     expect(kept.subject).toBe(`Re: ${'a '.repeat(2048).trim()}`);
     expect(maxLine(kept)).toBeLessThanOrEqual(998);
@@ -2416,8 +2418,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       }
       try {
         await message.forward('overflow@example.com');
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
     });
     const actions = await dispatchToHandler(makeEnvelope(), handler);
@@ -2447,8 +2449,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       await send(new Uint8Array(secondSize));
       try {
         await send(new Uint8Array(1));
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
     });
     const actions = await dispatchToHandler(makeEnvelope(), handler);
@@ -2492,8 +2494,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       await send(new Uint8Array(2 * 1024 * 1024));
       try {
         await send(raw);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
     });
     const actions = await dispatchToHandler(makeEnvelope(), handler);
@@ -2618,8 +2620,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       let thrown: unknown;
       try {
         await message.forward('archive@example.com', headers as unknown as Headers);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
       expect(thrown).toBeInstanceOf(MimeError);
       expect((thrown as MimeError).code).toBe('MIME_ERROR');
@@ -2673,8 +2675,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       let thrown: unknown;
       try {
         await message.forward('archive@example.com', headers as unknown as Headers);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
       expect(thrown).toBeInstanceOf(MimeError);
       expect((thrown as MimeError).code).toBe('MIME_ERROR');
@@ -2727,7 +2729,7 @@ describe('end-to-end: envelope → handler → action queue', () => {
     // Decision: A reason built from the inbound message can be as large as the message and carry a remote
     // sender's CRLF.
     const { message, getActions } = createMessageProxy(makeEnvelope());
-    message.setReject(`${'x'.repeat(5 * 1024 * 1024)}\r\n\x00`);
+    message.setReject(`${'x'.repeat(5 * 1024 * 1024)}\r\n\u0000`);
     const [action] = getActions();
     expect(action).toEqual({ type: 'reject', reason: 'x'.repeat(1000) });
   });
@@ -2771,8 +2773,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
       let thrown: unknown;
       try {
         await message.forward(to);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
       expect(thrown).toBeInstanceOf(MimeError);
       expect((thrown as MimeError).code).toBe('INVALID_TO');
@@ -2812,8 +2814,8 @@ describe('end-to-end: envelope → handler → action queue', () => {
           ...addrs,
           raw: new TextEncoder().encode('Subject: x\r\n\r\nhi'),
         } as unknown as Parameters<ForwardableEmailMessage['reply']>[0]);
-      } catch (e) {
-        thrown = e;
+      } catch (error) {
+        thrown = error;
       }
       expect(thrown).toBeInstanceOf(MimeError);
       expect((thrown as MimeError).code).toBe(code);

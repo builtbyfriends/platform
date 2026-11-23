@@ -4,8 +4,8 @@ import {
   R2_OBJECT_HEADER,
   serializeR2Conditional,
   serializeR2HttpMetadata,
-  type RemoteR2HttpMetadata,
 } from './r2-conditions.ts';
+import type { RemoteR2HttpMetadata } from './r2-conditions.ts';
 
 /** Object fields from the binding handler or from the proxy's REST fallback. */
 type RemoteR2Object = {
@@ -309,7 +309,7 @@ function makeR2ObjectBody(key: string, res: Response): R2ObjectBody {
       ? (JSON.parse(decodeURIComponent(meta)) as RemoteR2Object)
       : {
           key,
-          size: parseInt(res.headers.get('content-length') ?? '0'),
+          size: Number.parseInt(res.headers.get('content-length') ?? '0'),
           etag: res.headers.get('etag') ?? '',
           lastModified: res.headers.get('last-modified') ?? '',
           contentType: res.headers.get('content-type') ?? 'application/octet-stream',

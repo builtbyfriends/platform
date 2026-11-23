@@ -39,10 +39,9 @@ import {
   setupEnv,
   skipOrphanSweepDelay,
   teardownEnv,
-  type TestEnv,
-  type MockCfApiHandle,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv, MockCfApiHandle } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -96,7 +95,7 @@ beforeEach(async () => {
         return cfSuccess([]);
       }
       return Response.json(
-        { success: false, errors: [{ code: 10007, message: 'script not found' }] },
+        { success: false, errors: [{ code: 10_007, message: 'script not found' }] },
         { status: 404 },
       );
     }

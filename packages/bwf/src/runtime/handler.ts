@@ -12,7 +12,8 @@ import { executeComposedHandler, setHandlerComposition } from './handler-composi
 import { convertReturnValue } from './response.ts';
 import type { TypedRoutes } from './route-url.ts';
 import type { AssetBinding } from './routing-worker.ts';
-import { runValidation, type ValidatorSlots, type HandlerInput } from './validator.ts';
+import { runValidation } from './validator.ts';
+import type { ValidatorSlots, HandlerInput } from './validator.ts';
 
 /**
  * Thrown when `c.rewrite()` is called with a destination whose final path
@@ -316,7 +317,7 @@ export function defineHandler(...args: Array<MiddlewareFn | HandlerFn>): TypedHa
     return args[0] as TypedHandler;
   }
   const middlewares = args.slice(0, -1) as Array<MiddlewareFn>;
-  const handler = args[args.length - 1] as HandlerFn;
+  const handler = args.at(-1) as HandlerFn;
   // Decision: Pages read the recorded composition to render inside the same chain.
   const composed = setHandlerComposition(
     async (c: CloudContext) =>
@@ -417,7 +418,7 @@ function isBwfInternalPath(pathname: string) {
 }
 
 function basicAuthChallenge(realm: string, message: string) {
-  const escapedRealm = realm.replace(/["\\]/g, '\\$&');
+  const escapedRealm = realm.replaceAll(/["\\]/g, String.raw`\$&`);
 
   return new Response(message, {
     status: 401,

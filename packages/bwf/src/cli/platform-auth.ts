@@ -1,9 +1,7 @@
-import { runCloudflareAuthCommand, type CloudflareAuthRunner } from './cloudflare-auth.ts';
-import {
-  PlatformCloudflareApiError,
-  type CloudflareAccount,
-  type PlatformCloudflareClient,
-} from './platform-cloudflare.ts';
+import { runCloudflareAuthCommand } from './cloudflare-auth.ts';
+import type { CloudflareAuthRunner } from './cloudflare-auth.ts';
+import { PlatformCloudflareApiError } from './platform-cloudflare.ts';
+import type { CloudflareAccount, PlatformCloudflareClient } from './platform-cloudflare.ts';
 import { planCreatesZone, planWritesDns } from './platform-plan-writes.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
 
@@ -52,8 +50,8 @@ export async function verifyPlatformCloudflareCredential(
   ) => {
     try {
       await action();
-    } catch (cause) {
-      const status = cause instanceof PlatformCloudflareApiError ? cause.status : null;
+    } catch (error) {
+      const status = error instanceof PlatformCloudflareApiError ? error.status : null;
       if (status === 404 && allowMissing) {
         return;
       }
@@ -67,7 +65,7 @@ export async function verifyPlatformCloudflareCredential(
               : 'Retry the command after Cloudflare connectivity is restored.';
       throw new Error(
         `platform: ${label} is unavailable${status === null ? '' : ` (HTTP ${status})`} using the ${source}. ${detail}`,
-        { cause },
+        { error },
       );
     }
   };

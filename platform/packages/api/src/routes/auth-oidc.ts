@@ -352,8 +352,8 @@ app.post('/github-oidc', async (context) => {
       if (checkRunId) {
         await setBuildCheckRunId(db, build.id, checkRunId);
       }
-    } catch (err) {
-      console.warn('[auth-oidc] best-effort check-run create failed', err);
+    } catch (error) {
+      console.warn('[auth-oidc] best-effort check-run create failed', error);
     }
   }
 

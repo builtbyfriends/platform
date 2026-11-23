@@ -1,10 +1,5 @@
-import {
-  defineRegistry,
-  withProcedureName,
-  type AnalyticsProvider,
-  type AnyProcedure,
-  type Registry,
-} from '@builtbyfriends/realtime';
+import { defineRegistry, withProcedureName } from '@builtbyfriends/realtime';
+import type { AnalyticsProvider, AnyProcedure, Registry } from '@builtbyfriends/realtime';
 import { analyticsEngine, fanOut, posthog } from '@builtbyfriends/realtime-analytics';
 import { rpcHandler } from '@builtbyfriends/realtime-http';
 import type { Hono } from 'hono';

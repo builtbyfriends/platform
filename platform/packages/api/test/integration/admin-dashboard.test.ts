@@ -55,8 +55,8 @@ import {
   createTestDeployment,
   mockCfApi,
   skipOrphanSweepDelay,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { nativeFormSubmission } from './native-form-browser.ts';
 import { createUsageCounterFixture } from './usage-counter-fixture.ts';
 
@@ -780,7 +780,7 @@ function zeroTrustSetting(overrides: Record<string, unknown> = {}) {
     key: 'zeroTrust.configuration',
     value: {
       version: 1,
-      revision: 918273645,
+      revision: 918_273_645,
       enabled: true,
       protectNewProjects: true,
       accountId: 'zero-trust-account',
@@ -2452,8 +2452,8 @@ describe('GET /admin/projects', () => {
     expect(projectLink).toContain('target="_blank"');
     expect(projectLink).toContain('rel="noopener noreferrer"');
     expect(projectLink).toContain('<svg');
-    expect(projectLink?.replace(/<[^>]+>/g, '')).toContain('my-proj.buildwf.dev');
-    expect(projectLink?.replace(/<[^>]+>/g, '')).not.toContain('https://');
+    expect(projectLink?.replaceAll(/<[^>]+>/g, '')).toContain('my-proj.buildwf.dev');
+    expect(projectLink?.replaceAll(/<[^>]+>/g, '')).not.toContain('https://');
   });
 
   test('paginates projects', async () => {

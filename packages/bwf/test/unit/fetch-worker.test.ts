@@ -102,7 +102,7 @@ describe('worker fetch runtime behavior', () => {
       }),
     );
 
-    const err = await workerFetch('/api/hello').catch((e: Error) => e);
+    const err = await workerFetch('/api/hello').catch((error: Error) => error);
     expect(err).toBeInstanceOf(FetchError);
     expect((err as RuntimeFetchError).status).toBe(404);
     expect((err as RuntimeFetchError).statusText).toBe('Not Found');
@@ -262,7 +262,7 @@ function evaluateClient(
   FetchError: typeof RuntimeFetchError;
 } {
   const code = compile('/auth.mjs')
-    .replace(/^(import .*|export \{.*)\n/gm, '')
+    .replaceAll(/^(import .*|export \{.*)\n/gm, '')
     .replaceAll('export ', '');
   return new Function(
     'app',

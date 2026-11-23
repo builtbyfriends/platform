@@ -1,6 +1,8 @@
 import { expectTypeOf } from 'vite-plus/test';
-import { getRoom, type RoomHandle } from '../../src/runtime/ws-room.ts';
-import { defineRoom, type RoomActionContext } from '../../src/runtime/ws.ts';
+import { getRoom } from '../../src/runtime/ws-room.ts';
+import type { RoomHandle } from '../../src/runtime/ws-room.ts';
+import { defineRoom } from '../../src/runtime/ws.ts';
+import type { RoomActionContext } from '../../src/runtime/ws.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
 declare module '@builtbyfriends/bwf/routes' {

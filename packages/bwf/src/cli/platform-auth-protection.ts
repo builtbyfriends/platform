@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import {
   parsePlatformAccessProtection,
   platformProtectionProofMessage,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';

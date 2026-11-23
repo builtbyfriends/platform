@@ -18,7 +18,6 @@ import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
 import {
   TERMINAL_DEPLOYMENT_STATUSES,
-  type Db,
   deleteProjectCascade,
   cleanupJobsForResource,
   enqueueProjectCleanupJobs,
@@ -31,8 +30,8 @@ import {
   getProjectResources,
   getUser,
   terminateBuildsForProject,
-  type ProjectCleanupJobInput,
 } from '../db.ts';
+import type { Db, ProjectCleanupJobInput } from '../db.ts';
 import { drainProjectEmailAdmissions } from '../email/admission.ts';
 import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
 import { requestEmailDomainRemove, runEmailOperation } from '../email/connection-service.ts';
@@ -433,9 +432,8 @@ async function cleanupBestEffortResources(
   // Decision: Clear the cron scheduler DO unconditionally; /clear is idempotent (deleteAll + deleteAlarm). KV
   // `hasCrons` is omitted when false and missing on older entries, and the PG manifest is the
   // authority, so an unconditional clear avoids a stale-KV gate.
-  cleanup.push(cleanupJob(projectId, 'cron', projectId, { projectId }));
-
   cleanup.push(
+    cleanupJob(projectId, 'cron', projectId, { projectId }),
     cleanupJob(projectId, 'routing-key', projectRouteKey(project), {
       key: projectRouteKey(project),
     }),

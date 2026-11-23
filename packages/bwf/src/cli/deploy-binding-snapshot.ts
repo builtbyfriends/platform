@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { readConfigEntryString as readD1EntryString } from '@builtbyfriends/deploy-cloudflare';
 import { dirname, join, resolve } from 'pathslash';
-import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
-import { type BwfConfig } from '../config.ts';
+import { analyzeApplicationSync } from '../application-analysis.ts';
+import type { ApplicationAnalysis } from '../application-analysis.ts';
+import type { BwfConfig } from '../config.ts';
 import {
   resolveSandboxConfig,
   sandboxContainerConfig,
@@ -20,7 +21,7 @@ import {
   hasSandboxSqliteMigration,
   isSandboxAttached,
 } from '../sandbox/config.ts';
-import { type BindingIdentitySnapshot } from './deploy-types.ts';
+import type { BindingIdentitySnapshot } from './deploy-types.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
 import type { DesiredResourceSet, ProvisionDriftEntry } from './provision.ts';
 import {
@@ -354,7 +355,7 @@ export function hashWranglerUploader(
   let entry: string | undefined;
   try {
     const argv = resolveArgv(root);
-    entry = argv[argv.length - 1];
+    entry = argv.at(-1);
   } catch {
     return undefined;
   }

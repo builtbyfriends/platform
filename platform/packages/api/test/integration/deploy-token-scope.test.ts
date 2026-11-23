@@ -25,11 +25,11 @@ import {
   mockCfApi,
   cfSuccess,
   readAllEvents,
-  type TestEnv,
   rpcData,
   rpcRequest,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 

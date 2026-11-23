@@ -8,9 +8,11 @@ import {
   recordInstallationStep,
   setInstallationDesiredState,
   transitionInstallation,
-  type InstallationResource,
-  type InstallationResourceKind,
-  type PlatformInstallationManifest,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResource,
+  InstallationResourceKind,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { confirm, isCancel, log, outro, select } from '@voidzero-dev/vite-plus-prompts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
@@ -56,8 +58,8 @@ import {
   readPlatformProjectZeroTrustState,
   REMOTE_INSTALLATION_MANIFEST_KEY,
   resolveBootstrapGitHubId,
-  type PlatformDatabaseLifecycleLock,
 } from './platform-installer.ts';
+import type { PlatformDatabaseLifecycleLock } from './platform-installer.ts';
 import {
   assertNoninteractivePlatformMutationAcknowledged,
   resolvePlatformInstallDatabaseUrl,
@@ -107,14 +109,13 @@ import {
   purgeResourcesPermissions,
   PURGE_RESOURCES_STEP_PREFIX,
   runPurgeResourcesTeardown,
-  type PurgeResourcesClient,
-  type PurgeResourcesCredential,
 } from './platform-teardown.ts';
+import type { PurgeResourcesClient, PurgeResourcesCredential } from './platform-teardown.ts';
 import {
   assertProjectZeroTrustAllowsUninstall,
   formatZeroTrustApplications,
-  type PlatformProjectZeroTrustState,
 } from './platform-zero-trust-uninstall.ts';
+import type { PlatformProjectZeroTrustState } from './platform-zero-trust-uninstall.ts';
 
 type PlatformManagementClient = Pick<
   PlatformCloudflareClient,
@@ -240,7 +241,9 @@ export function selectAuthoritativePlatformManifest(
 }
 
 function commandArgument(value: string): string {
-  return /^[a-zA-Z0-9_./:@-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+  return /^[a-zA-Z0-9_./:@-]+$/.test(value)
+    ? value
+    : `'${value.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 export function platformLifecycleResumeCommand(

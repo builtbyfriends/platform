@@ -5,8 +5,8 @@ import {
   readConfigEntryString as readD1EntryString,
   readStoredResourceName,
   assertExistingCloudflareConfig,
-  type ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
+import type { ExistingCloudflareWorker } from '@builtbyfriends/deploy-cloudflare';
 import { dirname, resolve } from 'pathslash';
 import {
   deployPointerPath,
@@ -26,7 +26,7 @@ import {
 import { log } from './deploy-helpers.ts';
 import { BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { buildSchemaProbeEnv } from './deploy-transport.ts';
-import { type BindingIdentitySnapshot, type CloudflareDeployDeps } from './deploy-types.ts';
+import type { BindingIdentitySnapshot, CloudflareDeployDeps } from './deploy-types.ts';
 import type {
   EnvSchemaProbeInput,
   EnvSchemaProbeResult,
@@ -41,8 +41,8 @@ import {
   SelfHostFirstDeployError,
   SelfHostSchemaError,
   SelfHostSecretListError,
-  type SelfHostSchemaFacts,
 } from './env-validation.ts';
+import type { SelfHostSchemaFacts } from './env-validation.ts';
 import { readGeneratedWranglerConfigFile } from './generated-wrangler-config.ts';
 import { getErrorMessage } from './output.ts';
 import type { DesiredResourceSet } from './provision.ts';
@@ -71,7 +71,7 @@ async function validateEmittedVarsDefault(
 
 export function resolveGeneratedDeployConfigPathDefault(root: string): string {
   const pointerPath = deployPointerPath(root);
-  const pointer = JSON.parse(readFileSync(pointerPath, 'utf-8')) as { configPath?: unknown };
+  const pointer = JSON.parse(readFileSync(pointerPath, 'utf8')) as { configPath?: unknown };
   if (typeof pointer.configPath !== 'string' || pointer.configPath.length === 0) {
     throw new Error(`Generated Cloudflare deploy pointer ${pointerPath} has no configPath.`);
   }
@@ -164,7 +164,7 @@ export function verifyGeneratedDeployConfig(
   }
   let redirectedPath: string;
   try {
-    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf-8')) as { configPath?: unknown };
+    const parsed = JSON.parse(readFileSync(deployConfigPath, 'utf8')) as { configPath?: unknown };
     if (typeof parsed.configPath !== 'string' || parsed.configPath.length === 0) {
       return { ok: false, reason: `${deployConfigPath} has no "configPath" pointer.` };
     }
@@ -638,7 +638,7 @@ export async function validateCloudflarePostBuildEnv(options: {
   }
   const emittedVars = emitted.vars;
   // Decision: Better Auth's signing secret belongs in the secret store, not in plaintext vars.
-  if (authEnabled && Object.prototype.hasOwnProperty.call(emittedVars, BETTER_AUTH_SECRET_NAME)) {
+  if (authEnabled && Object.hasOwn(emittedVars, BETTER_AUTH_SECRET_NAME)) {
     log.error(
       [
         `deploy: ${BETTER_AUTH_SECRET_NAME} must be stored as a Cloudflare Worker secret, not a plaintext worker var.`,
@@ -671,9 +671,9 @@ export async function validateCloudflarePostBuildEnv(options: {
         { root },
         buildSchemaProbeEnv(accountId, apiBaseUrl),
       );
-    } catch (err) {
+    } catch (error) {
       log.error(
-        `deploy: could not validate the emitted worker vars against the env schema — ${getErrorMessage(err)}`,
+        `deploy: could not validate the emitted worker vars against the env schema — ${getErrorMessage(error)}`,
       );
       return false;
     }
@@ -704,17 +704,17 @@ export async function validateCloudflarePostBuildEnv(options: {
       // Decision: The probe could have rewritten the config's `name`; pin the expected Worker.
       workerName,
     });
-  } catch (err) {
+  } catch (error) {
     if (
-      err instanceof SelfHostFirstDeployError ||
-      err instanceof SelfHostSecretListError ||
-      err instanceof SelfHostEnvValidationError ||
-      err instanceof SelfHostSchemaError
+      error instanceof SelfHostFirstDeployError ||
+      error instanceof SelfHostSecretListError ||
+      error instanceof SelfHostEnvValidationError ||
+      error instanceof SelfHostSchemaError
     ) {
-      log.error(err.message);
+      log.error(error.message);
       return false;
     }
-    throw err;
+    throw error;
   }
 
   return true;

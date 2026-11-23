@@ -13,8 +13,8 @@ import {
   recordInstallationResource,
   recordInstallationStep,
   transitionInstallation,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   getPlatformRuntimeDirectory,
   resolvePlatformRuntime,
@@ -312,7 +312,7 @@ describe('installed platform upgrade', () => {
         'installation',
       ),
     ).toBe(
-      "bwf platform rollback installation --runtime '/tmp/earlier runtime' --from-runtime '/tmp/current'\\''s runtime' --yes",
+      String.raw`bwf platform rollback installation --runtime '/tmp/earlier runtime' --from-runtime '/tmp/current'\''s runtime' --yes`,
     );
   });
   it('replays --runtime-logs in the upgrade resume command', () => {
@@ -1352,7 +1352,7 @@ describe('installed platform upgrade', () => {
       });
       const explicit = await upgrade().then(
         () => null,
-        (failure: unknown) => failure as Error,
+        (error: unknown) => error as Error,
       );
       expect(explicit?.message).toContain(
         'platform: The runtime API token cannot use platform email. Cloudflare denied: Zone → Zone Settings → Edit, Zone → Email Routing Rules → Edit, Account → Email Routing Addresses → Edit (HTTP 403). Check that the token is valid',
@@ -1534,7 +1534,7 @@ describe('installed platform upgrade', () => {
 
       const error = await upgrade().then(
         () => null,
-        (failure: unknown) => failure as Error,
+        (error_: unknown) => error_ as Error,
       );
       expect(error).toBeInstanceOf(Error);
       expect(error?.message).toContain(
@@ -1683,7 +1683,7 @@ describe('installed platform upgrade', () => {
 
         const error = await upgrade().then(
           () => null,
-          (failure: unknown) => failure as Error,
+          (error_: unknown) => error_ as Error,
         );
 
         expect(error?.message).toContain(apiWorker());
@@ -1774,7 +1774,7 @@ describe('installed platform upgrade', () => {
 
         const error = await upgrade().then(
           () => null,
-          (failure: unknown) => failure as Error,
+          (error_: unknown) => error_ as Error,
         );
 
         expect(error?.message).toContain(
@@ -1876,7 +1876,7 @@ describe('installed platform upgrade', () => {
         try {
           return await upgrade({ yes: false }).then(
             () => null,
-            (failure: unknown) => failure as Error,
+            (error: unknown) => error as Error,
           );
         } finally {
           vi.mocked(installPlatform).mockImplementation(installer);

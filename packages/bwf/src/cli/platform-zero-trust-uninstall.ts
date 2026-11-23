@@ -39,7 +39,7 @@ export async function readPlatformDatabase<T>(
       /^platform: /,
       '',
     );
-    throw new Error(refuse(reason));
+    throw new Error(refuse(reason), { cause: error });
   }
 }
 

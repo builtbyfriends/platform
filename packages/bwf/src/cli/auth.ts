@@ -42,7 +42,7 @@ type Config = {
 
 function readConfig(): Config {
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    return JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
   } catch {
     return {};
   }
@@ -405,13 +405,13 @@ export async function awaitBrowserCallback<T>(options: {
       let result: T;
       try {
         result = await finalize(url.searchParams);
-      } catch (err) {
+      } catch (error) {
         if (settled) {
           return;
         }
         res.writeHead(400, { 'Content-Type': 'text/html' });
         res.end(page('Login failed', 'Could not complete login. Please try again.'));
-        fail(err instanceof Error ? err : new Error('auth: Failed to complete login.'));
+        fail(error instanceof Error ? error : new Error('auth: Failed to complete login.'));
         return;
       }
 
@@ -445,8 +445,8 @@ export async function awaitBrowserCallback<T>(options: {
       let authUrl: string;
       try {
         authUrl = await buildAuthUrl(callback);
-      } catch (err) {
-        fail(err instanceof Error ? err : new Error('auth: Failed to build authorize URL.'));
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error('auth: Failed to build authorize URL.'));
         return;
       }
 

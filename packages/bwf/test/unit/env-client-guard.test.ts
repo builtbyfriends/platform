@@ -71,8 +71,8 @@ async function runTransform(
   try {
     await handler.call(ctx, code, id);
     return { threw: false };
-  } catch (err) {
-    return { threw: true, error: err as Error };
+  } catch (error) {
+    return { threw: true, error: error as Error };
   }
 }
 

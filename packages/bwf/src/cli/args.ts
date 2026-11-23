@@ -30,7 +30,9 @@ export function parseDeployArgs(
     if (message.includes('argument missing') || message.includes('argument is ambiguous')) {
       const optionMatch = message.match(/Option '(--[a-z-]+)/);
       if (optionMatch?.[1] === '--platform') {
-        throw new Error("deploy: --platform requires a value ('cloudflare' or 'platform').");
+        throw new Error("deploy: --platform requires a value ('cloudflare' or 'platform').", {
+          cause: error,
+        });
       }
       throw new Error('deploy: --project requires a slug.');
     }

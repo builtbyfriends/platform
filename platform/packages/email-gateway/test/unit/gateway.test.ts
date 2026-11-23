@@ -258,7 +258,7 @@ describe('dedicated email gateway', () => {
         context,
       );
       await started;
-      await vi.advanceTimersByTimeAsync(5_001);
+      await vi.advanceTimersByTimeAsync(5001);
       const timedOut = await pending;
       expect(timedOut.status).toBe(503);
       expect(timedOut.headers.get('cache-control')).toBe('no-store');
@@ -283,7 +283,7 @@ describe('dedicated email gateway', () => {
         }),
         context,
       );
-      await vi.advanceTimersByTimeAsync(5_001);
+      await vi.advanceTimersByTimeAsync(5001);
       expect((await pending).status).toBe(503);
       expect(signal?.aborted).toBe(true);
 
@@ -503,7 +503,7 @@ describe('dedicated email gateway', () => {
         env(() => new Promise<Response>(() => {})),
         context,
       );
-      await vi.advanceTimersByTimeAsync(5_001);
+      await vi.advanceTimersByTimeAsync(5001);
       expect((await pending).status).toBe(503);
     } finally {
       vi.useRealTimers();
@@ -744,7 +744,7 @@ describe('dedicated email gateway', () => {
         context,
       );
       await started;
-      await vi.advanceTimersByTimeAsync(5_001);
+      await vi.advanceTimersByTimeAsync(5001);
       expect((await response).status).toBe(503);
     } finally {
       vi.useRealTimers();

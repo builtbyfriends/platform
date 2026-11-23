@@ -5,15 +5,17 @@ import {
   readWranglerTopLevelString,
 } from '@builtbyfriends/deploy-cloudflare';
 import { basename, join } from 'pathslash';
-import { type ApplicationAnalysis } from '../application-analysis.ts';
+import type { ApplicationAnalysis } from '../application-analysis.ts';
 import { analyzeApplication, completeApplicationAnalysis } from '../application-routing.ts';
 import { MATERIALIZED_CLOUDFLARE_FILE } from '../cloudflare-config.ts';
-import { type DatabaseDialect, type BwfConfig } from '../config.ts';
+import type { DatabaseDialect, BwfConfig } from '../config.ts';
 import { scopedCloudflareQueueName } from '../queues/cloudflare-names.ts';
-import { hasEmailHandlers, type EmailHandlersScan } from '../router/email.ts';
+import { hasEmailHandlers } from '../router/email.ts';
+import type { EmailHandlersScan } from '../router/email.ts';
 import { DEFAULT_PLATFORM_AI_BINDING } from './deploy-binding-snapshot.ts';
-import { type CloudflareAuthSecretFailureReason } from './deploy-types.ts';
-import { isRealD1Id, type DesiredResourceSet, type ProvisionDriftEntry } from './provision.ts';
+import type { CloudflareAuthSecretFailureReason } from './deploy-types.ts';
+import { isRealD1Id } from './provision.ts';
+import type { DesiredResourceSet, ProvisionDriftEntry } from './provision.ts';
 
 /** Human labels for a drifted resource kind, used in guidance messages. */
 export const CLOUDFLARE_RESOURCE_LABELS: Record<ProvisionDriftEntry['kind'], string> = {
@@ -75,11 +77,11 @@ const MAX_WORKER_NAME_LENGTH = 63;
 function toValidWorkerName(raw: string): string {
   const name = raw
     .toLowerCase()
-    .replace(/_/g, '-')
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replaceAll('_', '-')
+    .replaceAll(/[^a-z0-9-]/g, '-')
+    .replaceAll(/^-+|-+$/g, '')
     .slice(0, MAX_WORKER_NAME_LENGTH)
-    .replace(/-+$/g, '');
+    .replaceAll(/-+$/g, '');
   return name.length > 0 ? name : 'my-worker';
 }
 
@@ -94,7 +96,7 @@ function suffixedResourceName(workerName: string, suffix: string): string {
   }
   const base = toValidWorkerName(workerName)
     .slice(0, MAX_WORKER_NAME_LENGTH - suffix.length - 1)
-    .replace(/-+$/g, '');
+    .replaceAll(/-+$/g, '');
   return toValidWorkerName(`${base}-${suffix}`);
 }
 
@@ -105,7 +107,7 @@ function suffixedResourceName(workerName: string, suffix: string): string {
 export function deriveWorkerName(root: string): string {
   let pkgName: string | undefined;
   try {
-    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { name?: unknown };
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { name?: unknown };
     if (typeof pkg.name === 'string' && pkg.name.length > 0) {
       pkgName = pkg.name;
     }

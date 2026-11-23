@@ -12,8 +12,8 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { setGetProjectOverride } from './setup.ts';
 
 // Decision: A JSON deploy keeps running after its response is returned, until the NDJSON body is read. On
@@ -116,7 +116,7 @@ describe('fixture cleanup after an unread deploy stream', () => {
     await locked;
     // Decision: Let the deploy continue once the next cleanup waits on its lock, or after a short bound when the
     // harness finishes the deploy before cleanup.
-    void lockWaitOrTimeout(1_000).then(release);
+    void lockWaitOrTimeout(1000).then(release);
   });
 
   postgres('starts the next test only after that deploy finished', async () => {

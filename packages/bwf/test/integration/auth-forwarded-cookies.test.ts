@@ -4,12 +4,12 @@ import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { getCookieCache } from 'better-auth/cookies';
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vite-plus/test';
-import { getAuth, getSession, getUser, type BwfAuthConfig } from '../../src/runtime/auth.ts';
-import {
-  createBwfAuthRuntime,
-  type BwfAuthRuntimeOptions,
-} from '../../src/runtime/better-auth-shared.ts';
-import { createRoutingRuntime, type RoutingContext } from '../../src/runtime/routing.ts';
+import { getAuth, getSession, getUser } from '../../src/runtime/auth.ts';
+import type { BwfAuthConfig } from '../../src/runtime/auth.ts';
+import { createBwfAuthRuntime } from '../../src/runtime/better-auth-shared.ts';
+import type { BwfAuthRuntimeOptions } from '../../src/runtime/better-auth-shared.ts';
+import { createRoutingRuntime } from '../../src/runtime/routing.ts';
+import type { RoutingContext } from '../../src/runtime/routing.ts';
 
 const env = { BETTER_AUTH_SECRET: 'local-test-secret-with-at-least-32-characters' };
 const origin = 'https://app.test';

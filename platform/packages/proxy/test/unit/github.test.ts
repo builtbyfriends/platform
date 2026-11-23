@@ -19,7 +19,7 @@ async function signAiToken(projectId: string): Promise<string> {
   for (const byte of sig) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 function createEnv(credential: Response | null) {

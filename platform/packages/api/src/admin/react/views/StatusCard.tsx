@@ -1,7 +1,8 @@
 /** @jsxImportSource react */
 
 import { Activity, CircleCheck, CircleHelp, CircleX, Clock } from 'lucide-react';
-import { useSyncExternalStore, type ReactNode } from 'react';
+import { useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import { AdminCard } from './AdminCard.tsx';
 
 const clockListeners = new Set<() => void>();
@@ -16,7 +17,7 @@ function subscribeToClock(listener: () => void) {
       for (const notify of clockListeners) {
         notify();
       }
-    }, 5_000);
+    }, 5000);
   }
   clockListeners.add(listener);
   return () => {

@@ -74,7 +74,7 @@ const registry = (registryGlobal[ENV_REGISTRY_SYMBOL] ??= {
 // is gone.
 let validatedCache = new WeakMap<object, Map<string, unknown>>();
 
-// oxlint-disable-next-line anti-slop/no-object-parameters
+// oxlint-disable-next-line quality/no-object-parameters
 function getValidatedCache(rawEnv: object): Map<string, unknown> {
   let cache = validatedCache.get(rawEnv);
   if (!cache) {

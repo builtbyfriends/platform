@@ -12,11 +12,13 @@ import {
   parsePlatformResourceOwnershipMarker,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
   PLATFORM_R2_OWNERSHIP_MARKER_KEY,
-  type InstallationResource,
-  type InstallationResourceKind,
-  type PlatformAppAccess,
-  type PlatformDeploymentManifest,
-  type PlatformInstallationManifest,
+} from '@builtbyfriends/platform';
+import type {
+  InstallationResource,
+  InstallationResourceKind,
+  PlatformAppAccess,
+  PlatformDeploymentManifest,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { pc } from './output.ts';
 import {

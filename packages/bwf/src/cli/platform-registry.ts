@@ -11,10 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import {
-  parsePlatformInstallationManifest,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import { parsePlatformInstallationManifest } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { join, resolve } from 'pathslash';
 import { writeFileAtomic } from '../shared/atomic-write.ts';
 import { readKeyringPassword, writeKeyringPassword } from './keyring.ts';
@@ -169,6 +167,7 @@ function readRegistry(directory: string): PlatformConnectionRegistry {
     }
     throw new Error(
       `platform: Could not read ${join(directory, 'registry.json')}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }
@@ -185,7 +184,9 @@ function withRegistryLock<T>(directory: string, operation: () => T): T {
     }
     const age = Date.now() - statSync(lockPath).mtimeMs;
     if (age < 10 * 60 * 1000) {
-      throw new Error('platform: Another process is updating the platform registry.');
+      throw new Error('platform: Another process is updating the platform registry.', {
+        cause: error,
+      });
     }
     rmSync(lockPath, { force: true });
     descriptor = openSync(lockPath, 'wx', 0o600);
@@ -248,6 +249,7 @@ export function acquirePlatformLifecycleLock(
       if (!stale) {
         throw new Error(
           `platform: Another lifecycle operation is active for ${installationSlug} in account ${accountId}.`,
+          { cause: error },
         );
       }
       rmSync(lockPath, { force: true });
@@ -431,6 +433,7 @@ export function listInstallationManifests(
       } catch (error) {
         throw new Error(
           `platform: Invalid installation manifest ${path}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         );
       }
     }
@@ -676,6 +679,7 @@ function readRecoveryMaterial(
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw new Error(
         `platform: Could not read encrypted ${kind} material: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   }
@@ -695,6 +699,7 @@ function readRecoveryMaterial(
     }
     throw new Error(
       `platform: Could not migrate legacy ${kind} material: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }

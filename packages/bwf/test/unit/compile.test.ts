@@ -3,11 +3,8 @@ import { compilePattern as sharedCompilePattern, matchPatternCaptures } from '@b
 import { Hono } from 'hono';
 import { parseSync } from 'vite';
 import { describe, expect, it } from 'vite-plus/test';
-import {
-  compileRouteTable,
-  compileWorkerEntry,
-  type CompileOptions,
-} from '../../src/router/compile.ts';
+import { compileRouteTable, compileWorkerEntry } from '../../src/router/compile.ts';
+import type { CompileOptions } from '../../src/router/compile.ts';
 import type { ScanResult } from '../../src/router/scan.ts';
 import { BwfAssetRewriteError } from '../../src/runtime/handler.ts';
 import {
@@ -16,8 +13,8 @@ import {
   createModuleLoader,
   createAssetFallback,
   createAssetNotFound,
-  type RoutingRuntime,
 } from '../../src/runtime/routing.ts';
+import type { RoutingRuntime } from '../../src/runtime/routing.ts';
 
 const testOptions = {
   runtimeEnvPath: '/resolved/platform/runtime/env.mjs',
@@ -171,10 +168,10 @@ function evalCompiledApp(code: string): Hono {
   // Decision: Drop imports and `export` keywords so the module body runs inside `new Function`;
   // a noop `withRuntimeEnv` replaces the imported one.
   const stripped = code
-    .replace(/^import\s+\{[^}]*\}\s+from\s+["'][^"']+["'];?\s*$/gm, '')
-    .replace(/^export\s+default\s+app;?\s*$/gm, '')
-    .replace(/^export\s+(const|async\s+function|function)\s+/gm, '$1 ')
-    .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
+    .replaceAll(/^import\s+\{[^}]*\}\s+from\s+["'][^"']+["'];?\s*$/gm, '')
+    .replaceAll(/^export\s+default\s+app;?\s*$/gm, '')
+    .replaceAll(/^export\s+(const|async\s+function|function)\s+/gm, '$1 ')
+    .replaceAll(/^export\s+\{[^}]*\};?\s*$/gm, '');
 
   const factory = new Function(
     'Hono',
@@ -240,8 +237,8 @@ async function rewriteError(destination: string): Promise<unknown> {
   app.get('/from', (c) => {
     try {
       (c as any).rewrite(destination);
-    } catch (err) {
-      caught = err;
+    } catch (error) {
+      caught = error;
     }
     return c.text('handled', 200);
   });

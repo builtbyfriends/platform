@@ -11,8 +11,8 @@ import {
   readCloudflareVersionMigrationTag,
   assertExistingCloudflareConfig,
   assertCloudflareBindingsPreserved,
-  type ExistingCloudflareWorker,
 } from '../../src/existing.ts';
+import type { ExistingCloudflareWorker } from '../../src/existing.ts';
 import type { CloudflareOperation } from '../../src/operations.ts';
 import { operationFixture } from '../operation-fixture.ts';
 import { apiSecretDraftVersion, bwfSecretDraftVersion } from '../secret-draft-fixture.ts';
@@ -519,7 +519,7 @@ describe('existing Worker preservation', () => {
               status: 1,
               stdout: '',
               stderr: '',
-              errorCode: 10007,
+              errorCode: 10_007,
               failure: 'not-found',
               ...provenance,
             }),

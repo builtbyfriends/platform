@@ -4,8 +4,9 @@ import {
   isSandboxRegistryImage,
 } from '@builtbyfriends/deploy-core';
 import { and, eq, sql as drizzleSql } from 'drizzle-orm';
-import { type Context } from 'hono';
-import { paginatedR2Delete, type AssetManifestEntry } from '../assets.ts';
+import type { Context } from 'hono';
+import { paginatedR2Delete } from '../assets.ts';
+import type { AssetManifestEntry } from '../assets.ts';
 import { verifyOAuthDeployment, OAuthError } from '../auth/oauth.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
 import {
@@ -33,15 +34,16 @@ import {
   recordUploadedDeploymentInput,
   uploadedDeploymentInput,
   uploadedWorkerInputProblem,
-  type DeploymentInput,
 } from '../deployment-execution.ts';
+import type { DeploymentInput } from '../deployment-execution.ts';
 import {
   getSharedEmailRecipientReadiness,
   reconcileSharedEmailRecipient,
 } from '../email/shared-recipient-service.ts';
 import type { ApiEnv } from '../env.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
-import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
+import { createDeployLogger } from '../observability/logger.ts';
+import type { DeployLogger } from '../observability/logger.ts';
 import { resolvePlanLimits } from '../plans.ts';
 import { ProjectAccessDeniedError, projectAccessErrorBody } from '../project-access.ts';
 import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
@@ -49,13 +51,10 @@ import { assertManagedSandboxEntitlement } from '../provisioning/sandbox-control
 import { requestRotationIfReplacingUntrustedCode } from '../proxy-token-rotation.ts';
 import { requireProjectRouteCapability } from '../routes/project-access.ts';
 import { deploymentOperations } from '../schema.ts';
-import {
-  SUPPORTED_MANIFEST_VERSIONS,
-  type DeployManifest,
-  type Deployment,
-  type Project,
-} from '../types.ts';
-import { blobWorkerModule, type WorkerModule } from '../worker-upload.ts';
+import { SUPPORTED_MANIFEST_VERSIONS } from '../types.ts';
+import type { DeployManifest, Deployment, Project } from '../types.ts';
+import { blobWorkerModule } from '../worker-upload.ts';
+import type { WorkerModule } from '../worker-upload.ts';
 import { zeroTrustNotReadyMessage } from '../zero-trust/errors.ts';
 import { resolveProjectZeroTrustRouting } from '../zero-trust/routing.ts';
 import {
@@ -74,10 +73,10 @@ import {
   resolvePersistedDeploymentType,
   databaseTimestampMs,
   CUTOVER_RECOVERY_STALE_MS,
-  type CutoverMarker,
   replayDeploymentCutover,
   clearProjectExternalState,
 } from './recovery.ts';
+import type { CutoverMarker } from './recovery.ts';
 import {
   assertPersistedDeploymentServingAssetsExist,
   StaticAssetDisappearedError,
@@ -91,8 +90,8 @@ import {
   moduleContentType,
   workerFilesError,
   workerInputProblem,
-  type WorkerInput,
 } from './shared.ts';
+import type { WorkerInput } from './shared.ts';
 
 const WORKER_UPLOAD_CLAIMED_MESSAGE =
   'this Worker upload belongs to another deployment; run the deploy again';
@@ -218,7 +217,7 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
     parsedBody = await new Response(limited, {
       headers: { 'Content-Type': 'application/json' },
     }).json();
-  } catch (err) {
+  } catch (error) {
     if (overflowed) {
       return context.json(
         {
@@ -228,7 +227,7 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       );
     }
     return context.json(
-      { error: `invalid JSON body: ${err instanceof Error ? err.message : String(err)}` },
+      { error: `invalid JSON body: ${error instanceof Error ? error.message : String(error)}` },
       400,
     );
   }
@@ -587,11 +586,11 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       let decoded: Uint8Array<ArrayBuffer>;
       try {
         decoded = decodeBase64ToBytes(raw);
-      } catch (err) {
+      } catch (error) {
         return context.json(
           {
             event: 'error',
-            message: `workerFiles entry for ${filePath} is not valid base64: ${err instanceof Error ? err.message : String(err)}`,
+            message: `workerFiles entry for ${filePath} is not valid base64: ${error instanceof Error ? error.message : String(error)}`,
           },
           400,
         );
@@ -1092,28 +1091,28 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
         ...(reconciledMarkerKeys.length > 0 && { reconciledMarkerKeys }),
       } as const;
     });
-  } catch (err) {
-    if (err instanceof ProjectAccessDeniedError) {
-      return context.json(projectAccessErrorBody(err), 403);
+  } catch (error) {
+    if (error instanceof ProjectAccessDeniedError) {
+      return context.json(projectAccessErrorBody(error), 403);
     }
-    if (err instanceof ProjectRequiresNormalizationError) {
-      return context.json({ error: err.code, message: err.message }, 409);
+    if (error instanceof ProjectRequiresNormalizationError) {
+      return context.json({ error: error.code, message: error.message }, 409);
     }
-    if (err instanceof ConcurrentDeployError) {
-      return context.json({ error: 'deploy in progress', deployment: err.deploymentId }, 409);
+    if (error instanceof ConcurrentDeployError) {
+      return context.json({ error: 'deploy in progress', deployment: error.deploymentId }, 409);
     }
     if (
-      err instanceof Error &&
-      (err.message === 'deployment admission closed for platform maintenance' ||
-        err.message === 'deployment idempotency key was reused for different input' ||
-        err.message === WORKER_UPLOAD_CLAIMED_MESSAGE)
+      error instanceof Error &&
+      (error.message === 'deployment admission closed for platform maintenance' ||
+        error.message === 'deployment idempotency key was reused for different input' ||
+        error.message === WORKER_UPLOAD_CLAIMED_MESSAGE)
     ) {
-      return context.json({ error: err.message }, 409);
+      return context.json({ error: error.message }, 409);
     }
-    if (err instanceof Error && err.message === PROJECT_DELETING_ERROR_MESSAGE) {
+    if (error instanceof Error && error.message === PROJECT_DELETING_ERROR_MESSAGE) {
       return context.json({ error: 'project is being deleted' }, 410);
     }
-    throw err;
+    throw error;
   }
   // Decision: Delete only input this request staged itself. A CLI upload's prefix can belong to the operation a
   // retried request matched; that operation or the stale-input sweep removes it.

@@ -1,6 +1,7 @@
 import { DurableObject as CloudflareDurableObject } from 'cloudflare:workers';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
-import { authContext, type AuthState, type AuthUser } from './auth.ts';
+import { authContext } from './auth.ts';
+import type { AuthState, AuthUser } from './auth.ts';
 import type { BwfAuthEnv, BwfAuthRuntimeOptions } from './better-auth-shared.ts';
 import { withRuntimeEnv } from './env.ts';
 import type { CloudEnv } from './handler.ts';

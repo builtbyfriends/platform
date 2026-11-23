@@ -52,7 +52,7 @@ const defaultSpawn: EnvSchemaProbeSpawn = (command, args, options) => {
     cwd: options.cwd,
     env: options.env,
     stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
-    encoding: 'utf-8',
+    encoding: 'utf8',
   });
   const fd3 = result.output?.[RESULT_FD];
   return {
@@ -71,7 +71,7 @@ async function spawnEnvSchemaProbe(
   spawn: EnvSchemaProbeSpawn,
 ): Promise<EnvSchemaProbeRawResult> {
   const childInput: ChildInput = { op, root: input.root };
-  const self = fileURLToPath(import.meta.url);
+  const self = import.meta.filename;
   const result = spawn(process.execPath, [self, PROBE_MARKER, JSON.stringify(childInput)], {
     cwd: input.root,
     env,
@@ -189,12 +189,12 @@ async function runFactsChild(root: string): Promise<void> {
   try {
     const facts = await deriveSelfHostSchemaFacts(root);
     emitResult({ kind: 'ok', facts });
-  } catch (err) {
-    if (err instanceof SelfHostSchemaError) {
-      emitResult({ kind: 'schema-error', reason: err.reason });
+  } catch (error) {
+    if (error instanceof SelfHostSchemaError) {
+      emitResult({ kind: 'schema-error', reason: error.reason });
       return;
     }
-    throw err;
+    throw error;
   }
 }
 
@@ -210,12 +210,12 @@ async function runValidateEmittedChild(root: string): Promise<void> {
   try {
     const invalidKeys = await computeInvalidEmittedKeys(root, emitted.vars);
     emitResult({ kind: 'invalid-keys', invalidKeys });
-  } catch (err) {
-    if (err instanceof SelfHostSchemaError) {
-      emitResult({ kind: 'schema-error', reason: err.reason });
+  } catch (error) {
+    if (error instanceof SelfHostSchemaError) {
+      emitResult({ kind: 'schema-error', reason: error.reason });
       return;
     }
-    throw err;
+    throw error;
   }
 }
 

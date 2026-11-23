@@ -25,9 +25,9 @@ export async function loadUserEnvFile(envFile: string): Promise<void> {
   const url = pathToFileURL(envFile).href + `?t=${Date.now()}-${++loadCounter}`;
   try {
     await import(/* @vite-ignore */ url);
-  } catch (err) {
-    const base = `env: Failed to load '${envFile}': '${(err as Error).message}'.`;
-    const hint = aliasHint(err, 'env.ts');
+  } catch (error) {
+    const base = `env: Failed to load '${envFile}': '${(error as Error).message}'.`;
+    const hint = aliasHint(error, 'env.ts');
     throw new Error(hint ? `${base}\n\n${hint}` : base);
   }
 }

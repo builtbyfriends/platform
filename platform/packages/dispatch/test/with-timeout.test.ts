@@ -26,7 +26,7 @@ describe('withTimeout', () => {
     const original = new Error('boom');
     const p = withTimeout(Promise.reject(original), 1000, 'fast-reject');
 
-    const caught = await p.catch((e: unknown) => e);
+    const caught = await p.catch((error: unknown) => error);
     expect(caught).toBe(original);
     expect(caught).not.toBeInstanceOf(DispatchTimeoutError);
     expect(vi.getTimerCount()).toBe(0);
@@ -36,7 +36,7 @@ describe('withTimeout', () => {
     const neverSettles = new Promise<never>(() => {});
     const p = withTimeout(neverSettles, 1000, 'slow-op');
     // Decision: The handler is attached up front so the later rejection is never unhandled.
-    const caught = p.catch((e: unknown) => e);
+    const caught = p.catch((error: unknown) => error);
 
     await vi.advanceTimersByTimeAsync(1000);
 
@@ -83,7 +83,7 @@ describe('withDelayedHedge', () => {
     }> = {},
   ) => ({
     delayMs: 1000,
-    timeoutMs: 10000,
+    timeoutMs: 10_000,
     label: 'hedged-read',
     ...overrides,
   });
@@ -261,7 +261,7 @@ describe('withDelayedHedge', () => {
     const result = withDelayedHedge(operation, { ...options(), discard });
     const caught = result.catch((error: unknown) => error);
 
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(10_000);
     await expect(caught).resolves.toBeInstanceOf(DispatchTimeoutError);
 
     const lateFirst = { id: 'late-first' };
@@ -278,7 +278,7 @@ describe('withDelayedHedge', () => {
 
 describe('resolveTimeoutMs', () => {
   it('returns the 10s default when the env var is unset', () => {
-    expect(resolveTimeoutMs(undefined)).toBe(10000);
+    expect(resolveTimeoutMs(undefined)).toBe(10_000);
   });
 
   it('parses a valid numeric override', () => {

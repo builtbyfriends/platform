@@ -1,5 +1,6 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from 'better-auth';
+import { betterAuth } from 'better-auth';
+import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
 import { createAuthMiddleware } from 'better-auth/api';
 import type { Context } from 'hono';
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
@@ -8,11 +9,11 @@ import {
   getBwfAuthProviderEnvNames,
   getBwfAuthProviderSettingEnvNames,
   isBwfSocialAuthProvider,
-  type BwfAuthProvider,
-  type BwfSocialAuthProvider,
 } from '../auth/providers.ts';
+import type { BwfAuthProvider, BwfSocialAuthProvider } from '../auth/providers.ts';
 import { SHARED_CACHE_HEADERS, authDependentRequests } from './auth-response.ts';
-import { authContext, type AuthState, type BwfAuthConfig } from './auth.ts';
+import { authContext } from './auth.ts';
+import type { AuthState, BwfAuthConfig } from './auth.ts';
 import { isUnchangedStaticAsset } from './static-asset-marker.ts';
 
 export type BwfAuthDialect = 'sqlite' | 'postgresql' | 'mysql';

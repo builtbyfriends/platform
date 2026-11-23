@@ -1,5 +1,6 @@
 import { count, desc, eq } from 'drizzle-orm';
-import { getPlatformEventsByBatchId, updatePlatformEventStatus, type Db } from '../db.ts';
+import { getPlatformEventsByBatchId, updatePlatformEventStatus } from '../db.ts';
+import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { generateId } from '../id.ts';
 import {
@@ -10,12 +11,8 @@ import {
 import { platformEvents } from '../schema.ts';
 import type { PlatformEvent, User } from '../types.ts';
 import { OperatorError } from './common.ts';
-import {
-  PLATFORM_WORKERS,
-  getScriptName,
-  getWorkerByName,
-  type PlatformEnv,
-} from './platform-workers.ts';
+import { PLATFORM_WORKERS, getScriptName, getWorkerByName } from './platform-workers.ts';
+import type { PlatformEnv } from './platform-workers.ts';
 
 function requireHostedPlatform(env: ApiEnv['Bindings']) {
   if (env.PLATFORM_INSTALLATION_ID) {
@@ -232,17 +229,17 @@ export async function executeWorkerRollbacks(
           target.scriptName,
           target.versionId,
         );
-      } catch (cause) {
+      } catch (error_) {
         status = 'failed';
-        error = toErrorMessage(cause);
+        error = toErrorMessage(error_);
         stopped = true;
       }
     }
     let auditError: string | undefined;
     try {
       await updatePlatformEventStatus(db, event.id, status, error);
-    } catch (cause) {
-      auditError = toErrorMessage(cause);
+    } catch (error_) {
+      auditError = toErrorMessage(error_);
       stopped = true;
     }
     outcomes.push({

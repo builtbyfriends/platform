@@ -23,10 +23,10 @@ import {
   mockCfApi,
   cfSuccess,
   readAllEvents,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -576,8 +576,8 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
 
     const indexBytes = new TextEncoder().encode('<h1>hi</h1>');
     const cssBytes = new TextEncoder().encode('body { color: red }');
-    const indexHash = HASH(0x1010);
-    const cssHash = HASH(0x2020);
+    const indexHash = HASH(0x10_10);
+    const cssHash = HASH(0x20_20);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, indexHash, indexBytes);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, cssHash, cssBytes);
 
@@ -595,10 +595,10 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             assetConfig: { not_found_handling: 'single-page-application' },
           }),
           assetManifest: {
-            '/index.html': { blake3: indexHash, md5: MD5(0x1011), size: indexBytes.byteLength },
+            '/index.html': { blake3: indexHash, md5: MD5(0x10_11), size: indexBytes.byteLength },
             '/assets/style.css': {
               blake3: cssHash,
-              md5: MD5(0x2021),
+              md5: MD5(0x20_21),
               size: cssBytes.byteLength,
             },
           },
@@ -644,10 +644,10 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     mockCfApi();
 
     const indexBytes = new TextEncoder().encode('<h1>kept</h1>');
-    const indexHash = HASH(0x4a4a);
+    const indexHash = HASH(0x4a_4a);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, indexHash, indexBytes);
 
-    const orphanHash = HASH(0xdead);
+    const orphanHash = HASH(0xde_ad);
     const orphanKey = `assets/${project.id}/${orphanHash}`;
     await stageAssetInR2(
       env.STATIC_ASSETS_R2,
@@ -676,7 +676,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             assetConfig: { not_found_handling: 'single-page-application' },
           }),
           assetManifest: {
-            '/index.html': { blake3: indexHash, md5: MD5(0x4a4b), size: indexBytes.byteLength },
+            '/index.html': { blake3: indexHash, md5: MD5(0x4a_4b), size: indexBytes.byteLength },
           },
           source: null,
           commit: null,
@@ -706,7 +706,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
       const project = await createTestProject(env.db, user.id, 'stored-asset-gc');
       mockCfApi();
       const storedId = 'dpl_stored_asset_history';
-      const oldHash = HASH(0x4a50);
+      const oldHash = HASH(0x4a_50);
       const oldKey = `assets/${project.id}/${oldHash}`;
       const bundleKey = `worker-bundles/${project.id}/${storedId}/index.js`;
       await stageAssetInR2(
@@ -769,7 +769,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
           await remove(keys);
         });
       }
-      const newHash = HASH(0x4a51);
+      const newHash = HASH(0x4a_51);
       const bytes = new TextEncoder().encode('current asset');
       await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, newHash, bytes);
       const originalDispatch = env.DISPATCH;
@@ -784,7 +784,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             body: JSON.stringify({
               manifest: v2Manifest({ type: mode }),
               assetManifest: {
-                '/index.html': { blake3: newHash, md5: MD5(0x4a51), size: bytes.length },
+                '/index.html': { blake3: newHash, md5: MD5(0x4a_51), size: bytes.length },
               },
               ...(mode === 'platform'
                 ? { workerFiles: { 'index.js': btoa('export default {};') } }
@@ -816,12 +816,12 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     mockCfApi();
 
     const indexBytes = new TextEncoder().encode('<h1>kept</h1>');
-    const indexHash = HASH(0x4b4b);
+    const indexHash = HASH(0x4b_4b);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, indexHash, indexBytes);
 
     // Decision: MemoryR2Bucket stamps `uploaded = new Date()` on put, so this orphan counts as just uploaded
     // without an override.
-    const recentOrphanHash = HASH(0xbeef);
+    const recentOrphanHash = HASH(0xbe_ef);
     const recentOrphanKey = `assets/${project.id}/${recentOrphanHash}`;
     await stageAssetInR2(
       env.STATIC_ASSETS_R2,
@@ -843,7 +843,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             assetConfig: { not_found_handling: 'single-page-application' },
           }),
           assetManifest: {
-            '/index.html': { blake3: indexHash, md5: MD5(0x4b4c), size: indexBytes.byteLength },
+            '/index.html': { blake3: indexHash, md5: MD5(0x4b_4c), size: indexBytes.byteLength },
           },
           source: null,
           commit: null,
@@ -865,14 +865,14 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     const project = await createTestProject(env.db, user.id, 'jm-static-miss');
     mockCfApi();
 
-    const presentHash = HASH(0xa0a0);
+    const presentHash = HASH(0xa0_a0);
     await stageAssetInR2(
       env.STATIC_ASSETS_R2,
       project.id,
       presentHash,
       new TextEncoder().encode('present'),
     );
-    const missingHash = HASH(0xdead);
+    const missingHash = HASH(0xde_ad);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -884,8 +884,8 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
         body: JSON.stringify({
           manifest: v2Manifest({ type: 'spa' }),
           assetManifest: {
-            '/index.html': { blake3: presentHash, md5: MD5(0xa0a1), size: 7 },
-            '/missing.css': { blake3: missingHash, md5: MD5(0xdeae), size: 12 },
+            '/index.html': { blake3: presentHash, md5: MD5(0xa0_a1), size: 7 },
+            '/missing.css': { blake3: missingHash, md5: MD5(0xde_ae), size: 12 },
           },
           source: null,
           commit: null,
@@ -916,7 +916,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     mockCfApi();
 
     const assetBytes = new TextEncoder().encode('export const helper = 1;');
-    const assetHash = HASH(0xb1b1);
+    const assetHash = HASH(0xb1_b1);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, assetHash, assetBytes);
     await env.STATIC_ASSETS_R2.put(`assets/${assetHash}`, new TextEncoder().encode('legacy bytes'));
     const r2Get = vi.spyOn(env.STATIC_ASSETS_R2, 'get');
@@ -951,7 +951,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             assetManifest: {
               '/static/helper.js': {
                 blake3: assetHash,
-                md5: MD5(0xb1b2),
+                md5: MD5(0xb1_b2),
                 size: assetBytes.byteLength,
               },
             },
@@ -991,7 +991,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     async (hasWorker) => {
       const user = await createTestUser(env.db);
       const project = await createTestProject(env.db, user.id, 'unscoped-r2-reupload');
-      const hash = HASH(0xb1b2);
+      const hash = HASH(0xb1_b2);
       const bytes = new TextEncoder().encode('old unscoped asset');
       await env.STATIC_ASSETS_R2.put(`assets/${hash}`, bytes);
       const liveId = 'dpl_live_unscoped_r2';
@@ -1034,7 +1034,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
           headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             manifest: v2Manifest({ type: hasWorker ? 'platform' : 'spa' }),
-            assetManifest: { '/app.js': { blake3: hash, md5: MD5(0xb1b2), size: bytes.length } },
+            assetManifest: { '/app.js': { blake3: hash, md5: MD5(0xb1_b2), size: bytes.length } },
             ...(hasWorker ? { workerFiles: { 'index.js': btoa('export default {};') } } : {}),
           }),
         }),
@@ -1059,7 +1059,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     mockCfApi();
 
     const indexBytes = new TextEncoder().encode('<h1>same</h1>');
-    const indexHash = HASH(0xc1c1);
+    const indexHash = HASH(0xc1_c1);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, indexHash, indexBytes);
 
     // Decision: The dedupe compares against the full enriched manifest stored on the live deployment row.
@@ -1106,7 +1106,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
           assetManifest: {
             '/index.html': {
               blake3: indexHash,
-              md5: MD5(0xc1c2),
+              md5: MD5(0xc1_c2),
               size: indexBytes.byteLength,
             },
           },
@@ -1133,7 +1133,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     mockCfApi();
 
     const bytes = new TextEncoder().encode('<h1>cancel me</h1>');
-    const indexHash = HASH(0xca01);
+    const indexHash = HASH(0xca_01);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, indexHash, bytes);
 
     // Decision: Patch ROUTING.put to cancel on the slug write, so the cancel lands between the pre-routing
@@ -1176,7 +1176,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
             assetManifest: {
               '/index.html': {
                 blake3: indexHash,
-                md5: MD5(0xca02),
+                md5: MD5(0xca_02),
                 size: bytes.byteLength,
               },
             },
@@ -1426,9 +1426,9 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
 
     // Decision: The prior deploy stored this small asset in KV (no `!` prefix in the serving manifest), as the
     // multipart path does below KV_THRESHOLD. The R2 bucket is empty for this hash on purpose.
-    const kvHash = HASH(0x4101);
+    const kvHash = HASH(0x41_01);
     const kvBytes = new TextEncoder().encode('<h1>kv-prior</h1>');
-    const newR2Hash = HASH(0x4102);
+    const newR2Hash = HASH(0x41_02);
     const newR2Bytes = new TextEncoder().encode('body { color: blue }');
     await env.STATIC_ASSETS.put(
       `assets/${project.id}/${kvHash}`,
@@ -1499,8 +1499,8 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
         body: JSON.stringify({
           manifest: liveManifest,
           assetManifest: {
-            '/index.html': { blake3: kvHash, md5: MD5(0x4103), size: kvBytes.byteLength },
-            '/style.css': { blake3: newR2Hash, md5: MD5(0x4104), size: newR2Bytes.byteLength },
+            '/index.html': { blake3: kvHash, md5: MD5(0x41_03), size: kvBytes.byteLength },
+            '/style.css': { blake3: newR2Hash, md5: MD5(0x41_04), size: newR2Bytes.byteLength },
           },
           preflight: 'true',
         }),
@@ -1638,7 +1638,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     }) as typeof env.STATIC_ASSETS_R2.head;
 
     try {
-      const missingHash = HASH(0x9001);
+      const missingHash = HASH(0x90_01);
       const res = await app.fetch(
         new Request(`http://localhost/projects/${project.id}/deploy`, {
           method: 'POST',
@@ -1649,7 +1649,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
           body: JSON.stringify({
             manifest: v2Manifest({ type: 'spa' }),
             assetManifest: {
-              '/index.html': { blake3: missingHash, md5: MD5(0x9002), size: 5 },
+              '/index.html': { blake3: missingHash, md5: MD5(0x90_02), size: 5 },
             },
             source: null,
             commit: null,
@@ -1700,7 +1700,7 @@ describe('CF asset-upload-session body never carries v2 manifest extras', () => 
     const fetchMock = mockCfApi();
 
     const assetBytes = new TextEncoder().encode('export const x = 1;');
-    const assetHash = HASH(0xfeed);
+    const assetHash = HASH(0xfe_ed);
     await stageAssetInR2(env.STATIC_ASSETS_R2, project.id, assetHash, assetBytes);
 
     const originalDispatch = env.DISPATCH;
@@ -1732,7 +1732,7 @@ describe('CF asset-upload-session body never carries v2 manifest extras', () => 
             assetManifest: {
               '/static/x.js': {
                 blake3: assetHash,
-                md5: MD5(0xfeee),
+                md5: MD5(0xfe_ee),
                 size: assetBytes.byteLength,
               },
             },
@@ -1793,7 +1793,7 @@ describe('direct Worker module upload', () => {
       new Request(`http://localhost/rpc/deploy.workerUploadUrls`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${user.jwt}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: projectId, ...(body as object) }),
+        body: JSON.stringify({ projectId, ...(body as object) }),
       }),
       env,
     );

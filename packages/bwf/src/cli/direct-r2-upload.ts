@@ -104,9 +104,9 @@ export async function uploadAssetsToR2(
           }
           try {
             await uploadOne(items[i], cliLog, fetchImpl);
-          } catch (err) {
+          } catch (error) {
             if (firstError === null) {
-              firstError = err;
+              firstError = error;
             }
             return;
           }
@@ -147,7 +147,7 @@ async function uploadOne(
         body: new Uint8Array(body) as BodyInit,
         headers: item.headers,
       });
-    } catch (err) {
+    } catch (error) {
       // Decision: A network-level error is treated like a 5xx for retries (it's transient by nature), but
       // exhaustion still throws.
       if (attempt < MAX_R2_PUT_RETRIES) {
@@ -156,13 +156,13 @@ async function uploadOne(
           path: item.path,
           attempt: attempt + 1,
           status: 0,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         await sleep(RETRY_BACKOFF_MS[attempt]);
         attempt++;
         continue;
       }
-      cliLog?.error('r2_put_end', err, {
+      cliLog?.error('r2_put_end', error, {
         hash: item.hash,
         path: item.path,
         durationMs: Date.now() - startedAt,
@@ -172,7 +172,7 @@ async function uploadOne(
         0,
         item.hash,
         item.path,
-        err instanceof Error ? err.message : String(err),
+        error instanceof Error ? error.message : String(error),
       );
     }
 

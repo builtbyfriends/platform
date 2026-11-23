@@ -7,7 +7,8 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { describe, it, before, after } from 'node:test';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import {
   resetKitchenSink,
   waitForFreshHeartbeat,
@@ -85,7 +86,7 @@ async function pollForText(page: Page, path: string, text: string, timeoutMs = 3
     if (body?.includes(text)) {
       return;
     }
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(2000);
   }
   throw new Error(`Timed out after ${timeoutMs}ms waiting for "${text}" on ${path}`);
 }

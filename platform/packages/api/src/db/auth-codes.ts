@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { oauthNonces, authCodes } from '../schema.ts';
-import { type Db } from './client.ts';
+import type { Db } from './client.ts';
 
 export async function storeOAuthNonce(db: Db, nonce: string, ttlSeconds: number): Promise<void> {
   await db

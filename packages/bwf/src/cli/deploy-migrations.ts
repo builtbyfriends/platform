@@ -6,7 +6,7 @@ import {
 import { Minimatch } from 'minimatch';
 import { dirname, join, normalize, resolve } from 'pathslash';
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
-import { type DatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { openMigrationValidationDatabase } from '../migrations/sqlite-validation.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
@@ -14,11 +14,11 @@ import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import { hasDeploySchemaDrift, getDeploySchemaDriftMessage } from './deploy-drift.ts';
 import { log } from './deploy-helpers.ts';
 import { CLOUDFLARE_RESOURCE_LABELS } from './deploy-resources.ts';
-import {
-  type RequiredAuthTable,
-  type TableInfoRow,
-  type DeployWranglerRun,
-  type DeployWranglerRunResult,
+import type {
+  RequiredAuthTable,
+  TableInfoRow,
+  DeployWranglerRun,
+  DeployWranglerRunResult,
 } from './deploy-types.ts';
 import { formatCount, getErrorMessage } from './output.ts';
 import type { ProvisionDriftEntry } from './provision.ts';
@@ -39,7 +39,7 @@ export async function assertMigrationsProduceAuthSchema(
   required: Array<RequiredAuthTable>,
 ): Promise<void> {
   const db = await openMigrationValidationDatabase(migrations);
-  const quote = (identifier: string): string => `"${identifier.replace(/"/g, '""')}"`;
+  const quote = (identifier: string): string => `"${identifier.replaceAll('"', '""')}"`;
   // Decision: SQLite matches identifiers case-insensitively, but PRAGMAs echo the declared casing.
   const foldIdentifier = (identifier: string): string => identifier.toLowerCase();
   const sameIdentifier = (a: string, b: string): boolean => foldIdentifier(a) === foldIdentifier(b);
@@ -285,13 +285,13 @@ export async function assertMigrationsProduceAuthSchema(
               `(PRAGMA foreign_key_check)`,
           );
         }
-      } catch (err) {
-        const message = getErrorMessage(err);
+      } catch (error) {
+        const message = getErrorMessage(error);
         const mismatch = /foreign key mismatch\s*-\s*"(.+?)"\s+referencing\s+"(.+?)"/i.exec(
           message,
         );
         if (!mismatch) {
-          throw err;
+          throw error;
         }
         problems.push(
           `table "${mismatch[1]}" has a foreign key referencing "${mismatch[2]}" whose parent ` +
@@ -323,7 +323,7 @@ function readEmittedAuthMigrationSchema(root: string): Array<RequiredAuthTable> 
       `the build did not emit ${schemaPath}, so the generated auth schema could not be read from the build output.`,
     );
   }
-  const content = readFileSync(schemaPath, 'utf-8');
+  const content = readFileSync(schemaPath, 'utf8');
   const marker = 'export const migrationSchema = ';
   const start = content.indexOf(marker);
   if (start === -1) {
@@ -413,7 +413,7 @@ export function assertRemoteMigrationsDeployable(
  */
 function leadingWranglerMigrationNumber(relativePath: string): number {
   const firstSegment = relativePath.split('/')[0] ?? '';
-  return parseInt(firstSegment.split('_')[0] ?? '', 10);
+  return Number.parseInt(firstSegment.split('_')[0] ?? '', 10);
 }
 
 function compareWranglerMigrationSegments(a: string, b: string): number {
@@ -458,7 +458,7 @@ export function resolveWranglerMigrationPattern(
   migrationsDirRaw: string,
 ): { ok: true; pattern: string } | { ok: false; reason: string } {
   const field = readBindingFieldPresence(config, 'd1_databases', binding, 'migrations_pattern');
-  const migrationsDir = normalize(migrationsDirRaw.replace(/\\/g, '/')).replace(/\/$/, '');
+  const migrationsDir = normalize(migrationsDirRaw.replaceAll('\\', '/')).replace(/\/$/, '');
   if (!field.present) {
     return { ok: true, pattern: '*.sql' };
   }
@@ -482,7 +482,7 @@ export function resolveWranglerMigrationPattern(
       reason: `deploy: migrations_pattern for D1 binding ${binding} must be a non-empty string.`,
     };
   }
-  const normalized = normalize(field.value.replace(/\\/g, '/')).replace(/\/$/, '');
+  const normalized = normalize(field.value.replaceAll('\\', '/')).replace(/\/$/, '');
   const prefix = migrationsDir === '.' ? '' : `${migrationsDir}/`;
   if (prefix && !normalized.startsWith(prefix)) {
     return {
@@ -552,9 +552,9 @@ export async function checkWranglerMigrationApplySet(
   }
   const wranglerNames = listWranglerMigrationFiles(absDir, resolvedPattern.pattern);
   const wranglerContent = new Map(
-    wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf-8')]),
+    wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf8')]),
   );
-  const gatedNames = gated.map((m) => m.name.replace(/\\/g, '/'));
+  const gatedNames = gated.map((m) => m.name.replaceAll('\\', '/'));
   const gatedContent = new Map(gatedNames.map((name, i) => [name, gated[i]!.sql]));
 
   const wranglerSet = new Set(wranglerNames);

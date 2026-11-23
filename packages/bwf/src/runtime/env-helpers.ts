@@ -149,8 +149,8 @@ export function json<T = unknown>(): EnvSchema<T> {
   return build<T>((raw) => {
     try {
       return { ok: true, value: JSON.parse(raw) as T };
-    } catch (e) {
-      return { ok: false, message: `Invalid JSON: ${(e as Error).message}` };
+    } catch (error) {
+      return { ok: false, message: `Invalid JSON: ${(error as Error).message}` };
     }
   }, empty());
 }

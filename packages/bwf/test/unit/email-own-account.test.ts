@@ -411,7 +411,7 @@ describe('generated handleEmail on a native ForwardableEmailMessage', () => {
 
     const outcome = await handleEmail(message, {}, {}).then(
       () => 'resolved',
-      (e: unknown) => e,
+      (error: unknown) => error,
     );
 
     expect(calls.forwards).toEqual([]);

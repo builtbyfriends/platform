@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'pathslash';
 
 export function getPackageDir(): string {
-  let dir = join(fileURLToPath(import.meta.url), '..');
+  let dir = join(import.meta.filename, '..');
   for (let i = 0; i < 5; i++) {
     if (existsSync(join(dir, 'package.json'))) {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
       if (pkg.name === '@builtbyfriends/bwf') {
         return dir;
       }
@@ -17,7 +17,7 @@ export function getPackageDir(): string {
 }
 
 export function getOwnVersion(): string {
-  return JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf-8')).version;
+  return JSON.parse(readFileSync(join(getPackageDir(), 'package.json'), 'utf8')).version;
 }
 
 // Decision: Agent configs: the project-local skillsDir and how to detect the agent in the project root.

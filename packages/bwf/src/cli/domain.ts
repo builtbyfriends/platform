@@ -1,6 +1,7 @@
 import { log } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
-import { type DomainStatusResponse, PlatformClient } from './client.ts';
+import { PlatformClient } from './client.ts';
+import type { DomainStatusResponse } from './client.ts';
 import type { DomainArgs } from './domain-args.ts';
 import { printSuccess, note, pc } from './output.ts';
 import { readDeploymentPlatform } from './project.ts';
@@ -235,8 +236,7 @@ async function domainStatus(
 
   if (verbose) {
     // Decision: `Hostname:` is already shown by the rollup above.
-    rollupLines.push('', 'Details:');
-    rollupLines.push(`  Status:      ${status.status}`);
+    rollupLines.push('', 'Details:', `  Status:      ${status.status}`);
     rollupLines.push(`  SSL Status:  ${status.ssl_status}`);
     if (status.ownership_verification) {
       rollupLines.push(`  Ownership:   pending`);

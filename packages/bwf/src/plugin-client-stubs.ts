@@ -1,4 +1,4 @@
-import { type Plugin } from 'vite';
+import type { Plugin } from 'vite';
 
 export function createClientStubsPlugin(): Plugin {
   const STUB_PREFIX = '\0platform-client-stub:';
@@ -61,7 +61,9 @@ export function createClientStubsPlugin(): Plugin {
     '@builtbyfriends/bwf/durable': '',
   };
   const STUB_RESOLVE_FILTER = new RegExp(
-    `^(${Object.keys(SERVER_ONLY_STUBS).join('|').replaceAll('/', '\\/')})$`,
+    `^(${Object.keys(SERVER_ONLY_STUBS)
+      .join('|')
+      .replaceAll('/', String.raw`\/`)})$`,
   );
   // eslint-disable-next-line no-control-regex -- Vite virtual module null-byte prefix
   const STUB_LOAD_FILTER = new RegExp(`^\\0platform-client-stub:`);

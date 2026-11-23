@@ -1,6 +1,6 @@
 import { platformProjectHostnames, readPlatformApplication } from '@builtbyfriends/platform';
 import { and, eq, or, sql as drizzleSql } from 'drizzle-orm';
-import { type Context } from 'hono';
+import type { Context } from 'hono';
 import { findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
   computeAssetHash,
@@ -8,21 +8,17 @@ import {
   deleteWorkerBundle,
   scanProjectAssetOrphanCandidates,
   deleteUnreferencedAssets,
-  type AssetEntry,
-  type AssetManifestEntry,
 } from '../assets.ts';
+import type { AssetEntry, AssetManifestEntry } from '../assets.ts';
 import { activeOAuthApproval } from '../auth/oauth.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
-import {
-  restoreCronScheduler,
-  snapshotCronScheduler,
-  type CronSyncState,
-} from '../cron-scheduler-client.ts';
+import { restoreCronScheduler, snapshotCronScheduler } from '../cron-scheduler-client.ts';
+import type { CronSyncState } from '../cron-scheduler-client.ts';
+import type { createDeployment } from '../db.ts';
 import {
   getProject,
   getUser,
   getDeployment,
-  createDeployment,
   updateDeploymentManifest,
   updateDeploymentStatus,
   updateProjectWebSocketVersion,
@@ -37,25 +33,22 @@ import {
   assertDeploymentExecutionAuthority,
 } from '../deployment-execution.ts';
 import type { ApiEnv } from '../env.ts';
-import { type DeployLogger } from '../observability/logger.ts';
+import type { DeployLogger } from '../observability/logger.ts';
 import { PLAN_CATALOG_SETTING, resolvePlanLimits } from '../plans.ts';
 import { getPlatformSetting } from '../platform-settings.ts';
 import { ensureProjectIngress } from '../project-ingress.ts';
-import {
-  restoreQueueConsumer,
-  snapshotQueueConsumer,
-  type QueueConsumerInfo,
-} from '../provisioning/cloudflare-api.ts';
+import { restoreQueueConsumer, snapshotQueueConsumer } from '../provisioning/cloudflare-api.ts';
+import type { QueueConsumerInfo } from '../provisioning/cloudflare-api.ts';
 import { computeDispatchLimits, resolveRoutingUndo } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { routingSuspensionReason } from '../suspension.ts';
 import { isWithinLimit } from '../tiers.ts';
-import {
-  type DeployManifest,
-  type DeployEvent,
-  type Deployment,
-  type Project,
-  type DeploymentStatus,
+import type {
+  DeployManifest,
+  DeployEvent,
+  Deployment,
+  Project,
+  DeploymentStatus,
 } from '../types.ts';
 import type { WorkerModule } from '../worker-upload.ts';
 import {
@@ -180,9 +173,9 @@ export async function runDeploymentPipeline(input: {
     if (!streamOpen) {
       return;
     }
-    writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((err) => {
+    writer.write(encoder.encode(JSON.stringify(event) + '\n')).catch((error) => {
       streamOpen = false;
-      logger.warn('emit', 'stream_closed', { event: event.event, err: String(err) });
+      logger.warn('emit', 'stream_closed', { event: event.event, err: String(error) });
     });
   };
   const heartbeatOverride = context.env.DEPLOY_HEARTBEAT_INTERVAL_MS;
@@ -1081,9 +1074,9 @@ export async function runDeploymentPipeline(input: {
           finishOrphanSweep,
           deadline: execution?.deadline,
         });
-      } catch (err) {
+      } catch (error) {
         return await recoverFailedDeployment({
-          err,
+          error,
           logger,
           workerName,
           currentStep,
@@ -1120,8 +1113,8 @@ export async function runDeploymentPipeline(input: {
           owner,
         });
       }
-    } catch (err) {
-      logger.error('catch', 'unhandled_pipeline_error', err, { currentPhase: currentStep });
+    } catch (error) {
+      logger.error('catch', 'unhandled_pipeline_error', error, { currentPhase: currentStep });
       emit({
         event: 'error',
         message: 'deploy failed due to an internal error',
@@ -1153,17 +1146,17 @@ export async function runDeploymentPipeline(input: {
             hasManifest: latest.manifest !== null,
           });
         }
-      } catch (err) {
+      } catch (error) {
         logger.warn('placeholder_reap', 'reap_failed', {
           placeholderId: preDeployment.id,
-          err: err instanceof Error ? err.message : String(err),
+          err: error instanceof Error ? error.message : String(error),
         });
       }
       if (input.releaseWorkerInput) {
         // Decision: Do this before the stream closes: closing the response can end the request.
-        await input.releaseWorkerInput().catch((err) =>
+        await input.releaseWorkerInput().catch((error) =>
           logger.warn('worker_input', 'delete_failed', {
-            err: err instanceof Error ? err.message : String(err),
+            err: error instanceof Error ? error.message : String(error),
           }),
         );
       }

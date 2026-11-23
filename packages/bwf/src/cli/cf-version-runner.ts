@@ -2,12 +2,12 @@ import { execFile, spawn } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import {
-  parseCloudflareVersionMessage,
-  type CloudflareCommandResult,
-  type CloudflareCommandRunner,
-  type CloudflareOperation,
-  type CloudflareVersionActivationOptions,
+import { parseCloudflareVersionMessage } from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  CloudflareCommandRunner,
+  CloudflareOperation,
+  CloudflareVersionActivationOptions,
 } from '@builtbyfriends/deploy-cloudflare';
 import { isRecord as record } from '@builtbyfriends/deploy-core';
 import { getWorkerConfigPath, readBuildOutput } from '@cloudflare/build-output-utils';
@@ -20,11 +20,8 @@ import {
 } from './cf-command-values.ts';
 import { migrateBuiltWranglerConfig } from './cf-config-migrate.ts';
 import { getCfCliVersion } from './cf-user-agent.ts';
-import {
-  isSecretBindingType,
-  uploadPinnedCloudflareVersion,
-  type CfCommand,
-} from './cf-version-api.ts';
+import { isSecretBindingType, uploadPinnedCloudflareVersion } from './cf-version-api.ts';
+import type { CfCommand } from './cf-version-api.ts';
 import { publishCloudflareWorkerSettings } from './cf-worker-settings.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import type { WranglerAuthTokenResult } from './deploy-cloudflare-auth.ts';
@@ -298,8 +295,8 @@ export function createCfCommand(options: {
         if (processGroup && child.pid) {
           try {
             process.kill(-child.pid, 'SIGKILL');
-          } catch (cause) {
-            if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') {
+          } catch (error_) {
+            if ((error_ as NodeJS.ErrnoException).code !== 'ESRCH') {
               child.kill('SIGKILL');
             }
           }
@@ -372,7 +369,7 @@ export function createCfCommand(options: {
           args[1] === 'versions' &&
           args[2] === 'create' &&
           (output + '\n' + diagnostic)
-            .replace(/\s+/g, ' ')
+            .replaceAll(/\s+/g, ' ')
             .includes('You cannot upload a new version of a Worker that does not yet exist.');
         resolve({
           status: typeof status === 'number' ? status : 1,
@@ -454,9 +451,9 @@ export function createCfVersionRunner(options: {
     let credential: WranglerAuthTokenResult;
     try {
       credential = await credentials.getToken();
-    } catch (cause) {
+    } catch (error) {
       if (sessionToken === undefined) {
-        throw cause;
+        throw error;
       }
       return { ok: true, token: sessionToken };
     }
@@ -546,8 +543,8 @@ export function createCfVersionRunner(options: {
         data: { versionId: version.id, ...(preview ? { previewUrl: preview } : {}) },
         stderr: '',
       };
-    } catch (cause) {
-      return failed(cause instanceof Error ? cause.message : 'Cloudflare version upload failed.');
+    } catch (error) {
+      return failed(error instanceof Error ? error.message : 'Cloudflare version upload failed.');
     }
   };
 
@@ -560,7 +557,7 @@ export function createCfVersionRunner(options: {
       const body = result.data;
       const deployments = record(body) ? body.deployments : undefined;
       if (Array.isArray(deployments) && deployments.length === 0) {
-        return { ...failed('The Cloudflare Worker has no deployments.'), errorCode: 10007 };
+        return { ...failed('The Cloudflare Worker has no deployments.'), errorCode: 10_007 };
       }
       if (!Array.isArray(deployments) || !record(deployments[0])) {
         return failed('The Cloudflare Worker deployment was not readable.');
@@ -910,9 +907,9 @@ export function createCfVersionRunner(options: {
               logpush: raw.logpush,
               headers: { Authorization: `Bearer ${token}` },
             });
-          } catch (cause) {
+          } catch (error) {
             return failed(
-              cause instanceof Error ? cause.message : 'Cloudflare settings update failed.',
+              error instanceof Error ? error.message : 'Cloudflare settings update failed.',
             );
           }
         }

@@ -215,7 +215,7 @@ interface ReplySenderPin {
 
 /** Check the envelope shape before authoritative admission checks sender ownership. */
 function isPermittedReplySender(from: string, pin: ReplySenderPin): boolean {
-  if (!/^[\x21-\x7e]+$/.test(from)) {
+  if (!/^[\u0021-\u007e]+$/.test(from)) {
     return false;
   }
   const lower = from.toLowerCase();
@@ -294,8 +294,8 @@ export async function routeInbound(
         ? env.DISPATCH.get(workerName, {}, { limits: authoritative.limits })
         : env.DISPATCH.get(workerName)
     ) as Fetcher;
-  } catch (e) {
-    console.error(`[email-router] DISPATCH.get(${sanitize(workerName, 320)}) failed:`, e);
+  } catch (error) {
+    console.error(`[email-router] DISPATCH.get(${sanitize(workerName, 320)}) failed:`, error);
     throw new Error('email worker temporarily unavailable');
   }
 
@@ -313,20 +313,20 @@ export async function routeInbound(
     if (authoritative.addressing === 'custom') {
       envelope.viaDomain = receivedDomain;
     }
-  } catch (e) {
-    if (e instanceof InboundTooLargeError) {
+  } catch (error) {
+    if (error instanceof InboundTooLargeError) {
       message.setReject(`${label}: message too large (max ${MAX_INBOUND_BYTES} bytes)`);
       return;
     }
-    if (e instanceof InboundTooManyHeadersError) {
+    if (error instanceof InboundTooManyHeadersError) {
       message.setReject(`${label}: too many headers (max ${MAX_INBOUND_HEADERS})`);
       return;
     }
-    if (e instanceof InboundHeadersTooLargeError) {
+    if (error instanceof InboundHeadersTooLargeError) {
       message.setReject(`${label}: headers too large (max ${MAX_INBOUND_HEADER_BYTES} bytes)`);
       return;
     }
-    console.error(`[email-router] failed to read message body for ${sanitize(slug, 64)}:`, e);
+    console.error(`[email-router] failed to read message body for ${sanitize(slug, 64)}:`, error);
     message.setReject(`${label}: could not read inbound message body`);
     return;
   }
@@ -354,9 +354,10 @@ export async function routeInbound(
       receiptId,
     });
     actions = result.actions;
-  } catch (e) {
+  } catch (error) {
     await recordEmailReceipt(env, receiptId, projectId, 'handler_failed').catch(() => {});
-    const msg = e instanceof Error ? e.message.slice(0, 320) : describeUntrusted(e, 320);
+    const msg =
+      error instanceof Error ? error.message.slice(0, 320) : describeUntrusted(error, 320);
     console.error(`[email-router] dispatch to ${sanitize(workerName, 320)} failed:`, msg);
     throw new Error('email handler execution unresolved');
   }
@@ -434,9 +435,10 @@ export async function routeRelayed(
       receiptId,
     });
     actions = result.actions;
-  } catch (e) {
+  } catch (error) {
     await recordEmailReceipt(env, receiptId, projectId, 'handler_failed').catch(() => {});
-    const msg = e instanceof Error ? e.message.slice(0, 320) : describeUntrusted(e, 320);
+    const msg =
+      error instanceof Error ? error.message.slice(0, 320) : describeUntrusted(error, 320);
     console.error(`[email-relay] dispatch to ${sanitize(workerName, 320)} failed:`, msg);
     ctx.waitUntil(
       logRecv(env, projectId, relayed.message, [{ type: 'reject', reason: 'dispatch-error' }]),
@@ -596,8 +598,8 @@ async function logRecv(
       byteSize: message.rawSize ?? 0,
       status,
     });
-  } catch (e) {
-    console.error('[email-router] log-recv failed:', e);
+  } catch (error) {
+    console.error('[email-router] log-recv failed:', error);
   }
 }
 
@@ -761,10 +763,10 @@ async function validateActions(
         }
         try {
           headers = new Headers(action.headers);
-        } catch (e) {
+        } catch (error) {
           console.error(
             `[email-router] action list dropped: forward headers invalid:`,
-            e instanceof Error ? sanitize(e.message, 320) : sanitize(String(e), 320),
+            error instanceof Error ? sanitize(error.message, 320) : sanitize(String(error), 320),
           );
           return null;
         }

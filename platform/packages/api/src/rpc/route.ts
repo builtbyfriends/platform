@@ -1,6 +1,7 @@
 import { rpcHandler } from '@builtbyfriends/realtime-http';
 import { mcpHandler } from '@builtbyfriends/realtime-mcp';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ApiEnv } from '../env.ts';
 import { rememberCaller } from './procedure.ts';
 import { registry } from './registry.ts';

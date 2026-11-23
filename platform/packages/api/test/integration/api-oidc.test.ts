@@ -46,8 +46,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 // Decision: Stub the OIDC verifier so the test exercises connection resolution and token minting without a
 // real GitHub JWKS. The stub mirrors jose's audience enforcement: when the route passes an expected
@@ -269,7 +269,7 @@ beforeEach(async () => {
           return new Response('check-run create failed', { status: checkRunCreateStatus });
         }
         checkRunCreateCount += 1;
-        return Response.json({ id: 999000 + checkRunCreateCount });
+        return Response.json({ id: 999_000 + checkRunCreateCount });
       }
       if (url.includes('/compare/')) {
         if (compareSideEffect) {

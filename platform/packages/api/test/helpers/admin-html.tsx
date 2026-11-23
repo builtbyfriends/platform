@@ -3,7 +3,8 @@
 import { Suspense } from 'react';
 import { prerender } from 'react-dom/static';
 import { adminComponents, adminLayoutTree } from '../../src/admin/react/pages.ts';
-import { PageView, SpaContext, type PageObject } from '../../src/admin/react/spa.tsx';
+import { PageView, SpaContext } from '../../src/admin/react/spa.tsx';
+import type { PageObject } from '../../src/admin/react/spa.tsx';
 
 // Decision: For an admin SPA shell, append the markup the browser renders from the embedded page object, so
 // tests can assert on what the admin sees.
