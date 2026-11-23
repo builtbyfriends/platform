@@ -721,6 +721,8 @@ const dispatcher = {
             responseBytes,
             ...(response.status >= 500 && { status: response.status }),
             ...(failureKind && { failureKind }),
+          }).catch((error: unknown) => {
+            console.error(`[usage] dropped a usage event for project ${routing.projectId}:`, error);
           }),
         );
       }
