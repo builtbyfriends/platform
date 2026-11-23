@@ -94,8 +94,8 @@ export async function registerOAuthClient(
   return { client: publicOAuthClient(client!), clientSecret: secret };
 }
 export function publicOAuthClient(client: typeof oauthClients.$inferSelect) {
-  const { secret_hash: _secret, ...value } = client;
-  return value;
+  const { secret_hash: _secret, events_secret: eventsSecret, ...value } = client;
+  return { ...value, events_secret_set: Boolean(eventsSecret) };
 }
 export async function setOAuthPreviewPermission(db: Db, id: string, enabled: boolean) {
   return db.transaction(async (tx) => {

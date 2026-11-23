@@ -610,6 +610,21 @@ export function reusablePolicyReferences(policyIds: ReadonlyArray<string>) {
   return policyIds.map((id, index) => ({ id, precedence: index + 1 }));
 }
 
+/** Lets in people signed in with an address at one of these email domains. */
+export function emailDomainPolicy(
+  name: string,
+  domains: ReadonlyArray<string>,
+): ReadonlyArray<ObjectValue> {
+  return [
+    {
+      name,
+      decision: 'allow',
+      precedence: 1,
+      include: domains.map((domain) => ({ email_domain: { domain } })),
+    },
+  ];
+}
+
 export function bypassPolicy(name: string): ReadonlyArray<ObjectValue> {
   return [
     {

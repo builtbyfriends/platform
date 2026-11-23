@@ -60,6 +60,10 @@ export type ApiEnv = Env & {
     STRIPE_PRICE_SOLO?: string;
     STRIPE_PRICE_PRO?: string;
     STRIPE_LIVE_ENABLED?: string;
+    /** "true" turns on Stripe Tax for Checkout. */
+    STRIPE_AUTOMATIC_TAX?: string;
+    /** "true" shows the promotion code box on subscription Checkout. */
+    STRIPE_PROMOTION_CODES?: string;
     /** Dedicated HMAC shared only with the optional, path-isolated GitHub ingress Worker. */
     GITHUB_WEBHOOK_INGRESS_SECRET?: string;
     GITHUB_APP_SLUG?: string;

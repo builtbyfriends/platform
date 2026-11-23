@@ -12,6 +12,7 @@ import {
   lockNewProjectAiLoggingInputs,
   publishProjectAiLogging,
 } from '../ai-logging.ts';
+import { namedPayer } from '../app-payer.ts';
 import { signJwt, verifyJwt } from '../auth/jwt.ts';
 import { activeOAuthClient, activeOAuthGrant, oauthBearer, OAuthError } from '../auth/oauth.ts';
 import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
@@ -74,11 +75,13 @@ export type PreviewScope = {
 
 export async function createPreview(
   { db, env, grant, user }: PreviewScope,
-  body: { workspace: string },
+  body: { workspace: string; payer?: string },
 ) {
   if (typeof body.workspace !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.workspace)) {
     throw new OAuthError('invalid_request', 'Provide a workspace ID.');
   }
+  const payer = await namedPayer(db, grant, body.payer);
+  const paid = payer === undefined ? {} : { payer_person_id: payer };
   const project = await db.transaction(async (tx) => {
     await lockZeroTrustConfiguration(tx, 'shared');
     await lockNewProjectAiLoggingInputs(tx);
@@ -100,7 +103,7 @@ export async function createPreview(
       }
       const [renewed] = await tx
         .update(projects)
-        .set({ preview_expires_at: expiry(7 * 86400) })
+        .set({ preview_expires_at: expiry(7 * 86400), ...paid })
         .where(eq(projects.id, existing.id))
         .returning();
       return renewed!;
@@ -127,6 +130,7 @@ export async function createPreview(
         preview_client_id: grant.client_id,
         preview_workspace_id: body.workspace,
         preview_expires_at: expiry(7 * 86400),
+        ...paid,
       })
       .where(eq(projects.id, created.id))
       .returning();
@@ -222,6 +226,7 @@ export async function requestPreviewDeployment(
       data: {
         kind: 'preview',
         grantId: grant.id,
+        ...(grant.session.actingPerson ? { actingPerson: grant.session.actingPerson } : {}),
         projectId: project.id,
         checkpoint: body.checkpoint,
         redirectUri: '',

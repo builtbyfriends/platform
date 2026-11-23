@@ -21,6 +21,7 @@ import {
   type UserAiLoggingPublishProgress,
 } from '../ai-logging-plans.ts';
 import { readProjectAiLoggingStatus } from '../ai-logging.ts';
+import { billedAccountPlanId, billedPlanLimits } from '../app-payer.ts';
 import {
   type Db,
   ACTIVE_BUILD_STATUSES,
@@ -44,7 +45,7 @@ import {
 import type { ApiEnv } from '../env.ts';
 import { cancelContainerBuildDos } from '../github/cancel-builds.ts';
 import { generateId } from '../id.ts';
-import { initialPlanDefaultFor, requireAssignablePlan, resolvePlanLimits } from '../plans.ts';
+import { initialPlanDefaultFor, requireAssignablePlan } from '../plans.ts';
 import { teardownProject } from '../provisioning/cleanup.ts';
 import {
   getAccountUsageProjectWindows,
@@ -54,13 +55,14 @@ import {
 } from '../routes/usage.ts';
 import {
   computeDispatchLimits,
+  projectRouteKey,
   sandboxBlockKey,
   setProjectsRoutingSuspension,
-  projectRouteKey,
 } from '../routing.ts';
 import {
   builds,
   deployments,
+  domains,
   githubConnections,
   projectDeployCredentials,
   projectInvitations,
@@ -69,7 +71,14 @@ import {
   projects,
   users,
 } from '../schema.ts';
-import { isAdminSuspended, projectSuspensionKey, routingSuspensionReason } from '../suspension.ts';
+import {
+  isAdminSuspended,
+  projectBackgroundSuspensionReason,
+  projectRoutingSuspensionReason,
+  projectSuspensionKey,
+  REASON_OPERATOR_TAKEDOWN,
+  routingSuspensionReason,
+} from '../suspension.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
 import type { DeployManifest, Project, User } from '../types.ts';
 import {
@@ -125,12 +134,29 @@ export async function listOperatorUsers(db: Db, page: Page, search?: string) {
   return { users: rows, ...pageInfo(page, total.count) };
 }
 
+function searchHostname(search: string): string {
+  return search
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+    .split(/[/?#:]/)[0]!;
+}
+
 export async function listOperatorProjects(db: Db, page: Page, search?: string, user?: string) {
   const pattern = `%${search}%`;
+  const hostname = search ? searchHostname(search) : '';
+  // Decision: A reporter gives an address or a custom domain. A host matches a custom domain exactly, and its
+  // first label matches a slug, so the platform address finds its project too.
   const where = and(
     user ? eq(projects.user_id, user) : undefined,
     search
-      ? or(ilike(projects.slug, pattern), ilike(users.login, pattern), ilike(projects.id, pattern))
+      ? or(
+          ilike(projects.slug, pattern),
+          ilike(users.login, pattern),
+          ilike(projects.id, pattern),
+          sql`EXISTS (SELECT 1 FROM ${domains} WHERE ${domains.project_id} = ${projects.id} AND (${domains.hostname} = ${hostname} OR ${domains.hostname} ILIKE ${pattern}))`,
+          hostname.includes('.') ? eq(projects.slug, hostname.split('.')[0]!) : undefined,
+        )
       : undefined,
   );
   const lastDeploy = db
@@ -434,6 +460,7 @@ async function commitOwnershipTransfer(
   projectId: string,
   targetUserId: string,
   operatorUserId: string,
+  keepFormerOwner = true,
 ): Promise<OwnershipTransferCommit> {
   return db.transaction(async (tx) => {
     const [lockedProject] = await tx
@@ -583,18 +610,20 @@ async function commitOwnershipTransfer(
       .set({ user_id: newOwner.id })
       .where(eq(projects.id, projectId))
       .returning();
-    await tx
-      .insert(projectMembers)
-      .values({
-        project_id: projectId,
-        user_id: currentOwner.id,
-        role: 'admin',
-        added_by_user_id: operatorUserId,
-      })
-      .onConflictDoUpdate({
-        target: [projectMembers.project_id, projectMembers.user_id],
-        set: { role: 'admin', updated_at: sql`now()` },
-      });
+    if (keepFormerOwner) {
+      await tx
+        .insert(projectMembers)
+        .values({
+          project_id: projectId,
+          user_id: currentOwner.id,
+          role: 'admin',
+          added_by_user_id: operatorUserId,
+        })
+        .onConflictDoUpdate({
+          target: [projectMembers.project_id, projectMembers.user_id],
+          set: { role: 'admin', updated_at: sql`now()` },
+        });
+    }
     return {
       project: updatedProject!,
       previousOwner: currentOwner,
@@ -684,7 +713,7 @@ async function republishProjectOwnerState(
       manifest = JSON.parse(activeDeployment.manifest) as DeployManifest;
     }
     const dispatchLimits = computeDispatchLimits(
-      await resolvePlanLimits(tx, owner.plan),
+      await billedPlanLimits(tx, owner, project),
       manifest?.limits,
     );
     const protection = await resolveProjectZeroTrustRoutingForPublication(tx, project.id);
@@ -702,17 +731,17 @@ async function republishProjectOwnerState(
           projectId: project.id,
           userId: owner.id,
           limits: dispatchLimits,
-          suspended: routingSuspensionReason(owner.suspended_reason),
+          suspended: projectRoutingSuspensionReason(project, owner),
           zeroTrust: protection,
         }),
       );
     }
-    // Decision: Background runs (cron, queues) pause only for an administrator suspension; usage-limit suspensions
-    // keep them running.
+    // Decision: Background runs (cron, queues) pause for an administrator or project suspension; usage-limit
+    // suspensions keep them running.
     const markerKey = projectSuspensionKey(project.id);
     const marker = await context.env.ROUTING.get(markerKey);
-    const reason = owner.suspended_reason;
-    if (reason !== null && isAdminSuspended(reason)) {
+    const reason = projectBackgroundSuspensionReason(project, owner);
+    if (reason !== null) {
       if (marker !== reason) {
         await context.env.ROUTING.put(markerKey, reason);
       }
@@ -785,6 +814,10 @@ export async function transferOperatorProjectOwner(
   projectId: string,
   targetUserId: string,
   dryRun = false,
+  by: { actorId: string; keepFormerOwner: boolean } = {
+    actorId: context.get('user')?.id,
+    keepFormerOwner: true,
+  },
 ) {
   if (dryRun) {
     return previewOperatorProjectOwner(context, projectId, targetUserId);
@@ -796,7 +829,8 @@ export async function transferOperatorProjectOwner(
     db,
     projectId,
     targetUserId,
-    context.get('user').id,
+    by.actorId,
+    by.keepFormerOwner,
   );
   const convergence = {
     countersComplete: false,
@@ -866,7 +900,8 @@ export async function transferOperatorProjectOwner(
     previousOwner: historicalAccountSummary(transfer.previousOwner, transfer.previousOwnerId),
     newOwner: accountSummary(convergedOwner),
     transferredAt: transfer.transferredAt,
-    formerOwnerRole: transfer.previousOwnerId === transfer.newOwner.id ? null : 'admin',
+    formerOwnerRole:
+      transfer.previousOwnerId === transfer.newOwner.id || !by.keepFormerOwner ? null : 'admin',
     changed: transfer.changed,
     convergence,
   };
@@ -961,7 +996,7 @@ export async function reconcileOperatorUserPlan(context: Context<ApiEnv>, id: st
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId: id,
-        plan: user.plan,
+        plan: await billedAccountPlanId(db, user),
         billingPeriodStart: getCurrentBillingPeriodStart(
           user.billing_cycle_start ?? user.created_at,
         ).toISOString(),
@@ -1050,16 +1085,24 @@ export async function restoreOperatorUser(context: Context<ApiEnv>, id: string, 
     return preview('user.restore', target, {
       previousReason: user.suspended_reason,
       projects: projects.map((p) => ({ id: p.id, slug: p.slug })),
+      projectsStillSuspended: projects
+        .filter((p) => p.suspended_reason !== null)
+        .map((p) => ({ id: p.id, slug: p.slug, reason: p.suspended_reason })),
     });
   }
   // Decision: Keep the DB suspension until each routing, sandbox and DO latch clears.
   try {
     const stub = context.env.USAGE_COUNTER.get(context.env.USAGE_COUNTER.idFromName(id));
     const results = await Promise.allSettled([
-      setProjectsRoutingSuspension(context.env.ROUTING, db, projects, {
-        op: 'unsuspend',
-        matchReason: null,
-      }),
+      setProjectsRoutingSuspension(
+        context.env.ROUTING,
+        db,
+        projects.filter((p) => p.suspended_reason === null),
+        {
+          op: 'unsuspend',
+          matchReason: null,
+        },
+      ),
       context.env.ROUTING.delete(sandboxBlockKey(id)),
       stub.fetch(new Request('https://do/clear-suspension', { method: 'POST' })),
     ]);
@@ -1070,6 +1113,15 @@ export async function restoreOperatorUser(context: Context<ApiEnv>, id: string, 
     const cleared = results[2];
     if (cleared.status === 'fulfilled' && !cleared.value.ok) {
       throw new Error(`clear-suspension DO returned HTTP ${cleared.value.status}`);
+    }
+    for (const project of projects) {
+      if (project.suspended_reason !== null) {
+        await setProjectsRoutingSuspension(context.env.ROUTING, db, [project], {
+          op: 'suspend',
+          reason: project.suspended_reason,
+          force: true,
+        });
+      }
     }
     await unsuspendUser(db, id);
     await reconcileOperatorUserProjects(context, id);
@@ -1083,6 +1135,121 @@ export async function restoreOperatorUser(context: Context<ApiEnv>, id: string, 
     );
   }
   return { action: 'user.restore', target, cleanupComplete: true };
+}
+
+const PROJECT_SUSPEND_EFFECT =
+  "Requests on the project's address, custom domains and preview route get a 'not available' page. Cron jobs, queue delivery, AI calls and outgoing email stop, and running sandboxes stop within a minute. Data is kept. Queue messages are dropped when their retries run out: after about 3 hours by default, at once with maxRetries 0. Restore does not bring them back.";
+
+export async function suspendOperatorProject(
+  context: Context<ApiEnv>,
+  id: string,
+  note: string | undefined,
+  dryRun = false,
+) {
+  const db = context.get('db');
+  const project = await requireProject(db, id);
+  const target = { id, slug: project.slug, userId: project.user_id };
+  if (dryRun) {
+    const domains = await getDomainsByProjectId(db, id);
+    return preview('project.suspend', target, {
+      reason: REASON_OPERATOR_TAKEDOWN,
+      note: note ?? null,
+      previousReason: project.suspended_reason,
+      routes: [projectRouteKey(project), ...domains.map((domain) => `domain:${domain.hostname}`)],
+      effect: PROJECT_SUSPEND_EFFECT,
+      persistence:
+        "A new deploy, an owner change and restoring the owner's account keep the project suspended. Each preview project is a separate project.",
+    });
+  }
+  const [suspended] = await db
+    .update(projects)
+    .set({
+      suspended_reason: REASON_OPERATOR_TAKEDOWN,
+      suspended_at: new Date().toISOString(),
+      suspended_note: note ?? null,
+    })
+    .where(and(eq(projects.id, id), eq(projects.status, 'active')))
+    .returning();
+  if (!suspended) {
+    throw new OperatorError(409, 'Project is being deleted.', 'project_deleting');
+  }
+  // Decision: The project row is written first. If the edge stamp fails, the next reconcile or deploy stamps it
+  // from the row, so a partial suspend fails closed.
+  try {
+    await setProjectsRoutingSuspension(context.env.ROUTING, db, [suspended], {
+      op: 'suspend',
+      reason: REASON_OPERATOR_TAKEDOWN,
+      force: true,
+    });
+    await republishProjectOwnerState(context, id, suspended.user_id);
+  } catch (error) {
+    console.error('[admin] project suspend failed', { projectId: id, error });
+    throw new OperatorError(
+      500,
+      'Project suspended, but edge enforcement could not be fully stamped. Retry the suspend; the stamp is idempotent.',
+      'partial_failure',
+      { partial: true, target, reason: REASON_OPERATOR_TAKEDOWN },
+    );
+  }
+  // Decision: Platform has no event channel to a connected app yet. When billing events land, send
+  // project.suspended here and project.restored in restoreOperatorProject, with the note.
+  return {
+    action: 'project.suspend',
+    target,
+    reason: REASON_OPERATOR_TAKEDOWN,
+    note: note ?? null,
+  };
+}
+
+export async function restoreOperatorProject(context: Context<ApiEnv>, id: string, dryRun = false) {
+  const db = context.get('db');
+  const project = await requireProject(db, id);
+  const owner = await requireUser(db, project.user_id);
+  const ownerReason = routingSuspensionReason(owner.suspended_reason);
+  const target = { id, slug: project.slug, userId: project.user_id };
+  if (dryRun) {
+    return preview('project.restore', target, {
+      previousReason: project.suspended_reason,
+      note: project.suspended_note,
+      ownerSuspendedReason: owner.suspended_reason,
+      effect: ownerReason
+        ? "The owner's account is suspended, so the project stays offline until the account is restored."
+        : 'Requests, cron jobs, queue delivery, AI calls, email and sandboxes resume.',
+    });
+  }
+  const [restored] = await db
+    .update(projects)
+    .set({ suspended_reason: null, suspended_at: null, suspended_note: null })
+    .where(eq(projects.id, id))
+    .returning();
+  if (!restored) {
+    throw new OperatorError(404, 'Project not found');
+  }
+  try {
+    await setProjectsRoutingSuspension(
+      context.env.ROUTING,
+      db,
+      [restored],
+      ownerReason
+        ? { op: 'suspend', reason: ownerReason, force: true }
+        : { op: 'unsuspend', matchReason: null },
+    );
+    await republishProjectOwnerState(context, id, restored.user_id);
+  } catch (error) {
+    console.error('[admin] project restore failed', { projectId: id, error });
+    throw new OperatorError(
+      500,
+      'Project restored, but edge enforcement could not be fully cleared. Retry the restore; cleanup is idempotent.',
+      'partial_failure',
+      { partial: true, target, cleanupComplete: false },
+    );
+  }
+  return {
+    action: 'project.restore',
+    target,
+    ownerSuspended: ownerReason !== null,
+    cleanupComplete: true,
+  };
 }
 
 export async function deleteOperatorProject(context: Context<ApiEnv>, id: string, dryRun = false) {

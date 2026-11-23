@@ -24,9 +24,12 @@ import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
 import adminZeroTrust from './admin/routes/zero-trust.tsx';
 import { sweepAiLogging } from './ai-logging-sweep.ts';
+import { billedAccountPlanId } from './app-payer.ts';
+import { syncHostedUse } from './app-usage-sync.ts';
 import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { purgeExpiredOAuthRequests } from './auth/oauth.ts';
+import { deliverBillingEvents } from './billing-events.ts';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
@@ -714,6 +717,12 @@ async function runScheduledMaintenance(
     console.error('[scheduled] project cleanup retry failed:', error),
   );
 
+  await deliverBillingEvents(db)
+    .then((waiting) => {
+      fastTier.unfinished ||= waiting;
+    })
+    .catch((error) => console.error('[scheduled] billing event delivery failed:', error));
+
   // Decision: Fast tier: a resumable Zero Trust batch owns the rest of this invocation so it stays inside the
   // per-invocation subrequest budget. A failed batch doesn't, so the pending-domain and email work
   // below still runs. An operation already in error waits for the hourly tier or an explicit reconcile.
@@ -796,6 +805,10 @@ async function runScheduledMaintenance(
 
   await reconcilePendingProjectZeroTrust(env, db).catch((error) =>
     console.error('[scheduled] Zero Trust reconciliation failed:', error),
+  );
+
+  await syncHostedUse(env, db).catch((error) =>
+    console.error('[scheduled] hosted use sync failed:', error),
   );
 
   await sweepAiLogging(db, env.ROUTING, initialPlanDefaultFor(env)).catch((error) =>
@@ -1159,7 +1172,14 @@ export async function cleanupStalePendingDomains(
 async function processUserRollover(
   env: ApiEnv['Bindings'],
   db: Db,
-  user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
+  user: {
+    id: string;
+    plan: string;
+    provider: string;
+    provider_id: string;
+    billing_cycle_start: string;
+    suspended_reason: string | null;
+  },
   userProjects: ReadonlyArray<{ id: string; slug: string; created_at: string }>,
   needsUsageReconciliation: boolean,
 ): Promise<void> {
@@ -1225,6 +1245,7 @@ async function processUserRollover(
 
   const doId = env.USAGE_COUNTER.idFromName(user.id);
   const stub = env.USAGE_COUNTER.get(doId);
+  const plan = await billedAccountPlanId(db, user);
 
   // Decision: The rollover check (the DO resets only if the period changed). The DO does the sandbox-block KV
   // delete and the sandbox_runtime DB unsuspend inline because it owns that state; request-suspension
@@ -1233,7 +1254,7 @@ async function processUserRollover(
     new Request('https://do/rollover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billingPeriodStart, plan: user.plan, userId: user.id }),
+      body: JSON.stringify({ billingPeriodStart, plan, userId: user.id }),
     }),
   );
 
@@ -1277,7 +1298,7 @@ async function processUserRollover(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        plan: user.plan,
+        plan,
         billingPeriodStart,
         projectSlugs,
         projectOwnershipStarts,

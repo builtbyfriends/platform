@@ -1,6 +1,7 @@
 import { platformProjectHostnames, readPlatformApplication } from '@builtbyfriends/platform';
 import { and, eq, or, sql as drizzleSql } from 'drizzle-orm';
 import { type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
 import { findR2Assets, persistedR2AssetSizes } from '../asset-inventory.ts';
 import {
   computeAssetHash,
@@ -38,7 +39,7 @@ import {
 } from '../deployment-execution.ts';
 import type { ApiEnv } from '../env.ts';
 import { type DeployLogger } from '../observability/logger.ts';
-import { PLAN_CATALOG_SETTING, resolvePlanLimits } from '../plans.ts';
+import { PLAN_CATALOG_SETTING } from '../plans.ts';
 import { getPlatformSetting } from '../platform-settings.ts';
 import { ensureProjectIngress } from '../project-ingress.ts';
 import {
@@ -48,7 +49,7 @@ import {
 } from '../provisioning/cloudflare-api.ts';
 import { computeDispatchLimits, projectRouteKey, resolveRoutingUndo } from '../routing.ts';
 import { deployments } from '../schema.ts';
-import { routingSuspensionReason } from '../suspension.ts';
+import { projectRoutingSuspensionReason } from '../suspension.ts';
 import { isWithinLimit } from '../tiers.ts';
 import {
   type DeployManifest,
@@ -133,7 +134,7 @@ export async function runDeploymentPipeline(input: {
     deployBuild,
     workerFiles,
   } = input;
-  const planLimits = await resolvePlanLimits(context.get('db'), owner.plan);
+  const planLimits = await billedPlanLimits(context.get('db'), owner, project);
 
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream();
@@ -225,6 +226,7 @@ export async function runDeploymentPipeline(input: {
       mutate: (
         txDb: Db,
         currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+        lockedProject: Project,
       ) => Promise<T>,
     ): Promise<T> => {
       return await context.get('db').transaction(async (tx) => {
@@ -256,7 +258,7 @@ export async function runDeploymentPipeline(input: {
             throw new Error(SUPERSEDED_BUILD_ERROR_MESSAGE);
           }
         }
-        return await mutate(tx, currentAccess.owner);
+        return await mutate(tx, currentAccess.owner, lockedProject);
       });
     };
     // Decision: Compensation must serialize with each project cutover, not only teardown. Once a newer deploy or
@@ -447,7 +449,7 @@ export async function runDeploymentPipeline(input: {
           : null;
         const currentLimits = refreshPolicy
           ? computeDispatchLimits(
-              await resolvePlanLimits(txDb, currentOwner.plan),
+              await billedPlanLimits(txDb, currentOwner, currentProject),
               committedManifest?.limits,
             )
           : null;
@@ -475,7 +477,7 @@ export async function runDeploymentPipeline(input: {
                       projectId,
                       userId: currentOwner.id,
                       limits: currentLimits,
-                      suspended: routingSuspensionReason(currentOwner.suspended_reason),
+                      suspended: projectRoutingSuspensionReason(currentProject, currentOwner),
                       zeroTrust,
                     })
                   : withProjectZeroTrustRouting(value, zeroTrust, projectId);

@@ -6,7 +6,7 @@ import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
 import { createUser, getProject, type Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { projectUrl } from '../project-url.ts';
-import { oauthGrants, oauthRequests, users } from '../schema.ts';
+import { oauthGrants, oauthRequests, projects, users } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
 import { runScheduledAfterCommit } from './projects.ts';
 
@@ -50,7 +50,9 @@ export function appPersonClients(env: ApiEnv['Bindings']): Set<string> {
   );
 }
 
-async function appPersonUser(
+export const GROUP = 'group:';
+
+export async function appPersonUser(
   db: Db,
   clientId: string,
   person: string,
@@ -109,8 +111,25 @@ export async function appPersonToken(
       403,
     );
   }
-  const person = form.person;
-  if (typeof person !== 'string' || !person || person.length > 200) {
+  const named = (value: unknown) =>
+    typeof value === 'string' && value.length > 0 && value.length <= 200 ? value : null;
+  // Decision: A group, such as a team, owns apps no one person holds. Its user is the application's id with a
+  // group: prefix, so no person's id can reach it, and the person acting for it is named on each token.
+  const group = named(form.group);
+  const actingPerson = named(form.acting_person);
+  if (form.group !== undefined && (!group || !actingPerson || form.person !== undefined)) {
+    throw new OAuthError(
+      'invalid_request',
+      'Name the group with `group` and the person acting for it with `acting_person`.',
+    );
+  }
+  const person = group ? GROUP + group : form.person;
+  if (
+    typeof person !== 'string' ||
+    !person ||
+    person.length > 206 ||
+    (!group && person.startsWith(GROUP))
+  ) {
     throw new OAuthError('invalid_request', 'Name the person with `person`.');
   }
   const scopes = requestedScopes(client, form.scope);
@@ -137,6 +156,7 @@ export async function appPersonToken(
     aud: 'api',
     exp: Math.floor(Date.parse(expiresAt) / 1000),
     appPerson: true,
+    ...(actingPerson && group ? { actingPerson } : {}),
   };
   const result = await db.transaction(async (tx) => {
     await activeOAuthClient(tx, client.id, true);
@@ -192,8 +212,15 @@ export async function appPersonToken(
         ...request.data,
         // Decision: The deploy runs on this token's grant, which outlives the approval.
         grantId,
+        ...(session.actingPerson ? { actingPerson: session.actingPerson } : {}),
         projectId: await approval.project(context, tx as Db, request.data.slug!, user),
       };
+      if (data.payer !== undefined) {
+        await tx
+          .update(projects)
+          .set({ payer_person_id: data.payer })
+          .where(eq(projects.id, data.projectId));
+      }
       const [approved] = await tx
         .update(oauthRequests)
         .set({

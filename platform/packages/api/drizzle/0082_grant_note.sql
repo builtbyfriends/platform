@@ -1,0 +1,1 @@
+ALTER TABLE "app_credit_grants" ADD COLUMN "note" text;
