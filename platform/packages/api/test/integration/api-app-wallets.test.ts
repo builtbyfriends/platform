@@ -142,4 +142,28 @@ describe('wallets', () => {
       });
     });
   });
+
+  describe('use by person', () => {
+    const turn = (by: string | undefined, id: string) =>
+      call('/usage.record', { person: 'server:1', aiNeurons: 100_000, by, id });
+
+    it('keeps a total for each person, counts a resent report once, and charges the wallet', async () => {
+      await call('/wallets.open', { payer: 'server:1' });
+      await give('server:1', 20 * DOLLAR);
+      await turn('ana', 'r1');
+      await turn('ana', 'r1');
+      await turn('ana', 'r2');
+      await turn('ben', 'r3');
+      await turn(undefined, 'r4');
+      const answer = rpcData<{
+        byPerson: Array<{ person: string; usedMicros: number }>;
+        credits: { balanceMicros: number };
+      }>(await (await call('/usage.status', { person: 'server:1', byPerson: true })).json());
+      expect(answer.byPerson).toEqual([
+        { person: 'ana', usedMicros: 2_200_000 },
+        { person: 'ben', usedMicros: 1_100_000 },
+      ]);
+      expect(answer.credits.balanceMicros).toBe(20 * DOLLAR - 4 * 1_100_000);
+    });
+  });
 });

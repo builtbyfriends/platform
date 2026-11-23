@@ -211,6 +211,23 @@ export const appUsageEvents = pgTable(
   (table) => [primaryKey({ columns: [table.client_id, table.event_id] })],
 );
 
+/** What each person spent this month from a wallet they don't own, priced when it was reported. */
+export const appWalletUse = pgTable(
+  'app_wallet_use',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    payer_id: text('payer_id').notNull(),
+    person_id: text('person_id').notNull(),
+    period: text('period').notNull(),
+    cost_micros: bigint('cost_micros', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.client_id, table.payer_id, table.period, table.person_id] }),
+  ],
+);
+
 export type CreditPurchase = { minMicros: number; stepMicros: number; lifeDays: number };
 
 /** The payer's auto top-up: who pays for it, the balance that starts a charge, its size, and the most it charges in a calendar month. */

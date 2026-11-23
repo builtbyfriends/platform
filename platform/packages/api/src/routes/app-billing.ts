@@ -55,6 +55,7 @@ import {
   appUsageDaily,
   appUsageEvents,
   appUsageSources,
+  appWalletUse,
   oauthClients,
   projects,
   users,
@@ -175,6 +176,22 @@ async function hostedUse(context: BillingContext, person: string) {
     };
   });
   return { ...hostedLine(total.use, total.latest, prices), projects: listed };
+}
+
+/** What each person other than the payer spent from this payer this month, most first. */
+function useByPerson(context: BillingContext, payer: string) {
+  return context
+    .get('db')
+    .select({ person: appWalletUse.person_id, usedMicros: appWalletUse.cost_micros })
+    .from(appWalletUse)
+    .where(
+      and(
+        eq(appWalletUse.client_id, context.get('billingClient')),
+        eq(appWalletUse.payer_id, payer),
+        eq(appWalletUse.period, currentPeriod()),
+      ),
+    )
+    .orderBy(sql`${appWalletUse.cost_micros} desc`);
 }
 
 /** A person's plan, its caps, what they used this month, and whether they are still within the caps. */
@@ -410,6 +427,10 @@ async function forgetPerson(
             .where(
               and(eq(appUsageSources.client_id, clientId), eq(appUsageSources.person_id, person)),
             );
+          await tx
+            .update(appWalletUse)
+            .set(gone)
+            .where(and(eq(appWalletUse.client_id, clientId), eq(appWalletUse.person_id, person)));
           // Decision: Daily use and its cost stay for the books under an id that names no one.
           await tx
             .update(appUsageDaily)
@@ -469,12 +490,15 @@ export const appBillingRoutes = new Hono<ApiEnv>()
             ),
           }
         : {};
+    const byPerson =
+      body.byPerson === true ? { byPerson: await useByPerson(context, body.person) } : {};
     return context.json({
       data: {
         ...now,
         hostedAsOf: await hostedAsOf(db),
         ...hosted,
         ...daily,
+        ...byPerson,
         ...(renewsAt ? { renewsAt } : {}),
       },
     });
@@ -492,6 +516,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     if (neurons < 0 || seconds < 0) {
       return context.json({ error: 'bad_usage' }, 400);
+    }
+    if (body.by !== undefined && !isPersonId(body.by)) {
+      return context.json({ error: 'bad_by' }, 400);
     }
     const breakdown = shares(body?.breakdown);
     if (!breakdown) {
@@ -530,6 +557,30 @@ export const appBillingRoutes = new Hono<ApiEnv>()
       const payer = { clientId, person: body.person as string };
       await addUse(tx, { ...payer, meter: 'aiNeurons', quantity: neurons });
       await addUse(tx, { ...payer, meter: 'sandboxSeconds', quantity: seconds });
+      // Decision: A person's use of their own wallet has no limit, so it isn't split out.
+      if (body.by !== undefined && body.by !== body.person) {
+        const prices = await readMeterPrices(tx);
+        const cost =
+          costMicros('aiNeurons', neurons, prices) + costMicros('sandboxSeconds', seconds, prices);
+        await tx
+          .insert(appWalletUse)
+          .values({
+            client_id: clientId,
+            payer_id: body.person,
+            person_id: body.by,
+            period: currentPeriod(),
+            cost_micros: cost,
+          })
+          .onConflictDoUpdate({
+            target: [
+              appWalletUse.client_id,
+              appWalletUse.payer_id,
+              appWalletUse.period,
+              appWalletUse.person_id,
+            ],
+            set: { cost_micros: sql`${appWalletUse.cost_micros} + ${cost}` },
+          });
+      }
       for (const share of breakdown) {
         await tx
           .insert(appUsageSources)

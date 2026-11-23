@@ -540,6 +540,13 @@
       "when": 1795394682626,
       "tag": "0083_payer_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795394777176,
+      "tag": "0084_wallet_use",
+      "breakpoints": true
     }
   ]
 }
