@@ -56,6 +56,7 @@ const textRenames: Array<[RegExp, string]> = [
   [/\b__void/g, '__platform'],
   [/\bvoid\.config\b/g, 'bwf.config'],
   [/(^|[^\w.])\.void\//g, '$1.bwf/'],
+  [/'\.void'/g, "'.bwf'"],
   [/\bvoid([A-Z])/g, 'bwf$1'],
   [/\bVoid(?!Zero)([A-Z])/g, 'Bwf$1'],
   [/([a-z])Void([A-Z])/g, '$1Bwf$2'],

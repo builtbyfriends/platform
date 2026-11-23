@@ -2,7 +2,10 @@ import { mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
-import { ensureProjectTsconfig } from '../../src/codegen/project-tsconfig.ts';
+import {
+  ensureProjectTsconfig,
+  syncAuthTypesInProjectTsconfig,
+} from '../../src/codegen/project-tsconfig.ts';
 
 describe('ensureProjectTsconfig', () => {
   let root: string;
@@ -83,6 +86,33 @@ describe('ensureProjectTsconfig', () => {
     rmSync(join(root, '.bwf', 'auth.d.ts'));
     ensureProjectTsconfig(root);
     expect(readTsconfig().files).not.toContain('auth.d.ts');
+  });
+
+  it('maps @auth-schema only while the generated auth schema exists', () => {
+    const authSchema = join(root, '.bwf', 'better-auth-schema.ts');
+    ensureProjectTsconfig(root);
+    expect(readTsconfig().compilerOptions?.paths?.['@auth-schema']).toBeUndefined();
+
+    writeFileSync(authSchema, 'export const userTable = {};\n');
+    ensureProjectTsconfig(root);
+    expect(readTsconfig().compilerOptions.paths['@auth-schema']).toEqual([
+      './better-auth-schema.ts',
+    ]);
+
+    rmSync(authSchema);
+    ensureProjectTsconfig(root);
+    expect(readTsconfig().compilerOptions?.paths?.['@auth-schema']).toBeUndefined();
+  });
+
+  it('adds @auth-schema to an existing tsconfig once the auth schema is written', () => {
+    ensureProjectTsconfig(root, true, true, false);
+    writeFileSync(join(root, '.bwf', 'better-auth-schema.ts'), 'export const userTable = {};\n');
+    syncAuthTypesInProjectTsconfig(root);
+    expect(readTsconfig().compilerOptions.paths).toEqual({
+      '@builtbyfriends/bwf/db': ['./db.d.ts'],
+      '@builtbyfriends/bwf/routes': ['./routes.d.ts'],
+      '@auth-schema': ['./better-auth-schema.ts'],
+    });
   });
 
   it('combines routes and queues when present', () => {

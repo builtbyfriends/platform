@@ -161,13 +161,16 @@ function createDeployDriftProject(root: string, driftProjectRoot: string): void 
   }
 
   // Decision: The build-generated Better Auth schema takes part in `bwf db generate`, so it has to take part in
-  // the isolated drift check too. Copy only this known generated input; the rest of `.bwf` stays
-  // excluded.
-  const authSchemaPath = join(root, '.bwf', 'better-auth-schema.ts');
-  if (existsSync(authSchemaPath)) {
-    const target = join(driftProjectRoot, '.bwf', 'better-auth-schema.ts');
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(authSchemaPath, target);
+  // the isolated drift check too. The generated tsconfig maps `@auth-schema` and the app's tsconfig may extend
+  // it, so schema imports resolve only with it present. Copy only these known generated inputs; the rest of
+  // `.bwf` stays excluded.
+  for (const file of ['better-auth-schema.ts', 'tsconfig.json']) {
+    const source = join(root, '.bwf', file);
+    if (existsSync(source)) {
+      const target = join(driftProjectRoot, '.bwf', file);
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(source, target);
+    }
   }
 }
 

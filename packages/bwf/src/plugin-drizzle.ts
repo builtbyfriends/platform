@@ -5,7 +5,11 @@ import { dirname, isAbsolute, join, relative } from 'pathslash';
 import { normalizePath } from 'vite';
 import type { Plugin } from 'vite';
 import { DRIZZLE_OPERATORS, generateDbDts } from './codegen/db-types.ts';
-import { ensureProjectTsconfig } from './codegen/project-tsconfig.ts';
+import {
+  AUTH_SCHEMA_FILE,
+  AUTH_SCHEMA_ID,
+  ensureProjectTsconfig,
+} from './codegen/project-tsconfig.ts';
 import {
   getDatabaseCasing,
   getDatabaseDialect,
@@ -126,6 +130,10 @@ function createBwfDbModule(
           return schema.path;
         }
         return join(schema.path, id.slice('@schema/'.length));
+      }
+
+      if (id === AUTH_SCHEMA_ID) {
+        return join(root, '.bwf', AUTH_SCHEMA_FILE);
       }
     },
 
@@ -394,7 +402,7 @@ export function drizzlePlugin(
     },
 
     resolveId: {
-      filter: { id: /^(@builtbyfriends\/bwf\/db|@schema)/ },
+      filter: { id: /^(@builtbyfriends\/bwf\/db|@schema|@auth-schema$)/ },
       handler(id, importer) {
         if (id === '@builtbyfriends/bwf/db' && this.environment?.name === 'client') {
           return;
