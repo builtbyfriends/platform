@@ -11,6 +11,7 @@ import {
   grantCredits,
   lockPayer,
   payerBlocked,
+  takenToday,
   type Payer,
 } from './credit-ledger.ts';
 import type { Db, DbOrTx } from './db.ts';
@@ -38,7 +39,9 @@ export function parseCreditPurchase(value: unknown): CreditPurchase | null {
     !isCount(rules.lifeDays) ||
     rules.minMicros % MICROS_PER_CENT !== 0 ||
     rules.stepMicros % MICROS_PER_CENT !== 0 ||
-    (rules.buyForOthers !== undefined && typeof rules.buyForOthers !== 'boolean')
+    (rules.buyForOthers !== undefined && typeof rules.buyForOthers !== 'boolean') ||
+    (rules.buyerDailyMicros !== undefined && !isCount(rules.buyerDailyMicros)) ||
+    (rules.walletDailyMicros !== undefined && !isCount(rules.walletDailyMicros))
   ) {
     return null;
   }
@@ -47,6 +50,8 @@ export function parseCreditPurchase(value: unknown): CreditPurchase | null {
     stepMicros: rules.stepMicros,
     lifeDays: rules.lifeDays,
     ...(rules.buyForOthers ? { buyForOthers: true } : {}),
+    ...(rules.buyerDailyMicros ? { buyerDailyMicros: rules.buyerDailyMicros } : {}),
+    ...(rules.walletDailyMicros ? { walletDailyMicros: rules.walletDailyMicros } : {}),
   };
 }
 
@@ -64,6 +69,32 @@ export const fitsPurchase = (rules: CreditPurchase, amount: unknown): amount is 
   Number.isSafeInteger(amount) &&
   (amount as number) >= rules.minMicros &&
   ((amount as number) - rules.minMicros) % rules.stepMicros === 0;
+
+/**
+ * Which daily cap `amountMicros` more would pass, and what's left under it today. Null when it fits.
+ * A move has no buyer to count.
+ */
+export async function overDailyCap(
+  db: DbOrTx,
+  rules: CreditPurchase,
+  move: { clientId: string; buyer: string | null; payer: string; amountMicros: number },
+  now = new Date(),
+): Promise<{ cap: 'buyer' | 'wallet'; leftMicros: number } | null> {
+  if (!rules.buyerDailyMicros && !rules.walletDailyMicros) {
+    return null;
+  }
+  const taken = await takenToday(db, { ...move, buyer: move.buyer ?? '' }, now);
+  const checks = [
+    ['buyer', move.buyer ? rules.buyerDailyMicros : undefined, taken.buyerMicros],
+    ['wallet', rules.walletDailyMicros, taken.payerMicros],
+  ] as const;
+  for (const [cap, limit, used] of checks) {
+    if (limit !== undefined && used + move.amountMicros > limit) {
+      return { cap, leftMicros: Math.max(0, limit - used) };
+    }
+  }
+  return null;
+}
 
 export const boughtUntil = (now: Date, lifeDays: number) =>
   new Date(now.getTime() + lifeDays * DAY_MS);
@@ -290,6 +321,16 @@ export async function topUpIfLow(
     const spent = row.top_up_month === month ? row.top_up_month_micros : 0;
     if (spent + settings.amountMicros > settings.monthlyLimitMicros) {
       return off('monthly_limit');
+    }
+    if (
+      await overDailyCap(
+        tx,
+        rules,
+        { ...payer, buyer: settings.buyer, amountMicros: settings.amountMicros },
+        now,
+      )
+    ) {
+      return off('daily_cap');
     }
     await tx
       .update(appPayers)

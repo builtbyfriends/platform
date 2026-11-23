@@ -43,6 +43,7 @@ import {
   buyerOf,
   creditPurchase,
   fitsPurchase,
+  overDailyCap,
   setAutoTopUp,
 } from '../credit-purchase.ts';
 import { getOwnedProjectsByUserId } from '../db.ts';
@@ -74,6 +75,7 @@ const isReturnUrl = (value: unknown): value is string =>
 type BillingContext = Context<ApiEnv>;
 
 const MAX_WALLETS = 5;
+const MAX_HOLD_HOURS = 168;
 
 type Choice = { payer: string; person: string; monthlyLimitMicros?: number };
 
@@ -716,7 +718,8 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     const db = context.get('db');
     const clientId = context.get('billingClient');
-    if (!(await creditPurchase(db, clientId))?.buyForOthers) {
+    const rules = await creditPurchase(db, clientId);
+    if (!rules?.buyForOthers) {
       return context.json({ error: 'buy_for_others_off' }, 403);
     }
     // Decision: Credits move one way, from a person into a wallet, so they never pass from one person to another.
@@ -725,6 +728,15 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     if (!(await isWallet(db, { clientId, payer: body.to }))) {
       return context.json({ error: 'not_a_wallet' }, 400);
+    }
+    const over = await overDailyCap(db, rules, {
+      clientId,
+      buyer: null,
+      payer: body.to,
+      amountMicros: body.amountMicros,
+    });
+    if (over) {
+      return context.json({ error: 'daily_cap', ...over }, 403);
     }
     const moved = await moveCredits(db, {
       clientId,
@@ -922,6 +934,14 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (body.label !== undefined && (typeof body.label !== 'string' || body.label.length > 100)) {
       return context.json({ error: 'bad_label' }, 400);
     }
+    if (
+      body.holdHours !== undefined &&
+      (!Number.isSafeInteger(body.holdHours) ||
+        body.holdHours < 1 ||
+        body.holdHours > MAX_HOLD_HOURS)
+    ) {
+      return context.json({ error: 'bad_hold_hours', max: MAX_HOLD_HOURS }, 400);
+    }
     const db = context.get('db');
     const clientId = context.get('billingClient');
     const rules = await creditPurchase(db, clientId);
@@ -945,6 +965,15 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (await payerBlocked(db, { clientId, payer: body.buyer })) {
       return context.json({ error: 'blocked' }, 403);
     }
+    const over = await overDailyCap(db, rules, {
+      clientId,
+      buyer: body.buyer,
+      payer,
+      amountMicros: body.amountMicros,
+    });
+    if (over) {
+      return context.json({ error: 'daily_cap', ...over }, 403);
+    }
     const livemode = stripeLiveMode(context.env);
     const [person] = await db
       .select()
@@ -963,6 +992,7 @@ export const appBillingRoutes = new Hono<ApiEnv>()
           payerId: payer,
           lifeDays: String(rules.lifeDays),
           saveCard: String(body.saveCard === true),
+          ...(body.holdHours ? { holdHours: String(body.holdHours) } : {}),
         },
         customerId,
         email: typeof body.email === 'string' ? body.email : null,

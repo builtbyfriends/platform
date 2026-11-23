@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
 import { appCreditGrants, appPayers, type CreditSource, type PayerCap } from './schema.ts';
@@ -53,12 +53,15 @@ export async function openWallet(db: DbOrTx, payer: Payer, now = new Date()): Pr
     });
 }
 
-const openNow = (now: Date) =>
+const unended = (now: Date) =>
   and(
     isNull(appCreditGrants.voided_at),
     gt(appCreditGrants.remaining_micros, 0),
     or(isNull(appCreditGrants.expires_at), gt(appCreditGrants.expires_at, now.toISOString())),
   );
+
+// Decision: A grant with a later start, such as a held purchase, counts as pending and isn't spent until it starts.
+const openNow = (now: Date) => and(unended(now), lte(appCreditGrants.starts_at, now.toISOString()));
 
 const openGrants = (payer: Payer, now: Date) => and(payerGrants(payer), openNow(now));
 
@@ -173,7 +176,7 @@ const iso = (value: string | null) => (value ? new Date(value).toISOString() : n
  * payer who has never had a grant, whose plan's caps decide instead. A wallet always has a balance.
  */
 export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) {
-  const [[row], grants, any] = await Promise.all([
+  const [[row], grants, any, [pending]] = await Promise.all([
     db
       .select()
       .from(appPayers)
@@ -184,6 +187,12 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
       .where(openGrants(payer, now))
       .orderBy(...spendOrder),
     hasGrants(db, payer),
+    db
+      .select({ micros: sql<string>`coalesce(sum(${appCreditGrants.remaining_micros}), 0)` })
+      .from(appCreditGrants)
+      .where(
+        and(payerGrants(payer), unended(now), gt(appCreditGrants.starts_at, now.toISOString())),
+      ),
   ]);
   const owedMicros = row?.owed_micros ?? 0;
   if (!any && owedMicros === 0 && !row?.wallet) {
@@ -192,6 +201,7 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
   return {
     wallet: Boolean(row?.wallet),
     balanceMicros: grants.reduce((sum, grant) => sum + grant.remaining_micros, 0) - owedMicros,
+    pendingMicros: Number(pending?.micros ?? 0),
     owedMicros,
     outSince: iso(row?.out_since ?? null),
     lowSince: iso(row?.low_since ?? null),
@@ -563,6 +573,46 @@ export async function moveCredits(db: DbOrTx, move: Move, now = new Date()): Pro
       .where(and(eq(appPayers.client_id, move.clientId), eq(appPayers.payer_id, move.to)));
     return { replayed: false, grants: movedGrants(added) };
   });
+}
+
+const dayStart = (now: Date) => `${now.toISOString().slice(0, 10)}T00:00:00.000Z`;
+
+/** What a buyer paid for today and what a payer took in today, purchases and moves, by the UTC day. */
+export async function takenToday(
+  db: DbOrTx,
+  { clientId, buyer, payer }: { clientId: string; buyer: string; payer: string },
+  now = new Date(),
+) {
+  const today = and(
+    eq(appCreditGrants.client_id, clientId),
+    gte(appCreditGrants.created_at, dayStart(now)),
+  );
+  const sum = sql<string>`coalesce(sum(${appCreditGrants.amount_micros}), 0)`;
+  const bought = and(eq(appCreditGrants.source, 'bought'), isNull(appCreditGrants.moved_from));
+  const [[byBuyer], [intoPayer]] = await Promise.all([
+    db
+      .select({ micros: sum })
+      .from(appCreditGrants)
+      .where(and(today, bought, eq(appCreditGrants.giver_id, buyer))),
+    db
+      .select({ micros: sum })
+      .from(appCreditGrants)
+      .where(
+        and(
+          today,
+          eq(appCreditGrants.payer_id, payer),
+          // Decision: Credits a closed wallet gives back to their buyer don't count as taken in.
+          or(
+            bought,
+            and(
+              eq(appCreditGrants.source, 'moved'),
+              sql`${appCreditGrants.giver_id} is distinct from ${appCreditGrants.payer_id}`,
+            ),
+          ),
+        ),
+      ),
+  ]);
+  return { buyerMicros: Number(byBuyer?.micros ?? 0), payerMicros: Number(intoPayer?.micros ?? 0) };
 }
 
 /** True when a dispute has blocked the payer from buying. */

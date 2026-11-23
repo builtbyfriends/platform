@@ -230,13 +230,16 @@ export const appWalletUse = pgTable(
 
 /**
  * How an application sells credits. `buyForOthers` lets a person buy for, or top up, a payer other than
- * themselves, such as a shared wallet. It's off unless the operator turns it on.
+ * themselves, such as a shared wallet. It's off unless the operator turns it on. The daily caps limit
+ * what one buyer pays for and what one payer takes in, purchases and moves, in a UTC day.
  */
 export type CreditPurchase = {
   minMicros: number;
   stepMicros: number;
   lifeDays: number;
   buyForOthers?: boolean;
+  buyerDailyMicros?: number;
+  walletDailyMicros?: number;
 };
 
 /** The payer's auto top-up: who pays for it, the balance that starts a charge, its size, and the most it charges in a calendar month. */

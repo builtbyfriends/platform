@@ -24,7 +24,9 @@ import {
 import {
   boughtEvent,
   boughtUntil,
+  creditPurchase,
   grantTopUp,
+  overDailyCap,
   saveBuyer,
   topUpFailed,
   topUpFailedEvent,
@@ -439,6 +441,22 @@ async function applyCreditEvent(
     if (amountMicros <= 0 || !paymentIntentId) {
       return null;
     }
+    const now = new Date();
+    const rules = await creditPurchase(tx, metadata.clientId);
+    // Decision: Stripe already took the money, so a paid Checkout past a daily cap is granted and logged for an
+    // operator, not dropped.
+    const over =
+      rules &&
+      (await overDailyCap(tx, rules, {
+        clientId: metadata.clientId,
+        buyer: metadata.buyerId,
+        payer: metadata.payerId,
+        amountMicros,
+      }));
+    if (over) {
+      console.error('[credits] a paid Checkout passed a daily cap', { ...payer, ...over });
+    }
+    const holdHours = Number(metadata.holdHours ?? 0);
     const added = await grantCredits(tx, {
       ...payer,
       source: 'bought',
@@ -448,7 +466,8 @@ async function applyCreditEvent(
       billingCountry: object.customer_details?.address?.country ?? null,
       billingState: object.customer_details?.address?.state ?? null,
       stripePaymentIntentId: paymentIntentId,
-      expiresAt: boughtUntil(new Date(), Number(metadata.lifeDays)),
+      ...(holdHours > 0 ? { startsAt: new Date(now.getTime() + holdHours * 3_600_000) } : {}),
+      expiresAt: boughtUntil(now, Number(metadata.lifeDays)),
     });
     if (added) {
       await queueBillingEvent(tx, context.env, boughtEvent(added, false));

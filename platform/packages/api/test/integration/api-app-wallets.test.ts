@@ -10,7 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
-import { grantCredits } from '../../src/credit-ledger.ts';
+import { creditBalance, grantCredits, spendCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
 import { appBuyers, appCreditGrants, appPayers, oauthClients } from '../../src/schema.ts';
 import {
@@ -115,7 +115,7 @@ const dispute = (paymentIntent: string) =>
     data: { object: { payment_intent: paymentIntent, amount: 2000, status: 'needs_response' } },
   });
 
-const buyForOthers = (on: boolean) =>
+const buyForOthers = (on: boolean, caps: object = {}) =>
   env.db
     .update(oauthClients)
     .set({
@@ -124,6 +124,7 @@ const buyForOthers = (on: boolean) =>
         stepMicros: 20 * DOLLAR,
         lifeDays: 365,
         buyForOthers: on,
+        ...caps,
       },
     })
     .where(eq(oauthClients.id, registration.client.id));
@@ -414,9 +415,10 @@ describe('wallets', () => {
     });
 
     it('moves $10 into a bot’s wallet with the same end date, once for one id', async () => {
-      const first = await (await move(10 * DOLLAR, 'm1')).json();
-      expect(first.data.moved).toBe(true);
-      expect((await (await move(10 * DOLLAR, 'm1')).json()).data.moved).toBe(false);
+      const movedOf = async (answer: Promise<Response>) =>
+        rpcData<{ moved: boolean }>(await (await answer).json()).moved;
+      expect(await movedOf(move(10 * DOLLAR, 'm1'))).toBe(true);
+      expect(await movedOf(move(10 * DOLLAR, 'm1'))).toBe(false);
       expect((await status('ana')).credits?.balanceMicros).toBe(10 * DOLLAR);
       expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
       const grants = await env.db.select().from(appCreditGrants);
@@ -482,6 +484,99 @@ describe('wallets', () => {
       expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
       await refund(1000);
       expect((await status('bot:1')).credits?.balanceMicros).toBe(10 * DOLLAR);
+    });
+  });
+
+  describe('daily caps and holds', () => {
+    const caps = { buyerDailyMicros: 500 * DOLLAR, walletDailyMicros: 1000 * DOLLAR };
+    const order = (buyer: string, payer: string, extra: object = {}) =>
+      call('/credits.checkout', {
+        buyer,
+        payer,
+        amountMicros: 100 * DOLLAR,
+        returnUrl: 'https://example.com/credits',
+        ...extra,
+      });
+
+    beforeEach(async () => {
+      await buyForOthers(true, caps);
+      await call('/wallets.open', { payer: 'server:1' });
+    });
+
+    it('refuses a buyer’s sixth $100 purchase in a day', async () => {
+      for (let index = 0; index < 5; index++) {
+        expect((await order('ana', 'ana')).status).toBe(200);
+        await webhook(paid('ana', 'ana', 10_000).event);
+      }
+      const answer = await order('ana', 'ana');
+      expect(answer.status).toBe(403);
+      expect(await answer.json()).toEqual({ error: 'daily_cap', cap: 'buyer', leftMicros: 0 });
+    });
+
+    it('refuses a purchase or a move into a wallet that took in $1,000 today', async () => {
+      for (const buyer of ['ana', 'ben']) {
+        for (let index = 0; index < 5; index++) {
+          await webhook(paid(buyer, 'server:1', 10_000).event);
+        }
+      }
+      expect(await (await order('cara', 'server:1')).json()).toMatchObject({
+        error: 'daily_cap',
+        cap: 'wallet',
+      });
+      await webhook(paid('cara', 'cara', 2000).event);
+      const move = await call('/credits.move', {
+        from: 'cara',
+        to: 'server:1',
+        amountMicros: 20 * DOLLAR,
+        id: 'm1',
+      });
+      expect(await move.json()).toMatchObject({ error: 'daily_cap', cap: 'wallet' });
+    });
+
+    it('holds a purchase as pending until its start', async () => {
+      await order('ana', 'server:1', { holdHours: 24 });
+      expect(
+        new URLSearchParams(
+          String(calls.filter((c) => c.url.includes('checkout')).at(-1)!.init!.body),
+        ).get('metadata[holdHours]'),
+      ).toBe('24');
+      await webhook(paid('ana', 'server:1', 2000, { holdHours: '24' }).event);
+      const wallet = { clientId: registration.client.id, payer: 'server:1' };
+      expect(await creditBalance(env.db, wallet)).toMatchObject({
+        balanceMicros: 0,
+        pendingMicros: 20 * DOLLAR,
+      });
+      await spendCredits(env.db, wallet, DOLLAR);
+      expect(await creditBalance(env.db, wallet)).toMatchObject({
+        balanceMicros: -DOLLAR,
+        pendingMicros: 20 * DOLLAR,
+      });
+      const later = new Date(Date.now() + 25 * 3_600_000);
+      await spendCredits(env.db, wallet, DOLLAR, later);
+      expect(await creditBalance(env.db, wallet, later)).toMatchObject({
+        balanceMicros: 18 * DOLLAR,
+        pendingMicros: 0,
+      });
+    });
+
+    it('turns auto top-up off when a charge would pass a cap', async () => {
+      await buyForOthers(true, { buyerDailyMicros: 40 * DOLLAR });
+      await webhook(paid('ana', 'server:1', 2000, { saveCard: 'true' }).event);
+      await webhook(paid('ana', 'ana', 2000).event);
+      await call('/credits.autoTopUp', {
+        payer: 'server:1',
+        buyer: 'ana',
+        thresholdMicros: 5 * DOLLAR,
+        amountMicros: 20 * DOLLAR,
+        monthlyLimitMicros: 100 * DOLLAR,
+      });
+      await call('/usage.record', { person: 'server:1', aiNeurons: 1_500_000 });
+      expect(calls.filter((c) => c.url.endsWith('/v1/payment_intents'))).toHaveLength(0);
+      expect(
+        rpcData<{ autoTopUp: { enabled: boolean; offReason: string } }>(
+          await (await call('/usage.status', { person: 'server:1' })).json(),
+        ).autoTopUp,
+      ).toMatchObject({ enabled: false, offReason: 'daily_cap' });
     });
   });
 });
