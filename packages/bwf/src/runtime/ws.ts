@@ -225,6 +225,9 @@ type ListenerMap<ServerEvent> = {
   error: (error: unknown) => void;
 };
 
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const STABLE_AFTER_MS = 5_000;
+
 export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
   private socket: WebSocket | null = null;
   private readonly listeners: {
@@ -239,6 +242,7 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
   private reconnectAttempts = 0;
   private closedByUser = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private stableTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly url: string,
@@ -264,7 +268,12 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
 
     this.socket = new WebSocketCtor(this.url, this.options.protocols);
     this.socket.addEventListener('open', () => {
-      this.reconnectAttempts = 0;
+      // Decision: An open socket isn't a working one yet: a server that accepts and then drops would reset the
+      // count on each try, so the attempt limit and the growing delay would do nothing. The count goes
+      // back to zero once a message arrives or the socket has stayed open for a while.
+      this.stableTimer = setTimeout(() => {
+        this.reconnectAttempts = 0;
+      }, STABLE_AFTER_MS);
       const queued = this.buffer.splice(0);
       for (const item of queued) {
         this.socket?.send(JSON.stringify(item));
@@ -273,6 +282,7 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
     });
 
     this.socket.addEventListener('message', (event: { data: string }) => {
+      this.reconnectAttempts = 0;
       try {
         this.emit('message', JSON.parse(event.data) as ServerEventOf<P>);
       } catch (error) {
@@ -287,6 +297,7 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
     this.socket.addEventListener(
       'close',
       (event: { code?: number; reason?: string; wasClean?: boolean }) => {
+        clearTimeout(this.stableTimer);
         this.emit('close', {
           code: event.code,
           reason: event.reason,
@@ -304,7 +315,10 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
         }
 
         this.reconnectAttempts += 1;
-        const delay = this.options.reconnectDelayMs ?? 1_000;
+        const base = this.options.reconnectDelayMs ?? 1_000;
+        const grown = Math.min(MAX_RECONNECT_DELAY_MS, base * 2 ** (this.reconnectAttempts - 1));
+        const delay =
+          this.reconnectAttempts === 1 ? base : grown + Math.floor(Math.random() * grown * 0.2);
         this.reconnectTimer = setTimeout(() => this.connect(), delay);
       },
     );
@@ -321,6 +335,7 @@ export class BwfSocket<P extends keyof WebSocketRouteMap & string> {
   close(code?: number, reason?: string): void {
     this.closedByUser = true;
     clearTimeout(this.reconnectTimer);
+    clearTimeout(this.stableTimer);
     this.socket?.close(code, reason);
   }
 
