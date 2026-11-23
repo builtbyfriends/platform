@@ -43,7 +43,13 @@ github.post('/request', async (context) => {
   ) {
     return context.json({ error: 'path must be a /repos/owner/name/... GitHub API path' }, 400);
   }
-  const repository = repositoryOf(path.split('?', 1)[0]!);
+  // Decision: fetch resolves dot segments, encoded ones (%2e%2e) too, so a path that passed the
+  // checks above could still leave its repository. Send only a path the URL parser leaves as it is.
+  const target = new URL(path, GITHUB_API);
+  if (target.origin !== GITHUB_API || `${target.pathname}${target.search}` !== path) {
+    return context.json({ error: 'path must be a /repos/owner/name/... GitHub API path' }, 400);
+  }
+  const repository = repositoryOf(target.pathname);
   if (!repository) {
     return context.json({ error: 'path must name a repository' }, 400);
   }
@@ -91,7 +97,7 @@ github.post('/request', async (context) => {
   }
 
   const payload = body.body === undefined ? undefined : JSON.stringify(asRecord(body.body));
-  const upstream = await fetch(`${GITHUB_API}${path}`, {
+  const upstream = await fetch(target.href, {
     method,
     headers: {
       authorization: `Bearer ${credential.token}`,
