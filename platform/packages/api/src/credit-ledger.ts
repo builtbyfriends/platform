@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
-import { appCreditGrants, appPayers, type CreditSource } from './schema.ts';
+import { appCreditGrants, appPayers, type CreditSource, type PayerCap } from './schema.ts';
 
 type Payer = { clientId: string; payer: string };
 
@@ -188,6 +188,27 @@ export async function markOut(db: DbOrTx, payer: Payer, out: boolean, now = new 
     })
     .returning({ id: appPayers.payer_id });
   return changed.length > 0;
+}
+
+/** Records which of their plan's monthly caps a payer's hosted apps passed. True when that changed. */
+export async function markOverCaps(
+  db: DbOrTx,
+  payer: Payer,
+  caps: ReadonlyArray<PayerCap>,
+): Promise<boolean> {
+  const where = and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer));
+  const [row] = await db.select({ caps: appPayers.over_caps }).from(appPayers).where(where);
+  if ((row?.caps ?? []).join() === caps.join()) {
+    return false;
+  }
+  await db
+    .insert(appPayers)
+    .values({ client_id: payer.clientId, payer_id: payer.payer, over_caps: [...caps] })
+    .onConflictDoUpdate({
+      target: [appPayers.client_id, appPayers.payer_id],
+      set: { over_caps: [...caps] },
+    });
+  return true;
 }
 
 async function grantByPayment(tx: Tx, paymentIntentId: string) {

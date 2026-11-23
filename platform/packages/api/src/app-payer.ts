@@ -4,7 +4,7 @@ import type { OAuthSession } from './auth/oauth-types.ts';
 import { OAuthError } from './auth/oauth.ts';
 import type { DbOrTx } from './db.ts';
 import { resolvePlanLimits } from './plans.ts';
-import { appPeople, appUsage, oauthClients, projects, users } from './schema.ts';
+import { appPeople, appUsage, projects, users } from './schema.ts';
 
 type Owner = { id: string; plan: string; provider: string; provider_id: string };
 type Paid = { payer_person_id: string | null };
@@ -51,10 +51,9 @@ export async function billedPlanLimits(db: DbOrTx, owner: Owner, project: Paid) 
 }
 
 /**
- * The plan for the monthly meters an owner's projects share (requests, AI, sandbox time).
- * Decision: These meters count per owner, so this takes the payer all of the owner's projects
- * share, or the owner's own person when they differ. Count per payer if owners with several
- * payers turn out to be common.
+ * The plan shown for an owner's account: the payer all of the owner's projects share, or the
+ * owner's own person when they differ. It doesn't set monthly limits for a connected
+ * application's account (see accountPlanLimits).
  */
 export async function billedAccountPlanId(db: DbOrTx, owner: Owner): Promise<string> {
   if (!owner.provider.startsWith(APP)) {
@@ -70,8 +69,9 @@ export async function billedAccountPlanId(db: DbOrTx, owner: Owner): Promise<str
 }
 
 /**
- * The limits for an owner's shared monthly meters. A plan with credits is held to its balance,
- * so its monthly caps on requests, AI and sandbox time stop counting.
+ * The limits for an owner's shared monthly meters. A connected application's account has
+ * no monthly caps on requests, AI or sandbox time here: each payer is held to their own balance or
+ * plan, across the accounts they pay for (applyCredits in app-credits.ts).
  */
 export async function accountPlanLimits(
   db: DbOrTx,
@@ -79,14 +79,7 @@ export async function accountPlanLimits(
   planId: string,
 ): Promise<PlanLimits> {
   const limits = await resolvePlanLimits(db, planId);
-  if (!owner?.provider.startsWith(APP)) {
-    return limits;
-  }
-  const [client] = await db
-    .select({ plans: oauthClients.plans })
-    .from(oauthClients)
-    .where(eq(oauthClients.id, owner.provider.slice(APP.length)));
-  return (client?.plans?.[planId]?.creditMicros ?? 0) > 0
+  return owner?.provider.startsWith(APP)
     ? { ...limits, requestsPerMonth: 0, aiNeuronsPerMonth: 0, sandboxRuntimeSecondsPerMonth: 0 }
     : limits;
 }

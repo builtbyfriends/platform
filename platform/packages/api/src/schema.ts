@@ -255,6 +255,8 @@ export const appCreditGrants = pgTable(
 );
 
 /** What a payer owes past their grants, and since when their balance has been at or below zero. */
+export type PayerCap = 'ai' | 'sandbox';
+
 export const appPayers = pgTable(
   'app_payers',
   {
@@ -267,6 +269,12 @@ export const appPayers = pgTable(
     /** Set by a card dispute. A blocked payer can't buy until an operator clears it. */
     blocked_at: timestamp('blocked_at', { mode: 'string', withTimezone: true }),
     blocked_reason: text('blocked_reason'),
+    /** The monthly caps of a payer's plan that their hosted apps passed: 'ai' and 'sandbox'. Only for a payer with no grants. */
+    over_caps: text('over_caps')
+      .array()
+      .$type<Array<PayerCap>>()
+      .notNull()
+      .default(sql`'{}'::text[]`),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
 );

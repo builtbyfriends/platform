@@ -1,6 +1,7 @@
 import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@builtbyfriends/platform';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { and, eq, sql } from 'drizzle-orm';
+import { payerOutOfCredits } from './app-credits.ts';
 import { billedPlanLimits } from './app-payer.ts';
 import { getPlatformCapabilities } from './capabilities.ts';
 import { createDb } from './db.ts';
@@ -116,7 +117,8 @@ export class SandboxControl extends WorkerEntrypoint<
     }
     if (
       owner.suspended_reason === REASON_SANDBOX_RUNTIME_EXCEEDED ||
-      (await this.env.ROUTING.get(sandboxBlockKey(owner.id))) !== null
+      (await this.env.ROUTING.get(sandboxBlockKey(owner.id))) !== null ||
+      (await payerOutOfCredits(db, project.id, 'sandbox'))
     ) {
       return { ok: false, reason: 'runtime_budget' };
     }

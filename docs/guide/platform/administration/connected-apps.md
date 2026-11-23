@@ -176,3 +176,5 @@ Cloudflare charges you the same $25.25 for this use, less what your plan include
 When a payer's balance reaches zero, AI and sandbox time in the hosted apps they pay for stop at once. Each app keeps answering requests at a lower rate, 120 requests a minute, for the grace days. After that the app is paused: a visitor sees a page that says the app is paused, and its cron jobs and queues stop. Its data is kept.
 
 The grace days are 3 unless you change them under **Admin → Connected apps → Grace days at zero**. When the payer gets credits again, their apps answer normally within a few minutes. An app you took down yourself stays down until you restore it.
+
+A payer with no credits is held to their plan's monthly limits on hosted requests, AI and sandbox time instead. Platform adds up the use of every hosted app they pay for, whoever owns it, and checks it once an hour. Past the request limit, those apps are paused until the next month or until the payer buys a plan. Past the AI or sandbox limit, only AI or sandbox time stops. Apps under the same owner with another payer keep running.

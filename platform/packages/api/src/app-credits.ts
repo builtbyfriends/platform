@@ -1,10 +1,10 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
 import { stripeLiveMode } from './billing/stripe.ts';
-import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
+import { creditBalance, markOut, markOverCaps, spendCredits } from './credit-ledger.ts';
 import { creditsReason, readGraceDays, setCreditsPause } from './credits-pause.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { installationDefaultPlan } from './plans.ts';
+import { installationDefaultPlan, resolvePlanLimits } from './plans.ts';
 import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
 import {
   appCreditGrants,
@@ -15,7 +15,9 @@ import {
   oauthClients,
   projects,
   users,
+  type PayerCap,
 } from './schema.ts';
+import { REASON_CREDITS_PAUSED } from './suspension.ts';
 
 type Bindings = ApiEnv['Bindings'];
 
@@ -335,8 +337,15 @@ export async function paidProjectUse(db: DbOrTx, clientId: string, person: strin
   return byProject;
 }
 
-/** True while the person who pays for a project is out of credits. */
-export async function payerOutOfCredits(db: DbOrTx, projectId: string): Promise<boolean> {
+/**
+ * True while the person who pays for a project is out of credits, or, with no credits, past their
+ * plan's monthly cap on `cap` for hosted apps.
+ */
+export async function payerOutOfCredits(
+  db: DbOrTx,
+  projectId: string,
+  cap: PayerCap = 'ai',
+): Promise<boolean> {
   const rows = await db
     .select({ one: sql<number>`1` })
     .from(projects)
@@ -348,7 +357,12 @@ export async function payerOutOfCredits(db: DbOrTx, projectId: string): Promise<
         sql`${appPayers.payer_id} = ${payerOf}`,
       ),
     )
-    .where(and(eq(projects.id, projectId), sql`${appPayers.out_since} is not null`))
+    .where(
+      and(
+        eq(projects.id, projectId),
+        or(sql`${appPayers.out_since} is not null`, sql`${cap} = any(${appPayers.over_caps})`),
+      ),
+    )
     .limit(1);
   return rows.length > 0;
 }
@@ -437,8 +451,18 @@ export async function applyCredits(
   // that ends writes the default plan on the row.
   const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
   const standing = creditStanding(use, prices, paid ? plans[row!.plan]!.creditMicros : 0, balance);
-  // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide.
-  if (balance && (await markOut(db, payer, standing.credits!.out))) {
+  // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide. They are
+  // read from the daily totals, so they can be up to an hour behind.
+  const limits = balance ? null : await resolvePlanLimits(db, row?.plan ?? defaultPlan.id);
+  const past = (cap: number, used: number) => limits !== null && cap > 0 && used >= cap;
+  const overCaps = [
+    ...(past(limits?.aiNeuronsPerMonth ?? 0, use.hostedAiNeurons) ? (['ai'] as const) : []),
+    ...(past(limits?.sandboxRuntimeSecondsPerMonth ?? 0, use.hostedSandboxSeconds)
+      ? (['sandbox'] as const)
+      : []),
+  ];
+  const outChanged = balance ? await markOut(db, payer, standing.credits!.out) : false;
+  if ((await markOverCaps(db, payer, overCaps)) || outChanged) {
     for (const id of await paidOwnerIds(db, clientId, person)) {
       await env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(id))
         .fetch(
@@ -455,12 +479,17 @@ export async function applyCredits(
     }
   }
   const out = Boolean(balance && standing.credits!.out);
+  const requestsPast = past(limits?.requestsPerMonth ?? 0, use.hostedRequests);
   await setCreditsPause(
     env,
     db,
     clientId,
     person,
-    out ? creditsReason(balance!.outSince ?? now.toISOString(), graceDays, now) : null,
+    out
+      ? creditsReason(balance!.outSince ?? now.toISOString(), graceDays, now)
+      : requestsPast
+        ? REASON_CREDITS_PAUSED
+        : null,
     now,
   );
   return { ...standing, row, paid, defaultPlanId: defaultPlan.id };

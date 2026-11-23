@@ -10,8 +10,9 @@ import {
   it,
   vi,
 } from 'vite-plus/test';
-import { addProjectUse, payerOutOfCredits } from '../../src/app-credits.ts';
+import { addProjectUse, addUse, payerOutOfCredits, type Meter } from '../../src/app-credits.ts';
 import {
+  accountPlanLimits,
   billedAccountPlanId,
   billedAccountPlanLimits,
   billedPlanId,
@@ -21,7 +22,7 @@ import { syncHostedUse } from '../../src/app-usage-sync.ts';
 import { registerOAuthClient, setOAuthPreviewPermission } from '../../src/auth/oauth.ts';
 import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
-import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
+import { installationDefaultPlan, resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
 import { projectRouteKey, setProjectAiBlock } from '../../src/routing.ts';
 import {
@@ -692,6 +693,53 @@ describe('app billing', () => {
     await call('/usage.status', { person: 'boss' });
     expect(await state(mine)).toEqual(clear);
     expect(await state(taken)).toEqual({ row: takedown, route: takedown, background: takedown });
+  });
+
+  it('holds each payer to their own plan’s monthly caps, across owners, and leaves the others running', async () => {
+    const limits = await resolvePlanLimits(env.db, (await installationDefaultPlan(env.db, env)).id);
+    expect(limits.requestsPerMonth).toBeGreaterThan(0);
+    expect(limits.aiNeuronsPerMonth).toBeGreaterThan(0);
+    for (const person of ['a', 'b']) {
+      await call('/usage.record', { person, aiNeurons: 1 });
+    }
+    const aOfP1 = (await preview('p1', { workspace: 'w1', payer: 'a' })).project!;
+    const bOfP1 = (await preview('p1', { workspace: 'w2', payer: 'b' })).project!;
+    const aOfP2 = (await preview('p2', { workspace: 'w1', payer: 'a' })).project!;
+    const reason = async (project: typeof aOfP1) =>
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+        .suspended_reason;
+    const use = (project: typeof aOfP1, payer: string, meter: Meter, quantity: number) =>
+      addUse(env.db, {
+        clientId: registration.client.id,
+        person: payer,
+        projectId: project.id,
+        meter,
+        quantity,
+      });
+    const owner = (await env.db.select().from(users).where(eq(users.id, aOfP1.user_id)))[0]!;
+    expect(await accountPlanLimits(env.db, owner, owner.plan)).toMatchObject({
+      requestsPerMonth: 0,
+      aiNeuronsPerMonth: 0,
+      sandboxRuntimeSecondsPerMonth: 0,
+    });
+    expect(await accountPlanLimits(env.db, { provider: 'github' }, owner.plan)).toEqual(
+      await resolvePlanLimits(env.db, owner.plan),
+    );
+
+    const half = Math.ceil(limits.requestsPerMonth / 2);
+    await use(aOfP1, 'a', 'hostedRequests', half);
+    await call('/usage.status', { person: 'a' });
+    expect(await reason(aOfP1)).toBeNull();
+    await use(aOfP2, 'a', 'hostedRequests', half);
+    await use(bOfP1, 'b', 'hostedAiNeurons', limits.aiNeuronsPerMonth);
+    await call('/usage.status', { person: 'a' });
+    await call('/usage.status', { person: 'b' });
+    expect(await reason(aOfP1)).toBe('credits_paused');
+    expect(await reason(aOfP2)).toBe('credits_paused');
+    expect(await reason(bOfP1)).toBeNull();
+    expect(await payerOutOfCredits(env.db, bOfP1.id)).toBe(true);
+    expect(await payerOutOfCredits(env.db, bOfP1.id, 'sandbox')).toBe(false);
+    expect(await payerOutOfCredits(env.db, aOfP1.id)).toBe(false);
   });
 
   it('counts a hosted app’s database rows and storage operations, and keeps the others when one read fails', async () => {
