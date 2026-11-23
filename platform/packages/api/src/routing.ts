@@ -78,12 +78,13 @@ export async function setProjectAiBlock(
  *  - `{ op: 'suspend', reason, force }` — set `suspended = reason`. `force`
  *    (admin) overwrites a different existing reason; non-`force` (usage) only
  *    stamps when no marker exists, so it can't downgrade an admin suspension.
+ *    `over` lists the reasons a non-`force` stamp may still replace.
  *  - `{ op: 'unsuspend', matchReason }` — clear the marker. `matchReason: null`
  *    (admin) clears any reason; a string (usage) clears ONLY when the existing
  *    marker equals it, so a usage clear can't lift an admin suspension.
  */
 export type RoutingSuspensionUpdate =
-  | { op: 'suspend'; reason: string; force: boolean }
+  | { op: 'suspend'; reason: string; force: boolean; over?: ReadonlyArray<string> }
   | { op: 'unsuspend'; matchReason: string | null };
 
 /**
@@ -180,7 +181,7 @@ export async function applyRoutingSuspension(
       if (entry.suspended === update.reason) {
         continue;
       }
-      if (!update.force && entry.suspended) {
+      if (!update.force && entry.suspended && !update.over?.includes(String(entry.suspended))) {
         continue;
       }
       entry.suspended = update.reason;

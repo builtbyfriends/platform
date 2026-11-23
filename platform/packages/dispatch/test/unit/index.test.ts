@@ -487,6 +487,51 @@ describe('suspension check', () => {
     expect(await api.text()).not.toContain('usage limit');
     expect(dispatchGet).not.toHaveBeenCalled();
   });
+
+  it('answers a page saying the app is paused when its payer has been out of credits too long', async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'credits_paused' },
+    });
+    const page = await app.fetch(
+      new Request('https://my-app.void.app/', { headers: { Accept: 'text/html' } }),
+      env,
+      createCtx(),
+    );
+    expect(page.status).toBe(503);
+    const text = await page.text();
+    expect(text).toContain('This app is paused');
+    expect(text).not.toContain("isn't available");
+    expect(dispatchGet).not.toHaveBeenCalled();
+  });
+
+  it('serves an app in its grace days at the lower rate', async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'credits_grace' },
+      workerResponse: new Response('api'),
+    });
+    const limit = vi.fn(async () => ({ success: true }));
+    const limited = { ...env, CREDITS_GRACE_LIMITER: { limit } } as Env;
+    const ok = await app.fetch(
+      new Request('https://my-app.void.app/api/hello'),
+      limited,
+      createCtx(),
+    );
+    expect(ok.status).toBe(200);
+    expect(limit).toHaveBeenCalledWith({ key: 'proj_1' });
+
+    limit.mockResolvedValueOnce({ success: false });
+    const over = await app.fetch(
+      new Request('https://my-app.void.app/api/hello'),
+      limited,
+      createCtx(),
+    );
+    expect(over.status).toBe(429);
+    expect(await over.json()).toMatchObject({ resource: 'requests', reason: 'rate_limit' });
+    expect(dispatchGet).toHaveBeenCalledTimes(1);
+
+    const old = await app.fetch(new Request('https://my-app.void.app/api/hello'), env, createCtx());
+    expect(old.status).toBe(200);
+  });
 });
 
 describe('custom limits', () => {

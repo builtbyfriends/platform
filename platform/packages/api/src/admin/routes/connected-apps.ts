@@ -14,6 +14,7 @@ import {
   setOAuthPreviewPermission,
   OAuthError,
 } from '../../auth/oauth.ts';
+import { isGraceDays, readGraceDays, writeGraceDays } from '../../credits-pause.ts';
 import { isDevBypass, type ApiEnv } from '../../env.ts';
 import { executeAuditedMutation, operatorAuditIntent } from '../../operator/audit.ts';
 import { readPlanCatalog } from '../../plans.ts';
@@ -42,6 +43,7 @@ app.get('/', async (context) =>
       await context.get('db').select().from(oauthClients).orderBy(desc(oauthClients.created_at))
     ).map(publicOAuthClient),
     meterPrices: await readMeterPrices(context.get('db')),
+    graceDays: await readGraceDays(context.get('db')),
     meterUnits: Object.fromEntries(
       Object.entries(METERS).map(([meter, { unit }]) => [meter, unit]),
     ),
@@ -66,6 +68,20 @@ app.post('/usage-prices', async (context) => {
     operatorAuditIntent('oauth/clients/usage-prices', prices),
     async () => {
       await writeMeterPrices(context.get('db'), prices);
+      return { succeeded: true, response: context.redirect('/admin/connected-apps') };
+    },
+  );
+});
+app.post('/grace-days', async (context) => {
+  const days = Number((await context.req.parseBody()).days);
+  if (!isGraceDays(days)) {
+    throw new OAuthError('invalid_request', 'Give the grace days as a number from 0 to 365.');
+  }
+  return executeAuditedMutation(
+    context,
+    operatorAuditIntent('oauth/clients/grace-days', { days }),
+    async () => {
+      await writeGraceDays(context.get('db'), days);
       return { succeeded: true, response: context.redirect('/admin/connected-apps') };
     },
   );

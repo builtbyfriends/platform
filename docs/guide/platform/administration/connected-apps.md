@@ -170,3 +170,9 @@ One month of a busy hosted app, at the default prices:
 | **Charged to the payer** |         | **$25.25** |
 
 Cloudflare charges you the same $25.25 for this use, less what your plan includes. With Workers Logs on, the app's 10 million invocation events can add up to $6.00 more, so turn them off or add them to the request price as shown above. At twice each default price, the payer pays $50.50.
+
+## When a payer runs out of credits
+
+When a payer's balance reaches zero, AI and sandbox time in the hosted apps they pay for stop at once. Each app keeps answering requests at a lower rate, 120 requests a minute, for the grace days. After that the app is paused: a visitor sees a page that says the app is paused, and its cron jobs and queues stop. Its data is kept.
+
+The grace days are 3 unless you change them under **Admin → Connected apps → Grace days at zero**. When the payer gets credits again, their apps answer normally within a few minutes. An app you took down yourself stays down until you restore it.

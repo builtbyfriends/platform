@@ -679,12 +679,32 @@ const dispatcher = {
     if (routing.suspended === 'requests_exceeded') {
       return limitResponse('requests');
     }
+    if (routing.suspended === 'credits_paused') {
+      return createErrorResponse(request, 503, 'This app is paused', {
+        'Cache-Control': 'public, s-maxage=30, max-age=0',
+      });
+    }
+    if (routing.suspended === 'credits_grace') {
+      const allowed = await env.CREDITS_GRACE_LIMITER?.limit({ key: routing.projectId }).then(
+        (outcome) => outcome.success,
+        () => true,
+      );
+      if (allowed === false) {
+        return createLimitResponse(request, {
+          code: 'usage_limit',
+          resource: 'requests',
+          reason: 'rate_limit',
+          message: 'This app is busy. Please try again in a minute.',
+          retryAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+      }
+    }
     if (routing.suspended === 'operator_takedown') {
       return createErrorResponse(request, 403, "This app isn't available", {
         'Cache-Control': 'public, s-maxage=30, max-age=0',
       });
     }
-    if (routing.suspended) {
+    if (routing.suspended && routing.suspended !== 'credits_grace') {
       return Response.json(
         { error: 'usage limit exceeded', reason: routing.suspended },
         { status: 429, headers: { 'Cache-Control': 'public, s-maxage=30, max-age=0' } },

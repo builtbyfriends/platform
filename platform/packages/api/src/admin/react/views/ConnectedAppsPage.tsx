@@ -13,6 +13,7 @@ export function ConnectedAppsPage({
   clients,
   meterPrices,
   meterUnits,
+  graceDays,
   credentials,
   error,
 }: {
@@ -30,6 +31,7 @@ export function ConnectedAppsPage({
   }>;
   meterPrices?: Record<string, number>;
   meterUnits?: Record<string, number>;
+  graceDays?: number;
   credentials?: { clientId: string; clientSecret: string };
   error?: string;
 }) {
@@ -94,6 +96,17 @@ export function ConnectedAppsPage({
                 initialValue={JSON.stringify(meterPrices, null, 2)}
               />
               <Button type="submit" label="Save prices" />
+            </SectionStack>
+          </AdminCard>
+        )}
+        {graceDays !== undefined && (
+          <AdminCard
+            title="Grace days at zero"
+            description="When a payer’s balance reaches zero, their hosted apps keep answering at a lower request rate for this many days, then pause until credits return. A paused app’s data is kept."
+          >
+            <SectionStack as="form" method="post" action="/admin/connected-apps/grace-days">
+              <FormTextInput label="Days" name="days" required initialValue={String(graceDays)} />
+              <Button type="submit" label="Save grace days" />
             </SectionStack>
           </AdminCard>
         )}

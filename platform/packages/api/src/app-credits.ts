@@ -1,6 +1,7 @@
 import { and, eq, like, ne, or, sql } from 'drizzle-orm';
 import { stripeLiveMode } from './billing/stripe.ts';
 import { creditBalance, markOut, spendCredits } from './credit-ledger.ts';
+import { creditsReason, readGraceDays, setCreditsPause } from './credits-pause.ts';
 import type { Db, DbOrTx } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { installationDefaultPlan } from './plans.ts';
@@ -399,7 +400,8 @@ export async function dropTestPlans(
 
 /**
  * Works out whether a payer is out of credits and, when that changed, has the usage counters of
- * the accounts they pay for stamp or lift the AI pause on their hosted projects.
+ * the accounts they pay for stamp or lift the AI pause on their hosted projects. Then slows down
+ * or pauses those projects by how long the payer has been at zero (see credits-pause.ts).
  */
 export async function applyCredits(
   env: Pick<
@@ -409,6 +411,7 @@ export async function applyCredits(
     | 'STRIPE_PRICE_PRO'
     | 'PLATFORM_INSTALLATION_ID'
     | 'STRIPE_SECRET_KEY'
+    | 'ROUTING'
   >,
   db: Db,
   clientId: string,
@@ -416,7 +419,8 @@ export async function applyCredits(
 ) {
   const period = currentPeriod();
   const payer = { clientId, payer: person };
-  const [[stored], plans, prices, use, balance, defaultPlan] = await Promise.all([
+  const now = new Date();
+  const [[stored], plans, prices, use, balance, defaultPlan, graceDays] = await Promise.all([
     db
       .select()
       .from(appPeople)
@@ -426,6 +430,7 @@ export async function applyCredits(
     payerUse(db, clientId, person, period),
     creditBalance(db, payer),
     installationDefaultPlan(db, env),
+    readGraceDays(db),
   ]);
   const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
   // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
@@ -449,5 +454,14 @@ export async function applyCredits(
         });
     }
   }
+  const out = Boolean(balance && standing.credits!.out);
+  await setCreditsPause(
+    env,
+    db,
+    clientId,
+    person,
+    out ? creditsReason(balance!.outSince ?? now.toISOString(), graceDays, now) : null,
+    now,
+  );
   return { ...standing, row, paid, defaultPlanId: defaultPlan.id };
 }

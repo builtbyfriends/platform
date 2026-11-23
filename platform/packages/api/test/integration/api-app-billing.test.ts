@@ -23,7 +23,7 @@ import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
 import { resolvePlanLimits, writePlanCatalog } from '../../src/plans.ts';
 import { APP_PERSON_GRANT } from '../../src/routes/oauth-app-person.ts';
-import { setProjectAiBlock } from '../../src/routing.ts';
+import { projectRouteKey, setProjectAiBlock } from '../../src/routing.ts';
 import {
   appPayers,
   appPeople,
@@ -32,6 +32,7 @@ import {
   resources,
   users,
 } from '../../src/schema.ts';
+import { projectSuspensionKey } from '../../src/suspension.ts';
 import {
   setupEnv,
   teardownEnv,
@@ -624,6 +625,73 @@ describe('app billing', () => {
     await setProjectAiBlock(env.ROUTING, env.db, project!.id, owner!.id, false);
     expect(await env.ROUTING.get(`ai-block:${project!.id}`)).toBeNull();
     expect((await dataOf(call('/usage.status', { person: 'p1' }))).withinCaps).toBe(true);
+  });
+
+  it('slows a payer’s hosted apps at zero, pauses them after the grace days, and lifts both on a new grant', async () => {
+    const give = (amountMicros: number) =>
+      grantCredits(env.db, {
+        clientId: registration.client.id,
+        payer: 'boss',
+        livemode: false,
+        source: 'given',
+        amountMicros,
+      });
+    await give(100_000);
+    await call('/usage.record', { person: 'boss', aiNeurons: 1 });
+    const mine = (await preview('p1', { workspace: 'w1', payer: 'boss' })).project!;
+    const taken = (await preview('p1', { workspace: 'w2', payer: 'boss' })).project!;
+    const theirs = (await preview('p1', { workspace: 'w3' })).project!;
+    for (const project of [mine, taken, theirs]) {
+      await env.ROUTING.put(
+        projectRouteKey(project),
+        JSON.stringify({ workerName: 'w', projectId: project.id }),
+      );
+    }
+    const state = async (project: typeof mine) => {
+      const [row] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+      const route = JSON.parse((await env.ROUTING.get(projectRouteKey(project)))!);
+      return {
+        row: row!.suspended_reason,
+        route: route.suspended ?? null,
+        background: await env.ROUTING.get(projectSuspensionKey(project.id)),
+      };
+    };
+    const outFor = async (days: number) => {
+      await env.db
+        .update(appPayers)
+        .set({ out_since: new Date(Date.now() - days * 86_400_000).toISOString() })
+        .where(eq(appPayers.payer_id, 'boss'));
+      await call('/usage.status', { person: 'boss' });
+    };
+    const grace = { row: 'credits_grace', route: 'credits_grace', background: null };
+    const paused = { row: 'credits_paused', route: 'credits_paused', background: 'credits_paused' };
+    const clear = { row: null, route: null, background: null };
+
+    await call('/usage.record', { person: 'boss', aiNeurons: 20_000 });
+    expect(await state(mine)).toEqual(grace);
+    expect(await state(theirs)).toEqual(clear);
+    await outFor(1);
+    expect(await state(mine)).toEqual(grace);
+    await outFor(4);
+    expect(await state(mine)).toEqual(paused);
+    expect(await state(taken)).toEqual(paused);
+    expect(await state(theirs)).toEqual(clear);
+
+    const takedown = 'operator_takedown';
+    await env.db
+      .update(projects)
+      .set({ suspended_reason: takedown })
+      .where(eq(projects.id, taken.id));
+    await env.ROUTING.put(
+      projectRouteKey(taken),
+      JSON.stringify({ workerName: 'w', projectId: taken.id, suspended: takedown }),
+    );
+    await env.ROUTING.put(projectSuspensionKey(taken.id), takedown);
+
+    await give(1_000_000);
+    await call('/usage.status', { person: 'boss' });
+    expect(await state(mine)).toEqual(clear);
+    expect(await state(taken)).toEqual({ row: takedown, route: takedown, background: takedown });
   });
 
   it('counts a hosted app’s database rows and storage operations, and keeps the others when one read fails', async () => {

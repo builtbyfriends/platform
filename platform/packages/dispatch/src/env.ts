@@ -10,6 +10,8 @@ export type Env = Readonly<{
   // 503 it made itself (recordPlatformLog in metering.ts).
   LOGS: AnalyticsEngineDataset;
   USAGE_QUEUE: Queue<unknown>;
+  // Decision: Optional so a dispatcher installed before the binding existed still serves apps in their grace days.
+  CREDITS_GRACE_LIMITER?: RateLimit;
   BASE_HOSTNAME?: string;
   DISPATCH_TIMEOUT_MS?: string;
   PLATFORM_HEALTH_PROBE_TOKEN?: string;
