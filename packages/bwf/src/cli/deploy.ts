@@ -360,7 +360,9 @@ async function runManagedDeploy(
           );
         }
         if (!process.stdin.isTTY || reauthenticated) {
-          throw new Error('Auth token expired. Run `bwf account login` and try again.');
+          throw new Error('Auth token expired. Run `bwf account login` and try again.', {
+            cause: error,
+          });
         }
         log.warn('Auth token expired. Re-authenticating...');
         await promptForLoginToken(root);

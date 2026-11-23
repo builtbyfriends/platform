@@ -130,7 +130,7 @@ describe('RELAY_SOURCE', () => {
     await loadRelayWorker().email(message, env, ctx);
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://gateway.example.test/email/ingress');
     expect(init.method).toBe('POST');
     // Decision: No hand-set Content-Length: the runtime ignores one on a stream body and takes it from the

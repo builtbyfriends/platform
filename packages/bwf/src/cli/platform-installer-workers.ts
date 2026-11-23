@@ -17,16 +17,15 @@ import type { readCloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudfl
 import {
   encodeCloudflareVersionMessage,
   stabilizeCloudflareVersionTriggers,
-  type CloudflareCommandResult,
-  type CloudflareOperation,
-  type CloudflareTriggerConfig,
+} from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandResult,
+  CloudflareOperation,
+  CloudflareTriggerConfig,
 } from '@builtbyfriends/deploy-cloudflare';
 import type { createPlatformWorkerConfigs } from '@builtbyfriends/platform';
-import {
-  PLATFORM_DISABLED_KEY,
-  PLATFORM_DISABLED_VALUE,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { dirname, join, resolve } from 'pathslash';
 import { getErrorMessage } from './output.ts';
 import {

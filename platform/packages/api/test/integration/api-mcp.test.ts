@@ -77,13 +77,13 @@ describe('/mcp', () => {
       arguments: { projectId: project.id },
     });
     expect(own.body.result?.isError).toBeFalsy();
-    expect(JSON.parse(own.body.result!.content![0]!.text)).toMatchObject({ deployments: [] });
+    expect(JSON.parse(own.body.result!.content![0].text)).toMatchObject({ deployments: [] });
 
     const other = await mcp(stranger.jwt, 'tools/call', {
       name: 'deployments_list',
       arguments: { projectId: project.id },
     });
     expect(other.body.result?.isError).toBe(true);
-    expect(JSON.parse(other.body.result!.content![0]!.text).error.code).toBe('FORBIDDEN');
+    expect(JSON.parse(other.body.result!.content![0].text).error.code).toBe('FORBIDDEN');
   });
 });

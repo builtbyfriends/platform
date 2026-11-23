@@ -70,6 +70,9 @@ jobs:
         with:
           browser: ${{ matrix.shard != 'unit' }}
 
+      # The type-aware lint in `vp check` reads each app's generated `.bwf/tsconfig.json`.
+      - run: node scripts/lint-prepare.mjs
+        if: ${{ matrix.shard == 'unit' }}
       - run: vp check
         if: ${{ matrix.shard == 'unit' }}
 

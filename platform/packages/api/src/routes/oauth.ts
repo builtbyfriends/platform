@@ -173,7 +173,7 @@ async function newRequest(
   if (bindBrowser) {
     setCookie(context, browserCookie, proof, cookieOptions(context, FLOW_SECONDS));
   }
-  return request!;
+  return request;
 }
 async function loginPage(context: Context<ApiEnv>, id: string) {
   const settings = await readAuthSettings(context.get('db'));
@@ -540,7 +540,7 @@ app.post('/approve', async (context) => {
     if (data.kind === 'deployment') {
       data = {
         ...data,
-        projectId: await publishProject(context, tx as Db, data.slug!, context.get('user')),
+        projectId: await publishProject(context, tx, data.slug!, context.get('user')),
       };
     } else {
       const grantId = crypto.randomUUID();
@@ -903,8 +903,8 @@ export async function requestPublishApproval(
     })
     .returning();
   return {
-    authorization_url: authOrigin(env) + '/oauth/authorize?request=' + request!.id,
-    request_id: request!.id,
+    authorization_url: authOrigin(env) + '/oauth/authorize?request=' + request.id,
+    request_id: request.id,
     expires_in: FLOW_SECONDS,
   };
 }

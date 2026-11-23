@@ -10,7 +10,7 @@ import type { MigrationFile } from '../migrations/validate.ts';
 import type { QueueDefinition } from '../queues/scan.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
 import type { PlatformClient } from './client.ts';
-import { type DeploymentResponse, type ProjectResponse } from './client.ts';
+import type { DeploymentResponse, ProjectResponse } from './client.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { promptAndCreateProject, reportProjectCreationWarnings } from './create-project.ts';
 import type { ResourceSummary, RunDeployOptions } from './deploy-types.ts';

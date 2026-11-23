@@ -40,12 +40,8 @@ import type { WorkerModule } from '../worker-upload.ts';
 import { resolveProjectZeroTrustRouting } from '../zero-trust/routing.ts';
 import { assertDeploymentCanProceed } from './guards.ts';
 import type { requireActiveDeployAccess } from './recovery.ts';
-import {
-  commitCutoverLive,
-  cutoverIntentKey,
-  cutoverReadyKey,
-  type CutoverMarker,
-} from './recovery.ts';
+import { commitCutoverLive, cutoverIntentKey, cutoverReadyKey } from './recovery.ts';
+import type { CutoverMarker } from './recovery.ts';
 import { projectPublicUrls } from './shared.ts';
 
 export async function publishWorkerDeployment(input: {
@@ -553,7 +549,7 @@ export async function publishWorkerDeployment(input: {
   emit({
     event: 'done',
     deployment: deployment.id,
-    url: urls[0]!,
+    url: urls[0],
     urls,
     assets: deployedAssetCount,
     workers: workerFiles.length,

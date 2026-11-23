@@ -262,7 +262,7 @@ export async function resolveSharedEmailRecipientCreation(
       })
       .where(eq(emailSharedRecipients.id, current.id))
       .returning({ id: emailSharedRecipients.id, status: emailSharedRecipients.status });
-    return resolved!;
+    return resolved;
   });
 }
 
@@ -574,7 +574,7 @@ async function reconcileProjectRecipient(
       })
       .where(eq(emailSharedRecipients.id, row.id))
       .returning();
-    return claimedRow!;
+    return claimedRow;
   });
   if (!claimed) {
     return;
@@ -870,7 +870,7 @@ export async function removeSharedEmailRecipients(
         })
         .where(eq(emailSharedRecipients.id, current.id))
         .returning();
-      return claimed!;
+      return claimed;
     });
     if (!row) {
       continue;

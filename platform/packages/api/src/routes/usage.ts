@@ -123,7 +123,7 @@ export async function getAccountUsage(
     projectId: project.id,
     slug: project.slug,
     ...(usageMap.get(project.id) ?? ZERO_USAGE),
-    aiNeurons: aiUsages[i]!,
+    aiNeurons: aiUsages[i],
   }));
 
   const totals = projectUsages.reduce(
@@ -361,7 +361,7 @@ export async function sumAiUsageForWindows(
       interval.end,
       true,
     );
-    totals[index]! += usage.neurons;
+    totals[index] += usage.neurons;
   });
   return totals;
 }

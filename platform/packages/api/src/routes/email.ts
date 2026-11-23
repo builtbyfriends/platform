@@ -331,7 +331,7 @@ const app = new Hono<ApiEnv>()
       // revoked if the owner's identity changes (see `revokeOwnerVerifiedDestinationsForUserChange`).
       const ownerAudit: OwnerVerificationAudit = {
         userId: project.user_id,
-        emailSnapshot: ownerEmail!,
+        emailSnapshot: ownerEmail,
       };
       const inserted = await tryInsertWithRetry(
         context,
@@ -699,7 +699,7 @@ const app = new Hono<ApiEnv>()
       ) {
         return context.json({ error: 'invalid attemptId' }, 400);
       }
-      attemptId = body.attemptId as string | undefined;
+      attemptId = body.attemptId;
     }
     return rotateEmailIngressSecretForProject(
       context,

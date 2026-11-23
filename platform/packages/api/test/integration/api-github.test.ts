@@ -2937,7 +2937,7 @@ describe('GET /github/installations', () => {
     expect(res.status).toBe(200);
     const installations = (await res.json()) as Array<{ installation_id: string }>;
     expect(installations).toHaveLength(1);
-    expect(installations[0]!.installation_id).toBe('901');
+    expect(installations[0].installation_id).toBe('901');
   });
 
   it('includes an installation the caller has an active membership in', async () => {
@@ -2964,7 +2964,7 @@ describe('GET /github/installations', () => {
     expect(res.status).toBe(200);
     const installations = (await res.json()) as Array<{ installation_id: string }>;
     expect(installations).toHaveLength(1);
-    expect(installations[0]!.installation_id).toBe('910');
+    expect(installations[0].installation_id).toBe('910');
   });
 
   it('excludes an installation the caller has no membership in', async () => {

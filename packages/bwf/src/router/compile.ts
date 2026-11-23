@@ -148,8 +148,8 @@ export function compileRouteTable(
   lines.push(
     `import { AsyncLocalStorage } from "node:async_hooks";`,
     `import { Hono, createRoutingRuntime as __createRoutingRuntime, createHttpRouteHandler as __createHttpRouteHandler, createModuleLoader as __createModuleLoader, createAssetNotFound as __createAssetNotFound } from ${JSON.stringify(ROUTING_RUNTIME_PATH)};`,
+    `import { withRuntimeEnv } from ${JSON.stringify(options.runtimeEnvPath)};`,
   );
-  lines.push(`import { withRuntimeEnv } from ${JSON.stringify(options.runtimeEnvPath)};`);
 
   if (auth) {
     const authImports = ['runBwfAuthMiddleware', 'handleBwfAuthRequest', 'runBwfAuthMigrations'];
@@ -159,8 +159,6 @@ export function compileRouteTable(
     lines.push(
       `import { ${authImports.join(', ')} } from ${JSON.stringify(auth.authRuntimePath)};`,
       `import { __platformAuthDatabase } from ${JSON.stringify(auth.authDatabasePath)};`,
-    );
-    lines.push(
       `import { migrationSchema as __platformAuthMigrationSchema } from ${JSON.stringify(auth.authSchemaPath)};`,
     );
     if (auth.authConfigPath) {
@@ -233,12 +231,10 @@ export function compileRouteTable(
   lines.push(
     `const __routingRuntime = __createRoutingRuntime(app, ${JSON.stringify({ dev: options.dev === true, managedDispatch, blockedAssetExtensions: blockedExts })});`,
     'export const requestContext = __routingRuntime.requestContext;',
-  );
-  lines.push(
     'app.use(__routingRuntime.contextMiddleware);',
     'app.use(__routingRuntime.requestMiddleware);',
+    '',
   );
-  lines.push('');
 
   // Decision: Edge routing middleware. Every target without managed platform dispatch
   // owns routing end-to-end, including native Cloudflare production builds.
@@ -266,8 +262,9 @@ export function compileRouteTable(
     lines.push(
       'app.use(async (c, next) => {',
       '  return runBwfAuthMiddleware(c, next, __platformAuthOptions, __platformAuthDatabase);',
+      '});',
+      '',
     );
-    lines.push('});', '');
   }
 
   if (headerRules?.length) {
@@ -290,8 +287,6 @@ export function compileRouteTable(
     lines.push(
       `app.all(${JSON.stringify(route.pattern)}, async (c, next) => {`,
       `  if (c.req.raw.headers.get("upgrade")?.toLowerCase() !== "websocket") return next();`,
-    );
-    lines.push(
       `  return __forwardWebSocketRequest(c.req.raw, c.env, __platformWebSocketRoutes[${i}]);`,
       '});',
     );
@@ -304,13 +299,13 @@ export function compileRouteTable(
     lines.push(
       'app.all("/api/auth", async (c) => {',
       '  return handleBwfAuthRequest(c, __platformAuthOptions, __platformAuthDatabase);',
-    );
-    lines.push('});', '');
-    lines.push(
+      '});',
+      '',
       'app.all("/api/auth/*", async (c) => {',
       '  return handleBwfAuthRequest(c, __platformAuthOptions, __platformAuthDatabase);',
+      '});',
+      '',
     );
-    lines.push('});', '');
   }
 
   if (procedureFiles.length > 0) {
@@ -380,8 +375,8 @@ export function compileRouteTable(
           ...(route.name !== undefined && { name: route.name }),
         })),
       )};`,
+      '',
     );
-    lines.push('');
   }
   for (let i = 0; i < webSockets.length; i++) {
     lines.push(`__platformWebSocketRoutes[${i}].key = websocket${i}.key;`);
@@ -445,18 +440,16 @@ export function compileRouteTable(
     lines.push(
       'export async function scheduled(controller, env, ctx) {',
       '  const run = async (job, loadJob) => {',
-    );
-    lines.push('    try {', '      const mod = await loadJob();');
-    lines.push(
+      '    try {',
+      '      const mod = await loadJob();',
       "      if (typeof mod.default === 'function') await mod.default(controller, env, ctx);",
       '    } catch (error) {',
-    );
-    lines.push(
       '      console.error(`[bwf] Scheduled job ${job} failed for cron "${controller.cron}":`, error);',
       '      return { job, error };',
+      '    }',
+      '  };',
+      '  const tasks = [];',
     );
-    lines.push('    }', '  };');
-    lines.push('  const tasks = [];');
     for (let i = 0; i < scan.jobs.length; i++) {
       const job = scan.jobs[i];
       const filePath = JSON.stringify(`${jobsDir}/${job.filePath}`);
@@ -468,12 +461,11 @@ export function compileRouteTable(
     lines.push(
       '  const failures = (await Promise.all(tasks)).filter(Boolean);',
       '  if (failures.length) {',
-    );
-    lines.push(
       '    throw new AggregateError(failures.map((failure) => failure.error), `Scheduled jobs failed: ${failures.map((failure) => failure.job).join(", ")}`);',
       '  }',
+      '}',
+      '',
     );
-    lines.push('}', '');
   } else {
     lines.push('export async function scheduled() {}', '');
   }
@@ -482,33 +474,26 @@ export function compileRouteTable(
     lines.push(
       'function __platformTriggerUnauthorized(c) {',
       '  const __token = c.req.header("x-platform-internal");',
-    );
-    lines.push(
       '  const __expected = __getRawEnv()?.__PLATFORM_PROXY_TOKEN;',
       '  const __devToken = c.req.header("x-platform-dev-trigger");',
-    );
-    lines.push(
       '  return __PLATFORM_SERVE ? __devToken !== __PLATFORM_DEV_TRIGGER_TOKEN : __expected ? __token !== __expected : __token !== __PLATFORM_BUILD_KEY;',
       '}',
+      '',
     );
-    lines.push('');
   }
 
   if (scan.jobs.length > 0) {
     lines.push(
       'const __scheduledHandler = async (c) => {',
       '  if (__platformTriggerUnauthorized(c)) return c.json({ error: "unauthorized" }, 401);',
-    );
-    lines.push(
       '  const { cron, scheduledTime } = await c.req.json();',
       '  const controller = { cron, scheduledTime, noRetry() {} };',
-    );
-    lines.push(
       '  await scheduled(controller, c.env, c.executionCtx);',
       '  return c.json({ ok: true });',
+      '};',
+      'app.post("/__platform/scheduled", __scheduledHandler);',
+      '',
     );
-    lines.push('};', 'app.post("/__platform/scheduled", __scheduledHandler);');
-    lines.push('');
   }
 
   if (scan.queues.length > 0) {
@@ -532,65 +517,62 @@ export function compileRouteTable(
     lines.push(
       'export async function __processQueue(payload, env) {',
       '  const queueSuffix = payload.queue;',
-    );
-    lines.push(
       '  const __queueIndex = __resolveQueueIndex(queueSuffix);',
       '  if (__queueIndex === -1) {',
-    );
-    lines.push(
       '    const __error = `No unambiguous queue handler matches "${String(queueSuffix)}"`;',
       '    console.error(`[bwf] ${__error}`);',
-    );
-    lines.push('    return { ok: false, error: __error };', '  }');
-    lines.push('  const __decisions = new Map();', '  function __wrapMsg(m) {');
-    lines.push('    let decided = false;', '    return {');
-    lines.push(
+      '    return { ok: false, error: __error };',
+      '  }',
+      '  const __decisions = new Map();',
+      '  function __wrapMsg(m) {',
+      '    let decided = false;',
+      '    return {',
       '      id: m.id, timestamp: new Date(m.timestamp), body: m.body, attempts: m.attempts,',
       '      ack() { if (!decided) { decided = true; __decisions.set(m.id, { action: "ack" }); } },',
-    );
-    lines.push(
       '      retry(opts) { if (!decided) { decided = true; __decisions.set(m.id, { action: "retry", ...(opts?.delaySeconds != null ? { delaySeconds: opts.delaySeconds } : {}) }); } },',
       '    };',
     );
-    lines.push('  }', '  const __msgs = payload.messages.map(__wrapMsg);');
-    lines.push('  const batch = {', '    queue: queueSuffix,');
-    lines.push('    messages: __msgs,', '    ackAll() { for (const m of __msgs) m.ack(); },');
-    lines.push('    retryAll(opts) { for (const m of __msgs) m.retry(opts); },', '  };');
-    lines.push('  let __ok = true;', '  try {');
-    lines.push('    switch (__queueIndex) {');
+    lines.push(
+      '  }',
+      '  const __msgs = payload.messages.map(__wrapMsg);',
+      '  const batch = {',
+      '    queue: queueSuffix,',
+      '    messages: __msgs,',
+      '    ackAll() { for (const m of __msgs) m.ack(); },',
+      '    retryAll(opts) { for (const m of __msgs) m.retry(opts); },',
+      '  };',
+      '  let __ok = true;',
+      '  try {',
+      '    switch (__queueIndex) {',
+    );
     for (let i = 0; i < scan.queues.length; i++) {
       const q = scan.queues[i];
       lines.push(
         `      case ${i}: {`,
         `        const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
-      );
-      lines.push(
         "        if (typeof mod.default === 'function') await mod.default(batch, env);",
         '        break;',
+        '      }',
       );
-      lines.push('      }');
     }
-    lines.push('    }', '  } catch (error) {');
     lines.push(
+      '    }',
+      '  } catch (error) {',
       '    console.error(`[bwf] Queue handler ${__queueLabels[__queueIndex]} failed for queue "${String(queueSuffix)}":`, error);',
       '    __ok = false;',
-    );
-    lines.push(
       '  }',
       '  return { ok: __ok, ...(__decisions.size > 0 ? { decisions: Object.fromEntries(__decisions) } : {}) };',
-    );
-    lines.push('}', '');
-
-    lines.push(
+      '}',
+      '',
       'const __queueHandler = async (c) => {',
       '  if (__platformTriggerUnauthorized(c)) return c.json({ error: "unauthorized" }, 401);',
-    );
-    lines.push(
       '  const payload = await c.req.json();',
       '  const result = await __processQueue(payload, c.env);',
+      '  return c.json(result);',
+      '};',
+      'app.post("/__platform/queue", __queueHandler);',
+      '',
     );
-    lines.push('  return c.json(result);', '};');
-    lines.push('app.post("/__platform/queue", __queueHandler);', '');
   }
 
   // Decision: Inbound email: the first recipient pattern in scanner order wins, then `_default`.
@@ -625,51 +607,49 @@ export function compileRouteTable(
     lines.push(
       '  const __platformTo = message ? message.__platformTo : undefined;',
       '  const __to = String((__platformTo ?? (message && message.to)) || "");',
+      '  const __localFull = __to.split("@")[0] || "";',
     );
-    lines.push('  const __localFull = __to.split("@")[0] || "";');
     // Decision: With a slug configured, `<slug>[+<tag>]` routes on the tag; a bare `<slug>@` has an empty tag.
-    lines.push('  let __local = __localFull;', '  if (__opts && __opts.slug) {');
     lines.push(
+      '  let __local = __localFull;',
+      '  if (__opts && __opts.slug) {',
       '    const __plus = __localFull.indexOf("+");',
       '    __local = __plus === -1 ? "" : __localFull.slice(__plus + 1);',
+      '  }',
     );
-    lines.push('  }');
     if (email.addresses.length > 0) {
-      lines.push('  for (const __p of __emailPatterns) {', '    const __m = __p.re.exec(__local);');
-      lines.push('    if (!__m) continue;', '    const __params = {};');
       lines.push(
+        '  for (const __p of __emailPatterns) {',
+        '    const __m = __p.re.exec(__local);',
+        '    if (!__m) continue;',
+        '    const __params = {};',
         '    for (let __i = 0; __i < __p.params.length; __i++) {',
         '      __params[__p.params[__i]] = __m[__i + 1];',
-      );
-      lines.push('    }', '    const __mod = await __p.load();');
-      lines.push(
+        '    }',
+        '    const __mod = await __p.load();',
         '    if (typeof __mod.default !== "function") {',
         '      throw new Error("email handler at " + __p.path + " has no default export");',
-      );
-      lines.push(
         '    }',
         '    return await __mod.default(message, env, ctx, { params: __params });',
+        '  }',
       );
-      lines.push('  }');
     }
     if (email.defaultHandler) {
       const defaultPath = `${emailDir}/${email.defaultHandler}`;
       lines.push(
         '  const __dmod = await __emailDefault();',
         '  if (typeof __dmod.default !== "function") {',
-      );
-      lines.push(
         `    throw new Error("email handler at " + ${JSON.stringify(defaultPath)} + " has no default export");`,
         '  }',
+        '  return await __dmod.default(message, env, ctx, { params: {} });',
       );
-      lines.push('  return await __dmod.default(message, env, ctx, { params: {} });');
     } else {
       // Decision: Reject unmatched mail so the sender gets a bounce instead of silent loss.
       lines.push(
         '  if (typeof message.setReject === "function") {',
-        '    message.setReject("no handler matched recipient \\"" + __to + "\\" — add email/_default.ts to handle unmatched mail");',
+        String.raw`    message.setReject("no handler matched recipient \"" + __to + "\" — add email/_default.ts to handle unmatched mail");`,
+        '  }',
       );
-      lines.push('  }');
     }
     lines.push('}', '');
   }
@@ -680,8 +660,8 @@ export function compileRouteTable(
     lines.push(
       `import { createMigrationHandler as __createMigrationHandler } from ${JSON.stringify(options.migrationHandlerPath)};`,
       `const __migrations = ${JSON.stringify(options.migrations)};`,
+      `const __migrationPlanBundle = ${JSON.stringify(options.migrationPlanBundle)};`,
     );
-    lines.push(`const __migrationPlanBundle = ${JSON.stringify(options.migrationPlanBundle)};`);
     if (d1BindingName) {
       lines.push(
         `function __platformGetMigrationEnv() {
@@ -696,8 +676,9 @@ export function compileRouteTable(
     lines.push(
       'function __platformCreateMigrationRequestHandler(includeAuthMigrations, includePlanBundle) {',
       '  return __createMigrationHandler(',
+      '    __platformGetMigrationEnv(),',
+      '    __migrations,',
     );
-    lines.push('    __platformGetMigrationEnv(),', '    __migrations,');
     if (auth) {
       lines.push(
         '    includeAuthMigrations ? () => runBwfAuthMigrations(__platformGetMigrationEnv(), __platformAuthOptions, __platformAuthMigrationSchema) : undefined,',
@@ -705,26 +686,21 @@ export function compileRouteTable(
     } else {
       lines.push('    undefined,');
     }
-    lines.push('    includePlanBundle ? __migrationPlanBundle : undefined,', '  );');
-    lines.push('}', 'export async function __platformHandleInternalRoute(request) {');
     lines.push(
+      '    includePlanBundle ? __migrationPlanBundle : undefined,',
+      '  );',
+      '}',
+      'export async function __platformHandleInternalRoute(request) {',
       '  const url = new URL(request.url);',
       '  if (request.method === "POST" && url.pathname === "/__platform/migrate") {',
-    );
-    lines.push(
       `    return __platformCreateMigrationRequestHandler(${auth ? 'true' : 'false'}, false)(request);`,
       '  }',
-    );
-    lines.push(
       '  if (request.method === "GET" && url.pathname === "/__platform/migrate/capabilities") {',
       `    return __platformCreateMigrationRequestHandler(${auth ? 'true' : 'false'}, true)(request);`,
-    );
-    lines.push(
       '  }',
       '  if (request.method === "POST" && url.pathname === "/__platform/migrate/app") {',
-    );
-    lines.push('    return __platformCreateMigrationRequestHandler(false, true)(request);', '  }');
-    lines.push(
+      '    return __platformCreateMigrationRequestHandler(false, true)(request);',
+      '  }',
       '  if (request.method === "GET" && url.pathname.startsWith("/__platform/migrate/app/attempt/")) {',
       '    return __platformCreateMigrationRequestHandler(false, true)(request);',
     );
@@ -733,15 +709,14 @@ export function compileRouteTable(
       lines.push(
         '  if (request.method === "POST" && url.pathname === "/__platform/migrate/auth") {',
         '    return __platformCreateMigrationRequestHandler(true, true)(request);',
+        '  }',
       );
-      lines.push('  }');
     }
-    lines.push('  return null;', '}');
     lines.push(
+      '  return null;',
+      '}',
       `app.post("/__platform/migrate", (c) => __platformCreateMigrationRequestHandler(${auth ? 'true' : 'false'}, false)(c.req.raw));`,
       `app.get("/__platform/migrate/capabilities", (c) => __platformCreateMigrationRequestHandler(${auth ? 'true' : 'false'}, true)(c.req.raw));`,
-    );
-    lines.push(
       'app.post("/__platform/migrate/app", (c) => __platformCreateMigrationRequestHandler(false, true)(c.req.raw));',
       'app.get("/__platform/migrate/app/attempt/:attemptId", (c) => __platformCreateMigrationRequestHandler(false, true)(c.req.raw));',
     );
@@ -760,17 +735,14 @@ export function compileRouteTable(
     lines.push(
       `import { createBindingHandler as __createBindingHandler } from ${JSON.stringify(options.bindingHandlerPath)};`,
       'let __platformBindingApp;',
-    );
-    lines.push(
       'app.all("/__platform/*", async (c) => {',
       '  if (!__platformBindingApp) __platformBindingApp = __createBindingHandler(__getRawEnv());',
-    );
-    lines.push('  const url = new URL(c.req.url);', '  url.pathname = url.pathname.slice(7);');
-    lines.push(
+      '  const url = new URL(c.req.url);',
+      '  url.pathname = url.pathname.slice(7);',
       '  return __platformBindingApp.fetch(new Request(url.toString(), c.req.raw));',
       '});',
+      '',
     );
-    lines.push('');
   }
 
   // Decision: Request-scoped raw env — safe for concurrent requests (uses ALS, not a module global).
@@ -779,8 +751,8 @@ export function compileRouteTable(
   lines.push(
     'const __rawEnvStore = new AsyncLocalStorage();',
     'export function __withRawEnv(env, fn) { return __rawEnvStore.run(env, fn); }',
+    'function __getRawEnv() { return __rawEnvStore.getStore(); }',
   );
-  lines.push('function __getRawEnv() { return __rawEnvStore.getStore(); }');
   // Decision: Build-time key for internal route auth when __PLATFORM_PROXY_TOKEN is absent.
   // Embedded in the compiled route table — only same-build callers know it.
   lines.push(
@@ -791,8 +763,11 @@ export function compileRouteTable(
   // module is compiled, not read from `import.meta.env.DEV`: a build with
   // NODE_ENV=development still has DEV=true, and must keep the proxy-token /
   // build-key rule. Only the Vite dev server compiles with `dev: true`.
-  lines.push(`const __PLATFORM_SERVE = ${JSON.stringify(options.dev === true)};`, '');
-  lines.push(`export default app;`);
+  lines.push(
+    `const __PLATFORM_SERVE = ${JSON.stringify(options.dev === true)};`,
+    '',
+    `export default app;`,
+  );
 
   return lines.join('\n');
 }
@@ -1111,8 +1086,8 @@ function compileRoutingRulesMiddleware(
   lines.push(
     '// Routing rules: redirects + rewrites (applied before route handlers)',
     `const __routingRules = ${JSON.stringify(dev ? rules : stripOriginForProd(rules))};`,
+    'app.use("*", __routingRuntime.routingMiddleware(__routingRules));',
   );
-  lines.push('app.use("*", __routingRuntime.routingMiddleware(__routingRules));');
 }
 
 /** Generate the server-side fetch client, which calls `app.fetch()` with the current request's credentials. */

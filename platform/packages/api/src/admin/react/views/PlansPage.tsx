@@ -69,7 +69,7 @@ const aiLoggingLabels: Record<AiLoggingMode, string> = {
   full: 'Full (prompts and responses)',
 };
 function aiLoggingMode(modes: PlanAiLoggingSettings['modes'], planId: string): AiLoggingMode {
-  return Object.hasOwn(modes, planId) ? modes[planId]! : 'inherit';
+  return Object.hasOwn(modes, planId) ? modes[planId] : 'inherit';
 }
 function usePlans(path: string) {
   const { plans: ref } = useRequest(plansRequest(path), { mode: 'stale-while-revalidate' });

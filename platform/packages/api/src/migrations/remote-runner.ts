@@ -224,12 +224,12 @@ export async function queryD1(
       signal: controller.signal,
     });
     json = (await response.json()) as typeof json;
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
       const preview = query.sql.length > 80 ? `${query.sql.slice(0, 80)}…` : query.sql;
-      throw new Error(`D1 request timed out after ${timeoutMs}ms (${preview})`, { cause: err });
+      throw new Error(`D1 request timed out after ${timeoutMs}ms (${preview})`, { cause: error });
     }
-    throw err;
+    throw error;
   } finally {
     clearTimeout(timer);
   }

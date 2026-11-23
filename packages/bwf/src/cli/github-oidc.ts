@@ -52,6 +52,7 @@ async function requestGithubOidcToken(requestUrl: string, requestToken: string):
   } catch (error) {
     throw new Error(
       `github-oidc: Failed to reach the GitHub OIDC token endpoint: ${errText(error)}`,
+      { cause: error },
     );
   }
 
@@ -95,7 +96,7 @@ async function exchangeOidcTokenAtApi(
       redirect: 'manual',
     });
   } catch (error) {
-    throw new Error(`github-oidc: Failed to reach ${url}: ${errText(error)}`);
+    throw new Error(`github-oidc: Failed to reach ${url}: ${errText(error)}`, { cause: error });
   }
 
   if (!res.ok) {

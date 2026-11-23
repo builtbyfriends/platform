@@ -53,7 +53,7 @@ const actions: ReadonlySet<string> = new Set<PlanCatalogAction>([
   'reset',
 ]);
 function action(value: unknown): PlanCatalogAction {
-  if (typeof value !== 'string' || !actions.has(value as PlanCatalogAction)) {
+  if (typeof value !== 'string' || !actions.has(value)) {
     throw new OperatorError(400, 'Choose a supported plan action.');
   }
   return value as PlanCatalogAction;

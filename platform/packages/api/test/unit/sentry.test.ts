@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vite-plus/test';
 const { withSentry } = vi.hoisted(() => ({
   withSentry: vi.fn(
     (_options: unknown, handler: Record<string, (...args: Array<unknown>) => unknown>) => ({
-      fetch: (...args: Array<unknown>) => ['sentry', handler.fetch!(...args)],
+      fetch: (...args: Array<unknown>) => ['sentry', handler.fetch(...args)],
     }),
   ),
 }));
@@ -28,7 +28,7 @@ it('goes through Sentry when SENTRY_DSN is set', () => {
 
 it('adds no trace headers to outgoing requests and keeps tracing off', () => {
   withOptionalSentry('api', handler);
-  const options = (withSentry.mock.calls[0]![0] as (env: object) => Record<string, unknown>)({
+  const options = (withSentry.mock.calls[0][0] as (env: object) => Record<string, unknown>)({
     SENTRY_DSN: 'https://key@example.test/1',
     PLATFORM_VERSION: '1.2.3',
   });

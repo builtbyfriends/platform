@@ -216,7 +216,7 @@ async function runCleanupBatch(
   await Promise.all(
     Array.from({ length: Math.min(5, jobs.length) }, async () => {
       while (next < jobs.length) {
-        const job = jobs[next++]!;
+        const job = jobs[next++];
         try {
           await executeCleanupJob(env, job);
         } catch (error) {
@@ -437,8 +437,6 @@ async function cleanupBestEffortResources(
     cleanupJob(projectId, 'routing-key', projectRouteKey(project), {
       key: projectRouteKey(project),
     }),
-  );
-  cleanup.push(
     cleanupJob(projectId, 'routing-key', `ai-block:${projectId}`, { key: `ai-block:${projectId}` }),
   );
 
@@ -658,8 +656,8 @@ async function lockAndMarkDeleting(
     return {
       ownerUserId: lockedProject.user_id,
       ownerBillingCycleStart: owner.billing_cycle_start,
-      ownershipStartedAt: ownership!.starts_at,
-      ownershipEndedAt: ownership!.ends_at!,
+      ownershipStartedAt: ownership.starts_at,
+      ownershipEndedAt: ownership.ends_at!,
       cancelledBuilds: await terminateBuildsForProject(tx, projectId, {
         reason: 'project deleted',
       }),
@@ -769,7 +767,7 @@ export async function reconcileProjectCleanupJobs(db: Db, env: ApiEnv['Bindings'
   await Promise.all(
     Array.from({ length: Math.min(5, due.length) }, async () => {
       while (next < due.length) {
-        const job = due[next++]!;
+        const job = due[next++];
         // Decision: A later invocation can see the same due snapshot. Claim without holding a database transaction
         // open across provider I/O.
         const claimed = await db

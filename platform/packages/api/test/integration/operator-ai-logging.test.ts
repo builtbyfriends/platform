@@ -292,8 +292,8 @@ describe('operator project override', () => {
     const [lock, inputs] = queries.filter((query) =>
       query.trim().toLowerCase().startsWith('update'),
     );
-    expect(lock!.toLowerCase()).not.toContain(' from ');
-    expect(lock!.toLowerCase()).not.toContain(' join ');
+    expect(lock.toLowerCase()).not.toContain(' from ');
+    expect(lock.toLowerCase()).not.toContain(' join ');
     expect(inputs).toContain('"project_ai_logging"');
     expect((await published(project.id)).value).toBe('metadata');
   });

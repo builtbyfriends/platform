@@ -17,7 +17,7 @@ describe('localhostRedirectResponse', () => {
 
     const match = /content="0;url=([^"]*)"/.exec(body);
     expect(match).not.toBeNull();
-    const attr = match![1]!;
+    const attr = match![1];
     expect(attr).toContain('&quot;');
     expect(attr).toContain('&lt;');
     expect(attr).not.toContain('"');

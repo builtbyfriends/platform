@@ -912,6 +912,7 @@ export async function emailDomainRotateSecret(
     if (operation.status !== 'completed') {
       throw new Error(
         `email: secret rotation ${operation.status}; inspect operation ${operation.operationId}`,
+        { cause: error },
       );
     }
     printSuccess('Zone ingress secret rotated and verified on the deployed Worker.');

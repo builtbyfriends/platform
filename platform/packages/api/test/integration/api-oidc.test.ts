@@ -149,7 +149,7 @@ function makeClaims(overrides: Partial<GithubOidcClaims> = {}): GithubOidcClaims
   const scaffoldRef = `${repository}/.github/workflows/bwf-deploy.yml@${ref}`;
   return {
     repository,
-    repository_owner: repository.split('/')[0]!,
+    repository_owner: repository.split('/')[0],
     repository_owner_id: 'octo-id',
     repository_id: '42',
     ref,
@@ -498,7 +498,7 @@ describe('POST /auth/github-oidc', () => {
     const app = makeApp(env);
     const claims = makeClaims();
     delete (claims as unknown as Record<string, unknown>).ref;
-    setVerifyResult(claims as unknown as GithubOidcClaims);
+    setVerifyResult(claims);
 
     const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
     expect(res.status).toBe(401);
@@ -564,7 +564,7 @@ describe('POST /auth/github-oidc', () => {
 
     const projectBuilds = await getProjectBuilds(env.db, project.id);
     expect(projectBuilds.length).toBe(1);
-    const build = projectBuilds[0]!;
+    const build = projectBuilds[0];
     expect(build.id).toBe(json.buildId);
     expect(build.executor).toBe('github_actions');
     expect(build.status).toBe('building');
@@ -679,8 +679,8 @@ describe('POST /auth/github-oidc', () => {
 
     const projectBuilds = await getProjectBuilds(env.db, project.id);
     expect(projectBuilds.length).toBe(1);
-    expect(projectBuilds[0]!.github_run_id).toBe('525252');
-    expect(projectBuilds[0]!.github_run_attempt).toBe('3');
+    expect(projectBuilds[0].github_run_id).toBe('525252');
+    expect(projectBuilds[0].github_run_attempt).toBe('3');
   });
 
   it('returns 401 and creates no build when the run_attempt claim is missing', async () => {
@@ -1079,7 +1079,7 @@ describe('POST /auth/github-oidc', () => {
 
     const projectBuilds = await getProjectBuilds(env.db, project.id);
     expect(projectBuilds.length).toBe(1);
-    expect(projectBuilds[0]!.github_run_id).toBe('555');
+    expect(projectBuilds[0].github_run_id).toBe('555');
   });
 
   // Decision: A repeated exchange for the same run reuses the in-flight build, which already carries the
@@ -1237,9 +1237,9 @@ describe('POST /auth/github-oidc', () => {
     const buildsB = await getProjectBuilds(env.db, projectB.id);
     expect(buildsA.length).toBe(1);
     expect(buildsB.length).toBe(1);
-    expect(buildsA[0]!.github_run_id).toBe('777');
-    expect(buildsB[0]!.github_run_id).toBe('777');
-    expect(buildsA[0]!.id).not.toBe(buildsB[0]!.id);
+    expect(buildsA[0].github_run_id).toBe('777');
+    expect(buildsB[0].github_run_id).toBe('777');
+    expect(buildsA[0].id).not.toBe(buildsB[0].id);
   });
 
   // Decision: GitHub Actions builds respect the owner's per-tier build concurrency. A free user
@@ -1289,7 +1289,7 @@ describe('POST /auth/github-oidc', () => {
 
     expect((await getProjectBuilds(env.db, project.id)).length).toBe(1);
     expect((await getProjectBuilds(env.db, otherProject.id)).length).toBe(0);
-    expect((await getProjectBuilds(env.db, project.id))[0]!.github_run_id).toBe('111');
+    expect((await getProjectBuilds(env.db, project.id))[0].github_run_id).toBe('111');
   });
 
   it('supersedes the active build when a NEW run targets the SAME project+branch (latest-wins)', async () => {
@@ -2082,8 +2082,8 @@ describe('POST /auth/github-oidc', () => {
 
     const rows = await getProjectBuilds(env.db, project.id);
     expect(rows.length).toBe(1);
-    expect(rows[0]!.status).toBe('cancelled');
-    expect(rows[0]!.error).toBe('superseded by newer push during token exchange');
+    expect(rows[0].status).toBe('cancelled');
+    expect(rows[0].error).toBe('superseded by newer push during token exchange');
   });
 
   it('returns 503, mints no token, and cancels the created build when the post-create re-check is unverifiable', async () => {
@@ -2114,8 +2114,8 @@ describe('POST /auth/github-oidc', () => {
 
     const rows = await getProjectBuilds(env.db, project.id);
     expect(rows.length).toBe(1);
-    expect(rows[0]!.status).toBe('cancelled');
-    expect(rows[0]!.error).toBe('superseded by newer push during token exchange');
+    expect(rows[0].status).toBe('cancelled');
+    expect(rows[0].error).toBe('superseded by newer push during token exchange');
   });
 
   it('mints a token when the live install check confirms App coverage (default mock)', async () => {
@@ -2223,7 +2223,7 @@ describe('POST /auth/github-oidc', () => {
     });
 
     const app = makeApp(env);
-    setVerifyResult(makeClaims({ event_name: '' as never }));
+    setVerifyResult(makeClaims({ event_name: '' }));
 
     const res = await exchange(app, env, { oidcToken: 'good', project: project.slug });
     expect(res.status).toBe(401);

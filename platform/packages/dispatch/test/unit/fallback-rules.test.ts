@@ -497,8 +497,8 @@ describe('fallbackRules rewrite — WfP/framework branch', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('<html>spa</html>');
     expect(workerFetch).toHaveBeenCalledTimes(2);
-    expect(new URL((workerFetch.mock.calls[0]![0] as Request).url).pathname).toBe('/app/settings');
-    expect(new URL((workerFetch.mock.calls[1]![0] as Request).url).pathname).toBe('/index.html');
+    expect(new URL((workerFetch.mock.calls[0][0] as Request).url).pathname).toBe('/app/settings');
+    expect(new URL((workerFetch.mock.calls[1][0] as Request).url).pathname).toBe('/index.html');
   });
 
   it('does not re-dispatch Platform app handler 404s without the generated no-match marker', async () => {

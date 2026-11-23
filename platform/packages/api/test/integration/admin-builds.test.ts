@@ -339,7 +339,7 @@ describe('GET /admin/builds/:id (build page)', () => {
       JSON.parse(
         html.match(
           /<script type="application\/json" id="platform-admin-page">([\s\S]*?)<\/script>/,
-        )![1]!,
+        )![1],
       ),
     ).toMatchObject({ component: 'buildDetail' });
     expect(html).toContain('Loading logs...');

@@ -1175,14 +1175,12 @@ describe('POST /email/send — the envelope handed to CF', () => {
     const env = createMockEnv(kv, { SEND_EMAIL: sender.binding });
     await postSend(env, await sendBody({ from }));
     for (const call of sender.calls) {
-      // oxlint-disable-next-line no-control-regex
       expect(new RegExp(String.raw`[\u0000-\u001f\u007f]`).test(call.from)).toBe(false);
     }
   });
 });
 
 describe('POST /email/send — requestId is bounded and sanitized at intake', () => {
-  // oxlint-disable-next-line no-control-regex
   const CONTROL = new RegExp(String.raw`[\u0000-\u001f\u007f]`);
 
   it('a 5 MB control-heavy requestId still sends, and logs a short clean id', async () => {
@@ -1206,9 +1204,9 @@ describe('POST /email/send — requestId is bounded and sanitized at intake', ()
       expect(lines).toHaveLength(1);
       const fixed = `[email-log] proj_000000000001  dev@example.com sent cf-msg-1 @${Date.now()}`
         .length;
-      expect(lines[0]!.length).toBeLessThanOrEqual(fixed + 128);
+      expect(lines[0].length).toBeLessThanOrEqual(fixed + 128);
       expect(lines[0]).not.toMatch(CONTROL);
-      expect(lines[0]!.split(' ')[1]).toBe('proj_000000000001');
+      expect(lines[0].split(' ')[1]).toBe('proj_000000000001');
       expect(elapsed).toBeLessThan(500);
 
       logSpy.mockClear();
@@ -1220,7 +1218,7 @@ describe('POST /email/send — requestId is bounded and sanitized at intake', ()
       expect(lines2).toHaveLength(1);
       expect(lines2[0]).not.toMatch(CONTROL);
       expect(lines2[0]).not.toContain('\n[email-log]');
-      expect(lines2[0]!.split(' ')[1]).toBe('proj_000000000001');
+      expect(lines2[0].split(' ')[1]).toBe('proj_000000000001');
     } finally {
       logSpy.mockRestore();
     }
@@ -1240,7 +1238,7 @@ describe('POST /email/send — requestId is bounded and sanitized at intake', ()
         .map((call) => String(call[0]))
         .filter((line) => line.startsWith('[email-log] '));
       expect(lines).toHaveLength(1);
-      expect(lines[0]!.split(' ')[2]).toBe('unknown');
+      expect(lines[0].split(' ')[2]).toBe('unknown');
     } finally {
       logSpy.mockRestore();
     }

@@ -230,7 +230,7 @@ function isPermittedReplySender(from: string, pin: ReplySenderPin): boolean {
   if (pin.customDomain) {
     return true;
   }
-  return pin.names.includes(lower.slice(0, at).split('+')[0]!);
+  return pin.names.includes(lower.slice(0, at).split('+')[0]);
 }
 
 interface OutboundGate {
@@ -289,14 +289,12 @@ export async function routeInbound(
     // Decision: Passes the project's dispatch limits, as the HTTP router in packages/dispatch does. Without
     // them, anyone who can mail the project runs its worker at the namespace default, not the
     // CPU and sub-request ceiling the project is set to.
-    stub = (
-      authoritative.limits
-        ? env.DISPATCH.get(workerName, {}, { limits: authoritative.limits })
-        : env.DISPATCH.get(workerName)
-    ) as Fetcher;
+    stub = authoritative.limits
+      ? env.DISPATCH.get(workerName, {}, { limits: authoritative.limits })
+      : env.DISPATCH.get(workerName);
   } catch (error) {
     console.error(`[email-router] DISPATCH.get(${sanitize(workerName, 320)}) failed:`, error);
-    throw new Error('email worker temporarily unavailable');
+    throw new Error('email worker temporarily unavailable', { cause: error });
   }
 
   // Decision: Cloudflare sets `rawSize` before the body streams, so oversized messages are rejected before
@@ -359,7 +357,7 @@ export async function routeInbound(
     const msg =
       error instanceof Error ? error.message.slice(0, 320) : describeUntrusted(error, 320);
     console.error(`[email-router] dispatch to ${sanitize(workerName, 320)} failed:`, msg);
-    throw new Error('email handler execution unresolved');
+    throw new Error('email handler execution unresolved', { cause: error });
   }
 
   try {
@@ -959,7 +957,7 @@ async function enactSanitized(
       } else {
         if (relayedReply) {
           providerReference = await providerDeadline.run(() =>
-            relayedReply!(to, providerDeadline.remainingMs()),
+            relayedReply(to, providerDeadline.remainingMs()),
           );
         } else {
           await providerDeadline.run(() =>

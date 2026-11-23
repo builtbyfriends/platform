@@ -583,7 +583,7 @@ const app = new Hono<ApiEnv>()
                 ) {
                   throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
                 }
-                const migrationDiff = lease.migrationDiff as Array<string>;
+                const migrationDiff = lease.migrationDiff;
                 const released = await deleteRollbackLease(tx, activeDeploy.id, lease.ownerId);
                 if (!released) {
                   throw new RollbackError(409, `deploy in progress: ${activeDeploy.id}`);
@@ -1103,7 +1103,7 @@ const app = new Hono<ApiEnv>()
         });
         rollbackCommitted = true;
       }
-    } catch (err) {
+    } catch (error) {
       // Decision: The COMMIT acknowledgement can be lost after PostgreSQL applied the flip. The owned lease's
       // `applied` transition commits in the same transaction and is the witness, including when the
       // target was already active. A lease still `running` proves the transaction didn't commit.
@@ -1222,9 +1222,9 @@ const app = new Hono<ApiEnv>()
               });
             }
             throw new AggregateError(
-              [err, ...compensationErrors],
+              [error, ...compensationErrors],
               'rollback transaction failed and external state compensation was incomplete',
-              { cause: err },
+              { cause: error },
             );
           }
         } else if (ambiguousCommitOutcome === 'unknown') {
@@ -1253,20 +1253,20 @@ const app = new Hono<ApiEnv>()
           });
         }
       }
-      if (!rollbackCommitted && err instanceof RollbackError) {
-        if (err.destructiveMigrations) {
+      if (!rollbackCommitted && error instanceof RollbackError) {
+        if (error.destructiveMigrations) {
           rollbackErrorResponse = context.json(
-            { error: err.message, destructiveMigrations: err.destructiveMigrations },
-            err.status,
+            { error: error.message, destructiveMigrations: error.destructiveMigrations },
+            error.status,
           );
         } else {
           rollbackErrorResponse = context.json(
-            { error: err.message, ...(err.userMessage ? { message: err.userMessage } : {}) },
-            err.status,
+            { error: error.message, ...(error.userMessage ? { message: error.userMessage } : {}) },
+            error.status,
           );
         }
       } else if (!rollbackCommitted) {
-        rollbackErrorToThrow = err;
+        rollbackErrorToThrow = error;
       }
     } finally {
       if (rollbackLeaseId && releaseRollbackLease) {

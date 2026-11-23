@@ -41,12 +41,12 @@ describe('github_webhook_redeliveries — replay ledger', () => {
 
     const rows = await env.db.select().from(githubWebhookRedeliveries);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.id.startsWith('ghwr_')).toBe(true);
-    expect(rows[0]!.guid).toBe('guid-1');
-    expect(rows[0]!.delivery_id).toBe('111');
-    expect(rows[0]!.event).toBe('push');
-    expect(rows[0]!.status_code).toBe(500);
-    expect(rows[0]!.redelivered_at).not.toBeNull();
+    expect(rows[0].id.startsWith('ghwr_')).toBe(true);
+    expect(rows[0].guid).toBe('guid-1');
+    expect(rows[0].delivery_id).toBe('111');
+    expect(rows[0].event).toBe('push');
+    expect(rows[0].status_code).toBe(500);
+    expect(rows[0].redelivered_at).not.toBeNull();
   });
 
   it('double recordWebhookRedelivery with the same guid → exactly one row (onConflictDoNothing)', async () => {
@@ -65,7 +65,7 @@ describe('github_webhook_redeliveries — replay ledger', () => {
 
     const rows = await env.db.select().from(githubWebhookRedeliveries);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.delivery_id).toBe('111');
+    expect(rows[0].delivery_id).toBe('111');
   });
 
   it('getRedeliveredGuids([]) → empty Set, no query error', async () => {

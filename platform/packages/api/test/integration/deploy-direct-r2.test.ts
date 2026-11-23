@@ -661,7 +661,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     ).setUploadedAt(orphanKey, new Date(Date.now() - 2 * 3600 * 1000));
 
     const otherKey = 'assets/proj_other/cccccccccccccccccccccccccccccccc';
-    await env.STATIC_ASSETS_R2.put(otherKey, new Uint8Array([9, 9, 9]).buffer as ArrayBuffer);
+    await env.STATIC_ASSETS_R2.put(otherKey, new Uint8Array([9, 9, 9]).buffer);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -1432,7 +1432,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     const newR2Bytes = new TextEncoder().encode('body { color: blue }');
     await env.STATIC_ASSETS.put(
       `assets/${project.id}/${kvHash}`,
-      kvBytes.buffer.slice(0, kvBytes.byteLength) as ArrayBuffer,
+      kvBytes.buffer.slice(0, kvBytes.byteLength),
     );
 
     const liveId = 'dpl_live_jm_static_kv_cf';
@@ -1547,7 +1547,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     const fresh = (
       await env.db.select().from(deployments).where(eq(deployments.id, done!.deployment))
     )[0];
-    expect(JSON.parse(fresh!.asset_hashes!)).toEqual({
+    expect(JSON.parse(fresh.asset_hashes!)).toEqual({
       '/index.html': { hash: kvHash, size: kvBytes.byteLength, store: 'r2', scope: 'project' },
       '/style.css': { hash: newR2Hash, size: newR2Bytes.byteLength, store: 'r2', scope: 'project' },
     });
@@ -1623,7 +1623,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
     // here simulates a cancelDeployment call that races the missing-hash early-error path.
     const originalHead = env.STATIC_ASSETS_R2.head.bind(env.STATIC_ASSETS_R2);
     let canceledOnce = false;
-    env.STATIC_ASSETS_R2.head = (async (key: string) => {
+    env.STATIC_ASSETS_R2.head = async (key: string) => {
       if (!canceledOnce) {
         canceledOnce = true;
         const rows = await env.db
@@ -1635,7 +1635,7 @@ describe('POST /projects/:id/deploy (JSON mode — direct-to-R2)', () => {
         }
       }
       return null;
-    }) as typeof env.STATIC_ASSETS_R2.head;
+    };
 
     try {
       const missingHash = HASH(0x90_01);
@@ -1814,10 +1814,10 @@ describe('direct Worker module upload', () => {
       urls: Array<{ url: string; headers: Record<string, string> }>;
     };
     for (const [index, module] of modules.entries()) {
-      const key = decodeURI(new URL(urls[index]!.url).pathname).slice(
+      const key = decodeURI(new URL(urls[index].url).pathname).slice(
         `/${env.R2_STATIC_ASSETS_BUCKET}/`.length,
       );
-      await env.STATIC_ASSETS_R2.put(key, files[module.name]!);
+      await env.STATIC_ASSETS_R2.put(key, files[module.name]);
     }
     return { id, modules };
   }
@@ -1871,7 +1871,7 @@ describe('direct Worker module upload', () => {
       );
       expect(headers).toEqual({
         'Content-Type': types[index],
-        'Content-Length': String(modules[index]!.size),
+        'Content-Length': String(modules[index].size),
       });
       expect(parsed.searchParams.get('X-Amz-SignedHeaders')).toContain('content-length');
       expect(parsed.searchParams.get('X-Amz-SignedHeaders')).toContain('content-type');
@@ -1960,7 +1960,7 @@ describe('direct Worker module upload', () => {
 
     const calls = workerUploadCalls(cf, project.slug);
     expect(calls).toHaveLength(1);
-    const form = (calls[0]![1] as RequestInit).body as FormData;
+    const form = (calls[0][1] as RequestInit).body as FormData;
     const metadata = JSON.parse(await (form.get('metadata') as Blob).text()) as {
       main_module: string;
     };
@@ -2011,7 +2011,7 @@ describe('direct Worker module upload', () => {
       '"more.js" was not uploaded',
     );
     await reject(
-      { workerInput: { id, modules: [{ ...modules[0]!, size: code.byteLength + 1 }] } },
+      { workerInput: { id, modules: [{ ...modules[0], size: code.byteLength + 1 }] } },
       400,
       `has ${code.byteLength} bytes in storage instead of ${code.byteLength + 1}`,
     );
@@ -2033,7 +2033,7 @@ describe('direct Worker module upload', () => {
       {
         workerInput: {
           id,
-          modules: [{ ...modules[0]!, size: 64 * MiB + 1 }],
+          modules: [{ ...modules[0], size: 64 * MiB + 1 }],
         },
       },
       413,

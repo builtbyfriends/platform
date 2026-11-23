@@ -1428,7 +1428,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       return context.json({ error: 'invalid workflowPath' }, 400);
     }
     const newBranch: string | undefined = body.branch;
-    const newExecutor = body.buildExecutor as Build['executor'] | undefined;
+    const newExecutor = body.buildExecutor;
     const newWorkflowPath: string | undefined = body.workflowPath;
 
     // Decision: A branch or executor change orphans in-flight builds for the old config, so revoke their deploy

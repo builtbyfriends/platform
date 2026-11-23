@@ -1303,7 +1303,7 @@ export async function downloadSource(options = {}) {
       );
       // Decision: A cancel isn't a download failure and mustn't be retried.
       if (isCancelled()) {
-        throw new Error('build cancelled');
+        throw new Error('build cancelled', { cause: error });
       }
       if (lastError.retryable !== true || attempt >= maxAttempts) {
         break;

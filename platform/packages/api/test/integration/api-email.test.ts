@@ -796,9 +796,9 @@ describe('GET refresh against a recreated Cloudflare destination', () => {
       String(call[0]).includes('[email] destination tag mismatch'),
     );
     expect(mismatchLines).toHaveLength(1);
-    expect(String(mismatchLines[0]![0])).toContain(rowA.id);
-    expect(String(mismatchLines[0]![0])).toContain(tagT1);
-    expect(String(mismatchLines[0]![0])).toContain(tagT2);
+    expect(String(mismatchLines[0][0])).toContain(rowA.id);
+    expect(String(mismatchLines[0][0])).toContain(tagT1);
+    expect(String(mismatchLines[0][0])).toContain(tagT2);
   });
 
   it("adopts the recreated tag for the project owner's OWN address, with the inherited-consent audit", async () => {
@@ -854,7 +854,7 @@ describe('GET refresh against a recreated Cloudflare destination', () => {
     expect(removed.status).toBe(200);
     const deletes = cfCalls(fetchMock, 'DELETE', '/email/routing/addresses');
     expect(deletes).toHaveLength(1);
-    expect(String(deletes[0]![0])).toContain(tagT1);
+    expect(String(deletes[0][0])).toContain(tagT1);
     expect(await rowsFor(projectA.id)).toHaveLength(0);
 
     const readded = await addDestination(projectA.id, owner.jwt, 'alice@example.com', emailEnv());
@@ -869,7 +869,7 @@ describe('GET refresh against a recreated Cloudflare destination', () => {
     expect(body.platformVerificationPending).toBe(true);
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0]!.to).toBe('alice@example.com');
+    expect(sends[0].to).toBe('alice@example.com');
     expect((await rowsFor(projectA.id))[0]?.cf_destination_id).toBe(tagT2);
 
     const listed = await listDestinations(projectA.id, owner.jwt, emailEnv());
@@ -1008,7 +1008,7 @@ describe('DELETE /projects/:id/email/destinations/:destId', () => {
     const aRows = await rowsFor(projectA.id);
     expect(aRows[0]?.cf_destination_id).toBe('cf-tag-shared@example.com');
 
-    const res = await removeDestination(projectA.id, aRows[0]!.id, user.jwt);
+    const res = await removeDestination(projectA.id, aRows[0].id, user.jwt);
     expect(res.status).toBe(200);
 
     expect(cfCalls(fetchMock, 'DELETE', '/email/routing/addresses/')).toHaveLength(0);
@@ -1223,9 +1223,9 @@ describe('per-project verification (Option C + Option B)', () => {
 
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0]!.to).toBe('shared@example.com');
-    expect(sends[0]!.from).toBe(`noreply@${MAIL_DOMAIN}`);
-    expect(sends[0]!.text).toContain('/email/destinations/confirm?token=');
+    expect(sends[0].to).toBe('shared@example.com');
+    expect(sends[0].from).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(sends[0].text).toContain('/email/destinations/confirm?token=');
   });
 
   it('Option B: does NOT populate the audit columns (consent was per-recipient)', async () => {
@@ -1273,7 +1273,7 @@ describe('per-project verification (Option C + Option B)', () => {
 
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0]!.to).toBe('shared@example.com');
+    expect(sends[0].to).toBe('shared@example.com');
 
     // Decision: The recipient now clicks the link CF sent for the other project. That consent isn't ours to
     // claim: the row stays pending and the proxy keeps refusing sends.
@@ -1282,8 +1282,8 @@ describe('per-project verification (Option C + Option B)', () => {
     expect(listed.status).toBe(200);
     const rows = (await listed.json()) as Array<{ status: string; verification_source: string }>;
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.status).toBe('pending');
-    expect(rows[0]!.verification_source).toBe('platform');
+    expect(rows[0].status).toBe('pending');
+    expect(rows[0].verification_source).toBe('platform');
     expect(await readVerifiedDestinations(project.id)).toEqual([]);
   });
 
@@ -1415,7 +1415,7 @@ describe('per-project verification (Option C + Option B)', () => {
 
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0]!.to).toBe('shared@example.com');
+    expect(sends[0].to).toBe('shared@example.com');
     expect(await rowsFor(project.id)).toHaveLength(1);
   });
 
@@ -1454,7 +1454,7 @@ describe('per-project verification (Option C + Option B)', () => {
 
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(2);
-    expect(sends[1]!.to).toBe('shared@example.com');
+    expect(sends[1].to).toBe('shared@example.com');
     expect(cfCalls(fetchMock, 'POST', '/email/routing/addresses')).toHaveLength(1);
     expect(await rowsFor(project.id)).toHaveLength(1);
   });
@@ -1485,7 +1485,7 @@ describe('per-project verification (Option C + Option B)', () => {
     expect(retry.status).toBe(200);
     const sends = recordedVerificationSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0]!.to).toBe('shared@example.com');
+    expect(sends[0].to).toBe('shared@example.com');
     expect(await rowsFor(project.id)).toHaveLength(1);
   });
 
@@ -1994,11 +1994,11 @@ describe('/email/destinations/confirm', () => {
     expect(added.status).toBe(201);
 
     const [send] = recordedVerificationSends();
-    const link = /https:\/\/\S*\/email\/destinations\/confirm\?token=(\S+)/.exec(send!.text);
-    expect(link, `no confirm link in the mail body:\n${send!.text}`).not.toBeNull();
+    const link = /https:\/\/\S*\/email\/destinations\/confirm\?token=(\S+)/.exec(send.text);
+    expect(link, `no confirm link in the mail body:\n${send.text}`).not.toBeNull();
 
     vi.unstubAllGlobals();
-    const res = await confirm(decodeURIComponent(link![1]!));
+    const res = await confirm(decodeURIComponent(link![1]));
     expect(res.status).toBe(200);
 
     const rows = await rowsFor(project.id);
@@ -2089,7 +2089,7 @@ describe('PUT /projects/:id/email/alias', () => {
 
   async function storedAlias(projectId: string): Promise<string | null> {
     const [row] = await env.db.select().from(projects).where(eq(projects.id, projectId));
-    return row!.email_alias;
+    return row.email_alias;
   }
 
   async function seedAlias(projectId: string, alias: string): Promise<void> {
@@ -2281,7 +2281,7 @@ describe('PUT /projects/:id/email/alias', () => {
         EMAIL_SHARED_ACCOUNT_ID: env.CF_ACCOUNT_ID,
         EMAIL_SHARED_ZONE_ID: 'shared-zone',
         EMAIL_SHARED_INGRESS_NAME: 'native-gateway',
-      } as ApiEnv['Bindings'];
+      };
     }
 
     async function connectShared(config: NonNullable<Parameters<typeof stubCustomerCf>[0]> = {}) {

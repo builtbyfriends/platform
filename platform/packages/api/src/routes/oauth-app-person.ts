@@ -70,7 +70,7 @@ async function appPersonUser(
     return found;
   }
   try {
-    return (await createUser(db, provider, person, profile.login, profile.email)) as User;
+    return await createUser(db, provider, person, profile.login, profile.email);
   } catch (error) {
     // Decision: Two first calls for one person race on the unique (provider, provider_id) index, so re-read
     // after a conflict.
@@ -193,7 +193,7 @@ export async function appPersonToken(
         ...request.data,
         // Decision: The deploy runs on this token's grant, which outlives the approval.
         grantId,
-        projectId: await approval.project(context, tx as Db, request.data.slug!, user),
+        projectId: await approval.project(context, tx, request.data.slug!, user),
       };
       const [approved] = await tx
         .update(oauthRequests)
@@ -206,8 +206,8 @@ export async function appPersonToken(
         })
         .where(eq(oauthRequests.id, request.id))
         .returning();
-      const credential = await approval.token(context.env, approved!, user.id);
-      const project = await getProject(tx as Db, data.projectId);
+      const credential = await approval.token(context.env, approved, user.id);
+      const project = await getProject(tx, data.projectId);
       return project && context.env.PLATFORM_APPLICATION
         ? { ...credential, url: projectUrl(project, context.env) }
         : credential;

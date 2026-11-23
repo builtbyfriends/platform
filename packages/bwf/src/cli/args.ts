@@ -34,15 +34,15 @@ export function parseDeployArgs(
           cause: error,
         });
       }
-      throw new Error('deploy: --project requires a slug.');
+      throw new Error('deploy: --project requires a slug.', { cause: error });
     }
 
     const unknownOptionMatch = message.match(/Unknown option '([^']+)'/);
     if (unknownOptionMatch) {
-      throw new Error(`deploy: Unknown option '${unknownOptionMatch[1]}'.`);
+      throw new Error(`deploy: Unknown option '${unknownOptionMatch[1]}'.`, { cause: error });
     }
 
-    throw new Error(`deploy: ${message}.`);
+    throw new Error(`deploy: ${message}.`, { cause: error });
   }
 
   const tokens = parsed.tokens ?? [];

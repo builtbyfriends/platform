@@ -297,7 +297,7 @@ describe('BuildScheduler.fetch', () => {
     const res = await s.fetch(new Request('https://scheduler/poke', { method: 'POST' }));
     expect(res.status).toBe(200);
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now);
     expect(armed).toBeLessThanOrEqual(now + 1000);
   });
@@ -406,7 +406,7 @@ describe('BuildScheduler.alarm', () => {
 
     expect(startBuild).not.toHaveBeenCalled();
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 2000 - 500);
   });
 
@@ -421,7 +421,7 @@ describe('BuildScheduler.alarm', () => {
     await s.alarm();
 
     expect(startBuild).toHaveBeenCalledOnce();
-    const cfg = startBuild.mock.calls[0][0] as unknown as {
+    const cfg = startBuild.mock.calls[0][0] as {
       buildId: string;
       projectSlug: string;
       login: string;
@@ -497,7 +497,7 @@ describe('BuildScheduler.alarm', () => {
     await s.alarm();
 
     expect(startBuild).toHaveBeenCalledOnce();
-    const cfg = startBuild.mock.calls[0][0] as unknown as { instanceType: string };
+    const cfg = startBuild.mock.calls[0][0] as { instanceType: string };
     expect(cfg.instanceType).toBe('standard-4');
   });
 
@@ -557,7 +557,7 @@ describe('BuildScheduler.alarm', () => {
     await s.alarm();
 
     expect(startBuild).toHaveBeenCalledOnce();
-    const cfg = startBuild.mock.calls[0][0] as unknown as { instanceType: string };
+    const cfg = startBuild.mock.calls[0][0] as { instanceType: string };
     expect(cfg.instanceType).toBe('standard-4');
     expect(env.BUILD_MANAGER_LARGE.idFromName).toHaveBeenCalledWith('b1');
     expect(env.BUILD_MANAGER.idFromName).not.toHaveBeenCalled();
@@ -578,7 +578,7 @@ describe('BuildScheduler.alarm', () => {
     await s.alarm();
 
     expect(startBuild).toHaveBeenCalledOnce();
-    const cfg = startBuild.mock.calls[0][0] as unknown as {
+    const cfg = startBuild.mock.calls[0][0] as {
       instanceType: string;
       timeoutMinutes: number;
     };
@@ -680,7 +680,7 @@ describe('BuildScheduler.alarm', () => {
     expect(db.requeued).toEqual(['b1']);
     expect(db.failed.some((f) => f.id === 'b1')).toBe(false);
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
@@ -711,7 +711,7 @@ describe('BuildScheduler.alarm', () => {
     expect(db.requeued).toEqual(['b-free']);
     expect(db.failed).toEqual([]);
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
@@ -740,7 +740,7 @@ describe('BuildScheduler.alarm', () => {
     expect(env.BUILD_MANAGER.idFromName).toHaveBeenCalledWith('b-free');
     expect(db.requeued).toEqual(['b-paid']);
     expect(db.failed).toEqual([]);
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
@@ -766,7 +766,7 @@ describe('BuildScheduler.alarm', () => {
     expect(db.claimArgs).toEqual([{ buildId: 'b1', userId: 'uf', projectId: 'p1' }]);
     expect(db.requeued).toEqual(['b1']);
     expect(db.failed).toEqual([]);
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
@@ -842,13 +842,13 @@ describe('BuildScheduler.alarm', () => {
     });
     vi.mocked(markBuildTerminalIfActive).mockRejectedValueOnce(new Error('hyperdrive timeout'));
     const ctx = makeStubCtx();
-    const env = makeEnv(startBuild as unknown as ReturnType<typeof vi.fn>);
+    const env = makeEnv(startBuild);
     const s = makeScheduler(ctx, env);
 
     await expect(s.alarm()).resolves.toBeUndefined();
 
     expect(startBuild).toHaveBeenCalledTimes(2);
-    expect((startBuild.mock.calls[1][0] as { buildId: string }).buildId).toBe('b2');
+    expect(startBuild.mock.calls[1][0].buildId).toBe('b2');
 
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
   });
@@ -884,7 +884,7 @@ describe('BuildScheduler.alarm', () => {
     expect(db.failed).toEqual([]);
 
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 20_000);
   });
 
@@ -966,7 +966,7 @@ describe('BuildScheduler.alarm', () => {
 
     expect(startBuild).toHaveBeenCalledOnce();
     expect(ctx.storage.setAlarm).toHaveBeenCalledOnce();
-    const armed = ctx.storage.setAlarm.mock.calls[0][0] as number;
+    const armed = ctx.storage.setAlarm.mock.calls[0][0];
     expect(armed).toBeGreaterThanOrEqual(now + 2000 - 500);
   });
 });

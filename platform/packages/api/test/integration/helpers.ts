@@ -1026,12 +1026,12 @@ function extractMigrationTag(metadata: Record<string, unknown>): string | undefi
 
 function parseScriptNameFromUrl(url: string): string | null {
   const m = /\/workers\/(?:dispatch\/namespaces\/[^/]+\/)?scripts\/([^/?#]+)/.exec(url);
-  return m ? decodeURIComponent(m[1]!) : null;
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 function parseAppIdFromUrl(url: string): string | null {
   const m = /\/containers\/applications\/([^/?#]+)/.exec(url);
-  return m ? decodeURIComponent(m[1]!) : null;
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 function parseAppNameQuery(url: string): string | null {

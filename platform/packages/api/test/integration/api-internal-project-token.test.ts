@@ -109,7 +109,7 @@ async function proxyRequest(projectId: string, aiToken: string) {
         fetch: (input: string | Request, init?: RequestInit) =>
           app.fetch(new Request(input, init), env),
       },
-    } as never,
+    },
   );
   return { response, run };
 }

@@ -130,7 +130,6 @@ function createBwfDbModule(
     },
 
     load: {
-      // oxlint-disable-next-line no-control-regex -- \0 prefix is Vite's virtual module convention
       filter: { id: /^\0virtual:platform-db(?:-schema)?$/ },
       handler(id: string): string {
         if (id === VIRTUAL_SCHEMA_DB_ID) {

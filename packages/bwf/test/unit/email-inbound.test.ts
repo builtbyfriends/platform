@@ -1655,7 +1655,7 @@ describe('reply threading survives a hostile inbound header', () => {
     // Decision: `\x01` or DEL pass a WHATWG `Headers`, but an RFC 5322 section 3.6.4 `msg-id` admits no
     // control: such an id is dropped on its own, without a throw.
     // eslint-disable-next-line no-control-regex -- C0 controls and DEL are the point
-    const rawControl = /[\u0000-\u0008\x0b\u000c\x0e-\u001f\x7f]/;
+    const rawControl = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
     function headersOf(text: string): string {
       return text.slice(0, text.indexOf('\r\n\r\n'));

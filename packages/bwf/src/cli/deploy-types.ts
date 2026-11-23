@@ -3,9 +3,9 @@ import type {
   readExistingCloudflareWorker,
   assertCloudflareDurableObjectLifecycleSupported,
 } from '@builtbyfriends/deploy-cloudflare';
-import {
-  type CloudflareCommandResult,
-  type CloudflareOperation,
+import type {
+  CloudflareCommandResult,
+  CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
 import type { BwfConfig } from '../config.ts';
 import type { runMySqlMigrations } from '../migrations/runner-mysql.ts';
@@ -19,14 +19,14 @@ import type {
   validateAuthMigrationSchema,
 } from './deploy-migrations.ts';
 import type { renderAddressMap } from './email-cloudflare.ts';
-import { type EmailDns, type EmailFetch } from './email-cloudflare.ts';
+import type { EmailDns, EmailFetch } from './email-cloudflare.ts';
 import type {
   EnvSchemaProbeInput,
   EnvSchemaProbeResult,
   EnvSchemaValidateResult,
 } from './env-schema-probe.ts';
 import type { dischargeSelfHostEnvContext } from './env-validation.ts';
-import { type EmittedWorkerVarsResult } from './env-validation.ts';
+import type { EmittedWorkerVarsResult } from './env-validation.ts';
 import type { CliLogger } from './log-file.ts';
 import type { DeploymentPlatform } from './project.ts';
 import type { provisionCloudflareResources } from './provision.ts';

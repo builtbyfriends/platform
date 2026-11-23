@@ -143,7 +143,7 @@ async function mintConnectState(payload: {
 // mangles `Location: http://localhost:*` headers.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runConnectCallback(opts: {

@@ -39,9 +39,9 @@ async function routeInbound(
       projectId: 'p_test',
       workerName: 'user-worker',
       deploymentId: 'v1',
-      slug: to.split('@')[0]!.split('+')[0]!,
+      slug: to.split('@')[0].split('+')[0],
       addressing: 'shared',
-      domain: to.split('@')[1]!,
+      domain: to.split('@')[1],
     },
   );
 }
@@ -797,7 +797,6 @@ describe('routeInbound — action enaction', () => {
     await routeInbound(message, env, ctx);
     expect(rejectCalls).toHaveLength(1);
     // Decision: Built with RegExp() to satisfy oxlint's no-control-regex rule, like the production code.
-    // oxlint-disable-next-line no-control-regex
     expect(rejectCalls[0]).not.toMatch(new RegExp(String.raw`[\r\n\u0000]`));
   });
 
@@ -1073,7 +1072,7 @@ describe('routeRelayed — unsupported forward', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const { ctx } = createCtx();
     const outcome = await routeRelayed(env, ctx, {
-      stub: env.DISPATCH.get('user-worker') as Fetcher,
+      stub: env.DISPATCH.get('user-worker'),
       projectId: 'p_test',
       domain: 'custom.example.com',
       receiptId: 'receipt_1',
@@ -1164,7 +1163,7 @@ describe('routeRelayed — reply attempt outcomes', () => {
     vi.stubGlobal('fetch', providerFetch);
     const { ctx } = createCtx();
     const outcome = await routeRelayed(env, ctx, {
-      stub: env.DISPATCH.get('user-worker') as Fetcher,
+      stub: env.DISPATCH.get('user-worker'),
       projectId: 'p_test',
       domain: 'custom.example.com',
       receiptId: 'receipt_1',

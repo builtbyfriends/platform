@@ -236,8 +236,12 @@ async function domainStatus(
 
   if (verbose) {
     // Decision: `Hostname:` is already shown by the rollup above.
-    rollupLines.push('', 'Details:', `  Status:      ${status.status}`);
-    rollupLines.push(`  SSL Status:  ${status.ssl_status}`);
+    rollupLines.push(
+      '',
+      'Details:',
+      `  Status:      ${status.status}`,
+      `  SSL Status:  ${status.ssl_status}`,
+    );
     if (status.ownership_verification) {
       rollupLines.push(`  Ownership:   pending`);
     }

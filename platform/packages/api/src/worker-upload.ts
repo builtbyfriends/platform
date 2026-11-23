@@ -104,7 +104,7 @@ export function blobWorkerModule(name: string, content: Blob): WorkerModule {
     name,
     type: content.type,
     size: content.size,
-    open: async () => content.stream() as ReadableStream<Uint8Array>,
+    open: async () => content.stream(),
   };
 }
 
@@ -222,7 +222,7 @@ function sequence(
 
   const fill = () => {
     while (!canceled && nextToOpen < pieces.length) {
-      const piece = pieces[nextToOpen]!;
+      const piece = pieces[nextToOpen];
       if (piece instanceof Uint8Array) {
         nextToOpen++;
         continue;
@@ -308,7 +308,7 @@ function sequence(
               return;
             } else {
               const at = index++;
-              const piece = pieces[at]!;
+              const piece = pieces[at];
               if (piece instanceof Uint8Array) {
                 enqueue(controller, piece);
                 return;
@@ -485,7 +485,7 @@ export function withKnownLength(
   stream.pipeTo(fixed.writable).catch(() => {
     // Decision: The readable side reports the failed pipe to whoever reads it.
   });
-  return fixed.readable as ReadableStream<Uint8Array>;
+  return fixed.readable;
 }
 
 /** Every object under `prefix`, keyed by its full key, in paginated listings. */

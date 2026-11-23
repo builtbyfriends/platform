@@ -77,7 +77,7 @@ function request(body: BodyInit, headers: Record<string, string> = {}) {
       ...headers,
     },
     ...(body instanceof ReadableStream ? { duplex: 'half' as const } : {}),
-  } as RequestInit);
+  });
 }
 
 beforeEach(() => {

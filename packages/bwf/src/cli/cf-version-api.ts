@@ -406,7 +406,7 @@ async function preflightWorkflowExports(options: {
         options.verifyUploader,
       );
     } catch (error) {
-      if (error instanceof CloudflareApiError && error.status === 404 && error.code === 10200) {
+      if (error instanceof CloudflareApiError && error.status === 404 && error.code === 10_200) {
         continue;
       }
       throw error;
@@ -907,7 +907,7 @@ async function ensureContainerApplications(options: {
     } catch (error) {
       if (
         !(error instanceof CloudflareApiError) ||
-        error.code !== 100146 ||
+        error.code !== 100_146 ||
         Date.now() >= deadline
       ) {
         throw error;

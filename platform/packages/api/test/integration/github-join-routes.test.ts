@@ -174,7 +174,7 @@ async function mintJoinCode(payload: {
 // mangles `Location: http://localhost:*` headers. The target carries the signed `join_code`.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runJoinCallback(opts: {

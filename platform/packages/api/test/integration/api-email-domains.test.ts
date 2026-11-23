@@ -198,7 +198,7 @@ describe('project email domain authority', () => {
         })
       ).status,
     ).toBe(200);
-    const credential = (await env.db.select().from(emailCredentials))[0]!;
+    const credential = (await env.db.select().from(emailCredentials))[0];
     expect(credential).toMatchObject({
       token_id: 'tok_dummy',
       status: 'healthy',
@@ -376,7 +376,7 @@ describe('project email domain authority', () => {
     expect(body.operationId).toMatch(/^eop/);
     expect(body.readiness.inbound.status).toBe('ready');
     expect(JSON.stringify(body)).not.toContain(token);
-    const credential = (await env.db.select().from(emailCredentials))[0]!;
+    const credential = (await env.db.select().from(emailCredentials))[0];
     expect(credential.kind).toBe('api_token');
     expect(credential.ciphertext).not.toContain(token);
     expect(credential.account_id).toBe('customer-account');

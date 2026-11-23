@@ -10,6 +10,7 @@
     "declaration": true,
     "isolatedDeclarations": true,
     "allowImportingTsExtensions": true,
+    "noEmit": true,
     "types": ["node", "@cloudflare/workers-types"]
   },
   "include": ["src", "test"]

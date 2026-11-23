@@ -139,7 +139,7 @@ vi.mock('../../src/db.ts', () => ({
         return false;
       }
       dbState.status.set(id, 'building');
-      dbState.writes.push({ id, status: 'building', opts: opts as StatusWrite['opts'] });
+      dbState.writes.push({ id, status: 'building', opts });
       return true;
     },
   ),
@@ -551,7 +551,7 @@ beforeEach(() => {
     construct(target, args) {
       const init = args[1] as { status?: number } | undefined;
       if (init?.status === 101) {
-        return new FakeUpgradeResponse(args[0], init as { webSocket?: unknown });
+        return new FakeUpgradeResponse(args[0], init);
       }
       return Reflect.construct(target, args, target);
     },

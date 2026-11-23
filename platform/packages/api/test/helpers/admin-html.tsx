@@ -16,7 +16,7 @@ export async function adminHtml(response: Response): Promise<string> {
   if (!match) {
     return html;
   }
-  const page = JSON.parse(match[1]!) as PageObject;
+  const page = JSON.parse(match[1]) as PageObject;
   const { prelude } = await prerender(
     <SpaContext value={{ page, pending: null, visit: async () => {} }}>
       <Suspense>

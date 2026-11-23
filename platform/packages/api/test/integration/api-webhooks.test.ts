@@ -462,7 +462,7 @@ describe('POST /webhooks/github', () => {
     expect(build!.instance_type).toBe('standard-3');
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [pokeUrl, pokeInit] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    const [pokeUrl, pokeInit] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(pokeUrl).toContain('/poke');
     expect(pokeInit.method).toBe('POST');
   });
@@ -1284,7 +1284,7 @@ describe('POST /webhooks/github', () => {
     expect((await getBuild(env.db, build.id))!.status).toBe('complete');
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/repos/octo/check-ok/check-runs/5001');
     expect(init.method).toBe('PATCH');
     const body = JSON.parse(init.body as string) as { status: string; conclusion: string };
@@ -1338,7 +1338,7 @@ describe('POST /webhooks/github', () => {
     expect((await getBuild(env.db, build.id))!.status).toBe('failed');
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/repos/octo/check-fail/check-runs/5002');
     const body = JSON.parse(init.body as string) as { conclusion: string };
     expect(body.conclusion).toBe('failure');
@@ -1491,7 +1491,7 @@ describe('POST /webhooks/github', () => {
     expect((await getBuild(env.db, build.id))!.status).toBe('cancelled');
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]! as [string, RequestInit];
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/repos/octo/check-terminal/check-runs/5010');
     expect(init.method).toBe('PATCH');
     const body = JSON.parse(init.body as string) as { status: string; conclusion: string };
@@ -2583,7 +2583,7 @@ describe('scheduled() re-arms BUILD_SCHEDULER for orphaned queued builds', () =>
     await scheduled(mockController, makeBindings(pokeFetch), mockCtx);
 
     expect(pokeFetch).toHaveBeenCalledTimes(1);
-    const [pokeUrl, pokeInit] = pokeFetch.mock.calls[0]! as [string, RequestInit];
+    const [pokeUrl, pokeInit] = pokeFetch.mock.calls[0] as [string, RequestInit];
     expect(pokeUrl).toContain('/poke');
     expect(pokeInit.method).toBe('POST');
   });
@@ -4855,7 +4855,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       expect(await getProjectBuilds(env.db, project.id)).toHaveLength(0);
       expect(await getProjectBuilds(env.db, sibling.id)).toHaveLength(0);
       expect(pokes).toHaveLength(0);
-      const [, , , , opts] = spy.mock.calls[0]!;
+      const [, , , , opts] = spy.mock.calls[0];
       expect(opts.conclusion).toBe('failure');
     } finally {
       spy.mockRestore();
@@ -4888,7 +4888,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       );
 
       expect(await res.json()).toEqual({ ok: true, enqueued: 0 });
-      const [, , , , opts] = spy.mock.calls[0]!;
+      const [, , , , opts] = spy.mock.calls[0];
       expect(opts.conclusion).toBe('failure');
       expect(opts.title).toBe('Commit is no longer the branch head');
     } finally {
@@ -4914,7 +4914,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
         checkRunPayload({ id: 77_008, externalId: clicked.id, conclusion: 'stale' }),
       );
 
-      const [, , , , opts] = spy.mock.calls[0]!;
+      const [, , , , opts] = spy.mock.calls[0];
       expect(opts.conclusion).toBe('cancelled');
     } finally {
       spy.mockRestore();
@@ -4944,7 +4944,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
         checkRunPayload({ id: 77_006, externalId: failed.id, conclusion: null }),
       );
 
-      const [, , , , opts] = spy.mock.calls[0]!;
+      const [, , , , opts] = spy.mock.calls[0];
       expect(opts.conclusion).toBe('cancelled');
     } finally {
       spy.mockRestore();
@@ -5016,7 +5016,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       expect(await res.json()).toEqual({ ok: true, enqueued: 0, reused: [done.id] });
       expect(pokes).toHaveLength(0);
       expect(spy).toHaveBeenCalledTimes(1);
-      const [, , , checkRunId, opts] = spy.mock.calls[0]!;
+      const [, , , checkRunId, opts] = spy.mock.calls[0];
       expect(checkRunId).toBe('77003');
       expect(opts.conclusion).toBe('success');
       expect(opts.title).toBe('Already built and live');
@@ -5046,7 +5046,7 @@ describe('POST /webhooks/github — rerun from the check run', () => {
       // Decision: GitHub reset the suite to `queued` on the click. Leaving it there makes the button look broken, so
       // the refusal is reported on the check.
       expect(spy).toHaveBeenCalledTimes(1);
-      const [, , , checkRunId, opts] = spy.mock.calls[0]!;
+      const [, , , checkRunId, opts] = spy.mock.calls[0];
       expect(checkRunId).toBe('77001');
       expect(opts.conclusion).toBe('neutral');
       expect(opts.title).toBe('Commit is no longer the branch head');

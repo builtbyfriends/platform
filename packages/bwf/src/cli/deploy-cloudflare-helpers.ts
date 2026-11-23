@@ -5,8 +5,10 @@ import {
   parseRootWranglerConfig,
   readExistingCloudflareWorker,
   readWranglerTopLevelString,
-  type CloudflareCommandRunner,
-  type ExistingCloudflareWorker,
+} from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandRunner,
+  ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
 import { join } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';

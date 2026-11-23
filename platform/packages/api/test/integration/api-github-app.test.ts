@@ -71,7 +71,7 @@ beforeEach(async () => {
       });
     }
     return Response.json({}, { status: 404 });
-  }) as unknown as typeof fetch;
+  });
   return () => {
     globalThis.fetch = originalFetch;
   };

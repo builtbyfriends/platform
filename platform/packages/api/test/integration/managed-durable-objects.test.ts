@@ -279,7 +279,7 @@ describe('managed native Durable Objects', () => {
                 {
                   type: 'ESModule',
                   path: join(directory, 'application/index.js'),
-                  contents: application.modules['index.js']!,
+                  contents: application.modules['index.js'],
                 },
               ],
               durableObjects: { WORKSPACE: object },
@@ -441,7 +441,7 @@ describe('managed native Durable Objects', () => {
       first.id,
     );
     expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
         .active_deployment_id,
     ).toBe(first.id);
   });
@@ -751,7 +751,7 @@ describe('managed native Durable Objects', () => {
       second.id,
     );
     expect(
-      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]!
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0]
         .active_deployment_id,
     ).toBe(second.id);
   });

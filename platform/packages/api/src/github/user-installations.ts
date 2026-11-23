@@ -25,7 +25,7 @@ type AppOAuthEnv = ApiEnv['Bindings'] & {
  * to the personal account-id match.
  */
 export function isAppUserOAuthConfigured(env: ApiEnv['Bindings']): boolean {
-  const e = env as AppOAuthEnv;
+  const e = env;
   return (
     typeof e.GITHUB_APP_CLIENT_ID === 'string' &&
     e.GITHUB_APP_CLIENT_ID !== '' &&
@@ -47,7 +47,7 @@ async function exchangeInstallCodeForUserToken(
   code: string,
   redirectUri?: string,
 ): Promise<string | null> {
-  const e = env as AppOAuthEnv;
+  const e = env;
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {

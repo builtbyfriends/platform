@@ -43,7 +43,7 @@ github.post('/request', async (context) => {
   ) {
     return context.json({ error: 'path must be a /repos/owner/name/... GitHub API path' }, 400);
   }
-  const repository = repositoryOf(path.split('?', 1)[0]!);
+  const repository = repositoryOf(path.split('?', 1)[0]);
   if (!repository) {
     return context.json({ error: 'path must name a repository' }, 400);
   }

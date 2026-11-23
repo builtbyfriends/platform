@@ -224,7 +224,7 @@ describe('plan routes', () => {
   test('the preview counts the projects a change will publish', async () => {
     const pro = await owner('pro');
     const ids = await seedProjects(pro.id, 3, 'pro');
-    await saveModes([ids[0]!], 'full');
+    await saveModes([ids[0]], 'full');
     await seedProject('free');
     const preview = await operator('/config/plans/pro/set', { aiLogging: 'off', dryRun: true });
     expect(preview.status).toBe(200);
@@ -246,7 +246,7 @@ describe('plan routes', () => {
   test('publishes in pages of 100 through sync, without the usage counter', async () => {
     const user = await owner('pro');
     const ids = await seedProjects(user.id, 250);
-    await saveModes([ids[0]!], 'full');
+    await saveModes([ids[0]], 'full');
     const counter = forbiddenUsageCounter();
     const overrides = { USAGE_COUNTER: counter.namespace };
 
@@ -277,7 +277,7 @@ describe('plan routes', () => {
       aiLoggingPublish: { complete: true, processed: 49, remaining: 0 },
     });
     expect(await published(last)).toBe('off');
-    expect(await published(ids[0]!)).toBeNull();
+    expect(await published(ids[0])).toBeNull();
     expect(await (await operator(`/projects/${last}/ai-logging`)).json()).toMatchObject({
       state: 'pending',
     });
@@ -302,7 +302,7 @@ describe('plan routes', () => {
       ok: true,
       aiLoggingPublish: { complete: true, processed: 3 },
     });
-    expect(await published(first!)).toBe('off');
+    expect(await published(first)).toBe('off');
     expect(await planDefaults()).toMatchObject({ publish: { complete: true } });
   });
 
@@ -319,7 +319,7 @@ describe('plan routes', () => {
     });
     await syncUntilComplete(5);
     expect(await published(proIds.at(-1)!)).toBe('off');
-    expect(await published(freeId!)).toBe('metadata');
+    expect(await published(freeId)).toBe('metadata');
   });
 
   test('a page that ends after a newer plan change leaves the newer run alone', async () => {
@@ -342,7 +342,7 @@ describe('plan routes', () => {
     expect(page).toMatchObject({ complete: false, processed: PLAN_AI_LOGGING_PAGE_SIZE });
     expect(await planDefaults()).toEqual(newer);
     await syncUntilComplete(5);
-    expect(await published(freeId!)).toBe('metadata');
+    expect(await published(freeId)).toBe('metadata');
     expect(await published(proIds.at(-1)!)).toBe('off');
   });
 
@@ -350,7 +350,7 @@ describe('plan routes', () => {
     const pro = await owner('pro');
     const ids = await seedProjects(pro.id, 150, 'pro');
     const stalled = await stalledPlanPublish('/pro/set', { aiLogging: 'off' });
-    const ahead = ids[120]!;
+    const ahead = ids[120];
 
     await pageWithConcurrentChange(async () => {
       const current = (await planDefaults()) as PlanAiLoggingSettings;
@@ -508,7 +508,7 @@ describe('account changes', () => {
     });
     expect(get).toHaveBeenCalled();
     expect(writes()).toHaveLength(PLAN_AI_LOGGING_PAGE_SIZE);
-    expect(await published(ids[PLAN_AI_LOGGING_PAGE_SIZE - 1]!)).toBe('off');
+    expect(await published(ids[PLAN_AI_LOGGING_PAGE_SIZE - 1])).toBe('off');
     expect(await published(ids.at(-1)!)).toBeNull();
     expect(await (await operator(`/projects/${ids.at(-1)!}/ai-logging`)).json()).toMatchObject({
       effective: 'off',
@@ -536,11 +536,11 @@ describe('account changes', () => {
     const user = await owner('free');
     const ids = await seedProjects(user.id, PLAN_AI_LOGGING_PAGE_SIZE + 5);
     expect((await operator(`/users/${user.id}/plan`, { plan: 'pro' })).status).toBe(500);
-    expect(await published(ids[0]!)).toBe('off');
+    expect(await published(ids[0])).toBe('off');
     const writes = recordAiLoggingWrites(env.ROUTING);
     expect((await operator(`/users/${user.id}/plan`, { plan: 'solo' })).status).toBe(500);
-    expect(writes()[0]).toBe(aiLoggingKey(ids[0]!));
-    expect(await published(ids[0]!)).toBe('metadata');
+    expect(writes()[0]).toBe(aiLoggingKey(ids[0]));
+    expect(await published(ids[0])).toBe('metadata');
     expect((await operator(`/users/${user.id}/plan`, { plan: 'solo' })).status).toBe(200);
     for (const id of ids) {
       expect(await published(id)).toBe('metadata');
@@ -757,11 +757,11 @@ describe('hourly sweep', () => {
       mismatched: 2,
       repaired: 1,
     });
-    expect(await published(repairedId!)).toBeNull();
+    expect(await published(repairedId)).toBeNull();
     expect(
-      (await env.ROUTING.getWithMetadata(aiLoggingClearedKey(repairedId!))).metadata,
+      (await env.ROUTING.getWithMetadata(aiLoggingClearedKey(repairedId))).metadata,
     ).toMatchObject({ at: expect.any(Number) });
-    expect(await published(waitingId!)).toBe('off');
+    expect(await published(waitingId)).toBe('off');
   });
 
   test(`uses at most ${AI_LOGGING_SWEEP_KV_BUDGET} KV operations per run`, async () => {

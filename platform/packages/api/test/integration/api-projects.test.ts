@@ -1780,7 +1780,7 @@ describe('GET /projects/:id/deployments', () => {
       );
       expect(response.status).toBe(200);
       const body = rpcData(await response.json()) as { deployments: Array<{ manifest: string }> };
-      return JSON.parse(body.deployments[0]!.manifest) as Record<string, unknown>;
+      return JSON.parse(body.deployments[0].manifest) as Record<string, unknown>;
     };
 
     expect(await listAs(reader.jwt)).toEqual({ version: 1, ssr: true });
@@ -2566,7 +2566,7 @@ describe('POST /projects/:id/rollback', () => {
           doCalls.push({ url: url.pathname, body: req.body ? await req.text() : null });
           return new Response('{}', { status: 200 });
         },
-      } as unknown as DurableObjectStub;
+      };
     });
 
     const res = await app.fetch(
@@ -2631,7 +2631,7 @@ describe('POST /projects/:id/rollback', () => {
           doCalls.push({ url: url.pathname, body: req.body ? await req.text() : null });
           return new Response('{}', { status: 200 });
         },
-      } as unknown as DurableObjectStub;
+      };
     });
 
     const res = await app.fetch(
@@ -2771,7 +2771,7 @@ describe('POST /projects/:id/rollback', () => {
             }
             return new Response('{}', { status: 200 });
           },
-        } as unknown as DurableObjectStub;
+        };
       });
 
       const res = await app.fetch(
@@ -2791,7 +2791,7 @@ describe('POST /projects/:id/rollback', () => {
         proxyToken: heldToken,
       });
       expect(syncBodies).toHaveLength(1);
-      const sync = JSON.parse(syncBodies[0]!) as Record<string, unknown>;
+      const sync = JSON.parse(syncBodies[0]) as Record<string, unknown>;
       expect(Object.keys(sync).filter((key) => key.startsWith('proxyToken'))).toEqual([
         'proxyToken',
       ]);
@@ -3601,7 +3601,7 @@ describe('POST /projects — owner email destination auto-add', () => {
 
     const deletes = calls.filter((call) => call.method === 'DELETE');
     expect(deletes).toHaveLength(1);
-    expect(deletes[0]!.url).toContain('/email/routing/addresses/cf-tag-cascaded');
+    expect(deletes[0].url).toContain('/email/routing/addresses/cf-tag-cascaded');
   });
 
   it('leaves the CF address alone when a sibling project still references it', async () => {
@@ -3756,7 +3756,7 @@ describe('POST /projects — owner email destination auto-add', () => {
           .where(eq(projects.slug, 'auto-add-raced'));
         await env.db.insert(emailDestinations).values({
           id: 'edst_manual_raced',
-          project_id: project!.id,
+          project_id: project.id,
           address: ownerEmail,
           cf_destination_id: 'cf-tag-raced',
           status: 'pending',
@@ -3777,7 +3777,7 @@ describe('POST /projects — owner email destination auto-add', () => {
     const project = rpcData<{ id: string }>(await res.json());
 
     expect(helper).toHaveBeenCalledTimes(1);
-    await expect(helper.mock.results[0]!.value).resolves.toEqual({ row: null, inserted: false });
+    await expect(helper.mock.results[0].value).resolves.toEqual({ row: null, inserted: false });
 
     const rows = await env.db
       .select()
@@ -3787,7 +3787,7 @@ describe('POST /projects — owner email destination auto-add', () => {
 
     const deletes = calls.filter((call) => call.method === 'DELETE');
     expect(deletes).toHaveLength(1);
-    expect(deletes[0]!.url).toContain('/email/routing/addresses/cf-tag-raced');
+    expect(deletes[0].url).toContain('/email/routing/addresses/cf-tag-raced');
   });
 
   it('leaves a vanished-row tag alone when a sibling project still references it', async () => {
@@ -3825,7 +3825,7 @@ describe('POST /projects — owner email destination auto-add', () => {
         .where(eq(projects.slug, 'auto-add-raced-shared'));
       await env.db.insert(emailDestinations).values({
         id: 'edst_manual_raced_shared',
-        project_id: project!.id,
+        project_id: project.id,
         address: ownerEmail,
         cf_destination_id: 'cf-tag-raced-shared',
         status: 'verified',
@@ -3848,7 +3848,7 @@ describe('POST /projects — owner email destination auto-add', () => {
     const project = rpcData<{ id: string }>(await res.json());
 
     expect(helper).toHaveBeenCalledTimes(1);
-    await expect(helper.mock.results[0]!.value).resolves.toEqual({ row: null, inserted: false });
+    await expect(helper.mock.results[0].value).resolves.toEqual({ row: null, inserted: false });
     expect(
       await env.db
         .select()
@@ -3880,7 +3880,7 @@ describe('POST /projects — owner email destination auto-add', () => {
           .where(eq(projects.slug, 'auto-add-won'));
         await env.db.insert(emailDestinations).values({
           id: 'edst_manual_won',
-          project_id: project!.id,
+          project_id: project.id,
           address: ownerEmail,
           cf_destination_id: 'cf-tag-won',
           status: 'pending',
@@ -3900,7 +3900,7 @@ describe('POST /projects — owner email destination auto-add', () => {
     const project = rpcData<{ id: string }>(await res.json());
 
     expect(helper).toHaveBeenCalledTimes(1);
-    await expect(helper.mock.results[0]!.value).resolves.toMatchObject({
+    await expect(helper.mock.results[0].value).resolves.toMatchObject({
       row: { id: 'edst_manual_won' },
       inserted: false,
     });

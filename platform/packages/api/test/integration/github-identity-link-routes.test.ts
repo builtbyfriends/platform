@@ -143,7 +143,7 @@ async function mintState(payload: {
 // The target carries the signed `link_code`.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runCallback(opts: {

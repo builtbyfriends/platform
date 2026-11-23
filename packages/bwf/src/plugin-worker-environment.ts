@@ -6,7 +6,7 @@ import type { Plugin } from 'vite';
 import { ensureWranglerCompat } from './cli/wrangler.ts';
 import type { WranglerCompat } from './cli/wrangler.ts';
 import type { readConfig } from './config.ts';
-import { type DatabaseDialect } from './config.ts';
+import type { DatabaseDialect } from './config.ts';
 
 const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
 
@@ -242,7 +242,6 @@ export function createServerRuntimeOptimizerPlugin(
       },
     },
     load: {
-      // oxlint-disable-next-line no-control-regex -- \0 prefix is Vite's virtual module convention
       filter: { id: /^\0platform:node-require:/ },
       handler(id) {
         // Decision: A built-in's default export is its CommonJS exports, and `require` returns an ES

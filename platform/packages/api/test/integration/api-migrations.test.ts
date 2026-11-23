@@ -2558,7 +2558,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
     expect(updated[0]?.applied_migrations).not.toBeNull();
-    expect(JSON.parse(updated[0]!.applied_migrations!)).toEqual(['001_init.sql', '002_posts.sql']);
+    expect(JSON.parse(updated[0].applied_migrations!)).toEqual(['001_init.sql', '002_posts.sql']);
   });
 
   it('merges newly-applied migrations with existing deployment metadata without duplicates', async () => {
@@ -2595,7 +2595,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(updated[0]!.applied_migrations!)).toEqual(['001_init.sql', '002_posts.sql']);
+    expect(JSON.parse(updated[0].applied_migrations!)).toEqual(['001_init.sql', '002_posts.sql']);
   });
 
   it('two concurrent /apply requests union their names into applied_migrations without lost updates', async () => {
@@ -2638,7 +2638,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    const merged: Array<string> = JSON.parse(updated[0]!.applied_migrations!);
+    const merged: Array<string> = JSON.parse(updated[0].applied_migrations!);
     expect(merged.slice().sort()).toEqual(['001_a.sql', '002_b.sql']);
   });
 
@@ -2672,7 +2672,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
     expect(updated[0]?.applied_migrations).not.toBeNull();
-    expect(JSON.parse(updated[0]!.applied_migrations!)).toEqual(['001_init.sql']);
+    expect(JSON.parse(updated[0].applied_migrations!)).toEqual(['001_init.sql']);
   });
 
   it('applies even when there is no active deployment yet (first-deploy edge case)', async () => {
@@ -2748,7 +2748,7 @@ describe('POST /projects/:id/migrations/apply', () => {
     expect(state.trackingRows.has('002_posts.sql')).toBe(false);
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['001_users.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['001_users.sql']);
 
     const retry = await app.fetch(
       authedReq(`/projects/${project.id}/migrations/apply`, user.jwt, {
@@ -2777,7 +2777,7 @@ describe('POST /projects/:id/migrations/apply', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(afterRetry[0]!.applied_migrations!)).toEqual(['001_users.sql']);
+    expect(JSON.parse(afterRetry[0].applied_migrations!)).toEqual(['001_users.sql']);
   });
 });
 
@@ -2926,7 +2926,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(updated[0]!.applied_migrations!)).toEqual([
+    expect(JSON.parse(updated[0].applied_migrations!)).toEqual([
       '001_create_users.sql',
       '002_add_email.sql',
     ]);
@@ -3066,7 +3066,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, activeDeployment.id));
-    expect(JSON.parse(activeRow[0]!.applied_migrations!)).toEqual([
+    expect(JSON.parse(activeRow[0].applied_migrations!)).toEqual([
       '001_create_users.sql',
       '002_users.sql',
     ]);
@@ -3074,7 +3074,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, retainedDeployment.id));
-    expect(JSON.parse(retainedRow[0]!.applied_migrations!)).toEqual(['001_create_users.sql']);
+    expect(JSON.parse(retainedRow[0].applied_migrations!)).toEqual(['001_create_users.sql']);
   });
 
   it('rejects a duplicate "from" in the rename batch', async () => {
@@ -3307,7 +3307,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.get('002_add_email.sql')).toBe('2024-01-02T00:00:00Z');
 
     const activeRow = await env.db.select().from(deployments).where(eq(deployments.id, active.id));
-    expect(JSON.parse(activeRow[0]!.applied_migrations!)).toEqual([
+    expect(JSON.parse(activeRow[0].applied_migrations!)).toEqual([
       '001_create_users.sql',
       '002_add_email.sql',
     ]);
@@ -3315,7 +3315,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, retained.id));
-    expect(JSON.parse(retainedRow[0]!.applied_migrations!)).toEqual([
+    expect(JSON.parse(retainedRow[0].applied_migrations!)).toEqual([
       '001_create_users.sql',
       '002_add_email.sql',
     ]);
@@ -3384,7 +3384,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.has('old.sql')).toBe(false);
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['old.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['old.sql']);
   });
 
   it('persists committed prefix to pg metadata when a later rename pair conflicts', async () => {
@@ -3460,7 +3460,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.has('b_winner.sql')).toBe(true);
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['a1.sql', 'b.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['a1.sql', 'b.sql']);
   });
 
   it('same-payload retry reaches uncommitted suffix after partial-failure heal', async () => {
@@ -3537,7 +3537,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.has('b1.sql')).toBe(false);
 
     const midRow = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(midRow[0]!.applied_migrations!)).toEqual(['a1.sql', 'b.sql']);
+    expect(JSON.parse(midRow[0].applied_migrations!)).toEqual(['a1.sql', 'b.sql']);
 
     const secondRes = await app.fetch(
       authedReq(`/projects/${project.id}/migrations/rename`, user.jwt, {
@@ -3574,7 +3574,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(finalRow[0]!.applied_migrations!)).toEqual(['a1.sql', 'b1.sql']);
+    expect(JSON.parse(finalRow[0].applied_migrations!)).toEqual(['a1.sql', 'b1.sql']);
   });
 
   it('invalidates stale audit rows when a prior landing is recycled as a new source', async () => {
@@ -3721,7 +3721,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.has('001_new.sql')).toBe(true);
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['001_new.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['001_new.sql']);
   });
 
   it('rejects an ambiguous rename when pg has no reference to "from"', async () => {
@@ -3764,7 +3764,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.queries.find((q) => /UPDATE\s+_void_migrations/i.test(q.sql))).toBeUndefined();
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['999_unrelated.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['999_unrelated.sql']);
   });
 
   it('heals a legitimate retry where pg still references "from" on the active deployment', async () => {
@@ -3797,7 +3797,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(state.trackingRows.has('001_create_users.sql')).toBe(true);
 
     const row = await env.db.select().from(deployments).where(eq(deployments.id, deployment.id));
-    expect(JSON.parse(row[0]!.applied_migrations!)).toEqual(['001_create_users.sql']);
+    expect(JSON.parse(row[0].applied_migrations!)).toEqual(['001_create_users.sql']);
   });
 
   it('rejects rename when "from" only appears on a retained deployment', async () => {
@@ -3851,13 +3851,13 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, activeDeployment.id));
-    expect(JSON.parse(activeRow[0]!.applied_migrations!)).toEqual(['001_create_users.sql']);
+    expect(JSON.parse(activeRow[0].applied_migrations!)).toEqual(['001_create_users.sql']);
 
     const retainedRow = await env.db
       .select()
       .from(deployments)
       .where(eq(deployments.id, retainedDeployment.id));
-    expect(JSON.parse(retainedRow[0]!.applied_migrations!)).toEqual(['001_init.sql']);
+    expect(JSON.parse(retainedRow[0].applied_migrations!)).toEqual(['001_init.sql']);
   });
 
   it('rejects fat-fingered rename targeting a historically-present migration', async () => {
@@ -3913,13 +3913,13 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, activeDeployment.id));
-    expect(JSON.parse(activeRow[0]!.applied_migrations!)).toEqual(['001_create_users.sql']);
+    expect(JSON.parse(activeRow[0].applied_migrations!)).toEqual(['001_create_users.sql']);
 
     const retainedRow = await env.db
       .select()
       .from(deployments)
       .where(eq(deployments.id, retainedDeployment.id));
-    expect(JSON.parse(retainedRow[0]!.applied_migrations!)).toEqual(['001_init.sql']);
+    expect(JSON.parse(retainedRow[0].applied_migrations!)).toEqual(['001_init.sql']);
   });
 
   it('rollback/apply interleave: row lock keeps setActiveDeployment atomic with apply metadata', async () => {
@@ -3992,8 +3992,8 @@ describe('POST /projects/:id/migrations/rename', () => {
       .from(deployments)
       .where(eq(deployments.id, oldActive.id));
 
-    const targetMigrations: Array<string> = JSON.parse(targetRow[0]!.applied_migrations!);
-    const oldActiveMigrations: Array<string> = JSON.parse(oldActiveRow[0]!.applied_migrations!);
+    const targetMigrations: Array<string> = JSON.parse(targetRow[0].applied_migrations!);
+    const oldActiveMigrations: Array<string> = JSON.parse(oldActiveRow[0].applied_migrations!);
 
     expect(targetMigrations).toContain('002_new.sql');
     expect(oldActiveMigrations).toEqual(['001_init.sql']);
@@ -4047,7 +4047,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .select()
       .from(deployments)
       .where(eq(deployments.id, oldActive.id));
-    expect(JSON.parse(oldActiveMid[0]!.applied_migrations!)).toEqual(['m1.sql', 'm3.sql']);
+    expect(JSON.parse(oldActiveMid[0].applied_migrations!)).toEqual(['m1.sql', 'm3.sql']);
 
     // Decision: target has [m1] and currentActive has [m1, m3], so the diff is non-empty and the destructive
     // guard would reject without an opt-in. That's unrelated to this test's invariant, so echo the
@@ -4165,17 +4165,17 @@ describe('POST /projects/:id/migrations/rename', () => {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             if (!bHoldFired) {
               bHoldFired = true;
               await bHold;
             }
             return realTransaction(fn);
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(target, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     const rollbackBPromise = app.fetch(
@@ -4210,7 +4210,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(bodyB.migrationDiff).toEqual(['m2.sql']);
 
     const finalPg = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(finalPg[0]!.active_deployment_id).toBe(depC.id);
+    expect(finalPg[0].active_deployment_id).toBe(depC.id);
 
     const finalRouting = (await env.ROUTING.get(project.slug, 'json')) as {
       workerName: string;
@@ -4261,7 +4261,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       get(target, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             if (!beforeTxHoldFired) {
               beforeTxHoldFired = true;
               beforeTxReached?.();
@@ -4270,11 +4270,11 @@ describe('POST /projects/:id/migrations/rename', () => {
               });
             }
             return realTransaction(fn);
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(target, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     try {
@@ -4349,7 +4349,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             transactionCount++;
             const rejectsCutover = transactionCount === 2;
             try {
@@ -4382,11 +4382,11 @@ describe('POST /projects/:id/migrations/rename', () => {
               }
               throw error;
             }
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(targetDb, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     try {
@@ -4441,7 +4441,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             transactionCount++;
             if (transactionCount === 3) {
               // Decision: Lease creation is transaction #1, rollback cutover is #2, and the guarded outer compensation
@@ -4455,11 +4455,11 @@ describe('POST /projects/:id/migrations/rename', () => {
               }
               return result;
             });
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(targetDb, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     try {
@@ -4480,7 +4480,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .from(deployments)
       .where(eq(deployments.source, 'rollback-lease'));
     expect(lease).toBeDefined();
-    expect(JSON.parse(lease!.manifest!)).toMatchObject({
+    expect(JSON.parse(lease.manifest!)).toMatchObject({
       targetDeploymentId: target.id,
       state: 'retryable',
     });
@@ -4522,18 +4522,18 @@ describe('POST /projects/:id/migrations/rename', () => {
       get(targetDb, prop, receiver) {
         if (prop === 'transaction') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return (async (fn: any) => {
+          return async (fn: any) => {
             transactionCount++;
             const result = await realTransaction(fn);
             if (transactionCount === 2) {
               throw new Error('database connection lost after COMMIT');
             }
             return result;
-          }) as unknown as typeof realDb.transaction;
+          };
         }
         return Reflect.get(targetDb, prop, receiver);
       },
-    }) as Db;
+    });
     setTestDb(wrappedDb);
 
     try {
@@ -4622,7 +4622,7 @@ describe('POST /projects/:id/migrations/rename', () => {
       .from(deployments)
       .where(eq(deployments.id, lease.id));
     expect(preservedLease?.id).toBe(lease.id);
-    expect(JSON.parse(preservedLease!.manifest!)).toMatchObject({
+    expect(JSON.parse(preservedLease.manifest!)).toMatchObject({
       targetDeploymentId: target.id,
       state: 'retryable',
     });
@@ -4817,7 +4817,7 @@ describe('POST /projects/:id/migrations/rename', () => {
           });
           return new Response('{}', { status: 200 });
         },
-      } as unknown as DurableObjectStub;
+      };
     });
 
     const rollbackRes = await app.fetch(
@@ -4830,7 +4830,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackRes.status).toBe(200);
 
     expect(doCalls.map((call) => call.url)).toEqual(['/snapshot', '/clear']);
-    expect(doCalls[1]!.method).toBe('POST');
+    expect(doCalls[1].method).toBe('POST');
   });
 
   it('rollback queue sweep unions manifests from activated deployments and deletes historical orphans', async () => {
@@ -5271,7 +5271,7 @@ describe('POST /projects/:id/migrations/rename', () => {
           doCalls.push({ url: url.pathname, method: req.method });
           return new Response('{}', { status: 200 });
         },
-      } as unknown as DurableObjectStub;
+      };
     });
 
     const rollbackRes = await app.fetch(
@@ -5284,7 +5284,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(rollbackRes.status).toBe(200);
 
     expect(doCalls.map((call) => call.url)).toEqual(['/snapshot', '/clear']);
-    expect(doCalls[1]!.method).toBe('POST');
+    expect(doCalls[1].method).toBe('POST');
   });
 
   it('rollback destructive diff is rejected server-side without explicit override', async () => {
@@ -5354,12 +5354,12 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(body.destructiveMigrations).toEqual(['m2.sql']);
 
     const proj = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(proj[0]!.active_deployment_id).toBe(depA.id);
+    expect(proj[0].active_deployment_id).toBe(depA.id);
 
     const rowA = await env.db.select().from(deployments).where(eq(deployments.id, depA.id));
     const rowB = await env.db.select().from(deployments).where(eq(deployments.id, depB.id));
-    expect(JSON.parse(rowA[0]!.applied_migrations!)).toEqual(['m1.sql', 'm2.sql']);
-    expect(JSON.parse(rowB[0]!.applied_migrations!)).toEqual(['m1.sql']);
+    expect(JSON.parse(rowA[0].applied_migrations!)).toEqual(['m1.sql', 'm2.sql']);
+    expect(JSON.parse(rowB[0].applied_migrations!)).toEqual(['m1.sql']);
 
     expect(routingPutSpy).not.toHaveBeenCalled();
     expect(routingDeleteSpy).not.toHaveBeenCalled();
@@ -5408,7 +5408,7 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(body.migrationDiff).toEqual(['m2.sql']);
 
     const proj = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(proj[0]!.active_deployment_id).toBe(depB.id);
+    expect(proj[0].active_deployment_id).toBe(depB.id);
   });
 
   it('rollback destructive diff rejects allowDestructive snapshot mismatch', async () => {
@@ -5466,12 +5466,12 @@ describe('POST /projects/:id/migrations/rename', () => {
     expect(body.destructiveMigrations).toEqual(['m2.sql', 'm3.sql']);
 
     const proj = await env.db.select().from(projects).where(eq(projects.id, project.id));
-    expect(proj[0]!.active_deployment_id).toBe(depA.id);
+    expect(proj[0].active_deployment_id).toBe(depA.id);
 
     const rowA = await env.db.select().from(deployments).where(eq(deployments.id, depA.id));
     const rowB = await env.db.select().from(deployments).where(eq(deployments.id, depB.id));
-    expect(JSON.parse(rowA[0]!.applied_migrations!)).toEqual(['m1.sql', 'm2.sql', 'm3.sql']);
-    expect(JSON.parse(rowB[0]!.applied_migrations!)).toEqual(['m1.sql']);
+    expect(JSON.parse(rowA[0].applied_migrations!)).toEqual(['m1.sql', 'm2.sql', 'm3.sql']);
+    expect(JSON.parse(rowB[0].applied_migrations!)).toEqual(['m1.sql']);
 
     expect(routingPutSpy).not.toHaveBeenCalled();
     expect(routingDeleteSpy).not.toHaveBeenCalled();

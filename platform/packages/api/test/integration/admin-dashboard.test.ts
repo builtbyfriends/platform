@@ -821,7 +821,7 @@ function pageSnapshot(html: string): string {
   const match =
     /<script type="application\/json" id="platform-admin-page">([\s\S]*?)<\/script>/.exec(html);
   expect(match).not.toBeNull();
-  const page = JSON.parse(match![1]!) as { shared: { adminFateSnapshot?: unknown } };
+  const page = JSON.parse(match![1]) as { shared: { adminFateSnapshot?: unknown } };
   expect(page.shared.adminFateSnapshot).toBeDefined();
   return JSON.stringify(page.shared.adminFateSnapshot);
 }
@@ -1228,7 +1228,7 @@ describe('GET /admin/ (dashboard)', () => {
       }>;
     };
     expect(body.results[0]?.ok).toBe(true);
-    const health = body.results[0]!.data;
+    const health = body.results[0].data;
     expect(health.checkedAt).toBeGreaterThanOrEqual(startedAt);
     expect(health.checkedAt).toBeLessThanOrEqual(Date.now());
     expect(health.checks).toEqual(
@@ -1386,7 +1386,7 @@ describe('GET /admin/ (dashboard)', () => {
               const ownership = document.getElementById('owner-transfer')!;
               const sections = [builds, zeroTrust, team, ownership];
               return sections.slice(1).map((section, index) => {
-                const previous = sections[index]!.getBoundingClientRect();
+                const previous = sections[index].getBoundingClientRect();
                 return section.getBoundingClientRect().top - previous.bottom;
               });
             });
@@ -1522,7 +1522,7 @@ describe('GET /admin/ (dashboard)', () => {
                 .map(
                   (section, index) =>
                     section.getBoundingClientRect().top -
-                    sections[index]!.getBoundingClientRect().bottom,
+                    sections[index].getBoundingClientRect().bottom,
                 );
             });
           expect(gaps.length).toBeGreaterThan(0);
@@ -1541,7 +1541,7 @@ describe('GET /admin/ (dashboard)', () => {
                   .map(
                     (element, index) =>
                       element.getBoundingClientRect().top -
-                      elements[index]!.getBoundingClientRect().bottom,
+                      elements[index].getBoundingClientRect().bottom,
                   );
               }),
             );
@@ -2117,7 +2117,7 @@ describe('POST /admin/users/:id/plan', () => {
         body: new URLSearchParams({ plan: 'pro' }).toString(),
         redirect: 'manual',
       }),
-      { ...env, USAGE_COUNTER: failingDo } as typeof env,
+      { ...env, USAGE_COUNTER: failingDo },
     );
     expect(res.status).toBe(500);
 
@@ -2262,7 +2262,7 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
         body: '',
         redirect: 'manual',
       }),
-      { ...env, ...overrides } as typeof env,
+      { ...env, ...overrides },
     );
   }
 
@@ -2284,7 +2284,7 @@ describe('POST /admin/users/:id/suspend + unsuspend', () => {
         body: new URLSearchParams({ reason }).toString(),
         redirect: 'manual',
       }),
-      { ...env, ...overrides } as typeof env,
+      { ...env, ...overrides },
     );
   }
 
@@ -2686,7 +2686,7 @@ describe('GET /admin/projects/:id', () => {
     );
     await expect(
       respondToProjectInvitation(env.db, {
-        invitationId: invitation!.id,
+        invitationId: invitation.id,
         actorUserId: teammate.id,
         response: 'accept',
       }),
@@ -2721,7 +2721,7 @@ describe('GET /admin/projects/:id', () => {
     const [invitation] = await env.db.select().from(projectInvitations);
 
     const revoke = await req(
-      `/admin/projects/${project.id}/team/invitations/${invitation!.id}/revoke`,
+      `/admin/projects/${project.id}/team/invitations/${invitation.id}/revoke`,
       admin.adminJwt,
       form({}),
     );
@@ -3127,7 +3127,7 @@ describe('GET /admin/login', () => {
     );
     expect(authorization.searchParams.get('redirect_uri')).toBe('http://localhost/auth/callback');
     const state = authorization.searchParams.get('state')!;
-    const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0]!;
+    const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0];
 
     vi.stubGlobal(
       'fetch',
@@ -3168,7 +3168,7 @@ describe('GET /admin/login', () => {
       env,
     );
     const state = new URL(start.headers.get('Location')!).searchParams.get('state')!;
-    const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0]!;
+    const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | URL | Request): Promise<Response> => {
@@ -3224,7 +3224,7 @@ describe('GET /admin/login', () => {
       );
       const authorization = new URL(start.headers.get('Location')!);
       const state = authorization.searchParams.get('state')!;
-      const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0]!;
+      const browserCookie = start.headers.get('Set-Cookie')!.split(';', 1)[0];
 
       vi.stubGlobal(
         'fetch',
@@ -3701,7 +3701,7 @@ describe('GET /admin/deployments/:id (logs section)', () => {
       JSON.parse(
         html.match(
           /<script type="application\/json" id="platform-admin-page">([\s\S]*?)<\/script>/,
-        )![1]!,
+        )![1],
       ),
     ).toMatchObject({ component: 'deploymentDetail' });
     expect(html).toContain('src="/admin/client.js"');

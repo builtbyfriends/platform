@@ -196,7 +196,7 @@ describe('per-deploy sandbox integration', () => {
       props: { projectId: project.id, deploymentId: deployId, userId: user.id, slug: project.slug },
     });
     const [stored] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
-    expect(JSON.parse(stored!.manifest!).sandbox.runtime).toEqual({ protocol: 2 });
+    expect(JSON.parse(stored.manifest!).sandbox.runtime).toEqual({ protocol: 2 });
     cf.expectCallOrder(
       { method: 'POST', url: '/containers/image-preparations' },
       { method: 'PUT', url: '/workers/scripts/' + controllerName },
@@ -283,16 +283,10 @@ describe('per-deploy sandbox integration', () => {
     // Decision: Direct-to-R2 deploys verify R2 has the declared bytes before flipping routing.
     const indexBytes = new TextEncoder().encode('<html>hello</html>');
     const indexHash = (await import('../../src/assets.ts')).computeAssetHash(
-      indexBytes.buffer.slice(
-        indexBytes.byteOffset,
-        indexBytes.byteOffset + indexBytes.byteLength,
-      ) as ArrayBuffer,
+      indexBytes.buffer.slice(indexBytes.byteOffset, indexBytes.byteOffset + indexBytes.byteLength),
       '/index.html',
     );
-    await env.STATIC_ASSETS_R2.put(
-      `assets/${project.id}/${indexHash}`,
-      indexBytes as unknown as ArrayBuffer,
-    );
+    await env.STATIC_ASSETS_R2.put(`assets/${project.id}/${indexHash}`, indexBytes);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}/deploy`, {
@@ -331,7 +325,7 @@ describe('per-deploy sandbox integration', () => {
     expect(bundleKeys).toHaveLength(0);
 
     const [row] = await env.db.select().from(deployments).where(eq(deployments.id, deployId));
-    expect(row!.bundle_stored).toBe(false);
+    expect(row.bundle_stored).toBe(false);
   });
 
   it('retention eviction: oldest sandbox deploy has its user worker, container app, AND R2 bundle deleted when retention limit is exceeded', async () => {
@@ -377,7 +371,7 @@ describe('per-deploy sandbox integration', () => {
     expect(await listR2Keys(`worker-bundles/${project.id}/${v1Id}/`)).toHaveLength(0);
 
     const [v1Row] = await env.db.select().from(deployments).where(eq(deployments.id, v1Id));
-    expect(v1Row!.retained).toBe(false);
+    expect(v1Row.retained).toBe(false);
   });
 
   it('retries controller and container cleanup after an interrupted deployment cleanup', async () => {
@@ -409,7 +403,7 @@ describe('per-deploy sandbox integration', () => {
       .select({ manifest: deployments.manifest })
       .from(deployments)
       .where(eq(deployments.id, deploymentId));
-    expect(JSON.parse(cleaned!.manifest!).sandbox.runtime.cleanupComplete).toBe(true);
+    expect(JSON.parse(cleaned.manifest!).sandbox.runtime.cleanupComplete).toBe(true);
   });
 
   it('pre-routing failure: outer catch deletes the user worker AND the per-deploy container app (no orphans)', async () => {
@@ -428,7 +422,7 @@ describe('per-deploy sandbox integration', () => {
       if (key === project.slug) {
         throw new Error('forced ROUTING.put failure for test');
       }
-      return originalPut(key, value as never, options as never);
+      return originalPut(key, value as never, options);
     }) as typeof env.ROUTING.put);
 
     const cf = mockCfApi();
@@ -490,7 +484,7 @@ describe('per-deploy sandbox integration', () => {
       value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
       options?: KVNamespacePutOptions,
     ) => {
-      const result = await originalPut(key, value as never, options as never);
+      const result = await originalPut(key, value as never, options);
       // Decision: The `cutover-ready:` key is written after the routing-switch transaction commits and before the
       // deploy's finalize transaction opens, so the teardown writes can be awaited here: no transaction is
       // open, nothing deadlocks, and the flip lands before the finalize read. Queuing them instead only
@@ -586,8 +580,8 @@ describe('per-deploy sandbox integration', () => {
       errors: Array<{ code: number; message: string }>;
     };
     expect(body.success).toBe(false);
-    expect(body.errors[0]!.code).toBe(10_061);
-    expect(body.errors[0]!.message).toMatch(/Cannot create binding for class in script/);
+    expect(body.errors[0].code).toBe(10_061);
+    expect(body.errors[0].message).toMatch(/Cannot create binding for class in script/);
   });
 
   // Decision: CF rejects all cross-script DO bindings between dispatch namespace scripts, even when the target
@@ -635,8 +629,8 @@ describe('per-deploy sandbox integration', () => {
       errors: Array<{ code: number; message: string }>;
     };
     expect(body.success).toBe(false);
-    expect(body.errors[0]!.code).toBe(10_061);
-    expect(body.errors[0]!.message).toMatch(/do-host-existing/);
+    expect(body.errors[0].code).toBe(10_061);
+    expect(body.errors[0].message).toMatch(/do-host-existing/);
   });
 
   it('mock regression: 2nd container POST for the same namespace_id returns CF code 1608 DURABLE_OBJECT_ALREADY_HAS_APPLICATION', async () => {
@@ -667,7 +661,7 @@ describe('per-deploy sandbox integration', () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { success: boolean; errors: Array<{ code: number }> };
     expect(body.success).toBe(false);
-    expect(body.errors[0]!.code).toBe(1608);
+    expect(body.errors[0].code).toBe(1608);
   });
 
   it('project teardown deletes per-deploy container apps for ALL retained deployments via deterministic-name orphan recovery', async () => {

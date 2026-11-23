@@ -836,7 +836,7 @@ describe('normalizeEmail', () => {
       // Decision: A name isn't an address: `formatAddress` RFC 2047-encodes a non-printable name, so the byte
       // reaches the wire only inside base64.
       // eslint-disable-next-line no-control-regex -- C0 controls and DEL are the point
-      const rawControl = /[\u0000-\u0009\x0b\u000c\x0e-\u001f\x7f]/;
+      const rawControl = /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/;
       for (const ch of ['\u0001', '\u001b', '\u001f', '\u007f', '\t']) {
         const { text } = await build({
           from: 'a@x.dev',

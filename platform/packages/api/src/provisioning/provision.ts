@@ -167,8 +167,8 @@ export async function provisionBindings(
   bindings.push(
     { type: 'service', name: '__PLATFORM_PROXY', service: aiProxyService },
     { type: 'plain_text', name: '__PROJECT_ID', text: projectId },
+    { type: 'plain_text', name: '__PLATFORM_PROXY_TOKEN', text: platform.proxyToken },
   );
-  bindings.push({ type: 'plain_text', name: '__PLATFORM_PROXY_TOKEN', text: platform.proxyToken });
   // Decision: The single producer of `__PLATFORM_PROJECT_SLUG`. `@builtbyfriends/bwf/email` needs it on each
   // worker to default an outbound `from` to `<slug>+noreply@<domain>`, and the sandbox runtime reads
   // the same name. It's emitted after the user's vars in the upload array, so it can't be shadowed;

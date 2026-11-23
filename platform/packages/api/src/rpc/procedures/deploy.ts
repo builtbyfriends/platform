@@ -279,7 +279,7 @@ export const workerUploadUrls = procedure('deploy.workerUploadUrls')
     // the stale-input sweep and project teardown already cover.
     const failed = await presignUnderProjectLock(ctx, project.id, async (_tx, signingKeyCache) => {
       await uploadPool([...modules.keys()], PRESIGN_BATCH_CONCURRENCY, async (index) => {
-        const module = modules[index]!;
+        const module = modules[index];
         urls[index] = await presignAssetPut(
           {
             accountId: env.CF_ACCOUNT_ID,

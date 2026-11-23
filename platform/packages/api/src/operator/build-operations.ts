@@ -81,7 +81,7 @@ export async function buildLogs(
     ...body,
     lines,
     hasMore,
-    lastSeq: Math.max(since, lastSeq!),
+    lastSeq: Math.max(since, lastSeq),
     status: body.status ?? build.status,
     terminal: body.terminal === true || terminal,
     // Decision: A terminal row that was never claimed couldn't have had a container log producer. For started

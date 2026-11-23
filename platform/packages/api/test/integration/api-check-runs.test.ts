@@ -94,7 +94,7 @@ vi.mock('../../src/db.ts', () => ({
         return false;
       }
       dbState.status.set(id, 'building');
-      dbState.writes.push({ id, status: 'building', opts: opts as StatusWrite['opts'] });
+      dbState.writes.push({ id, status: 'building', opts });
       return true;
     },
   ),

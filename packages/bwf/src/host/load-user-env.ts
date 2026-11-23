@@ -28,6 +28,6 @@ export async function loadUserEnvFile(envFile: string): Promise<void> {
   } catch (error) {
     const base = `env: Failed to load '${envFile}': '${(error as Error).message}'.`;
     const hint = aliasHint(error, 'env.ts');
-    throw new Error(hint ? `${base}\n\n${hint}` : base);
+    throw new Error(hint ? `${base}\n\n${hint}` : base, { cause: error });
   }
 }

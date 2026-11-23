@@ -222,7 +222,7 @@ describe('createDefaultRunWrangler — confirmed child termination + kill classi
       const left = existsSync(killClassifyTmp) ? readdirSync(killClassifyTmp) : [];
       const live = left
         .filter((entry) => entry.endsWith('.pid'))
-        .map((entry) => Number(readFileSync(join(killClassifyTmp, entry), 'utf-8').trim()))
+        .map((entry) => Number(readFileSync(join(killClassifyTmp, entry), 'utf8').trim()))
         .filter((pid) => {
           try {
             process.kill(pid, 0);

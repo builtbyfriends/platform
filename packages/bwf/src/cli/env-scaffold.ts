@@ -84,12 +84,11 @@ export function renderEnvTs(entries: Array<InferredEntry>): string {
   );
 
   const lines: Array<string> = [];
-  lines.push(`import { defineEnv, ${importList.join(', ')} } from '@builtbyfriends/bwf/env';`, '');
   lines.push(
+    `import { defineEnv, ${importList.join(', ')} } from '@builtbyfriends/bwf/env';`,
+    '',
     `// Scaffolded from .env. Inference is conservative — review each`,
     `// entry and tighten types as needed (e.g. oneOf([...]), url(), .optional(),`,
-  );
-  lines.push(
     `// .default(value), or a Standard Schema validator from valibot/zod/arktype).`,
     `export default defineEnv({`,
   );

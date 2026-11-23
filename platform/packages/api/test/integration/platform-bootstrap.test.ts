@@ -197,7 +197,7 @@ async function authenticateSetup() {
   const start = await form('/auth/bootstrap', { code });
   expect(start.status).toBe(302);
   authorization = new URL(start.headers.get('Location')!);
-  const cookie = start.headers.get('Set-Cookie')!.split(';')[0]!;
+  const cookie = start.headers.get('Set-Cookie')!.split(';')[0];
   return app.fetch(
     new Request(
       `${origin}/auth/callback?code=provider-code&state=${authorization.searchParams.get('state')}`,
@@ -235,7 +235,7 @@ describe('provider-independent first administrator setup', () => {
       'custom',
       'admin',
     );
-    const revision = (await env.db.select().from(platformLoginRevisions))[0]!;
+    const revision = (await env.db.select().from(platformLoginRevisions))[0];
     expect(
       recoverAuthenticationCredential(
         env.PROJECT_SECRET_KEYS_JSON,
@@ -291,7 +291,7 @@ describe('provider-independent first administrator setup', () => {
     );
     expect(start.status).toBe(302);
     authorization = new URL(start.headers.get('Location')!);
-    const cookie = start.headers.getSetCookie()[0]!.split(';')[0]!;
+    const cookie = start.headers.getSetCookie()[0].split(';')[0];
     const callback = await app.fetch(
       new Request(
         `${origin}/auth/callback?code=provider-code&state=${authorization.searchParams.get('state')}`,
@@ -828,7 +828,7 @@ describe('provider-independent first administrator setup', () => {
     const proofCookie = callback.headers
       .getSetCookie()
       .find((cookie) => cookie.startsWith('platform_bootstrap_confirm='))!
-      .split(';')[0]!;
+      .split(';')[0];
     expect(
       (
         await form(
@@ -860,7 +860,7 @@ describe('provider-independent first administrator setup', () => {
       .find((response) => response.status === 302)!
       .headers.getSetCookie()
       .find((cookie) => cookie.startsWith('admin_token='))!
-      .split(';')[0]!;
+      .split(';')[0];
     expect(
       (
         await app.fetch(
@@ -888,7 +888,7 @@ describe('provider-independent first administrator setup', () => {
     const start = await form('/auth/bootstrap', { code });
     expect(start.status).toBe(302);
     authorization = new URL(start.headers.get('Location')!);
-    const cookie = start.headers.get('Set-Cookie')!.split(';')[0]!;
+    const cookie = start.headers.get('Set-Cookie')!.split(';')[0];
     const provider = globalThis.fetch;
     vi.stubGlobal('fetch', async (input: string | URL | Request, options?: RequestInit) =>
       input.toString() === `${issuer}/token`

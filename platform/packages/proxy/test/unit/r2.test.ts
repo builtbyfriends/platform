@@ -216,7 +216,7 @@ describe('R2 proxy endpoints', () => {
           value: 'new',
           onlyIf: { etagMatches: 'old' },
         }),
-        env as never,
+        env,
       );
       expect(res.status).toBe(501);
       expect(await res.text()).toContain('conditional');

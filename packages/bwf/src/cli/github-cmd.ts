@@ -199,21 +199,21 @@ export async function runInstall(
       await linkIdentity(client);
       try {
         ({ url } = await client.getGithubInstallUrl());
-      } catch (retryErr) {
+      } catch (error_) {
         // Decision: Only the same identity-required 403 means linking didn't take, so show the link and install
         // guidance. Any other failure (401, 426, 500, a different 403) is the real error and has to surface
         // normally.
         if (
-          retryErr instanceof PlatformApiError &&
-          retryErr.status === 403 &&
-          retryErr.code === 'github_identity_required'
+          error_ instanceof PlatformApiError &&
+          error_.status === 403 &&
+          error_.code === 'github_identity_required'
         ) {
           log.error(
             'Could not start the GitHub App install after linking. Try `bwf github link`, then `bwf github install` again.',
           );
           process.exit(1);
         }
-        throw retryErr;
+        throw error_;
       }
     } else {
       throw error;
@@ -709,11 +709,11 @@ export async function runConnect(
           connectGrant: grant.connectGrant,
           codeVerifier: grant.codeVerifier,
         });
-      } catch (retryErr) {
+      } catch (error_) {
         if (
-          retryErr instanceof PlatformApiError &&
-          retryErr.status === 403 &&
-          retryErr.code === 'invalid connect grant'
+          error_ instanceof PlatformApiError &&
+          error_.status === 403 &&
+          error_.code === 'invalid connect grant'
         ) {
           // Decision: The grant expired or the browser identity differs from the linked one; the generic 403 message
           // would wrongly blame project access.
@@ -722,7 +722,7 @@ export async function runConnect(
           );
           process.exit(1);
         }
-        throw retryErr;
+        throw error_;
       }
     } else {
       const message = describeGithubClientError(error, describeConnectError);

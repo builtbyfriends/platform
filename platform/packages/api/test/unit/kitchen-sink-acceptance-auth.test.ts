@@ -51,7 +51,7 @@ beforeAll(async () => {
       const denied = await websocket.onBeforeConnect({
         env: mocks.env,
         request: c.req.raw,
-      } as never);
+      });
       return denied ?? c.json({ ok: true });
     });
 });

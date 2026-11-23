@@ -73,23 +73,21 @@ export function generateRouteTypes(
   lines.push(
     'type StandardSchemaV1<Input = unknown, Output = Input> = {',
     '  readonly "~standard": {',
-  );
-  lines.push('    readonly version: 1;', '    readonly vendor: string;');
-  lines.push(
+    '    readonly version: 1;',
+    '    readonly vendor: string;',
     '    readonly validate: (value: unknown) => unknown;',
     '    readonly types?: { readonly input: Input; readonly output: Output } | undefined;',
-  );
-  lines.push('  };', '};');
-  lines.push(
+    '  };',
+    '};',
     'declare namespace StandardSchemaV1 {',
     '  type InferInput<Schema extends StandardSchemaV1> = NonNullable<',
-  );
-  lines.push('    Schema["~standard"]["types"]', '  >["input"];');
-  lines.push(
+    '    Schema["~standard"]["types"]',
+    '  >["input"];',
     '  type InferOutput<Schema extends StandardSchemaV1> = NonNullable<',
     '    Schema["~standard"]["types"]',
+    '  >["output"];',
+    '}',
   );
-  lines.push('  >["output"];', '}');
   lines.push('');
   // Decision: JSON keeps invalid array positions as null, but omits the same values in objects.
   // Find optional object keys before Serialize removes their omitted-value union members.
@@ -102,120 +100,106 @@ export function generateRouteTypes(
   lines.push(
     'type SerializeArray<T extends readonly unknown[]> =',
     '  { [K in keyof T]: SerializeArrayElement<T[K]> } extends infer A',
-  );
-  lines.push(
     '    ? A extends readonly unknown[] ? A',
     '      : T extends unknown[] ? Array<SerializeArrayElement<T[number]>>',
-  );
-  lines.push('      : ReadonlyArray<SerializeArrayElement<T[number]>>', '    : never;');
-  lines.push(
+    '      : ReadonlyArray<SerializeArrayElement<T[number]>>',
+    '    : never;',
     'type JsonOptionalKeys<T> = {',
     '  [K in keyof T]-?: Extract<T[K], JsonOmitted> extends never ? never : K;',
-  );
-  lines.push('}[keyof T];', 'type SerializeObject<T> = {');
-  lines.push(
+    '}[keyof T];',
+    'type SerializeObject<T> = {',
     '  [K in keyof T as K extends symbol ? never : T[K] extends JsonOmitted ? never : K]: Serialize<T[K]>;',
     '};',
+    '',
+    'type Serialize<T> =',
+    '  T extends Response ? never :',
+    '  T extends Date ? string :',
   );
-  lines.push('', 'type Serialize<T> =');
-  lines.push('  T extends Response ? never :', '  T extends Date ? string :');
-  lines.push('  T extends bigint ? never :', '  T extends JsonOmitted ? never :');
   lines.push(
+    '  T extends bigint ? never :',
+    '  T extends JsonOmitted ? never :',
     '  T extends readonly unknown[] ? SerializeArray<T> :',
     '  T extends object ? SerializeObject<Omit<T, JsonOptionalKeys<T>> & Partial<Pick<T, JsonOptionalKeys<T>>>> :',
-  );
-  lines.push('  T;', '');
-
-  lines.push(
+    '  T;',
+    '',
     'type ExtractInput<V> = {',
     '  [K in keyof V as V[K] extends StandardSchemaV1 ? K : never]:',
-  );
-  lines.push(
     '    V[K] extends StandardSchemaV1 ? StandardSchemaV1.InferInput<V[K]> : never;',
     '};',
-  );
-  lines.push('', 'type ExtractOutput<S> =');
-  lines.push('  S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : never;', '');
-  lines.push(
+    '',
+    'type ExtractOutput<S> =',
+    '  S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : never;',
+    '',
     'type RouteParams<P extends readonly string[]> =',
     '  P extends readonly [] ? Record<string, never> : { [K in P[number]]: string };',
   );
-  lines.push('', 'declare module "@builtbyfriends/bwf/routes" {');
-  lines.push('  export interface RouteMap {}', '  export interface WebSocketRouteMap {}');
-  lines.push('  export interface PageActionMap {}', '');
+  lines.push(
+    '',
+    'declare module "@builtbyfriends/bwf/routes" {',
+    '  export interface RouteMap {}',
+    '  export interface WebSocketRouteMap {}',
+    '  export interface PageActionMap {}',
+    '',
+  );
   // Decision: Projects resolve bwf/routes to this generated declaration through their
   // tsconfig paths, so keep the standalone helper's declarations here as well.
   lines.push(
     '  export type RoutePath = keyof RoutePathMap & string;',
     '  export type RouteQueryValue = string | number | boolean | null | undefined;',
-  );
-  lines.push(
     '  export type RouteQuery = Record<string, RouteQueryValue | ReadonlyArray<RouteQueryValue>>;',
     '  export type RouteOptions<P extends RoutePath> = {',
-  );
-  lines.push('    query?: RouteQuery;', '    hash?: string;');
-  lines.push('  } & ([RoutePathMap[P]] extends [never]', '    ? { params?: never }');
-  lines.push(
+    '    query?: RouteQuery;',
+    '    hash?: string;',
+    '  } & ([RoutePathMap[P]] extends [never]',
+    '    ? { params?: never }',
     '    : { params: { [K in RoutePathMap[P] & string]: string | number } });',
     '  export type RouteDestination<P extends RoutePath = RoutePath> = P extends RoutePath',
-  );
-  lines.push('    ? { pathname: P } & RouteOptions<P>', '    : never;');
-  lines.push(
+    '    ? { pathname: P } & RouteOptions<P>',
+    '    : never;',
     '  type RouteUrlSegment<S extends string> = S extends `:${string}` | `[${string}]` | "*" ? string : S;',
     '  type CheckedRoutePath<P extends string> = P extends `/${infer Segment}/${infer Rest}`',
-  );
-  lines.push(
     '    ? Rest extends ""',
     '      ? string extends RouteUrlSegment<Segment> ? never : P',
   );
-  lines.push('      : P', '    : P extends `/${infer Segment}`');
-  lines.push('      ? string extends RouteUrlSegment<Segment> ? never : P', '      : P;');
   lines.push(
+    '      : P',
+    '    : P extends `/${infer Segment}`',
+    '      ? string extends RouteUrlSegment<Segment> ? never : P',
+    '      : P;',
     '  type RouteSegmentsUrl<P extends string> = P extends `${infer Segment}/${infer Rest}`',
     '    ? `${RouteUrlSegment<Segment>}/${RouteSegmentsUrl<Rest>}`',
-  );
-  lines.push(
     '    : RouteUrlSegment<P>;',
     '  type RoutePatternUrl<P extends string> = P extends `${infer Prefix}/${"*" | "[...]"}/`',
-  );
-  lines.push(
     '    ? `${RouteSegmentsUrl<Prefix>}/` | `${RouteSegmentsUrl<Prefix>}/${string}/`',
     '    : P extends `${infer Prefix}/${"*" | "[...]"}`',
-  );
-  lines.push(
     '    ? (Prefix extends "" ? "/" : RouteSegmentsUrl<Prefix>) | `${RouteSegmentsUrl<Prefix>}/${string}`',
     '    : RouteSegmentsUrl<P>;',
-  );
-  lines.push(
     '  type EncodedRoutePath = EncodedRoutePathMap[keyof EncodedRoutePathMap] & string;',
     '  type RoutePathUrl = RoutePatternUrl<CheckedRoutePath<RoutePath | EncodedRoutePath>>;',
-  );
-  lines.push(
     '  type BuiltRouteUrl = string & { readonly __platformRouteUrl: true };',
     '  type TypedRoutes = RouteTypesConfig extends { typedRoutes: true } ? true : false;',
   );
   lines.push(
     '  export type RouteUrl = TypedRoutes extends true',
     '    ? BuiltRouteUrl | RoutePathUrl | `${RoutePathUrl}${"?" | "#"}${string}`',
-  );
-  lines.push('    : string;', '  export type Href = TypedRoutes extends true');
-  lines.push(
+    '    : string;',
+    '  export type Href = TypedRoutes extends true',
     '    ? RouteUrl | `${"?" | "#"}${string}` | `${"http://" | "https://" | "mailto:" | "tel:"}${string}`',
     '    : string;',
-  );
-  lines.push(
     '  export type RouteUrlInput = Href | URL | RouteDestination;',
     '  export function routeUrl<P extends RoutePath>(',
+    '    path: P,',
+    '    ...args: [RoutePathMap[NoInfer<P>]] extends [never]',
+    '      ? [options?: RouteOptions<P>]',
+    '      : [options: RouteOptions<P>]',
+    '  ): RouteUrl;',
+    '',
+    '  export interface RouteTypesConfig {',
   );
-  lines.push('    path: P,', '    ...args: [RoutePathMap[NoInfer<P>]] extends [never]');
-  lines.push('      ? [options?: RouteOptions<P>]', '      : [options: RouteOptions<P>]');
-  lines.push('  ): RouteUrl;', '');
-  lines.push('  export interface RouteTypesConfig {');
   if (options.typedRoutes) {
     lines.push('    typedRoutes: true;');
   }
-  lines.push('  }', '');
-  lines.push('  export interface RoutePathMap {');
+  lines.push('  }', '', '  export interface RoutePathMap {');
   const paths = new Map<string, Set<string>>();
   // Decision: A route file without HTTP method exports serves every method through its default export.
   for (const route of [...scan.routes, ...(scan.websockets ?? [])]) {
@@ -249,23 +233,24 @@ export function generateRouteTypes(
       }
     }
   }
-  lines.push('  }', '');
   lines.push(
+    '  }',
+    '',
     '  /** Union of known route patterns (keys of the generated RouteMap). */',
     '  export type RouteName = keyof RouteMap;',
-  );
-  lines.push('', '  /**');
-  lines.push('   * Destination type for rewrites / fallbacks / c.rewrite().', '   *');
-  lines.push(
+    '',
+    '  /**',
+    '   * Destination type for rewrites / fallbacks / c.rewrite().',
+    '   *',
     '   * The `string & {}` branch keeps IDE autocomplete of known routes while',
     '   * still accepting arbitrary strings (needed for dynamic paths like',
-  );
-  lines.push(
     '   * `/users/${id}`). When no routes are generated yet, `RouteName` is',
     '   * `never` and this degenerates to `string & {}`, which is assignable',
+    '   * from any string.',
+    '   */',
+    '  export type RewriteDestination = RouteName | (string & {});',
+    '',
   );
-  lines.push('   * from any string.', '   */');
-  lines.push('  export type RewriteDestination = RouteName | (string & {});', '');
   lines.push('  interface RouteMap {');
 
   const routesByPattern = new Map<string, Map<string, Array<RouteDefinition>>>();
@@ -296,8 +281,6 @@ export function generateRouteTypes(
       lines.push(
         `      ${method}: {`,
         `        input: ${imports.map((source) => `ExtractInput<${source}["__validators"]>`).join(' & ')};`,
-      );
-      lines.push(
         `        output: ${imports.map((source) => `Serialize<Awaited<${source}["__output"]>>`).join(' | ')};`,
         '      };',
       );
@@ -307,8 +290,7 @@ export function generateRouteTypes(
     legacyRouteAlias(lines, 'RouteMap', pattern);
   }
 
-  lines.push('  }', '');
-  lines.push('  interface WebSocketRouteMap {');
+  lines.push('  }', '', '  interface WebSocketRouteMap {');
 
   const websocketsByPattern = new Map<string, Array<WebSocketRouteDefinition>>();
   for (const route of scan.websockets ?? []) {
@@ -325,8 +307,6 @@ export function generateRouteTypes(
     lines.push(
       `    ${JSON.stringify(publicRoutePattern(pattern))}: {`,
       `      params: RouteParams<${JSON.stringify(sources[0]!.params)}>;`,
-    );
-    lines.push(
       `      client: ${imports.map((source) => `ExtractInput<${source}["client"]>`).join(' & ')};`,
       `      server: ${imports.map((source) => `ExtractOutput<${source}["server"]>`).join(' | ')};`,
     );
@@ -342,8 +322,7 @@ export function generateRouteTypes(
     legacyRouteAlias(lines, 'WebSocketRouteMap', pattern);
   }
 
-  lines.push('  }', '}');
-  lines.push('');
+  lines.push('  }', '}', '');
 
   return { dts: lines.join('\n') };
 }

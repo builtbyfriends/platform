@@ -49,7 +49,7 @@ async function seedVerifiedDestination(db: Db, projectId: string, address: strin
       verified_at: new Date().toISOString(),
     })
     .returning();
-  return row!;
+  return row;
 }
 
 beforeAll(async () => {

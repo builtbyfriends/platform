@@ -5,7 +5,7 @@ import type { SpinnerResult } from '@voidzero-dev/vite-plus-prompts';
 import type { NotFoundHandling, RoutingConfig } from '../config.ts';
 import { getTokenSource } from './auth.ts';
 import type { PlatformClient } from './client.ts';
-import { type ManifestOnlyDeployPayload } from './client.ts';
+import type { ManifestOnlyDeployPayload } from './client.ts';
 import {
   formatConnectionLostMessage,
   formatDeployFailureMessage,

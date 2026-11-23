@@ -1,9 +1,7 @@
 import { stripVTControlCharacters } from 'node:util';
 import type { stabilizeCloudflareVersionTriggers } from '@builtbyfriends/deploy-cloudflare';
-import {
-  cloudflareCommandDiagnostic,
-  type CloudflareCommandResult,
-} from '@builtbyfriends/deploy-cloudflare';
+import { cloudflareCommandDiagnostic } from '@builtbyfriends/deploy-cloudflare';
+import type { CloudflareCommandResult } from '@builtbyfriends/deploy-cloudflare';
 import { formatUrl } from './output.ts';
 
 // Decision: Cloudflare refuses a Worker with an Analytics Engine binding (code 10089)

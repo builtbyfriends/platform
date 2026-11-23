@@ -1,9 +1,8 @@
 import type { createPlatformWorkerConfigs } from '@builtbyfriends/platform';
-import {
-  PLATFORM_DISABLED_KEY,
-  transitionInstallation,
-  type PlatformInstallationManifest,
-  type PlatformLifecycleOperation,
+import { PLATFORM_DISABLED_KEY, transitionInstallation } from '@builtbyfriends/platform';
+import type {
+  PlatformInstallationManifest,
+  PlatformLifecycleOperation,
 } from '@builtbyfriends/platform';
 import type { PlatformRuntimeManifest } from '@builtbyfriends/platform/installer';
 import { platformWorkerAction, platformWorkerDeployCallbacks } from './platform-install-workers.ts';

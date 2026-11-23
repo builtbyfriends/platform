@@ -144,7 +144,7 @@ void describe(`kitchen-sink smoke (${BASE})`, { concurrency: true }, () => {
       const assetMatch = html.match(/\/(assets\/[^"']+[-._][A-Za-z0-9_-]{6,}\.(js|css))/);
       assert.ok(assetMatch, 'found hashed asset URL in HTML');
 
-      const assetUrl = `${BASE}/${assetMatch![1]}?smoke=${uid}`;
+      const assetUrl = `${BASE}/${assetMatch[1]}?smoke=${uid}`;
 
       // Decision: A unique URL forces a fresh GET without sending cache-bypass directives to the origin. Cookies
       // are left out because cookie-bearing requests bypass the shared asset cache. Access service-token

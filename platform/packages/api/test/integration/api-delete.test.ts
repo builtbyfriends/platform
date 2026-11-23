@@ -252,14 +252,14 @@ describe('DELETE /projects/:id', () => {
           projectId: project.id,
           userId: user.id,
           billingPeriodStart: expect.any(String),
-          ownershipStartedAt: ownership!.starts_at,
+          ownershipStartedAt: ownership.starts_at,
           ownershipEndedAt: expect.any(String),
         },
       },
     ]);
-    const detachBody = usageCalls[0]!.body as { ownershipEndedAt: string };
+    const detachBody = usageCalls[0].body as { ownershipEndedAt: string };
     expect(Date.parse(detachBody.ownershipEndedAt)).toBeGreaterThanOrEqual(
-      Date.parse(ownership!.starts_at),
+      Date.parse(ownership.starts_at),
     );
   });
 
@@ -308,8 +308,8 @@ describe('DELETE /projects/:id', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect((await request()).status).toBe(200);
     expect(usageCalls).toHaveLength(2);
-    expect(Date.parse(usageCalls[1]!.body.ownershipEndedAt)).toBeGreaterThan(
-      Date.parse(usageCalls[0]!.body.ownershipEndedAt),
+    expect(Date.parse(usageCalls[1].body.ownershipEndedAt)).toBeGreaterThan(
+      Date.parse(usageCalls[0].body.ownershipEndedAt),
     );
   });
 
@@ -758,7 +758,7 @@ describe('DELETE /projects/:id', () => {
     expect(cleanupZeroTrust).toHaveBeenCalledWith(expect.anything(), expect.anything(), project.id);
     expect(cascade).toHaveBeenCalledTimes(1);
     expect(cleanupZeroTrust.mock.invocationCallOrder[0]).toBeLessThan(
-      cascade.mock.invocationCallOrder[0]!,
+      cascade.mock.invocationCallOrder[0],
     );
   });
 
@@ -907,10 +907,10 @@ describe('DELETE /projects/:id', () => {
       `assets/${project.id}/cccccccccccccccccccccccccccccccc`,
     ];
     for (const key of ownKeys) {
-      await env.STATIC_ASSETS_R2.put(key, new Uint8Array([1, 2, 3]).buffer as ArrayBuffer);
+      await env.STATIC_ASSETS_R2.put(key, new Uint8Array([1, 2, 3]).buffer);
     }
     const otherKey = 'assets/proj_otherproject/dddddddddddddddddddddddddddddddd';
-    await env.STATIC_ASSETS_R2.put(otherKey, new Uint8Array([4, 5, 6]).buffer as ArrayBuffer);
+    await env.STATIC_ASSETS_R2.put(otherKey, new Uint8Array([4, 5, 6]).buffer);
 
     const res = await app.fetch(
       new Request(`http://localhost/projects/${project.id}`, {

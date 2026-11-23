@@ -96,6 +96,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
     if (overrides.length > 0) {
       throw new Error(
         `Cloudflare credentials from ${overrides.join(', ')} were rejected or cannot access account ${options.accountId}. Correct or unset them, then retry the deploy.`,
+        { cause: error },
       );
     }
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -103,6 +104,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
         wrongAccount
           ? `The Cloudflare session cannot access account ${options.accountId}. Run \`bwf cloudflare login\` with the correct user, or set a token for that account in CI, then retry.`
           : 'Cloudflare authentication expired or is unavailable. Run `bwf cloudflare login` in a terminal, or set CLOUDFLARE_API_TOKEN in CI, then retry.',
+        { cause: error },
       );
     }
     log.warn(
@@ -120,6 +122,7 @@ export async function prepareExistingCloudflareDeployWithAuth(
     if (!authenticated.accounts.some((account) => account.id === options.accountId)) {
       throw new Error(
         `The signed-in Cloudflare user cannot access account ${options.accountId}. Sign in with a user who can access it, then retry.`,
+        { cause: error },
       );
     }
     if (!beforeRun()) {

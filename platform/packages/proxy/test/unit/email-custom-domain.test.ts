@@ -257,7 +257,7 @@ describe('POST /email/send — custom sender domain', () => {
     ).toHaveLength(1);
     const [leaseUrl, leaseInit] = apiFetch.mock.calls.find(([url]) =>
       String(url).endsWith('/domain-credential'),
-    )! as [string, RequestInit];
+    )!;
     expect(leaseUrl).toBe('https://api/internal/email/domain-credential');
     expect(leaseInit.method).toBe('POST');
     expect(JSON.parse(leaseInit.body as string)).toEqual({
@@ -365,7 +365,7 @@ describe('POST /email/send — custom sender domain', () => {
       expect([...actions.values()][0]?.recipients[0]?.state).toBe('cancelled');
       const finish = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/finish'));
       expect(finish).toBeDefined();
-      expect(JSON.parse(String((finish![1] as RequestInit).body))).toMatchObject({
+      expect(JSON.parse(String(finish![1].body))).toMatchObject({
         state: 'cancelled',
       });
       expect(providerCalls).toEqual([]);

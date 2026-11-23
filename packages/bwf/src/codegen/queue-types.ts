@@ -25,7 +25,6 @@ export function generateQueueTypes(
     );
   }
 
-  lines.push('}', '');
-  lines.push('export declare const queues: QueueMap;', '');
+  lines.push('}', '', 'export declare const queues: QueueMap;', '');
   return lines.join('\n');
 }

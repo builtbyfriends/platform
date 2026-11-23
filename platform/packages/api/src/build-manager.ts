@@ -2007,7 +2007,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     }
     await this.finalizeCheckRun(
       config,
-      conclusion as CheckRunConclusion,
+      conclusion,
       {
         detailsUrl: this.projectUrl(config),
         title: `Platform build ${conclusion === 'success' ? 'succeeded' : conclusion}`,

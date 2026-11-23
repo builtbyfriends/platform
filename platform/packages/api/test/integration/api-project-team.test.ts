@@ -63,40 +63,40 @@ type Translated = { procedure: string };
 const translated = new WeakMap<Request, Translated>();
 
 const ROUTES: Array<[RegExp, string, string, (m: RegExpMatchArray) => Record<string, string>]> = [
-  [/^\/projects\/([^/]+)\/members$/, 'GET', 'team.members', (m) => ({ projectId: m[1]! })],
-  [/^\/projects\/([^/]+)\/invitations$/, 'GET', 'team.invitations', (m) => ({ projectId: m[1]! })],
-  [/^\/projects\/([^/]+)\/invitations$/, 'POST', 'team.invite', (m) => ({ projectId: m[1]! })],
+  [/^\/projects\/([^/]+)\/members$/, 'GET', 'team.members', (m) => ({ projectId: m[1] })],
+  [/^\/projects\/([^/]+)\/invitations$/, 'GET', 'team.invitations', (m) => ({ projectId: m[1] })],
+  [/^\/projects\/([^/]+)\/invitations$/, 'POST', 'team.invite', (m) => ({ projectId: m[1] })],
   [
     /^\/projects\/([^/]+)\/invitations\/([^/]+)\/resend$/,
     'POST',
     'team.resendInvitation',
-    (m) => ({ projectId: m[1]!, invitationId: m[2]! }),
+    (m) => ({ projectId: m[1], invitationId: m[2] }),
   ],
   [
     /^\/projects\/([^/]+)\/invitations\/([^/]+)$/,
     'DELETE',
     'team.revokeInvitation',
-    (m) => ({ projectId: m[1]!, invitationId: m[2]! }),
+    (m) => ({ projectId: m[1], invitationId: m[2] }),
   ],
   [
     /^\/projects\/([^/]+)\/members\/([^/]+)$/,
     'PATCH',
     'team.setRole',
-    (m) => ({ projectId: m[1]!, userId: m[2]! }),
+    (m) => ({ projectId: m[1], userId: m[2] }),
   ],
   [
     /^\/projects\/([^/]+)\/members\/([^/]+)$/,
     'DELETE',
     'team.remove',
-    (m) => ({ projectId: m[1]!, userId: m[2]! }),
+    (m) => ({ projectId: m[1], userId: m[2] }),
   ],
-  [/^\/projects\/([^/]+)\/leave$/, 'POST', 'team.leave', (m) => ({ projectId: m[1]! })],
+  [/^\/projects\/([^/]+)\/leave$/, 'POST', 'team.leave', (m) => ({ projectId: m[1] })],
   [/^\/me\/project-invitations$/, 'GET', 'team.myInvitations', () => ({})],
   [
     /^\/project-invitations\/([^/]+)\/(accept|decline)$/,
     'POST',
     'team.respond',
-    (m) => ({ invitationId: m[1]!, response: m[2]! }),
+    (m) => ({ invitationId: m[1], response: m[2] }),
   ],
 ];
 
@@ -1077,7 +1077,7 @@ describe('project team API', () => {
             gt(projectInvitations.expires_at, sql`now()`),
           ),
         );
-      return result!.count;
+      return result.count;
     }
 
     it.each(['create', 'refresh', 'resend'] as const)(
@@ -1206,8 +1206,8 @@ describe('project team API', () => {
           .select()
           .from(projectInvitations)
           .where(eq(projectInvitations.id, invitationId));
-        expect(Date.parse(after!.expires_at)).toBeGreaterThan(Date.parse(before!.expires_at));
-        expect(after!.role).toBe(action === 'resend' ? 'reader' : 'admin');
+        expect(Date.parse(after.expires_at)).toBeGreaterThan(Date.parse(before.expires_at));
+        expect(after.role).toBe(action === 'resend' ? 'reader' : 'admin');
         expect(await liveInvitationCount(project.id)).toBe(100);
         expect(await env.db.select().from(projectInvitations)).toHaveLength(101);
         expect(await env.db.select().from(projectAccessEvents)).toHaveLength(1);
