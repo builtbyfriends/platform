@@ -579,4 +579,72 @@ describe('wallets', () => {
       ).toMatchObject({ enabled: false, offReason: 'daily_cap' });
     });
   });
+
+  describe('closing a wallet', () => {
+    const close = async () =>
+      rpcData<{
+        closed: boolean;
+        returned: Array<{ to: string; amountMicros: number; expiresAt: string }>;
+        lapsedMicros: number;
+      }>(await (await call('/credits.close', { payer: 'server:1' })).json());
+
+    beforeEach(async () => {
+      await buyForOthers(true);
+      await call('/wallets.open', { payer: 'server:1' });
+    });
+
+    it('gives unspent bought credits back to who added them, lets the rest lapse, and closes once', async () => {
+      const fromAna = paid('ana', 'server:1', 2000);
+      await webhook(fromAna.event);
+      await webhook(paid('ben', 'ben', 2000).event);
+      await call('/credits.move', {
+        from: 'ben',
+        to: 'server:1',
+        amountMicros: 5 * DOLLAR,
+        id: 'm1',
+      });
+      await give('server:1', 3 * DOLLAR);
+      await call('/usage.record', { person: 'server:1', aiNeurons: 500_000 });
+
+      const result = await close();
+      expect(result.closed).toBe(true);
+      expect(result.returned.map(({ to, amountMicros }) => [to, amountMicros]).sort()).toEqual([
+        ['ana', 14_500_000],
+        ['ben', 5 * DOLLAR],
+      ]);
+      expect(result.lapsedMicros).toBe(3 * DOLLAR);
+      expect((await status('ana')).credits?.balanceMicros).toBe(14_500_000);
+      expect((await status('ben')).credits?.balanceMicros).toBe(20 * DOLLAR);
+      expect((await status('server:1')).credits?.balanceMicros).toBe(0);
+      expect((await close()).closed).toBe(false);
+
+      const grants = await env.db.select().from(appCreditGrants);
+      const back = grants.find((grant) => grant.payer_id === 'ana')!;
+      expect(back.stripe_payment_intent_id).toBe(fromAna.paymentIntent);
+      await dispute(fromAna.paymentIntent);
+      expect((await status('ana')).credits?.balanceMicros).toBe(0);
+    });
+
+    it('lets given credits lapse, and refuses new purchases and moves', async () => {
+      await give('server:1', 3 * DOLLAR);
+      expect((await close()).lapsedMicros).toBe(3 * DOLLAR);
+      const checkout = await call('/credits.checkout', {
+        buyer: 'ana',
+        payer: 'server:1',
+        amountMicros: 20 * DOLLAR,
+        returnUrl: 'https://example.com/credits',
+      });
+      expect(await checkout.json()).toEqual({ error: 'closed' });
+      await webhook(paid('ana', 'ana', 2000).event);
+      const move = await call('/credits.move', {
+        from: 'ana',
+        to: 'server:1',
+        amountMicros: 5 * DOLLAR,
+        id: 'm1',
+      });
+      expect(await move.json()).toEqual({ error: 'closed' });
+      await webhook(paid('ana', 'server:1', 2000).event);
+      expect((await status('ana')).credits?.balanceMicros).toBe(40 * DOLLAR);
+    });
+  });
 });

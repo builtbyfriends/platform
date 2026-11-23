@@ -133,9 +133,20 @@ export type NewGrant = Payer & {
  * Adds a grant, which first settles what the payer owes. A grant for a Stripe invoice or payment
  * that already has one is skipped, and the answer is null.
  */
-export async function grantCredits(db: DbOrTx, grant: NewGrant, now = new Date()) {
+export async function grantCredits(
+  db: DbOrTx,
+  grant: NewGrant,
+  now = new Date(),
+): Promise<typeof appCreditGrants.$inferSelect | null> {
   return db.transaction(async (tx) => {
     const row = await lockPayer(tx, grant);
+    // Decision: A closed wallet takes no grants. A purchase that lands after the close goes to its buyer, since
+    // the money is already taken.
+    if (row.closed_at) {
+      return grant.giverId && grant.giverId !== grant.payer
+        ? grantCredits(tx, { ...grant, payer: grant.giverId }, now)
+        : null;
+    }
     const settled = Math.min(row.owed_micros, grant.amountMicros);
     const [added] = await tx
       .insert(appCreditGrants)
@@ -463,6 +474,130 @@ export async function restoreDisputedGrant(tx: Tx, paymentIntentId: string): Pro
   return grants.length > 0 ? payersOf(grants) : [];
 }
 
+/** Takes `take` from a grant and adds it to `to` as a moved grant that keeps its end date, payment and buyer. */
+async function moveGrant(
+  tx: Tx,
+  grant: GrantRow,
+  { to, take, settled, moveId }: { to: string; take: number; settled: number; moveId: string },
+  now: Date,
+) {
+  await tx
+    .update(appCreditGrants)
+    .set({
+      remaining_micros: grant.remaining_micros - take,
+      moved_out_micros: grant.moved_out_micros + take,
+    })
+    .where(eq(appCreditGrants.id, grant.id));
+  const [row] = await tx
+    .insert(appCreditGrants)
+    .values({
+      id: generateId('grant'),
+      client_id: grant.client_id,
+      payer_id: to,
+      source: 'moved',
+      amount_micros: take,
+      remaining_micros: take - settled,
+      moved_from: grant.id,
+      move_id: moveId,
+      giver_id: grant.giver_id,
+      billing_country: grant.billing_country,
+      billing_state: grant.billing_state,
+      stripe_payment_intent_id: grant.stripe_payment_intent_id,
+      stripe_invoice_id: grant.stripe_invoice_id,
+      livemode: grant.livemode,
+      starts_at: grant.starts_at,
+      expires_at: grant.expires_at,
+      created_at: now.toISOString(),
+    })
+    .returning();
+  return row!;
+}
+
+/**
+ * Closes a wallet. What's left of each bought or moved grant goes back to the person who paid for
+ * it, with its end date and payment, so a later dispute still finds it. Plan, starter and given
+ * credits lapse. What the wallet owes is lost, since nobody is left to charge. A second close does
+ * nothing.
+ */
+export async function closeWallet(db: DbOrTx, payer: Payer, now = new Date()) {
+  return db.transaction(async (tx) => {
+    const row = await lockPayer(tx, payer);
+    if (row.closed_at) {
+      return { closed: false, returned: [], lapsedMicros: 0, owedMicros: 0 };
+    }
+    const grants = await tx
+      .select()
+      .from(appCreditGrants)
+      .where(and(payerGrants(payer), unended(now)))
+      .orderBy(...spendOrder)
+      .for('update');
+    const returnable = (grant: GrantRow) =>
+      (grant.source === 'bought' || grant.source === 'moved') &&
+      grant.giver_id !== null &&
+      grant.giver_id !== payer.payer;
+    const givers = [...new Set(grants.filter(returnable).map((grant) => grant.giver_id!))].sort();
+    const owed = new Map<string, number>();
+    for (const giver of givers) {
+      owed.set(giver, (await lockPayer(tx, { ...payer, payer: giver })).owed_micros);
+    }
+    const returned: Array<{ to: string; amountMicros: number; expiresAt: string | null }> = [];
+    let lapsedMicros = 0;
+    for (const grant of grants) {
+      if (!returnable(grant)) {
+        lapsedMicros += grant.remaining_micros;
+        await tx
+          .update(appCreditGrants)
+          .set({
+            remaining_micros: 0,
+            voided_at: now.toISOString(),
+            void_reason: 'closed',
+            voided_remaining_micros: grant.remaining_micros,
+          })
+          .where(eq(appCreditGrants.id, grant.id));
+        continue;
+      }
+      const to = grant.giver_id!;
+      const settled = Math.min(owed.get(to)!, grant.remaining_micros);
+      owed.set(to, owed.get(to)! - settled);
+      await moveGrant(
+        tx,
+        grant,
+        { to, take: grant.remaining_micros, settled, moveId: `close:${payer.payer}` },
+        now,
+      );
+      returned.push({ to, amountMicros: grant.remaining_micros, expiresAt: iso(grant.expires_at) });
+    }
+    for (const giver of givers) {
+      await tx
+        .update(appPayers)
+        .set({ owed_micros: owed.get(giver)! })
+        .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, giver)));
+    }
+    if (row.owed_micros > 0) {
+      console.error('[credits] a closed wallet still owed', { ...payer, owed: row.owed_micros });
+    }
+    await tx
+      .update(appPayers)
+      .set({
+        closed_at: now.toISOString(),
+        owed_micros: 0,
+        top_up_enabled: false,
+        top_up_off_reason: 'closed',
+      })
+      .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+    return { closed: true, returned, lapsedMicros, owedMicros: row.owed_micros };
+  });
+}
+
+/** True when the application closed this wallet. */
+export async function payerClosed(db: DbOrTx, payer: Payer): Promise<boolean> {
+  const [row] = await db
+    .select({ closed: appPayers.closed_at })
+    .from(appPayers)
+    .where(and(eq(appPayers.client_id, payer.clientId), eq(appPayers.payer_id, payer.payer)));
+  return Boolean(row?.closed);
+}
+
 export type Move = {
   clientId: string;
   from: string;
@@ -472,7 +607,7 @@ export type Move = {
 };
 
 export type MoveResult =
-  | { error: 'owes' | 'not_enough' }
+  | { error: 'owes' | 'not_enough' | 'closed' }
   | {
       replayed: boolean;
       grants: Array<{ id: string; amountMicros: number; expiresAt: string | null; from: string }>;
@@ -508,6 +643,9 @@ export async function moveCredits(db: DbOrTx, move: Move, now = new Date()): Pro
     if (done.length > 0) {
       return { replayed: true, grants: movedGrants(done) };
     }
+    if (rows.get(move.to)!.closed_at) {
+      return { error: 'closed' };
+    }
     if (rows.get(move.from)!.owed_micros > 0) {
       return { error: 'owes' };
     }
@@ -536,36 +674,9 @@ export async function moveCredits(db: DbOrTx, move: Move, now = new Date()): Pro
       left -= take;
       const settled = Math.min(owed, take);
       owed -= settled;
-      await tx
-        .update(appCreditGrants)
-        .set({
-          remaining_micros: grant.remaining_micros - take,
-          moved_out_micros: grant.moved_out_micros + take,
-        })
-        .where(eq(appCreditGrants.id, grant.id));
-      const [row] = await tx
-        .insert(appCreditGrants)
-        .values({
-          id: generateId('grant'),
-          client_id: move.clientId,
-          payer_id: move.to,
-          source: 'moved',
-          amount_micros: take,
-          remaining_micros: take - settled,
-          moved_from: grant.id,
-          move_id: move.moveId,
-          giver_id: grant.giver_id,
-          billing_country: grant.billing_country,
-          billing_state: grant.billing_state,
-          stripe_payment_intent_id: grant.stripe_payment_intent_id,
-          stripe_invoice_id: grant.stripe_invoice_id,
-          livemode: grant.livemode,
-          starts_at: grant.starts_at,
-          expires_at: grant.expires_at,
-          created_at: now.toISOString(),
-        })
-        .returning();
-      added.push(row!);
+      added.push(
+        await moveGrant(tx, grant, { to: move.to, take, settled, moveId: move.moveId }, now),
+      );
     }
     await tx
       .update(appPayers)

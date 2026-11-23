@@ -326,6 +326,8 @@ export const appPayers = pgTable(
     payer_id: text('payer_id').notNull(),
     /** Set by the application for a payer that is a wallet, not a person. A wallet has no plan, caps or starter credit: only its balance. */
     wallet: boolean('wallet').notNull().default(false),
+    /** Set when the application closed the wallet. A closed wallet takes no more grants or moves. */
+    closed_at: timestamp('closed_at', { mode: 'string', withTimezone: true }),
     owed_micros: bigint('owed_micros', { mode: 'number' }).notNull().default(0),
     out_since: timestamp('out_since', { mode: 'string', withTimezone: true }),
     /** Since when the balance has been under the application's low mark, so the low event is sent once a crossing. */

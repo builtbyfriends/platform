@@ -32,6 +32,7 @@ import {
 } from '../billing/stripe.ts';
 import {
   balancesOf,
+  closeWallet,
   creditBalance,
   forgetPayer,
   grantCredits,
@@ -39,6 +40,7 @@ import {
   moveCredits,
   openWallet,
   payerBlocked,
+  payerClosed,
 } from '../credit-ledger.ts';
 import {
   autoTopUpStatus,
@@ -807,6 +809,23 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     });
     return context.json({ data: { projectId: found.id, payer: body.payer, changed: true } });
   })
+  .post('/credits.close', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isPersonId(body?.payer)) {
+      return context.json({ error: 'bad_payer' }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const wallet = { clientId, payer: body.payer as string };
+    if (!(await isWallet(db, wallet))) {
+      return context.json({ error: 'not_a_wallet' }, 400);
+    }
+    const result = await closeWallet(db, wallet);
+    for (const payer of new Set([wallet.payer, ...result.returned.map((entry) => entry.to)])) {
+      await applyCredits(context.env, db, clientId, payer);
+    }
+    return context.json({ data: result });
+  })
   .post('/wallets.open', async (context) => {
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.payer)) {
@@ -1007,6 +1026,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     if (!isReturnUrl(body.returnUrl)) {
       return context.json({ error: 'bad_return_url' }, 400);
     }
+    if (await payerClosed(db, { clientId, payer })) {
+      return context.json({ error: 'closed' }, 409);
+    }
     // Decision: A dispute blocks the person who paid. A blocked wallet with a clean buyer may still be bought for,
     // since that settles what it owes.
     if (await payerBlocked(db, { clientId, payer: body.buyer })) {
@@ -1092,6 +1114,9 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     if (await payerBlocked(db, { clientId, payer: buyer })) {
       return context.json({ error: 'blocked' }, 403);
+    }
+    if (await payerClosed(db, payer)) {
+      return context.json({ error: 'closed' }, 409);
     }
     // Decision: Auto top-up charges a card saved by a credits Checkout with saveCard, so the buyer agreed to
     // charges made with nobody present.
