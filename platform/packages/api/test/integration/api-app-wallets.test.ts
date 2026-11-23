@@ -14,6 +14,7 @@ import { grantCredits } from '../../src/credit-ledger.ts';
 import rawApp from '../../src/index.ts';
 import { oauthClients } from '../../src/schema.ts';
 import {
+  captureQueries,
   clearTables,
   createMockExecutionContext,
   rpcData,
@@ -164,6 +165,66 @@ describe('wallets', () => {
         { person: 'ben', usedMicros: 1_100_000 },
       ]);
       expect(answer.credits.balanceMicros).toBe(20 * DOLLAR - 4 * 1_100_000);
+    });
+  });
+
+  describe('picking who pays', () => {
+    const list = (limit?: number) => ({
+      wallets: [
+        { payer: 'bot:1', person: 'ana' },
+        { payer: 'server:1', person: 'ana', monthlyLimitMicros: limit },
+        { payer: 'ana', person: 'ana' },
+        { payer: 'bot:1', person: 'ana' },
+      ],
+    });
+    const pick = async (body: object) =>
+      rpcData<{
+        payer: string | null;
+        wallets: Array<{ payer: string; skipped?: string; balanceMicros: number | null }>;
+      }>(await (await call('/payer.pick', body)).json());
+
+    beforeEach(async () => {
+      for (const payer of ['bot:1', 'server:1']) {
+        await call('/wallets.open', { payer });
+      }
+      await give('ana', 5 * DOLLAR);
+    });
+
+    it('answers the first wallet with credits, in one read and no Stripe call', async () => {
+      await give('bot:1', 2 * DOLLAR);
+      const { result, queries } = await captureQueries(env.db, () => pick(list()));
+      expect(result.payer).toBe('bot:1');
+      expect(result.wallets.map((wallet) => wallet.payer)).toEqual(['bot:1', 'server:1', 'ana']);
+      expect(queries.filter((query) => query.includes('from "app_'))).toHaveLength(3);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('falls back past an empty wallet and a person over their limit', async () => {
+      await give('server:1', 10 * DOLLAR);
+      expect((await pick(list(DOLLAR))).payer).toBe('server:1');
+      await call('/usage.record', { person: 'server:1', aiNeurons: 100_000, by: 'ana' });
+      const answer = await pick(list(DOLLAR));
+      expect(answer.payer).toBe('ana');
+      expect(answer.wallets.map((wallet) => wallet.skipped)).toEqual([
+        'empty',
+        'over_limit',
+        undefined,
+      ]);
+    });
+
+    it('answers no payer, with each reason, when nothing is left', async () => {
+      await call('/usage.record', { person: 'ana', aiNeurons: 1_000_000 });
+      const answer = await pick(list());
+      expect(answer.payer).toBeNull();
+      expect(answer.wallets.map((wallet) => wallet.skipped)).toEqual(['empty', 'empty', 'empty']);
+    });
+
+    it('answers a person on their plan with no balance', async () => {
+      const answer = await pick({ wallets: [{ payer: 'ben', person: 'ben' }] });
+      expect(answer).toEqual({
+        payer: 'ben',
+        wallets: [{ payer: 'ben', balanceMicros: null, personUsedMicros: 0 }],
+      });
     });
   });
 });

@@ -28,6 +28,7 @@ import {
   stripeLiveMode,
 } from '../billing/stripe.ts';
 import {
+  balancesOf,
   creditBalance,
   forgetPayer,
   grantCredits,
@@ -69,6 +70,37 @@ const isReturnUrl = (value: unknown): value is string =>
   typeof value === 'string' && URL.canParse(value) && new URL(value).protocol === 'https:';
 
 type BillingContext = Context<ApiEnv>;
+
+const MAX_WALLETS = 5;
+
+type Choice = { payer: string; person: string; monthlyLimitMicros?: number };
+
+/** The ordered wallets a turn may charge, or null when the list is malformed. Repeats keep the first. */
+function walletList(value: unknown): Array<Choice> | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_WALLETS) {
+    return null;
+  }
+  const list: Array<Choice> = [];
+  for (const entry of value as Array<Record<string, unknown> | null>) {
+    if (
+      !isPersonId(entry?.payer) ||
+      !isPersonId(entry.person) ||
+      (entry.monthlyLimitMicros !== undefined && !isMicros(entry.monthlyLimitMicros))
+    ) {
+      return null;
+    }
+    if (!list.some((choice) => choice.payer === entry.payer)) {
+      list.push({
+        payer: entry.payer,
+        person: entry.person,
+        ...(entry.monthlyLimitMicros === undefined
+          ? {}
+          : { monthlyLimitMicros: entry.monthlyLimitMicros as number }),
+      });
+    }
+  }
+  return list;
+}
 
 const walletRefused = async (context: BillingContext, person: string) =>
   (await isWallet(context.get('db'), { clientId: context.get('billingClient'), payer: person }))
@@ -619,6 +651,55 @@ export const appBillingRoutes = new Hono<ApiEnv>()
         creditsRemainingMicros: now.credits?.remainingMicros ?? null,
       },
     });
+  })
+  .post('/payer.pick', async (context) => {
+    const body = await context.req.json().catch(() => null);
+    const list = walletList(body?.wallets);
+    if (!list) {
+      return context.json({ error: 'bad_wallets', max: MAX_WALLETS }, 400);
+    }
+    const db = context.get('db');
+    const clientId = context.get('billingClient');
+    const payers = list.map((choice) => choice.payer);
+    // Decision: A read with no Stripe call and no events, so it can run before each turn.
+    const [balances, use] = await Promise.all([
+      balancesOf(db, clientId, payers),
+      db
+        .select()
+        .from(appWalletUse)
+        .where(
+          and(
+            eq(appWalletUse.client_id, clientId),
+            eq(appWalletUse.period, currentPeriod()),
+            inArray(appWalletUse.payer_id, payers),
+            inArray(
+              appWalletUse.person_id,
+              list.map((choice) => choice.person),
+            ),
+          ),
+        ),
+    ]);
+    let picked: string | null = null;
+    const wallets = list.map(({ payer, person, monthlyLimitMicros }) => {
+      const { balanceMicros, blocked } = balances.get(payer)!;
+      const personUsedMicros =
+        payer === person
+          ? 0
+          : (use.find((row) => row.payer_id === payer && row.person_id === person)?.cost_micros ??
+            0);
+      const skipped = blocked
+        ? ('blocked' as const)
+        : balanceMicros !== null && balanceMicros <= 0
+          ? ('empty' as const)
+          : monthlyLimitMicros !== undefined && personUsedMicros >= monthlyLimitMicros
+            ? ('over_limit' as const)
+            : null;
+      if (!skipped && picked === null) {
+        picked = payer;
+      }
+      return { payer, balanceMicros, personUsedMicros, ...(skipped ? { skipped } : {}) };
+    });
+    return context.json({ data: { payer: picked, wallets } });
   })
   .post('/wallets.open', async (context) => {
     const body = await context.req.json().catch(() => null);

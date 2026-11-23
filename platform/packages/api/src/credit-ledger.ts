@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { DbOrTx, Tx } from './db.ts';
 import { generateId } from './id.ts';
 import { appCreditGrants, appPayers, type CreditSource, type PayerCap } from './schema.ts';
@@ -53,13 +53,14 @@ export async function openWallet(db: DbOrTx, payer: Payer, now = new Date()): Pr
     });
 }
 
-const openGrants = (payer: Payer, now: Date) =>
+const openNow = (now: Date) =>
   and(
-    payerGrants(payer),
     isNull(appCreditGrants.voided_at),
     gt(appCreditGrants.remaining_micros, 0),
     or(isNull(appCreditGrants.expires_at), gt(appCreditGrants.expires_at, now.toISOString())),
   );
+
+const openGrants = (payer: Payer, now: Date) => and(payerGrants(payer), openNow(now));
 
 // Decision: The grant that ends soonest is spent first. A grant with no end date goes last.
 const spendOrder = [
@@ -199,6 +200,51 @@ export async function creditBalance(db: DbOrTx, payer: Payer, now = new Date()) 
       expiresAt: iso(grant.expires_at),
     })),
   };
+}
+
+/**
+ * Several payers' balances in two queries, for picking who pays. Null for a payer on their plan's
+ * caps, as creditBalance answers.
+ */
+export async function balancesOf(
+  db: DbOrTx,
+  clientId: string,
+  payers: ReadonlyArray<string>,
+  now = new Date(),
+) {
+  const [rows, sums] = await Promise.all([
+    db
+      .select()
+      .from(appPayers)
+      .where(and(eq(appPayers.client_id, clientId), inArray(appPayers.payer_id, [...payers]))),
+    db
+      .select({
+        payer: appCreditGrants.payer_id,
+        open: sql<string>`coalesce(sum(${appCreditGrants.remaining_micros}) filter (where ${openNow(now)}), 0)`,
+      })
+      .from(appCreditGrants)
+      .where(
+        and(
+          eq(appCreditGrants.client_id, clientId),
+          inArray(appCreditGrants.payer_id, [...payers]),
+        ),
+      )
+      .groupBy(appCreditGrants.payer_id),
+  ]);
+  return new Map(
+    payers.map((payer) => {
+      const row = rows.find((entry) => entry.payer_id === payer);
+      const sum = sums.find((entry) => entry.payer === payer);
+      const owed = row?.owed_micros ?? 0;
+      return [
+        payer,
+        {
+          balanceMicros: sum || owed > 0 || row?.wallet ? Number(sum?.open ?? 0) - owed : null,
+          blocked: Boolean(row?.blocked_at),
+        },
+      ] as const;
+    }),
+  );
 }
 
 /** Records when a payer's balance reached zero, or clears it. True when that changed. */
