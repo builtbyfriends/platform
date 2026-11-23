@@ -18,7 +18,8 @@ beforeEach(async () => {
   database = new PGlite();
   await database.waitReady;
   queries = [];
-  mocks.pool.mockImplementation(() => {
+  // oxlint-disable-next-line prefer-arrow-callback -- the code under test calls this mock with new
+  mocks.pool.mockImplementation(function () {
     const query = async (sql: string, values?: Array<unknown>) => {
       queries.push(sql);
       // Decision: PGlite has one session and no advisory locks. All ownership, migration, checkpoint and

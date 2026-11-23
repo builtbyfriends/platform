@@ -422,7 +422,8 @@ export function validateConfig(config: unknown, source: string = CONFIG_FILE): B
   } catch (error) {
     if (source !== CONFIG_FILE && error instanceof Error) {
       // Decision: No `cause`: Node would print its message too, which names the placeholder.
-      throw new Error(error.message.replaceAll(CONFIG_FILE, source), { cause: error });
+      // oxlint-disable-next-line preserve-caught-error -- see the decision above
+      throw new Error(error.message.replaceAll(CONFIG_FILE, source));
     }
     throw error;
   }

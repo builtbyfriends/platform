@@ -12,7 +12,8 @@ vi.mock('pg', () => ({ Pool: mocks.pool }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.pool.mockImplementation(() => {
+  // oxlint-disable-next-line prefer-arrow-callback -- the code under test calls this mock with new
+  mocks.pool.mockImplementation(function () {
     return {
       connect: async () => {
         throw new Error('Stopped before network access.');
