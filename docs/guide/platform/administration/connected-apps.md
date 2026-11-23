@@ -123,6 +123,8 @@ Checkout takes `quantity` (1 to 500) for such a plan. Any other plan answers `no
 
 To change the count, send `POST /app-billing/billing.seats` with `{ payer, quantity }`. More seats are charged at once for the share of the period that's left, and the count changes once that's paid. If the card fails, the answer has `paymentNeeded: true` and the old count stays. Fewer seats take effect at once, with no refund for the days left, and the next bill is lower. `usage.status` answers `seats: { count, priceCents, nextBillCents, nextBillAt }` for a seat plan, and `null` otherwise. Platform doesn't know who holds a seat, so the application checks that before it lowers the count.
 
+Each paid invoice puts each seat's credits in the payer's balance, until the end of the paid period. A seat added partway through brings the same share of a seat's credits as the share of the price Stripe charged, rounded down to the cent: with $20 of credits on a $30 seat, a seat added halfway through charges $15 and brings $10. A removed seat brings nothing and takes nothing back. A refund or dispute of a seat change takes back that change's credits only. A dispute also cancels the seat subscription and blocks the person who paid.
+
 ## Sell credits
 
 People can also buy credits once, with or without a plan. Fill in **Credits people can buy once** for the application, with amounts in millionths of a dollar:

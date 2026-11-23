@@ -86,6 +86,7 @@ type Answer = {
   used: { aiNeurons: number };
   billingPeriodStart: string;
   url: string;
+  seats: { count: number; priceCents: number | null; nextBillCents: number | null } | null;
 };
 const dataOf = async (response: Response | Promise<Response>) =>
   rpcData<Answer>(await (await response).json());
@@ -1790,6 +1791,126 @@ describe('app billing', () => {
         error: 'not_per_seat',
       });
       expect((await dataOf(call('/usage.status', { person: 'p1' }))).seats).toBeNull();
+    });
+
+    describe('seat credits', () => {
+      const start = Math.floor(Date.now() / 1000) - DAY;
+      const end = start + 30 * DAY;
+      const seatLine = (amount: number, quantity: number, proration = false, from = start) => ({
+        amount,
+        quantity,
+        period: { start: from, end },
+        pricing: { price_details: { price: 'price_app_team' }, unit_amount_decimal: '3000' },
+        parent: { subscription_item_details: { proration } },
+      });
+      const seatInvoice = (
+        payer: string,
+        id: string,
+        lines: Array<ReturnType<typeof seatLine>>,
+        reason = 'subscription_create',
+        extra: Record<string, string> = {},
+      ) => ({
+        type: 'invoice.paid',
+        data: {
+          object: {
+            id,
+            billing_reason: reason,
+            payment_intent: `pi_${id}`,
+            amount_paid: lines.reduce((sum, line) => sum + line.amount, 0),
+            lines: { data: lines },
+            parent: { subscription_details: { metadata: { ...seatMetadata(payer), ...extra } } },
+          },
+        },
+      });
+      const balance = async (person = 'p1') =>
+        (
+          (await dataOf(call('/usage.status', { person }))).credits as unknown as {
+            balanceMicros: number;
+          }
+        ).balanceMicros;
+      const added = (id: string, net: number, from = Math.floor(Date.now() / 1000) - 60) =>
+        seatInvoice(
+          'p1',
+          id,
+          [seatLine(-net * 5, 5, true, from), seatLine(net * 6, 6, true, from)],
+          'subscription_update',
+        );
+
+      beforeEach(async () => {
+        await startSeats('p1', 5);
+        await webhook(seatInvoice('p1', 'in_seats', [seatLine(15_000, 5)]));
+      });
+
+      it('gives 5 seats at $20 each $100 on the first paid invoice', async () => {
+        expect(await balance()).toBe(100_000_000);
+        expect((await dataOf(call('/usage.status', { person: 'p1' }))).credits).toMatchObject({
+          includedMicros: 100_000_000,
+        });
+      });
+
+      it('gives a seat added halfway through $10 for the $15 charged, once', async () => {
+        const event = { id: 'evt_half', ...added('in_half', 1500) };
+        await webhook(event);
+        await webhook(event);
+        await webhook({ ...added('in_half', 1500), id: 'evt_half_again' });
+        expect(await balance()).toBe(110_000_000);
+      });
+
+      it('gives a seat added on the 29th of 30 days its share, rounded down to the cent', async () => {
+        await webhook(added('in_late', 100));
+        expect(await balance()).toBe(100_660_000);
+      });
+
+      it('gives nothing for a seat removed, and keeps this period’s credits', async () => {
+        await webhook(
+          seatInvoice(
+            'p1',
+            'in_down',
+            [seatLine(-1500, 5, true), seatLine(1200, 4, true)],
+            'subscription_update',
+          ),
+        );
+        expect(await balance()).toBe(100_000_000);
+      });
+
+      it('takes back only the seat’s grant when its invoice is refunded', async () => {
+        await webhook(added('in_refund', 1500));
+        await webhook({
+          type: 'charge.refunded',
+          data: { object: { payment_intent: 'pi_in_refund', amount: 1500, amount_refunded: 1500 } },
+        });
+        expect(await balance()).toBe(100_000_000);
+      });
+
+      it('on a dispute of a wallet’s seats, blocks the buyer and cancels the wallet’s seats', async () => {
+        await call('/wallets.open', { payer: 'server-1' });
+        await startSeats('server-1', 2);
+        await env.db
+          .update(appPeople)
+          .set({ stripe_subscription_id: 'sub_server' })
+          .where(eq(appPeople.person_id, 'server-1'));
+        await webhook(
+          seatInvoice('server-1', 'in_server', [seatLine(6000, 2)], 'subscription_create', {
+            buyerId: 'p2',
+          }),
+        );
+        expect(await balance('server-1')).toBe(40_000_000);
+        await webhook({
+          type: 'charge.dispute.created',
+          data: {
+            object: { payment_intent: 'pi_in_server', amount: 6000, status: 'needs_response' },
+          },
+        });
+        expect(await balance('server-1')).toBe(0);
+        expect(
+          calls.some(
+            ([url, init]) =>
+              init?.method === 'DELETE' && url.endsWith('/v1/subscriptions/sub_server'),
+          ),
+        ).toBe(true);
+        const [buyer] = await env.db.select().from(appPayers).where(eq(appPayers.payer_id, 'p2'));
+        expect(buyer!.blocked_at).not.toBeNull();
+      });
     });
   });
 

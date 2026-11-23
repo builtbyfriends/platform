@@ -386,13 +386,14 @@ export async function refundGrant(
 /**
  * A card dispute takes back the whole payment, from each wallet it was moved to as well. What each
  * one already spent becomes owed there, so a balance can go below zero. The buyer who paid is
- * blocked from buying until an operator clears it, and `buyer` in the answer names them.
+ * blocked from buying until an operator clears it, and `buyer` in the answer names them. For a plan's
+ * payment, `subscriber` names the payer whose subscription it paid, such as a wallet with seats.
  */
 export async function disputeGrant(
   tx: Tx,
   paymentIntentId: string,
   now = new Date(),
-): Promise<{ payers: Array<Payer>; buyer: string } | null> {
+): Promise<{ payers: Array<Payer>; buyer: string; subscriber?: string } | null> {
   const grants = await grantsByPayment(tx, paymentIntentId);
   const first = grants.find((grant) => grant.moved_from === null);
   if (!first || first.voided_at) {
@@ -426,7 +427,7 @@ export async function disputeGrant(
   }
   const buyer = first.giver_id ?? first.payer_id;
   await blockPayer(tx, { clientId: first.client_id, payer: buyer }, now);
-  return { payers, buyer };
+  return { payers, buyer, ...(first.source === 'plan' ? { subscriber: first.payer_id } : {}) };
 }
 
 async function blockPayer(tx: Tx, payer: Payer, now: Date) {

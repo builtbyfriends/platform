@@ -1,6 +1,12 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
-import { applyCredits, clientPlans, dropTestPlans, paidOwnerIds } from '../app-credits.ts';
+import {
+  applyCredits,
+  clientPlans,
+  dropTestPlans,
+  paidOwnerIds,
+  type ClientPlan,
+} from '../app-credits.ts';
 import { queueBillingEvent, type BillingEventType } from '../billing-events.ts';
 import {
   cancelSubscription,
@@ -41,9 +47,12 @@ type Metadata = Record<string, string>;
 
 type InvoiceLine = {
   amount?: number;
+  quantity?: number | null;
+  proration?: boolean;
   period?: { start?: number; end?: number };
-  price?: { id?: string };
-  pricing?: { price_details?: { price?: string } };
+  price?: { id?: string; unit_amount?: number | null };
+  pricing?: { price_details?: { price?: string }; unit_amount_decimal?: string | null };
+  parent?: { subscription_item_details?: { proration?: boolean } | null };
 };
 
 type StripeObject = {
@@ -124,6 +133,40 @@ const subscriptionOf = (event: StripeEvent) =>
 const planForPrice = (plans: Record<string, { stripePriceId: string }>, price?: string | null) =>
   price ? Object.keys(plans).find((id) => plans[id]!.stripePriceId === price) : undefined;
 
+const priceOf = (line: InvoiceLine) => line.pricing?.price_details?.price ?? line.price?.id;
+const isProration = (line: InvoiceLine) =>
+  line.parent?.subscription_item_details?.proration ?? line.proration ?? false;
+const unitCents = (line: InvoiceLine) => {
+  const unit = line.pricing?.unit_amount_decimal ?? line.price?.unit_amount;
+  return unit === null || unit === undefined ? null : Number(unit);
+};
+
+/**
+ * What a seat plan's invoice brings. A new period brings each seat's credits. A seat change brings each
+ * seat's credits times the share of a seat's price Stripe charged, net of the credit for unused time, rounded
+ * down to the cent. A move to fewer seats nets nothing and brings nothing.
+ */
+function seatCredits(
+  lines: ReadonlyArray<InvoiceLine>,
+  plan: ClientPlan,
+  change: boolean,
+  storedUnitCents: number | null,
+): number {
+  const seat = lines.filter((line) => priceOf(line) === plan.stripePriceId);
+  if (!change) {
+    return (
+      plan.creditMicros *
+      seat.filter((line) => !isProration(line)).reduce((sum, line) => sum + (line.quantity ?? 1), 0)
+    );
+  }
+  const charged = seat.filter(isProration).reduce((sum, line) => sum + (line.amount ?? 0), 0);
+  const unit = seat.map(unitCents).find(Boolean) ?? storedUnitCents;
+  if (charged <= 0 || !unit) {
+    return 0;
+  }
+  return Math.floor((plan.creditMicros * charged) / unit / MICROS_PER_CENT) * MICROS_PER_CENT;
+}
+
 /**
  * A paid subscription invoice grants the plan's monthly credits, which end with the paid period. The plan comes
  * from the invoice's price, since a plan changed in Stripe's portal keeps the old plan in the metadata.
@@ -149,12 +192,18 @@ async function grantPlanCredits(
   const line = invoice.lines?.data?.reduce((most, next) =>
     (next.amount ?? 0) > (most.amount ?? 0) ? next : most,
   );
-  const plan =
-    planForPrice(plans, line?.pricing?.price_details?.price ?? line?.price?.id) ??
-    eventMetadata(invoice).plan;
+  const plan = planForPrice(plans, line ? priceOf(line) : undefined) ?? eventMetadata(invoice).plan;
   let credits = plan ? (plans[plan]?.creditMicros ?? 0) : 0;
   const { start, end } = line?.period ?? {};
-  if (invoice.billing_reason === 'subscription_update') {
+  const change = invoice.billing_reason === 'subscription_update';
+  const bought = plan ? plans[plan] : undefined;
+  if (bought?.perSeat) {
+    const [row] = await tx
+      .select({ unit: appPeople.seat_price_cents })
+      .from(appPeople)
+      .where(and(eq(appPeople.client_id, key.client_id), eq(appPeople.person_id, key.person_id)));
+    credits = seatCredits(invoice.lines?.data ?? [], bought, change, row?.unit ?? null);
+  } else if (change) {
     // Decision: A move to a bigger plan grants the difference from the largest plan grant still open, and only
     // when Stripe charged for it. A move down grants nothing and takes nothing back.
     const [open] = await tx
@@ -180,6 +229,7 @@ async function grantPlanCredits(
     source: 'plan',
     amountMicros: credits,
     livemode: event.livemode,
+    giverId: eventMetadata(invoice).buyerId ?? null,
     stripeInvoiceId: invoice.id,
     stripePaymentIntentId: paymentIntentId,
     startsAt: new Date(start * 1000),
@@ -213,7 +263,11 @@ async function paidBy(context: Context<ApiEnv>, invoice: StripeObject): Promise<
 async function takeBack(
   tx: Tx,
   event: StripeEvent,
-): Promise<{ payers: Array<{ clientId: string; payer: string }>; buyer?: string } | null> {
+): Promise<{
+  payers: Array<{ clientId: string; payer: string }>;
+  buyer?: string;
+  subscriber?: string;
+} | null> {
   const object = event.data.object;
   const paymentIntentId = idOf(object.payment_intent);
   if (!paymentIntentId) {
@@ -553,8 +607,10 @@ export const stripeWebhookRoutes = new Hono<ApiEnv>().post('/', async (context) 
       return context.json({ ok: true, ignored: true });
     }
     const clientId = outcome.payers[0]!.clientId;
-    if (outcome.buyer) {
-      await cancelDisputed(context, { clientId, payer: outcome.buyer });
+    for (const payer of new Set([outcome.buyer, outcome.subscriber])) {
+      if (payer) {
+        await cancelDisputed(context, { clientId, payer });
+      }
     }
     for (const { payer } of outcome.payers) {
       await applyCredits(context.env, db, clientId, payer);
