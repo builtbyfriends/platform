@@ -8,11 +8,19 @@ const fullSuitePaths = [
   /^packages\/(?:create-bwf|react|vue|svelte|solid|md)\/(?:src|bin)\//,
   /^packages\/bwf\/src\/cli\/(?:init|template|package|agents)(?:[-./])/,
   /^\.github\/scripts\/(?:packed-|release-policy)/,
-  /^\.github\/workflows\/(?:packed-consumers|prepublish-test|publish)\.yml$/,
+  /^\.github\/workflows\/(?:prepublish-test|publish)\.yml$/,
+];
+
+const shippedContentPaths = [
+  /^packages\/bwf\/(?:AGENTS_TEMPLATE\.md|README\.md|skills\/)/,
+  /^docs\/guide\//,
 ];
 
 export function selectPackedSuite(paths) {
   if (paths === null) {
+    return 'full';
+  }
+  if (paths.some((path) => shippedContentPaths.some((pattern) => pattern.test(path)))) {
     return 'full';
   }
   const code = paths.filter(

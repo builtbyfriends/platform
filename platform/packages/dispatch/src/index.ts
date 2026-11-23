@@ -150,12 +150,6 @@ function staticAssetFailureResponse(kind: FailureKind): Response {
   });
 }
 
-export function isHtmlResponse(response: Response): boolean {
-  return (
-    response.headers.get('content-type')?.toLowerCase().split(';', 1)[0]?.trim() === 'text/html'
-  );
-}
-
 async function applyWorkerFallbackRules(opts: {
   response: Response;
   worker: { fetch(request: Request): Promise<Response> };

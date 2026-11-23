@@ -272,9 +272,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (request.method === 'POST' && path === '/reevaluate-limits') {
       return this.handleReevaluateLimits(request);
     }
-    if (request.method === 'POST' && path === '/reevaluate-sandbox') {
-      return this.handleReevaluateSandbox(request);
-    }
     if (request.method === 'POST' && path === '/clear-suspension') {
       return this.handleClearSuspension();
     }
@@ -707,36 +704,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     await this.saveState(state);
     await this.ensureAiAlarm();
     return Response.json({ ok: true, requestsSuspended, sandboxRuntimeSuspended, aiSuspended });
-  }
-
-  /**
-   * Admin plan changes: optimistically clear ALL in-memory usage latches so the
-   * next handleRecord (and the AI alarm) re-evaluates against the new plan.
-   * Drops request + sandbox + AI — a plan change can lift any cap, and leaving
-   * `requestsSuspended` set would make the next `/init` re-stamp the routes the
-   * plan-change route just cleared. AI normally self-heals via the alarm, but
-   * the alarm returns early for unlimited-AI plans, so a capped→unlimited-AI
-   * upgrade needs the ai-block keys cleared here (projectId-keyed, owned by the
-   * DO). The plan-change route deletes the userId-keyed sandbox-block.
-   */
-  private async handleReevaluateSandbox(request: Request): Promise<Response> {
-    const body = (await request.json()) as { plan: string };
-    const state = await this.getState();
-    state.plan = body.plan;
-    state.requestsSuspended = false;
-    state.sandboxRuntimeSuspended = false;
-    if (state.aiSuspended) {
-      // Decision: Keep the durable latch set until each idempotent delete succeeds.
-      const db = createDb(this.env.HYPERDRIVE.connectionString);
-      if (state.ownerUserId) {
-        for (const projectId of Object.keys(state.projectSlugs)) {
-          await setProjectAiBlock(this.env.ROUTING, db, projectId, state.ownerUserId, false);
-        }
-      }
-      state.aiSuspended = false;
-    }
-    await this.saveState(state);
-    return Response.json({ ok: true });
   }
 
   /**

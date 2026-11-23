@@ -822,9 +822,17 @@ async function dispatchPlatformVerification(
     token,
   );
   // Decision: Keep delivery alive after the response; contexts without waitUntil await it. Delivery failures are
-  // logged; missing platform-mail configuration still rejects.
+  // logged with the project and destination ids; without a context the failure still rejects.
   try {
-    context.executionCtx.waitUntil(sendPromise);
+    context.executionCtx.waitUntil(
+      sendPromise.catch((error: unknown) => {
+        console.error('[email] platform verification send failed', {
+          projectId: project.id,
+          destinationId: row.id,
+          error,
+        });
+      }),
+    );
   } catch {
     await sendPromise;
   }

@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parse as parseJsonc } from 'jsonc-parser';
 import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -2508,8 +2509,34 @@ export default config;
 
       await runInitCommand(root, { tsconfig: true, github: false });
 
-      const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
+      const tsconfig = parseJsonc(readFileSync(join(root, 'tsconfig.json'), 'utf-8'));
       expect(tsconfig.extends).toBeDefined();
+      expect(tsconfig.compilerOptions.types).toContain('@builtbyfriends/bwf/env');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps comments in an existing tsconfig.json when it updates the file', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'platform-init-'));
+    try {
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        `{
+  // keep this comment
+  "compilerOptions": {
+    "strict": true // inline comment
+  }
+}\n`,
+      );
+
+      await runInitCommand(root, { tsconfig: true, github: false });
+
+      const text = readFileSync(join(root, 'tsconfig.json'), 'utf-8');
+      expect(text).toContain('// keep this comment');
+      expect(text).toContain('// inline comment');
+      const tsconfig = parseJsonc(text);
+      expect(tsconfig.extends).toBe('./.bwf/tsconfig.json');
       expect(tsconfig.compilerOptions.types).toContain('@builtbyfriends/bwf/env');
     } finally {
       rmSync(root, { recursive: true, force: true });

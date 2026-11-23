@@ -8,8 +8,6 @@ import {
   bindingEntriesForField,
   bindingNamesForField,
   ensureWranglerCompat,
-  ensureWranglerCompatibilityDate,
-  ensureWranglerNodejsAlsFlag,
   LATEST_KNOWN_COMPAT_DATE,
   readExistingLiveBindingConfig,
   readProvisionedBindingEntry,
@@ -372,28 +370,6 @@ describe('ensureWranglerCompat', () => {
   });
 });
 
-describe('ensureWranglerCompatibilityDate', () => {
-  it('creates wrangler.jsonc with compatibility_date when no wrangler config exists', () => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    mkdirSync(tmpDir, { recursive: true });
-    expect(ensureWranglerCompatibilityDate(tmpDir, '2026-02-24')).toBe(true);
-    const created = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(created.compatibility_date).toBe('2026-02-24');
-  });
-
-  it('updates existing wrangler config compatibility_date', () => {
-    setup('wrangler.jsonc', '{ "name": "test" }');
-    expect(ensureWranglerCompatibilityDate(tmpDir, '2026-02-24')).toBe(true);
-    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(parsed.compatibility_date).toBe('2026-02-24');
-  });
-
-  it('returns false when compatibility_date already matches', () => {
-    setup('wrangler.jsonc', '{ "compatibility_date": "2026-02-24" }');
-    expect(ensureWranglerCompatibilityDate(tmpDir, '2026-02-24')).toBe(false);
-  });
-});
-
 const noBindings: InferredBindings = {
   needsD1: false,
   needsKV: false,
@@ -403,30 +379,6 @@ const noBindings: InferredBindings = {
   needsAI: false,
   needsSandbox: false,
 };
-
-describe('ensureWranglerNodejsAlsFlag', () => {
-  it('creates wrangler.jsonc when no wrangler config exists', () => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    mkdirSync(tmpDir, { recursive: true });
-    expect(ensureWranglerNodejsAlsFlag(tmpDir)).toBe(true);
-    const created = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(created.compatibility_flags).toEqual(['nodejs_als']);
-  });
-
-  it('adds nodejs_als compatibility flag when missing', () => {
-    setup('wrangler.jsonc', '{ "name": "test" }');
-    const result = ensureWranglerNodejsAlsFlag(tmpDir);
-    expect(result).toBe(true);
-    const parsed = JSON.parse(readFileSync(join(tmpDir, 'wrangler.jsonc'), 'utf-8'));
-    expect(parsed.compatibility_flags).toEqual(['nodejs_als']);
-  });
-
-  it('does not duplicate existing nodejs_als compatibility flag', () => {
-    setup('wrangler.jsonc', '{ "name": "test", "compatibility_flags": ["nodejs_als"] }');
-    const result = ensureWranglerNodejsAlsFlag(tmpDir);
-    expect(result).toBe(false);
-  });
-});
 
 describe('syncWranglerBindings', () => {
   it('creates wrangler.jsonc when no wrangler config exists', () => {
