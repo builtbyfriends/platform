@@ -14,7 +14,7 @@ import {
 import { APP } from '../../src/app-credits.ts';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
-import { projects, resources } from '../../src/schema.ts';
+import { projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -57,7 +57,7 @@ beforeEach(async () => {
   registration = await registerOAuthClient(env.db, {
     name: 'Runtime app',
     operator: 'Test',
-    redirectUris: ['https://crowded.test/callback'],
+    redirectUris: ['https://connected-app.test/callback'],
     scopes: ['profile'],
   });
   const owner = await createTestUser(env.db, 'app-owner', APP + registration.client.id, 'person');
@@ -351,4 +351,43 @@ describe('connected app runtime reads', () => {
       data: { available: false, events: [] },
     });
   });
+});
+
+it('reads a group resource only for that connected app and exact group owner', async () => {
+  await env.db
+    .update(users)
+    .set({ provider_id: 'group:server:team' })
+    .where(eq(users.provider_id, 'person'));
+  expect((await call('projects.resources', { project: project.id })).status).toBe(404);
+  expect(
+    (
+      await call('projects.resources', {
+        project: project.id,
+        owner: { person: 'group:server:team' },
+      })
+    ).status,
+  ).toBe(400);
+  expect(
+    (await call('projects.resources', { project: project.id, owner: { group: 'server:wrong' } }))
+      .status,
+  ).toBe(404);
+  const answer = await payload(
+    call('projects.resources', { project: project.id, owner: { group: 'server:team' } }),
+  );
+  expect(answer).toMatchObject({ data: { appId: project.id, available: true } });
+  const foreign = await registerOAuthClient(env.db, {
+    name: 'Different connection',
+    operator: 'Test',
+    redirectUris: ['https://other.test/callback'],
+    scopes: ['profile'],
+  });
+  expect(
+    (
+      await call(
+        'projects.resources',
+        { project: project.id, owner: { group: 'server:team' } },
+        'Basic ' + btoa(foreign.client.id + ':' + foreign.clientSecret),
+      )
+    ).status,
+  ).toBe(404);
 });
