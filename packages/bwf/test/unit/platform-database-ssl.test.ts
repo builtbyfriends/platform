@@ -21,6 +21,7 @@ beforeEach(() => {
       query: async () => {
         throw new Error('Stopped before network access.');
       },
+      on: () => {},
       end: async () => {},
     };
   });
