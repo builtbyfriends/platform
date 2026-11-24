@@ -22,7 +22,8 @@ const text = (value: unknown, max = 200): value is string =>
 const optionalText = (value: unknown, max: number) =>
   value === undefined || (typeof value === 'string' && value.length <= max);
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
-const secretColumn = /password|secret|token|credential|private.?key|verification.?code/i;
+const secretColumn =
+  /password|secret|token|credential|private.?key|verification.?code|api[_-]?key|access[_-]?key/i;
 const pageSize = 50;
 function runtimeOwner(value: unknown): RuntimeOwner | null {
   if (!isRecord(value)) {

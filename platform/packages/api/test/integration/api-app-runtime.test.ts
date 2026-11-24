@@ -231,6 +231,52 @@ describe('connected app runtime reads', () => {
     }
   });
 
+  it('redacts common API and access key names while keeping ordinary fields readable', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    const credentials = [
+      'api_key',
+      'apiKey',
+      'API-KEY',
+      'access_key',
+      'accessKey',
+      'aws_access_key_id',
+    ];
+    const ordinary = ['api_version', 'access_count', 'public_key', 'keyboard', 'name'];
+    const columns = [...credentials, ...ordinary];
+    sqlite.exec(`CREATE TABLE settings (${columns.map((name) => `"${name}" TEXT`).join(', ')})`);
+    sqlite
+      .prepare(`INSERT INTO settings VALUES (${columns.map(() => '?').join(', ')})`)
+      .run(
+        ...credentials.map((name) => `sensitive-${name}`),
+        ...ordinary.map((name) => `visible-${name}`),
+      );
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+    try {
+      const answer = await payload(
+        call('resources.inspect', {
+          project: project.id,
+          resourceId: 'res_database',
+          table: 'settings',
+        }),
+      );
+      expect(answer).toMatchObject({
+        data: {
+          kind: 'rows',
+          columns,
+          rows: [
+            [...credentials.map(() => '[redacted]'), ...ordinary.map((name) => `visible-${name}`)],
+          ],
+        },
+      });
+      expect(JSON.stringify(answer)).not.toContain('sensitive-');
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('separates an empty page from unavailable capability and rejects unbounded input', async () => {
     proxy.mockResolvedValue(Response.json({ objects: [], truncated: false }));
     expect(
