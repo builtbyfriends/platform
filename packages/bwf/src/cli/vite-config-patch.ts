@@ -87,6 +87,29 @@ function lineIndent(code: string, index: number): string {
   return code.slice(lineStart, index).match(/^\s*/)?.[0] ?? '';
 }
 
+/**
+ * Whether a Vite config imports `bwfPlugin` from `@builtbyfriends/bwf`. Only then does the
+ * build split into `dist/client` and `dist/ssr`; a project can install `@builtbyfriends/bwf`
+ * for its CLI alone and keep Vite's plain `dist` output.
+ */
+export function viteConfigImportsBwfPlugin(filePath: string, code: string): boolean {
+  let program: Node;
+  try {
+    program = parseSync(filePath, code).program as Node;
+  } catch {
+    return false;
+  }
+  return (program.body ?? []).some(
+    (node) =>
+      node.type === 'ImportDeclaration' &&
+      node.source?.value === '@builtbyfriends/bwf' &&
+      (node.specifiers ?? []).some(
+        (specifier) =>
+          specifier.type === 'ImportSpecifier' && specifier.imported?.name === 'bwfPlugin',
+      ),
+  );
+}
+
 /** Add the plugin only when the exported Vite configuration has an editable object and array. */
 export function patchViteConfigWithBwfPlugin(filePath: string, code: string): string | undefined {
   if (filePath.endsWith('.cjs') || filePath.endsWith('.cts')) {

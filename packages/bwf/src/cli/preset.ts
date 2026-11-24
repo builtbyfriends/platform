@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'pathslash';
 import { readProjectPaths } from '../project-paths.ts';
 import type { ProjectPaths } from '../project-paths.ts';
@@ -7,6 +7,7 @@ import {
   hasPackageDependency,
   readPackageJson,
 } from '../shared/package-json.ts';
+import { viteConfigImportsBwfPlugin } from './vite-config-patch.ts';
 
 /** Build output conventions for a known SSG (static site generator). */
 type SsgPreset = {
@@ -170,7 +171,7 @@ export function detectPreset(
     const buildCommand = resolveProjectScriptCommand(root, 'build');
     return {
       buildCommand: buildCommand ?? resolveProjectCommand(root, 'vite build'),
-      outputDir: resolve(root, 'dist'),
+      outputDir: resolve(root, viteSpaOutputDir(root, pkg)),
       appType: 'spa',
     };
   }
@@ -269,6 +270,33 @@ function resolveProjectScriptCommand(root: string, scriptName: string): string |
 
 function hasViteLike<T extends Record<string, unknown>>(pkg: T): boolean {
   return hasPackageDependency(pkg, 'vite') || hasPackageDependency(pkg, 'vite-plus');
+}
+
+const VITE_CONFIG_FILES = [
+  'vite.config.ts',
+  'vite.config.mts',
+  'vite.config.js',
+  'vite.config.mjs',
+  'vite.config.cts',
+  'vite.config.cjs',
+];
+
+/**
+ * Where a Vite SPA build puts its browser files. A Vite config that uses
+ * `bwfPlugin()` (`bwf init` adds it) splits the output into `dist/client`
+ * (browser files) and `dist/ssr` (the server bundle, its source map and
+ * `wrangler.json`). Only `dist/client` may be uploaded: uploading `dist`
+ * publishes the server files and leaves `/` without an `index.html`. A
+ * project that installs `@builtbyfriends/bwf` only for its CLI keeps Vite's plain `dist`.
+ */
+function viteSpaOutputDir(root: string, pkg: Record<string, unknown>): string {
+  if (!hasPackageDependency(pkg, '@builtbyfriends/bwf')) {
+    return 'dist';
+  }
+  const config = VITE_CONFIG_FILES.map((name) => join(root, name)).find((path) => existsSync(path));
+  return config && viteConfigImportsBwfPlugin(config, readFileSync(config, 'utf8'))
+    ? 'dist/client'
+    : 'dist';
 }
 
 function detectViteBinary(root: string): 'vite' | 'vp' {

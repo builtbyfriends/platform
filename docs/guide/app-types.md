@@ -98,4 +98,4 @@ To lock the app type and skip auto-detection, set `inference.appType` in [`bwf.c
 ```
 
 - `inference.appType`: `"platform"`, `"spa"`, or `"static"`
-- `inference.outputDir`: output directory for static app types (relative to project root, defaults to `"dist"`)
+- `inference.outputDir`: output directory for static app types (relative to project root). Defaults to `"dist"`, or `"dist/client"` when the project depends on `@builtbyfriends/bwf`, because `bwfPlugin()` writes browser files there
