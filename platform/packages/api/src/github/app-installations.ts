@@ -1,3 +1,4 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { hmacSignState, hmacVerifyState } from '../auth/hmac.ts';
 import type { GitHubInstallationOwner } from '../db/credentials.ts';
 import type { ApiEnv } from '../env.ts';
@@ -193,4 +194,72 @@ export async function listInstallationRepositoryPage(
     private: repo.private ?? true,
     default_branch: repo.default_branch ?? 'main',
   }));
+}
+
+const selectionPrefix = 'github-app-selection:';
+
+export function appInstallationAuthorizeUrl(clientId: string, state: string): string {
+  // Decision: Use the App's registered first callback, as the installation flow does, so no second callback needs registering.
+  return `https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, state })}`;
+}
+
+export async function signAppInstallSelection(
+  state: string,
+  installationId: string | null,
+  callerAccountId: string,
+  expiresAt: number,
+  secret: string,
+): Promise<string> {
+  const encoded = btoa(
+    JSON.stringify({
+      state,
+      installationId,
+      callerAccountId,
+      exp: Math.min(expiresAt, Date.now() + 5 * 60 * 1000),
+    }),
+  );
+  return `${selectionPrefix}${encoded}.${await hmacSignState(selectionPrefix + encoded, secret)}`;
+}
+
+export function isAppInstallSelection(raw: string): boolean {
+  return raw.startsWith(selectionPrefix);
+}
+
+export async function verifyAppInstallSelection(
+  raw: string,
+  secret: string,
+): Promise<{ state: string; installationId: string | null; callerAccountId: string } | null> {
+  if (!isAppInstallSelection(raw) || raw.length > 12_000) {
+    return null;
+  }
+  const dot = raw.lastIndexOf('.');
+  if (
+    dot < selectionPrefix.length ||
+    !(await hmacVerifyState(raw.slice(0, dot), raw.slice(dot + 1), secret))
+  ) {
+    return null;
+  }
+  try {
+    const value: unknown = JSON.parse(atob(raw.slice(selectionPrefix.length, dot)));
+    if (
+      !isRecord(value) ||
+      typeof value.state !== 'string' ||
+      (value.installationId !== null &&
+        (typeof value.installationId !== 'string' || !/^\d{1,20}$/.test(value.installationId))) ||
+      typeof value.callerAccountId !== 'string' ||
+      !/^\d{1,20}$/.test(value.callerAccountId) ||
+      typeof value.exp !== 'number' ||
+      !Number.isFinite(value.exp) ||
+      value.exp <= Date.now()
+    ) {
+      return null;
+    }
+    return {
+      state: value.state,
+      installationId: value.installationId,
+      callerAccountId: value.callerAccountId,
+    };
+  } catch {
+    return null;
+  }
 }
