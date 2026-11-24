@@ -56,7 +56,7 @@ beforeEach(async () => {
   registration = await registerOAuthClient(env.db, {
     name: 'Runtime app',
     operator: 'Test',
-    redirectUris: ['https://crowded.test/callback'],
+    redirectUris: ['https://connected-app.test/callback'],
     scopes: ['profile'],
   });
   const owner = await createTestUser(
