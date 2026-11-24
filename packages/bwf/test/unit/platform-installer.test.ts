@@ -125,7 +125,8 @@ type DefaultedClientMethods =
   | 'publishWorkerCustomDomainsSafely'
   | 'publishWorkerRoutesSafely'
   | 'putKvBulk'
-  | 'request';
+  | 'request'
+  | 'setHyperdriveOriginConnectionLimit';
 type TestInstallerDependencies = Omit<InstallArguments[3], 'client'> & {
   client: Omit<InstallClient, DefaultedClientMethods> &
     Partial<Pick<InstallClient, DefaultedClientMethods>>;
@@ -163,6 +164,9 @@ function installPlatform(
       publishWorkerRoutesSafely: unexpectedCloudflareCall('publishWorkerRoutesSafely'),
       putKvBulk: unexpectedCloudflareCall('putKvBulk'),
       request: unexpectedCloudflareCall('request'),
+      setHyperdriveOriginConnectionLimit: unexpectedCloudflareCall(
+        'setHyperdriveOriginConnectionLimit',
+      ),
       ...dependencies.client,
       getHyperdriveConfig:
         dependencies.client.getHyperdriveConfig ??

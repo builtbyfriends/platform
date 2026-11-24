@@ -77,7 +77,7 @@ export function createAssetCachePolicy(
   assetsDir?: string,
   loadManifest: ManifestLoader = createManifestLoader(),
 ): (request: Request, env: RuntimeEnvironment, asset: Response) => Promise<Response> {
-  let files: Promise<Set<string>> | undefined;
+  let files: Set<string> | undefined;
   return async (request, env, asset) => {
     const path = new URL(request.url).pathname;
     if (
@@ -88,18 +88,18 @@ export function createAssetCachePolicy(
       return applyAssetCachePolicy(request, asset, assetsDir);
     }
     if (!files) {
-      // Decision: Optional cache metadata must not make a successfully served asset fail.
-      files = loadManifest(request, env).then(
-        (manifest) =>
-          new Set(
-            Object.values(manifest ?? {}).flatMap((entry) =>
-              Array.isArray(entry?.immutableFiles) ? entry.immutableFiles : [],
-            ),
+      // Decision: optional cache metadata must not make a served asset fail. A miss uses the
+      // conservative policy until a request loads the manifest.
+      const manifest = await loadManifest(request, env).catch(() => null);
+      if (manifest) {
+        files ??= new Set(
+          Object.values(manifest).flatMap((entry) =>
+            Array.isArray(entry?.immutableFiles) ? entry.immutableFiles : [],
           ),
-        () => new Set(),
-      );
+        );
+      }
     }
-    return applyAssetCachePolicy(request, asset, assetsDir, (await files).has(path.slice(1)));
+    return applyAssetCachePolicy(request, asset, assetsDir, files?.has(path.slice(1)));
   };
 }
 

@@ -102,7 +102,7 @@ async function runSubcommandGroup<T>(
       const platformMessage = message.replace(/^platform:/, pc.bold(pc.red('platform:')));
       console.error(
         error instanceof OperatorClientError && error.details !== undefined
-          ? `${platformMessage}\nPartial result:\n${JSON.stringify(error.details, null, 2)}`
+          ? `${platformMessage}\n${isPartialResult(error) ? 'Partial result' : 'Details'}:\n${JSON.stringify(error.details, null, 2)}`
           : platformMessage,
       );
     } else {
@@ -110,6 +110,15 @@ async function runSubcommandGroup<T>(
     }
     process.exit(1);
   }
+}
+
+function isPartialResult(err: OperatorClientError): boolean {
+  return (
+    err.code === 'partial_failure' ||
+    (typeof err.details === 'object' &&
+      err.details !== null &&
+      (err.details as { partial?: unknown }).partial === true)
+  );
 }
 
 const args = process.argv.slice(2);

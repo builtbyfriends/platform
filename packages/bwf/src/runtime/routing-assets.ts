@@ -47,7 +47,6 @@ export type ManifestLoader = (
 ) => Promise<ClientManifest | null>;
 export function createManifestLoader(): ManifestLoader {
   let cached: ClientManifest | null = null;
-  let pending: Promise<ClientManifest | null> | null = null;
   return async (request, env) => {
     if (cached) {
       return cached;
@@ -62,20 +61,16 @@ export function createManifestLoader(): ManifestLoader {
     if (!assets || typeof assets.fetch !== 'function') {
       return null;
     }
-    // Decision: Concurrent cold requests share one fetch and parse. A missing or failed
-    // manifest is not cached, so a later request retries.
-    pending ??= (async () => {
-      const response = await assets.fetch(
-        new Request(new URL('/.vite/manifest.json', request.url).toString()),
-      );
-      if (!response.ok) {
-        return null;
-      }
-      cached = (await response.json()) as ClientManifest;
-      return cached;
-    })().finally(() => {
-      pending = null;
-    });
-    return pending;
+    // Decision: Workers scope I/O to the request that starts it. A fetch shared across requests can
+    // stay unsettled when its request is canceled, and every later request would wait on it. So only
+    // the parsed manifest is cached, and a failed load retries on the next request.
+    const response = await assets.fetch(
+      new Request(new URL('/.vite/manifest.json', request.url).toString()),
+    );
+    if (!response.ok) {
+      return null;
+    }
+    cached = (await response.json()) as ClientManifest;
+    return cached;
   };
 }

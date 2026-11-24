@@ -1,4 +1,4 @@
 # Last upstream Void commit this fork has reviewed. scripts/upstream-sync.ts reads it.
 upstream https://github.com/voidzero-dev/void main
-commit cf8c2dfb641a31ab316c4ac05fd7d73a1b44d174
-subject fix(platform): name the failing credential in deploy, repair and upgrade errors (#887)
+commit b0ff2fae21093df8aa456480e206d3182654acd1
+subject Enable unsafe assertion checks at validated input boundaries.

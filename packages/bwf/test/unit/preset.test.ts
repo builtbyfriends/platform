@@ -152,6 +152,50 @@ describe('detectPreset', () => {
     });
   });
 
+  it('uploads only dist/client for a Vite app built with bwf and no backend', () => {
+    const root = setupProject({
+      pkg: { devDependencies: { 'vite-plus': '^1.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+      files: {
+        'index.html': '<html></html>',
+        'main.js': '',
+        'vite.config.ts':
+          "import { defineConfig } from 'vite-plus';\nimport { bwfPlugin } from '@builtbyfriends/bwf';\nexport default defineConfig({ plugins: [bwfPlugin()] });\n",
+      },
+    });
+    expect(detectPreset(root)).toEqual({
+      buildCommand: 'vp build',
+      outputDir: toSlash(resolve(root, 'dist/client')),
+      appType: 'spa',
+    });
+  });
+
+  it('keeps dist for a Vite app that installs bwf without bwfPlugin()', () => {
+    for (const config of [
+      null,
+      "import { defineConfig } from 'vite';\nexport default defineConfig({});\n",
+    ]) {
+      const root = setupProject({
+        pkg: { devDependencies: { vite: '^6.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+        files: { 'index.html': '<html></html>', ...(config ? { 'vite.config.ts': config } : {}) },
+      });
+      expect(detectPreset(root)?.outputDir).toBe(toSlash(resolve(root, 'dist')));
+    }
+  });
+
+  it('uses dist/client for a configured static app built with bwf', () => {
+    const root = setupProject({
+      pkg: { dependencies: { vite: '^6.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+      files: {
+        'vite.config.ts':
+          "import { bwfPlugin } from '@builtbyfriends/bwf';\nexport default { plugins: [bwfPlugin()] };\n",
+      },
+    });
+    const config = { inference: { appType: 'spa' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, config, {})?.outputDir).toBe(
+      toSlash(resolve(root, 'dist/client')),
+    );
+  });
+
   it('detects pre-built dist/index.html as static', () => {
     const root = setupProject({
       files: { 'dist/index.html': '<html></html>' },
