@@ -486,4 +486,4 @@ App type. If omitted, auto-detected on first deploy. See [Supported App Types](.
 
 #### `inference.outputDir`
 
-Output directory for static deploys, relative to the project root. Only relevant when `inference.appType` is `"spa"` or `"static"`. Defaults to `"dist"`.
+Output directory for static deploys, relative to the project root. Only relevant when `inference.appType` is `"spa"` or `"static"`. Defaults to `"dist"`, or `"dist/client"` when the project depends on `@builtbyfriends/bwf`, because `bwfPlugin()` writes browser files there and server files to `dist/ssr`.

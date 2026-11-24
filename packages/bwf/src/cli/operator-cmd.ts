@@ -119,7 +119,23 @@ const LABEL_WORDS = new Map(
   } satisfies Record<string, string>),
 );
 
+// Decision: API field names are camelCase or snake_case. Any other key is data, such as a worker
+// name or a model ID, and prints as it is.
+function isFieldName(key: string): boolean {
+  for (const char of key) {
+    const letterOrDigit =
+      (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9');
+    if (!letterOrDigit && char !== '_') {
+      return false;
+    }
+  }
+  return true;
+}
+
 function fieldLabel(key: string): string {
+  if (!isFieldName(key)) {
+    return key;
+  }
   const words = key
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1 $2')
     .split(/[\s_-]+/)
