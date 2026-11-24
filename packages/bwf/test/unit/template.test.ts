@@ -39,9 +39,9 @@ describe('Vite+ starter', () => {
 
     expect(SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES).toEqual({
       vite: installed.dependencies.vite,
-      'vite-plus': `^${installed.version}`,
+      'vite-plus': installed.version,
     });
-    expect(SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus']).toBe(`^${catalogVitePlus}`);
+    expect(SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES['vite-plus']).toBe(catalogVitePlus);
     expect(SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES.vite).toBe(catalogVite);
   });
 });
