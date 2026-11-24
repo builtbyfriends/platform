@@ -116,3 +116,5 @@ File browsing reads up to 50 object names, sizes and modification times per page
 Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads return `kind: "unavailable"` with a reason. An empty supported page remains a successful page. Other resource kinds can appear in the inventory but don't yet have a data browser.
 
 Activity reads the current deployment's last hour with up to 50 invocations per page. Messages can arrive after a request finishes. With minimal runtime logging, `partial: true` indicates that URLs and message bodies weren't collected. URL query strings and fragments are omitted. Failed reads return `available: false`; local development doesn't substitute sample logs. These calls don't retry jobs, change data or deploy code.
+
+A trusted connected app can request an app-person token for a team with `group` and `acting_person` instead of `person`. The group owns its apps; the acting person is recorded for a publish or preview request. Group accounts stay separate from personal accounts and from other connected apps. The existing operator allowlist and client credentials are required.

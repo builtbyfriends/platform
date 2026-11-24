@@ -13,7 +13,7 @@ import {
 } from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
-import { projects, resources } from '../../src/schema.ts';
+import { projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -355,4 +355,35 @@ describe('connected app runtime reads', () => {
       data: { available: false, events: [] },
     });
   });
+});
+
+it('reads a group resource only for that connected app and exact group owner', async () => {
+  await env.db
+    .update(users)
+    .set({ provider_id: 'group:server:team' })
+    .where(eq(users.provider_id, 'person'));
+  expect((await call('projects.resources', { project: project.id })).status).toBe(404);
+  expect(
+    (await call('projects.resources', { project: project.id, owner: { group: 'server:wrong' } }))
+      .status,
+  ).toBe(404);
+  const answer = await payload(
+    call('projects.resources', { project: project.id, owner: { group: 'server:team' } }),
+  );
+  expect(answer).toMatchObject({ data: { appId: project.id, available: true } });
+  const foreign = await registerOAuthClient(env.db, {
+    name: 'Different connection',
+    operator: 'Test',
+    redirectUris: ['https://other.test/callback'],
+    scopes: ['profile'],
+  });
+  expect(
+    (
+      await call(
+        'projects.resources',
+        { project: project.id, owner: { group: 'server:team' } },
+        'Basic ' + btoa(foreign.client.id + ':' + foreign.clientSecret),
+      )
+    ).status,
+  ).toBe(404);
 });

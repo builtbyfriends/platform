@@ -17,6 +17,7 @@ export type OAuthRequestData = {
   artifactDigest?: string;
   workerModules?: Array<string>;
   projectId?: string;
+  actingPerson?: string;
 };
 export type OAuthSession = Pick<JwtPayload, 'sub' | 'aud' | 'sid' | 'exp'> & {
   // Decision: Attested by Platform's Access middleware during consent, not by the client.
@@ -27,4 +28,5 @@ export type OAuthSession = Pick<JwtPayload, 'sub' | 'aud' | 'sid' | 'exp'> & {
    * the application is the person's sign-in, so the human-session check does not apply.
    */
   appPerson?: true;
+  actingPerson?: string;
 };

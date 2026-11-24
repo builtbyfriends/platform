@@ -222,6 +222,7 @@ export async function requestPreviewDeployment(
       data: {
         kind: 'preview',
         grantId: grant.id,
+        ...(grant.session.actingPerson ? { actingPerson: grant.session.actingPerson } : {}),
         projectId: project.id,
         checkpoint: body.checkpoint,
         redirectUri: '',

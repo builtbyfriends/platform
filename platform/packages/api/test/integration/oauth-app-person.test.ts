@@ -26,7 +26,7 @@ const artifact = createDeployArtifact({
   workerFiles: { 'index.js': btoa("export default { fetch() { return new Response('ok') } }") },
 });
 
-let env: TestEnv;
+let env: TestEnv & { PLATFORM_APP_PERSON_CLIENTS?: string };
 let registration: Awaited<ReturnType<typeof registerOAuthClient>>;
 const basic = () => 'Basic ' + btoa(registration.client.id + ':' + registration.clientSecret);
 const request = (path: string, init?: RequestInit) =>
@@ -169,5 +169,91 @@ describe('app-person grant', () => {
       project_id: string;
     };
     expect(next.project_id).toBe(credential.project_id);
+  });
+});
+
+describe('group grants', () => {
+  const accessFor = async (form: Record<string, string>) => {
+    const response = await token(form);
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { access_token: string }).access_token;
+  };
+  const publish = async (form: Record<string, string>) => {
+    const response = await call('publish.request', await accessFor(form), {
+      redirect_uri: redirect,
+      state: 's'.repeat(32),
+      code_challenge: await calculatePKCECodeChallenge('v'.repeat(64)),
+      code_challenge_method: 'S256',
+      slug: 'team-app',
+      checkpoint: 'checkpoint-1',
+      artifact,
+    });
+    expect(response.status).toBe(200);
+    const { request_id } = rpcData(await response.json()) as { request_id: string };
+    const approved = await token({ ...form, publish_request: request_id });
+    expect(approved.status).toBe(200);
+    return { requestId: request_id, ...((await approved.json()) as { project_id: string }) };
+  };
+
+  it('requires an acting person and keeps personal grants out of group identities', async () => {
+    expect((await token({ group: 'server:team' })).status).toBe(400);
+    expect((await token({ group: 'server:team', acting_person: 'p1', person: 'p1' })).status).toBe(
+      400,
+    );
+    expect((await token({ person: 'group:server:team' })).status).toBe(400);
+    expect((await token({ group: 'server:team', acting_person: 'p1' })).status).toBe(200);
+    const [owner] = await env.db.select().from(users);
+    expect(owner).toMatchObject({
+      provider: 'app:' + registration.client.id,
+      provider_id: 'group:server:team',
+    });
+    const [grant] = await env.db.select().from(oauthGrants);
+    expect(grant.session).toMatchObject({ appPerson: true, actingPerson: 'p1' });
+  });
+
+  it('publishes under the group and retains the acting person on each publish', async () => {
+    const first = await publish({ group: 'server:team', acting_person: 'p1' });
+    const [project] = await env.db.select().from(projects).where(eq(projects.id, first.project_id));
+    const [owner] = await env.db.select().from(users).where(eq(users.id, project.user_id));
+    expect(owner.provider_id).toBe('group:server:team');
+    const [record] = await env.db
+      .select()
+      .from(oauthRequests)
+      .where(eq(oauthRequests.id, first.requestId));
+    expect(record.data.actingPerson).toBe('p1');
+    const second = await publish({ group: 'server:team', acting_person: 'p2' });
+    expect(second.project_id).toBe(first.project_id);
+    const [next] = await env.db
+      .select()
+      .from(oauthRequests)
+      .where(eq(oauthRequests.id, second.requestId));
+    expect(next.data.actingPerson).toBe('p2');
+  });
+
+  it('keeps previews separate across groups, people and connected clients', async () => {
+    const create = async (bearer: string) => {
+      const response = await call('previews.create', bearer, { workspace: 'shared-workspace' });
+      expect(response.status).toBe(200);
+      return (rpcData(await response.json()) as { project_id: string }).project_id;
+    };
+    const first = await create(await accessFor({ group: 'server:team', acting_person: 'p1' }));
+    expect(await create(await accessFor({ group: 'server:team', acting_person: 'p2' }))).toBe(
+      first,
+    );
+    expect(await create(await accessFor({ group: 'server:other', acting_person: 'p1' }))).not.toBe(
+      first,
+    );
+    expect(await create(await accessFor({ person: 'server:team' }))).not.toBe(first);
+    registration = await registerOAuthClient(env.db, {
+      name: 'Other app',
+      operator: 'Other operator',
+      redirectUris: [redirect],
+      scopes: ['profile', 'deploy:approve'],
+    });
+    await setOAuthPreviewPermission(env.db, registration.client.id, true);
+    env.PLATFORM_APP_PERSON_CLIENTS = registration.client.id;
+    expect(await create(await accessFor({ group: 'server:team', acting_person: 'p1' }))).not.toBe(
+      first,
+    );
   });
 });

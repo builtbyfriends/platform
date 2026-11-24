@@ -877,6 +877,7 @@ export async function requestPublishApproval(
   const data: OAuthRequestData = {
     kind: 'deployment',
     grantId: grant.id,
+    ...(grant.session.actingPerson ? { actingPerson: grant.session.actingPerson } : {}),
     redirectUri: body.redirect_uri,
     state: body.state,
     challenge: body.code_challenge,
