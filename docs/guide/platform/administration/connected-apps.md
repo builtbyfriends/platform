@@ -121,6 +121,24 @@ Two more calls use the client's own credentials:
 
 Send both to `POST /app-billing/<call>`. A preview can't move (`preview`). The person who had the app isn't added to its team, so removing them later leaves the app with the group.
 
+### Read an app's resources and activity
+
+A connected application can build a read-only operations view with its client credentials. It checks its own people's project permissions before each call. Platform checks that the project belongs to this connected application, then checks resource identity again after reading data.
+
+Send these calls to `POST /app-billing/<call>`. Include `owner: { person }` or `owner: { group }` from the application's authorized project record. Platform checks the current owner before and after reading, so a transfer can't leave the old project view with access. Responses put the result in `data`.
+
+| Call                 | Body                                                                | Result                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `projects.resources` | `{ project, owner }`                                                | Actual resource IDs, binding names, kinds and browse modes. Provider IDs, credentials and resource metadata are omitted.                      |
+| `resources.inspect`  | `{ project, owner, resourceId, prefix?, cursor?, table?, offset? }` | File metadata, database tables or a page of table rows. Select an actual resource ID from the inventory; a binding name alone isn't accepted. |
+| `projects.activity`  | `{ project, owner, cursor? }`                                       | Recent invocation logs and exceptions for the active deployment, newest first. These are app events, not an individual resource's health.     |
+
+File browsing reads up to 50 object names, sizes and modification times per page. A `cursor` continues the listing. It doesn't download, upload or delete content. Database browsing lists up to 200 tables; selecting `table` returns up to 50 rows and `nextOffset`. Previews stop at offset 10,000 and 100 columns. Text cells are shortened to 1,000 characters, binary values display as `[binary]`, and credential-named columns display as `[redacted]`. The API constructs read queries; it doesn't accept SQL. Live table changes can shift rows between pages.
+
+Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads return `kind: "unavailable"` with a reason. An empty supported page remains a successful page. Other resource kinds can appear in the inventory but don't yet have a data browser.
+
+Activity reads the current deployment's last hour with up to 50 invocations per page. Messages can arrive after a request finishes. With minimal runtime logging, `partial: true` indicates that URLs and message bodies weren't collected. URL query strings and fragments are omitted. Failed reads return `available: false`; local development doesn't substitute sample logs. These calls don't retry jobs, change data or deploy code.
+
 ### Custom domains and sign-in for an application's apps
 
 An application can add custom domains to its people's apps and put an app behind sign-in. Both depend on the payer's plan: add `"customDomains": true` or `"protection": true` to a plan in the application's plan list. A payer on another plan gets `plan_required` with the `feature` it lacks. Custom domains also need the installation's `customDomains` capability, or the calls answer `CAPABILITY_UNAVAILABLE`.

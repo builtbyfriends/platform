@@ -88,6 +88,7 @@ import {
 } from '../schema.ts';
 import { ZeroTrustUnavailableError } from '../zero-trust/errors.ts';
 import { setProjectZeroTrustProtection } from '../zero-trust/project.ts';
+import { appRuntimeRoutes } from './app-runtime.ts';
 import { appPersonUser, GROUP } from './oauth-app-person.ts';
 
 const isPersonId = (value: unknown): value is string =>
@@ -663,6 +664,14 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     return next();
   })
+  .route(
+    '/',
+    appRuntimeRoutes(async (context, ref, owner) => {
+      const found = await appProject(context, ref);
+      const expected = 'group' in owner ? GROUP + owner.group : owner.person;
+      return found?.owner.provider_id === expected ? found.project : null;
+    }),
+  )
   .post('/usage.status', async (context) => {
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.person)) {
