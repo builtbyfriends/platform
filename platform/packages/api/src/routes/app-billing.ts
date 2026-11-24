@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, or, sql } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
 import { authenticateOAuthClient, OAuthError } from '../auth/oauth.ts';
 import {
@@ -11,7 +11,8 @@ import {
 } from '../billing/stripe.ts';
 import type { ApiEnv } from '../env.ts';
 import { getDefaultPlan, resolvePlanLimits } from '../plans.ts';
-import { appPeople, appUsage, appUsageEvents } from '../schema.ts';
+import { appPeople, appUsage, appUsageEvents, projects, users } from '../schema.ts';
+import { appRuntimeRoutes } from './app-runtime.ts';
 
 const isPaidPlan = (value: unknown): value is PaidPlan =>
   typeof value === 'string' && Object.hasOwn(PAID_PLANS, value);
@@ -87,6 +88,28 @@ export const appBillingRoutes = new Hono<ApiEnv>()
     }
     return next();
   })
+  .route(
+    '/',
+    appRuntimeRoutes(async (context, ref, owner) => {
+      if (!isPersonId(ref)) {
+        return null;
+      }
+      const [found] = await context
+        .get('db')
+        .select({ project: projects })
+        .from(projects)
+        .innerJoin(users, eq(users.id, projects.user_id))
+        .where(
+          and(
+            eq(users.provider, 'app:' + context.get('billingClient')),
+            eq(users.provider_id, 'group' in owner ? 'group:' + owner.group : owner.person),
+            ne(projects.status, 'deleting'),
+            or(eq(projects.id, ref), eq(projects.slug, ref)),
+          ),
+        );
+      return found?.project ?? null;
+    }),
+  )
   .post('/usage.status', async (context) => {
     const body = await context.req.json().catch(() => null);
     if (!isPersonId(body?.person)) {

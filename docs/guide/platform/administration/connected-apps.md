@@ -98,3 +98,21 @@ person=<the application's id for the person>
 Platform finds or makes a user for that person (provider `app:<client id>`) and returns an access token for one hour, with the client's `profile` and `preview:deploy` permissions. There's no refresh token: ask again when it runs out. Each token is its own grant, so two parts of the application can work for one person at the same time.
 
 A publish still needs the person's approval, but the application asks for it in its own interface. Make the publish request as usual with the token, then, once the person approves, send the same token request with `publish_request` set to the returned `request_id`. The answer is the publish credential that the browser approval gives (`project_id`, `approval_id` and a `deploy:approve` token). Platform takes this request as the person's approval, so only list a client you trust to ask its people first.
+
+### Read an app's resources and activity
+
+A connected application can build a read-only operations view with its client credentials. It checks its own people's project permissions before each call. Platform checks that the project belongs to this connected application, then checks resource identity again after reading data.
+
+Send these calls to `POST /app-billing/<call>`. Include `owner: { person }` or `owner: { group }` from the application's authorized project record. Platform checks the current owner before and after reading, so a transfer can't leave the old project view with access. Responses put the result in `data`.
+
+| Call                 | Body                                                                | Result                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `projects.resources` | `{ project, owner }`                                                | Actual resource IDs, binding names, kinds and browse modes. Provider IDs, credentials and resource metadata are omitted.                      |
+| `resources.inspect`  | `{ project, owner, resourceId, prefix?, cursor?, table?, offset? }` | File metadata, database tables or a page of table rows. Select an actual resource ID from the inventory; a binding name alone isn't accepted. |
+| `projects.activity`  | `{ project, owner, cursor? }`                                       | Recent invocation logs and exceptions for the active deployment, newest first. These are app events, not an individual resource's health.     |
+
+File browsing reads up to 50 object names, sizes and modification times per page. A `cursor` continues the listing. It doesn't download, upload or delete content. Database browsing lists up to 200 tables; selecting `table` returns up to 50 rows and `nextOffset`. Previews stop at offset 10,000 and 100 columns. Text cells are shortened to 1,000 characters, binary values display as `[binary]`, and credential-named columns display as `[redacted]`. The API constructs read queries; it doesn't accept SQL. Live table changes can shift rows between pages.
+
+Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads return `kind: "unavailable"` with a reason. An empty supported page remains a successful page. Other resource kinds can appear in the inventory but don't yet have a data browser.
+
+Activity reads the current deployment's last hour with up to 50 invocations per page. Messages can arrive after a request finishes. With minimal runtime logging, `partial: true` indicates that URLs and message bodies weren't collected. URL query strings and fragments are omitted. Failed reads return `available: false`; local development doesn't substitute sample logs. These calls don't retry jobs, change data or deploy code.
