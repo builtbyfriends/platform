@@ -364,6 +364,14 @@ it('reads a group resource only for that connected app and exact group owner', a
     .where(eq(users.provider_id, 'person'));
   expect((await call('projects.resources', { project: project.id })).status).toBe(404);
   expect(
+    (
+      await call('projects.resources', {
+        project: project.id,
+        owner: { person: 'group:server:team' },
+      })
+    ).status,
+  ).toBe(400);
+  expect(
     (await call('projects.resources', { project: project.id, owner: { group: 'server:wrong' } }))
       .status,
   ).toBe(404);

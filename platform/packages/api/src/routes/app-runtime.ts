@@ -31,7 +31,7 @@ function runtimeOwner(value: unknown): RuntimeOwner | null {
   if (text(value.group) && value.person === undefined) {
     return { group: value.group };
   }
-  if (text(value.person) && value.group === undefined) {
+  if (text(value.person) && !value.person.startsWith('group:') && value.group === undefined) {
     return { person: value.person };
   }
   return null;
