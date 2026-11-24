@@ -1,5 +1,5 @@
 import { Files } from '@cloudflare/sandbox';
-import { DurableObject, RpcTarget } from 'cloudflare:workers';
+import { DurableObject, RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 export type SandboxInstance =
   | 'lite'
@@ -8,10 +8,24 @@ export type SandboxInstance =
   | 'standard-2'
   | 'standard-3'
   | 'standard-4';
+export type SandboxSecret = {
+  /** Hostnames or `*` patterns the header is added for. Sent over HTTPS only. */
+  hosts: Array<string>;
+  header: string;
+  value: string;
+};
+export type SandboxOutbound = {
+  /** `full` reaches any host, `hosts` only the listed ones, `none` nothing but the secrets' hosts. */
+  mode: 'full' | 'hosts' | 'none';
+  hosts?: Array<string>;
+  secrets?: Array<SandboxSecret>;
+};
 export type SandboxOptions = {
   inactivityTimeoutMs?: number;
   enableInternet?: boolean;
   labels?: Record<string, string>;
+  /** HTTP and HTTPS rules for the sandbox. Secrets are added outside the container, so code in it can't read them. */
+  outbound?: SandboxOutbound;
 };
 export type SandboxExecOptions = ContainerExecOptions & {
   signal?: AbortSignal;
@@ -46,7 +60,7 @@ export type SandboxNativeContainer = Omit<Container, 'start' | 'exec'> & {
   ): Promise<ExecProcess & { isPty?: boolean; resize(cols: number, rows: number): void }>;
 };
 
-const OPTIONS = new Set(['inactivityTimeoutMs', 'enableInternet', 'labels']);
+const OPTIONS = new Set(['inactivityTimeoutMs', 'enableInternet', 'labels', 'outbound']);
 const FILE_OPERATIONS = new Set<keyof Files>([
   'readFile',
   'writeFile',
@@ -88,7 +102,143 @@ export function validateSandboxOptions(options: SandboxOptions): void {
   ) {
     throw new TypeError('Sandbox labels must be strings.');
   }
+  if (options.outbound !== undefined) {
+    validateOutbound(options.outbound);
+    if (options.enableInternet !== undefined) {
+      throw new TypeError('Use outbound.mode instead of enableInternet with outbound rules.');
+    }
+  }
 }
+
+const HOST_PATTERN =
+  /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^\*$/;
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const MAX_OUTBOUND_HOSTS = 200;
+const MAX_OUTBOUND_SECRETS = 50;
+
+function validHosts(hosts: unknown, label: string): asserts hosts is Array<string> {
+  if (
+    !Array.isArray(hosts) ||
+    hosts.length > MAX_OUTBOUND_HOSTS ||
+    hosts.some((host) => typeof host !== 'string' || !HOST_PATTERN.test(host))
+  ) {
+    throw new TypeError(
+      `Sandbox ${label} must be at most ${MAX_OUTBOUND_HOSTS} lower-case hostnames, each optionally starting with *.`,
+    );
+  }
+}
+
+function validateOutbound(outbound: SandboxOutbound): void {
+  if (!outbound || typeof outbound !== 'object' || Array.isArray(outbound)) {
+    throw new TypeError('Sandbox outbound must be an object.');
+  }
+  for (const key of Object.keys(outbound)) {
+    if (!['mode', 'hosts', 'secrets'].includes(key)) {
+      throw new TypeError(`Unsupported Sandbox outbound option: ${key}`);
+    }
+  }
+  if (!['full', 'hosts', 'none'].includes(outbound.mode)) {
+    throw new TypeError('Sandbox outbound.mode must be full, hosts or none.');
+  }
+  if (outbound.hosts !== undefined) {
+    validHosts(outbound.hosts, 'outbound.hosts');
+  }
+  if (outbound.mode === 'hosts' && !outbound.hosts?.length) {
+    throw new TypeError('Sandbox outbound.mode hosts needs at least one host.');
+  }
+  const secrets: unknown = outbound.secrets;
+  if (secrets === undefined) {
+    return;
+  }
+  if (!Array.isArray(secrets) || secrets.length > MAX_OUTBOUND_SECRETS) {
+    throw new TypeError(
+      `Sandbox outbound.secrets must be at most ${MAX_OUTBOUND_SECRETS} entries.`,
+    );
+  }
+  for (const secret of outbound.secrets ?? []) {
+    if (!secret || typeof secret !== 'object') {
+      throw new TypeError('Each Sandbox outbound secret must be an object.');
+    }
+    validHosts(secret.hosts, 'outbound secret hosts');
+    if (!secret.hosts.length || secret.hosts.includes('*')) {
+      throw new TypeError('Each Sandbox outbound secret needs named hosts, not *.');
+    }
+    if (typeof secret.header !== 'string' || !HEADER_NAME.test(secret.header)) {
+      throw new TypeError('Each Sandbox outbound secret needs a valid header name.');
+    }
+    if (typeof secret.value !== 'string' || !secret.value || /[\r\n]/.test(secret.value)) {
+      throw new TypeError('Each Sandbox outbound secret needs a one-line value.');
+    }
+  }
+}
+
+export function hostMatches(host: string, pattern: string): boolean {
+  const name = host.toLowerCase().replace(/\.+$/, '');
+  if (pattern === '*') {
+    return true;
+  }
+  if (pattern.startsWith('*.')) {
+    return name.endsWith(pattern.slice(1));
+  }
+  return name === pattern;
+}
+
+/** What the outbound handler decides for one request: block it, send it as is, or add a secret's header. */
+export function outboundDecision(
+  outbound: SandboxOutbound,
+  url: URL,
+):
+  | { action: 'block'; reason: string }
+  | { action: 'send' }
+  | { action: 'secret'; secret: SandboxSecret } {
+  const host = url.hostname;
+  const secret = outbound.secrets?.find((entry) =>
+    entry.hosts.some((pattern) => hostMatches(host, pattern)),
+  );
+  if (secret) {
+    // Decision: A secret only goes over HTTPS, so a plain HTTP request to its host is refused instead of sent without it.
+    return url.protocol === 'https:'
+      ? { action: 'secret', secret }
+      : {
+          action: 'block',
+          reason: `Use https:// for ${host}: its secret isn't sent over plain HTTP.`,
+        };
+  }
+  if (outbound.mode === 'full') {
+    return { action: 'send' };
+  }
+  if (outbound.mode === 'hosts' && outbound.hosts?.some((pattern) => hostMatches(host, pattern))) {
+    return { action: 'send' };
+  }
+  return { action: 'block', reason: `This sandbox's network rules don't include ${host}.` };
+}
+
+/**
+ * Applies a sandbox's `outbound` rules to its HTTP and HTTPS requests. Export it from the Worker that defines the Sandbox
+ * Durable Object; `ctx.exports` needs it there.
+ */
+export class SandboxOutboundHandler extends WorkerEntrypoint<unknown, SandboxOutbound> {
+  override async fetch(request: Request): Promise<Response> {
+    const decision = outboundDecision(this.ctx.props, new URL(request.url));
+    if (decision.action === 'block') {
+      return new Response(`Blocked: ${decision.reason}\n`, {
+        status: 403,
+        headers: { 'content-type': 'text/plain' },
+      });
+    }
+    if (decision.action === 'send') {
+      return fetch(request);
+    }
+    const headers = new Headers(request.headers);
+    headers.set(decision.secret.header, decision.secret.value);
+    // Decision: A redirect isn't followed here, so the secret can't travel on to another host.
+    return fetch(new Request(request, { headers, redirect: 'manual' }));
+  }
+}
+
+const SANDBOX_CA = '/etc/cloudflare/certs/cloudflare-containers-ca.crt';
+// Decision: Best effort across images: Debian-style images take update-ca-certificates; others get the CA added to the bundle.
+const TRUST_CA = `[ -f ${SANDBOX_CA} ] || exit 0; if command -v update-ca-certificates >/dev/null 2>&1; then mkdir -p /usr/local/share/ca-certificates && cp ${SANDBOX_CA} /usr/local/share/ca-certificates/cloudflare-containers-ca.crt && update-ca-certificates >/dev/null 2>&1; else for b in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem; do [ -f "$b" ] && cat ${SANDBOX_CA} >> "$b" && break; done; fi`;
 
 class ProcessCapability extends RpcTarget {
   #process: ExecProcess & { resize(cols: number, rows: number): void };
@@ -209,11 +359,43 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
   async configure(options: SandboxOptions): Promise<void> {
     validateSandboxOptions(options);
     await this.#ready;
+    const before = this.#options;
     this.#options = { ...options };
     await this.ctx.storage.put('__platformSandboxOptions', this.#options);
-    if (this.container.running) {
-      await this.container.setInactivityTimeout(this.inactivityTimeoutMs);
+    if (!this.container.running) {
+      return;
     }
+    // Decision: Internet access is fixed when a container starts, so a change to it, or to whether rules apply at all, restarts the
+    // container on its next use. Other rule changes replace the intercepts' handler in place.
+    if (
+      Boolean(before.outbound) !== Boolean(options.outbound) ||
+      this.#internet(before) !== this.#internet(options)
+    ) {
+      await this.destroy();
+      return;
+    }
+    await this.container.setInactivityTimeout(this.inactivityTimeoutMs);
+    if (options.outbound && JSON.stringify(before.outbound) !== JSON.stringify(options.outbound)) {
+      await this.#intercept(options.outbound);
+    }
+  }
+
+  #internet(options: SandboxOptions): boolean {
+    return options.outbound ? options.outbound.mode === 'full' : (options.enableInternet ?? false);
+  }
+
+  async #intercept(outbound: SandboxOutbound): Promise<void> {
+    const exports = this.ctx.exports as {
+      SandboxOutboundHandler?: (options: { props: SandboxOutbound }) => Fetcher;
+    };
+    if (!exports.SandboxOutboundHandler) {
+      throw new Error(
+        'Sandbox outbound rules need SandboxOutboundHandler exported from the Worker that defines the Sandbox.',
+      );
+    }
+    const handler = exports.SandboxOutboundHandler({ props: outbound });
+    await this.container.interceptAllOutboundHttp(handler);
+    await this.container.interceptOutboundHttps('*', handler);
   }
 
   protected get inactivityTimeoutMs(): number {
@@ -285,6 +467,9 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
     if (result.exitCode !== 0) {
       throw new Error('Sandbox workspace initialization failed.');
     }
+    if (this.#options.outbound) {
+      await this.initializationOutput(['sh', '-c', TRUST_CA], {}, 30_000);
+    }
   }
   protected get entrypoint(): Array<string> | undefined {
     return undefined;
@@ -316,10 +501,14 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
         throw new Error('Sandbox startup was cancelled.');
       }
       if (!this.container.running) {
+        if (this.#options.outbound) {
+          // Decision: HTTPS intercepts go in before start, so the container's CA file exists when it boots.
+          await this.#intercept(this.#options.outbound);
+        }
         this.container.start({
           image: this.image,
           instance: this.instanceType,
-          enableInternet: this.#options.enableInternet ?? false,
+          enableInternet: this.#internet(this.#options),
           labels: this.#options.labels,
           ...(this.entrypoint ? { entrypoint: this.entrypoint } : {}),
         });

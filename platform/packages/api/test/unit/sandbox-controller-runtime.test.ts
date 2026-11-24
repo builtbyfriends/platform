@@ -52,6 +52,8 @@ function fixture() {
       stdout: new Blob(['ok']).stream(),
     })),
     setInactivityTimeout: vi.fn(),
+    interceptAllOutboundHttp: vi.fn(),
+    interceptOutboundHttps: vi.fn(),
     destroy: vi.fn(async () => {
       container.running = false;
     }),
@@ -66,6 +68,9 @@ function fixture() {
     blockConcurrencyWhile: (fn: () => Promise<void>) => fn(),
     id: { toString: () => 'namespace-instance' },
     container,
+    exports: {
+      SandboxOutboundHandler: vi.fn((options: { props: unknown }) => ({ outbound: options.props })),
+    },
     storage: {
       get: async (key: string) => structuredClone(data.get(key)),
       put: async (key: string, value: unknown) => {
@@ -474,6 +479,37 @@ describe('Sandbox capability boundary', () => {
     await expect((await f.host.getSandbox('default')).invoke(method, [])).rejects.toThrow(
       'Unsupported Sandbox operation',
     );
+  });
+  it('routes HTTP and HTTPS through the outbound rules, registered before boot with the internet off', async () => {
+    const f = fixture();
+    const outbound = {
+      mode: 'hosts' as const,
+      hosts: ['registry.npmjs.org'],
+      secrets: [{ hosts: ['api.example.com'], header: 'authorization', value: 'Bearer s' }],
+    };
+    await f.controller.configure({ outbound });
+    await f.start();
+    expect(f.ctx.exports.SandboxOutboundHandler).toHaveBeenCalledWith({ props: outbound });
+    expect(f.container.interceptAllOutboundHttp).toHaveBeenCalledWith({ outbound });
+    expect(f.container.interceptOutboundHttps).toHaveBeenCalledWith('*', { outbound });
+    expect(f.container.interceptOutboundHttps.mock.invocationCallOrder[0]).toBeLessThan(
+      f.container.start.mock.invocationCallOrder[0],
+    );
+    expect(f.container.start).toHaveBeenCalledWith(
+      expect.objectContaining({ enableInternet: false }),
+    );
+  });
+  it('replaces the rules of a running container in place, and restarts it when internet access changes', async () => {
+    const f = fixture();
+    await f.controller.configure({ outbound: { mode: 'hosts', hosts: ['a.example.com'] } });
+    await f.start();
+    await f.controller.configure({ outbound: { mode: 'hosts', hosts: ['b.example.com'] } });
+    expect(f.container.destroy).not.toHaveBeenCalled();
+    expect(f.container.interceptOutboundHttps).toHaveBeenLastCalledWith('*', {
+      outbound: { mode: 'hosts', hosts: ['b.example.com'] },
+    });
+    await f.controller.configure({ outbound: { mode: 'full' } });
+    expect(f.container.destroy).toHaveBeenCalled();
   });
   it('validates new options and rejects removed SDK options', async () => {
     const f = service();

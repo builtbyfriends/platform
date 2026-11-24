@@ -230,7 +230,7 @@ try {
         if (useVitePlus) {
           assert.equal(
             manifest.devDependencies['vite-plus'],
-            `^${vitePlusVersion}`,
+            vitePlusVersion,
             'Vite+ init must match the tested workspace toolchain',
           );
           assert.equal(

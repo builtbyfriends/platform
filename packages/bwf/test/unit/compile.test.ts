@@ -634,7 +634,7 @@ describe('compileWorkerEntry', () => {
 
     // Decision: BwfPlatformSandbox carries the metering and gate hooks, so user subclasses inherit them.
     expect(code).toContain(
-      'import { BwfPlatformSandbox as __PlatformSandbox, __setSandboxBindingName } from "@builtbyfriends/bwf/sandbox"',
+      'import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, __setSandboxBindingName } from "@builtbyfriends/bwf/sandbox"',
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
     expect(code).toContain('export { __PlatformSandbox as SandboxV1 };');
@@ -655,7 +655,7 @@ describe('compileWorkerEntry', () => {
     });
 
     expect(code).toContain(
-      'import { BwfPlatformSandbox as __PlatformSandbox, __setSandboxBindingName } from "@builtbyfriends/bwf/sandbox"',
+      'import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, __setSandboxBindingName } from "@builtbyfriends/bwf/sandbox"',
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
     expect(code).toContain('export class CodeSandbox extends __PlatformSandbox {}');
@@ -674,7 +674,7 @@ describe('compileWorkerEntry', () => {
     });
 
     expect(code).toContain(
-      'import { BwfPlatformSandbox as __PlatformSandbox, __setSandboxBindingName } from "/abs/path/to/sandbox.mjs"',
+      'import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, __setSandboxBindingName } from "/abs/path/to/sandbox.mjs"',
     );
   });
 

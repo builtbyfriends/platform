@@ -9,13 +9,16 @@ import {
 } from './sandbox-container.ts';
 import type {
   SandboxCapability,
+  SandboxOutbound,
+  SandboxSecret,
   SandboxOptions,
   SandboxExecOptions,
   SandboxProcessWire,
 } from './sandbox-container.ts';
 
 export * from '@cloudflare/sandbox';
-export type { SandboxOptions, SandboxExecOptions };
+export type { SandboxOptions, SandboxExecOptions, SandboxOutbound, SandboxSecret };
+export { SandboxOutboundHandler } from './sandbox-container.ts';
 export const DEFAULT_SANDBOX_ID = 'default';
 export const DEFAULT_SANDBOX_BINDING = 'SANDBOX';
 export const SANDBOX_SERVICE_BINDING = '__PLATFORM_SANDBOX';

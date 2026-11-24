@@ -61,6 +61,26 @@ On native Cloudflare deployments, `sandbox.fetch()` also supports WebSocket upgr
 
 `getSandbox()` options include `inactivityTimeoutMs` (default ten minutes, maximum six hours), `enableInternet` (default `false`), and string `labels`. Internet access and labels take effect on the next container start. `binding` selects a custom native binding; managed platforms use the configured binding.
 
+### Network rules and secrets
+
+Use `outbound` instead of `enableInternet` when a sandbox should reach only some hosts, or call an API with a key that code in the sandbox can't read:
+
+```ts
+const sandbox = await getSandbox(`task-${task.id}`, {
+  outbound: {
+    mode: 'hosts',
+    hosts: ['registry.npmjs.org', '*.github.com'],
+    secrets: [{ hosts: ['api.example.com'], header: 'authorization', value: `Bearer ${apiKey}` }],
+  },
+});
+```
+
+`mode` is `full` (any host), `hosts` (only the listed hosts) or `none`. A host is a lower-case name, or a pattern like `*.example.com` for its subdomains. Each secret's header is added to HTTPS requests for its hosts, outside the container, and those hosts are reachable in every mode. A plain HTTP request to a secret's host is refused.
+
+The rules cover HTTP on port 80 and HTTPS on port 443. With `full`, other ports reach the internet directly; with `hosts` or `none`, they're closed. The sandbox trusts the certificate that the HTTPS rules need when it starts. Node.js doesn't read the system bundle, so set `NODE_EXTRA_CA_CERTS=/etc/cloudflare/certs/cloudflare-containers-ca.crt` in a command's `env` for Node programs.
+
+Calling `getSandbox()` with new hosts or secrets applies them to a running sandbox. A change between `full` and the other modes takes effect on the next container start. On native Cloudflare deployments, bwf exports the handler these rules need from your Worker; a custom Sandbox Durable Object needs `export { SandboxOutboundHandler } from '@builtbyfriends/bwf/sandbox'` in its Worker.
+
 For code that runs on both deployment targets, use `getSandbox()`. Direct access through `c.env.SANDBOX` is available only on local and native Cloudflare deployments.
 
 ## Usage limits

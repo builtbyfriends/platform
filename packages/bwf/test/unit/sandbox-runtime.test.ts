@@ -6,7 +6,11 @@ vi.mock('@cloudflare/sandbox', () => ({
   S3Mount: class {},
   S3Gateway: class {},
 }));
-vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, RpcTarget: class {} }));
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {},
+  RpcTarget: class {},
+  WorkerEntrypoint: class {},
+}));
 import { envContext } from '../../src/runtime/env-raw.ts';
 import { UsageLimit } from '../../src/runtime/limits.ts';
 import {

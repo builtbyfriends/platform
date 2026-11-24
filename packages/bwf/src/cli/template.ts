@@ -44,7 +44,8 @@ type ScaffoldVitePlusDevDependencies = {
  */
 export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: ScaffoldVitePlusDevDependencies = {
   vite: vitePlusManifest.dependencies.vite,
-  'vite-plus': `^${vitePlusManifest.version}`,
+  // Decision: Exact, like the core beside it. A caret let vite-plus 1.8.0 install next to the 1.7.0 core, and it refuses to build.
+  'vite-plus': vitePlusManifest.version,
 };
 
 export const SCAFFOLD_TOOLCHAIN_OPTIONS = [

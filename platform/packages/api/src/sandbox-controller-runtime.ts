@@ -3,6 +3,8 @@ import type { SandboxOptions, SandboxInstance } from '@builtbyfriends/bwf/_sandb
 import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 import { getSandboxShim } from './sandbox-shim.ts';
 
+export { SandboxOutboundHandler } from '@builtbyfriends/bwf/_sandbox-container';
+
 type Admission = { ok: true } | { ok: false; reason: string };
 type Control = {
   reserve(instanceId: string, generation: string): Promise<Admission>;
