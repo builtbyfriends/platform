@@ -7,6 +7,7 @@ import {
 import type { ApiEnv } from '../env.ts';
 import {
   APP_INSTALL_STATE_TTL_MS,
+  appInstallationAuthorizeUrl,
   getInstallationDetails,
   isReturnUrl,
   listInstallationRepositoryPage,
@@ -55,6 +56,9 @@ export async function githubAppOp(
   }
 
   if (op === 'install-url') {
+    if (!env.GITHUB_APP_CLIENT_ID || !env.GITHUB_APP_CLIENT_SECRET) {
+      return fail(503, 'GitHub App user authorization is not configured on this platform');
+    }
     const returnUrl = body?.returnUrl;
     if (typeof returnUrl !== 'string' || !isReturnUrl(returnUrl)) {
       return fail(400, 'returnUrl must be an https URL');
@@ -73,7 +77,7 @@ export async function githubAppOp(
     return {
       status: 200,
       body: {
-        url: `https://github.com/apps/${slug}/installations/new?state=${encodeURIComponent(state)}`,
+        url: appInstallationAuthorizeUrl(env.GITHUB_APP_CLIENT_ID, state),
         state,
       },
     };

@@ -25,14 +25,19 @@ call. The app never holds the key or a long-lived token.
   app's own id for the space (`[A-Za-z0-9_:.-]{1,128}`). It's never shared between projects.
 - The app's backend calls `POST /github/app` on the proxy with `op` and `scope`. The proxy
   passes it to `POST /internal/github-app/:projectId` with its internal credential:
-  - `install-url` (`returnUrl`): a signed state and the App's install link.
+  - `install-url` (`returnUrl`): a signed state and the App's GitHub authorization link.
   - `describe` (`state` optional): the installation's account, repo selection and
     permissions, and whether it was connected under that state.
   - `repositories` (`page`): 30 repos a page.
   - `disconnect`: deletes the row. The App stays installed on GitHub.
-- GitHub sends the person to `GET /github-app/callback`. It checks the state (HMAC with
+- GitHub authorization opens an account chooser at `GET /github-app/callback`. The person
+  chooses an accessible installation, or installs the App on another account. Existing
+  installations don't need to return through GitHub's Configure page, which drops the state.
+- The selected account is confirmed with fresh GitHub authorization. The callback checks the state (HMAC with
   `JWT_SECRET`, `purpose: 'github-app'`, 30 minutes) and proves, with the person's own GitHub
-  token from the install's `code`, that they can reach the installation. Then it stores the
+  token from the authorization `code`, that they can reach the installation. A signed choice
+  expires after five minutes and must be completed by the same GitHub person who chose it.
+  The original connection state remains valid for thirty minutes. Then it stores the
   row with the state's nonce and sends the person back to `returnUrl` with `state` and
   `bound=1`, or `error`.
 - `POST /github/request` with `scope` uses that installation's token and skips the stored
