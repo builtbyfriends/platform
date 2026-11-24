@@ -1,5 +1,7 @@
 # Connected app runtime inspection — 2026-11-24
 
+This is the initial publication receipt. The [later API-key redaction patch](./runtime-redaction-deploy-2026-11-24.md) records the current API version.
+
 The installed API at `https://platform.buildwithfriends.dev` was patched to support read-only resource lists, file metadata, database table previews, and app activity through the connected application's credentials. The patch also backports group grants so a connected app can act for a team and record the acting person.
 
 | Item                    | Verified value                                                     |
