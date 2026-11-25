@@ -16,6 +16,7 @@ type Column = {
   notNull: boolean;
   primaryKey: number;
   redacted: boolean;
+  generated: boolean;
 };
 const text = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
@@ -109,6 +110,7 @@ async function columns(query: Query, table: string) {
       notNull: row.notnull === 1,
       primaryKey: Number(row.pk),
       redacted: secretColumn.test(row.name),
+      generated: row.hidden === 2 || row.hidden === 3,
     });
   }
   if (!values.length) {
@@ -125,7 +127,9 @@ export async function databaseSchema(
   return {
     kind: 'table-schema' as const,
     table,
-    columns: await columns(databaseQuery(env, project, resource), table),
+    columns: (await columns(databaseQuery(env, project, resource), table)).map(
+      ({ generated: _generated, ...column }) => column,
+    ),
   };
 }
 export async function databaseIndexes(
@@ -553,7 +557,7 @@ const unavailableCell = () => ({
   reason:
     'This row or table changed, or its reference expired. Refresh the table and open the value again.',
 });
-export async function databaseCell(
+async function cellContext(
   env: ApiEnv['Bindings'],
   project: Project,
   resource: Resource,
@@ -561,7 +565,7 @@ export async function databaseCell(
 ) {
   const parts = input.rowToken.split('.');
   if (parts.length !== 2 || !parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) {
-    return unavailableCell();
+    return null;
   }
   const signature = decode(parts[1]);
   const expected = await signRow(env, project, resource, parts[0]);
@@ -570,7 +574,7 @@ export async function databaseCell(
     signature.length !== expected.length ||
     signature.reduce((difference, byte, index) => difference | (byte ^ expected[index]), 0) !== 0
   ) {
-    return unavailableCell();
+    return null;
   }
   const payload: unknown = JSON.parse(
     new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(decode(parts[0])),
@@ -583,7 +587,7 @@ export async function databaseCell(
     payload.expires < Date.now() ||
     payload.expires > Date.now() + 900_000
   ) {
-    return unavailableCell();
+    return null;
   }
   const query = databaseQuery(env, project, resource);
   const schema = await columns(query, input.table);
@@ -598,19 +602,35 @@ export async function databaseCell(
     primary.some((entry) => entry.redacted) ||
     payload.schema !== (await schemaHash(schema))
   ) {
-    return unavailableCell();
+    return null;
   }
-  const params = key.map((entry) =>
-    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-      Uint8Array.from(entry[1].match(/../g) ?? [], (byte) => Number.parseInt(byte, 16)),
-    ),
-  );
+  const params = key.flatMap(([kind, hex]) => [kind, hex]);
   const where = primary
     .map(
-      (entry, index) =>
-        `${quote(entry.name)} = ${key[index][0] === 'integer' ? 'CAST(? AS INTEGER)' : '?'}`,
+      (entry) => `typeof(${quote(entry.name)}) = ? AND hex(CAST(${quote(entry.name)} AS BLOB)) = ?`,
     )
     .join(' AND ');
+  const rowId = encode(
+    await signRow(
+      env,
+      project,
+      resource,
+      JSON.stringify(['row-id', input.table, payload.schema, key]),
+    ),
+  );
+  return { query, schema, column, params, where, rowId, fingerprint: payload.schema };
+}
+export async function databaseCell(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+  input: { table: string; column: string; rowToken: string },
+) {
+  const context = await cellContext(env, project, resource, input);
+  if (!context) {
+    return unavailableCell();
+  }
+  const { query, schema, column, params, where, rowId, fingerprint } = context;
   const result = await query(
     `SELECT ${cellSelection([column], 65_536)} AS cells FROM ${quote(input.table)} WHERE ${where} LIMIT 2`,
     params,
@@ -627,11 +647,20 @@ export async function databaseCell(
   if (cell.type === 'protected' || cell.totalBytes === null) {
     return unavailableCell();
   }
-  if ((await schemaHash(await columns(query, input.table))) !== payload.schema) {
+  if ((await schemaHash(await columns(query, input.table))) !== fingerprint) {
     return unavailableCell();
   }
+  const safety =
+    cell.type === 'text' && !cell.truncated
+      ? await cellWriteSafety(query, input.table, column, schema).catch(() =>
+          readonlyCell('Editing is unavailable for this table.'),
+        )
+      : { reason: 'Only complete text values can be edited here.' };
   return {
     kind: 'cell' as const,
+    rowId,
+    editable: 'revision' in safety,
+    ...('reason' in safety && { reason: safety.reason }),
     table: input.table,
     column: input.column,
     rowToken: input.rowToken,
@@ -641,4 +670,205 @@ export async function databaseCell(
     truncated: cell.truncated,
     checkedAt: Date.now(),
   };
+}
+
+export function validCellText(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= 65_536 &&
+    !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value) &&
+    new TextEncoder().encode(value).length <= 65_536
+  );
+}
+const readonlyCell = (reason: string) => ({ reason });
+// Decision: D1 forbids schema_version; an exact catalog snapshot fences table, index, trigger and relationship changes inside the write.
+const schemaRevision = `(SELECT CASE WHEN count(*) <= 256 AND coalesce(sum(length(CAST(coalesce(sql, '') AS BLOB)) + length(CAST(name AS BLOB)) + length(CAST(tbl_name AS BLOB))), 0) <= 131072
+  THEN (SELECT json_group_array(json_array(type, name, tbl_name, sql)) FROM (SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name LIMIT 257))
+  ELSE NULL END FROM (SELECT name, tbl_name, sql FROM sqlite_schema LIMIT 257))`;
+async function cellWriteSafety(query: Query, table: string, column: Column, schema: Array<Column>) {
+  if (column.primaryKey || column.redacted || column.generated) {
+    return readonlyCell('Primary keys, protected fields and calculated fields are read-only.');
+  }
+  if (
+    /INT/i.test(column.type) ||
+    (column.type !== '' && !/CHAR|CLOB|TEXT|BLOB/i.test(column.type))
+  ) {
+    return readonlyCell('This field can convert text into numbers. Edit it through your app.');
+  }
+  const snapshot = await query(
+    `SELECT
+      ${schemaRevision} AS revision,
+      (SELECT type FROM pragma_table_list WHERE schema = 'main' AND name = ?1 COLLATE BINARY) AS kind,
+      (SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?1 COLLATE NOCASE) AS triggers,
+      (SELECT json_group_array(json_object('name', name, 'type', type, 'notNull', "notnull", 'pk', pk, 'hidden', hidden)) FROM pragma_table_xinfo(?1)) AS columns,
+      (SELECT json_group_array(json_object('partial', l.partial, 'keys', json((SELECT json_group_array(json_object('name', name, 'cid', cid)) FROM (SELECT name, cid FROM pragma_index_xinfo(l.name) WHERE key = 1 LIMIT 101))))) FROM (SELECT name, partial FROM pragma_index_list(?1) WHERE "unique" = 1 LIMIT 101) AS l) AS indexes,
+      (SELECT json_group_array(json_object('from', f."from")) FROM (SELECT "from" FROM pragma_foreign_key_list(?1) LIMIT 101) AS f) AS outgoing,
+      (SELECT json_group_array(json_object('to', f."to")) FROM (SELECT fk."to" FROM sqlite_schema AS s JOIN pragma_foreign_key_list(s.name) AS fk WHERE s.type = 'table' AND fk."table" = ?1 COLLATE NOCASE LIMIT 101) AS f) AS incoming`,
+    [table],
+  );
+  if (
+    !Array.isArray(snapshot.results) ||
+    snapshot.results.length !== 1 ||
+    !isRecord(snapshot.results[0])
+  ) {
+    throw Error('Invalid database safety metadata.');
+  }
+  const row = snapshot.results[0];
+  if (
+    typeof row.revision !== 'string' ||
+    new TextEncoder().encode(row.revision).length > 200_000 ||
+    row.kind !== 'table' ||
+    !Number.isSafeInteger(row.triggers) ||
+    Number(row.triggers) < 0
+  ) {
+    return readonlyCell('This table cannot be edited here.');
+  }
+  if (row.triggers !== 0) {
+    return readonlyCell('This table has automatic actions. Edit it through your app.');
+  }
+  const metadata = (name: string): Array<unknown> => {
+    const value = row[name];
+    if (typeof value !== 'string' || value.length > 200_000) {
+      throw Error('Invalid database safety metadata.');
+    }
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length > 100) {
+      throw Error('Database safety metadata exceeds this view.');
+    }
+    return parsed;
+  };
+  const current = metadata('columns');
+  if (
+    current.length !== schema.length ||
+    !current.every((value, index) => {
+      const entry = schema[index];
+      return (
+        isRecord(value) &&
+        value.name === entry.name &&
+        value.type === entry.type &&
+        value.notNull === Number(entry.notNull) &&
+        value.pk === entry.primaryKey &&
+        (entry.generated ? value.hidden === 2 || value.hidden === 3 : value.hidden === 0)
+      );
+    })
+  ) {
+    return readonlyCell('The table structure changed. Refresh before editing.');
+  }
+  for (const index of metadata('indexes')) {
+    if (
+      !isRecord(index) ||
+      (index.partial !== 0 && index.partial !== 1) ||
+      !Array.isArray(index.keys) ||
+      index.keys.length === 0 ||
+      index.keys.length > 100
+    ) {
+      throw Error('Invalid unique-key metadata.');
+    }
+    if (index.partial) {
+      return readonlyCell('This table has a conditional unique key. Edit it through your app.');
+    }
+    for (const key of index.keys) {
+      if (!isRecord(key) || !Number.isSafeInteger(key.cid)) {
+        throw Error('Invalid unique-key metadata.');
+      }
+      const member = schema.find((entry) => entry.name === key.name);
+      if (Number(key.cid) < 0 || !member || member.generated) {
+        return readonlyCell('This table has a calculated unique key. Edit it through your app.');
+      }
+      if (member.name === column.name) {
+        return readonlyCell('This field is part of a unique key. Edit it through your app.');
+      }
+    }
+  }
+  for (const foreign of metadata('outgoing')) {
+    if (!isRecord(foreign) || typeof foreign.from !== 'string') {
+      throw Error('Invalid relationship metadata.');
+    }
+    if (foreign.from.toLowerCase() === column.name.toLowerCase()) {
+      return readonlyCell('This field links records. Edit it through your app.');
+    }
+  }
+  for (const foreign of metadata('incoming')) {
+    if (!isRecord(foreign) || (foreign.to !== null && typeof foreign.to !== 'string')) {
+      throw Error('Invalid relationship metadata.');
+    }
+    if (typeof foreign.to === 'string') {
+      const referencedName = foreign.to.toLowerCase();
+      const member = schema.find((entry) => entry.name.toLowerCase() === referencedName);
+      if (!member || member.generated || member.name === column.name) {
+        return readonlyCell('Other records depend on this field. Edit it through your app.');
+      }
+    }
+  }
+  return { revision: String(row.revision) };
+}
+export async function databaseCellSave(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+  input: { table: string; column: string; rowToken: string; expectedText: string; text: string },
+  stillAuthorized: () => Promise<boolean>,
+) {
+  const unavailable = (reason: string) => ({ kind: 'unavailable' as const, reason });
+  if (!validCellText(input.text) || !validCellText(input.expectedText)) {
+    return unavailable('Use valid text of up to 64 KB.');
+  }
+  const context = await cellContext(env, project, resource, input);
+  if (!context) {
+    return unavailableCell();
+  }
+  const { query, schema, column, params, where, rowId } = context;
+  const safety = await cellWriteSafety(query, input.table, column, schema);
+  if ('reason' in safety) {
+    return unavailable(safety.reason);
+  }
+  if (!(await stillAuthorized())) {
+    return unavailable('This resource changed. Refresh before editing.');
+  }
+  // Decision: One statement fences schema changes and compares exact text bytes; unique/FK/trigger eligibility prevents indirect row changes.
+  try {
+    const result = await query(
+      `UPDATE ${quote(input.table)} SET ${quote(input.column)} = ? WHERE ${where}
+       AND typeof(${quote(input.column)}) = 'text' AND CAST(${quote(input.column)} AS BLOB) = CAST(? AS BLOB)
+       AND CAST(${schemaRevision} AS BLOB) = CAST(? AS BLOB)
+       AND NOT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? COLLATE NOCASE)
+       RETURNING ${cellSelection([column], 65_536)} AS cells`,
+      [input.text, ...params, input.expectedText, safety.revision, input.table],
+    );
+    if (!Array.isArray(result.results)) {
+      throw Error('Invalid save result.');
+    }
+    if (result.results.length === 0) {
+      return {
+        kind: 'conflict' as const,
+        reason: 'The value or table changed. Read the latest value before saving again.',
+      };
+    }
+    if (
+      result.results.length !== 1 ||
+      !isRecord(result.results[0]) ||
+      typeof result.results[0].cells !== 'string'
+    ) {
+      throw Error('Invalid save result.');
+    }
+    const cell = parseCells(result.results[0].cells, 1, true)[0];
+    if (cell.type !== 'text' || cell.truncated || cell.text !== input.text) {
+      throw Error('Unexpected saved value.');
+    }
+    return {
+      kind: 'cell-saved' as const,
+      table: input.table,
+      column: input.column,
+      rowToken: input.rowToken,
+      rowId,
+      text: cell.text,
+      checkedAt: Date.now(),
+    };
+  } catch {
+    return {
+      kind: 'unknown' as const,
+      reason:
+        'The save could not be confirmed. Read the latest value before making another change.',
+    };
+  }
 }
