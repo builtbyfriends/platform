@@ -703,6 +703,13 @@ describe('database structure and server queries', () => {
       action: 'database.schema',
       input: { table },
     });
+  const indexes = (table = 'items') =>
+    call('resources.execute', {
+      project: project.id,
+      resourceId: 'res_database',
+      action: 'database.indexes',
+      input: { table },
+    });
   beforeEach(() => {
     sqlite = new DatabaseSync(':memory:');
     sqlite.exec(
@@ -736,6 +743,16 @@ describe('database structure and server queries', () => {
             browseCapabilities: { filterOperators: ['equals', 'contains', 'is-null'], sort: true },
             actions: [
               {
+                id: 'database.indexes',
+                label: 'View indexes',
+                effect: 'read',
+                fields: [
+                  { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
+                ],
+                view: { scope: 'table', label: 'Indexes' },
+                result: 'records',
+              },
+              {
                 id: 'database.schema',
                 label: 'View structure',
                 effect: 'read',
@@ -753,7 +770,194 @@ describe('database structure and server queries', () => {
     const result = await payload(call('projects.resources', { project: project.id }));
     expect(JSON.stringify(result)).not.toContain('browseCapabilities');
     expect(JSON.stringify(result)).not.toContain('database.schema');
+    expect(JSON.stringify(result)).not.toContain('database.indexes');
   });
+  it('returns bounded records for actual SQLite indexes without definition SQL or protected names', async () => {
+    sqlite.exec(`
+      CREATE UNIQUE INDEX named_unique ON items(name);
+      CREATE INDEX composite_index ON items(category, quantity DESC);
+      CREATE INDEX expression_index ON items(lower(name));
+      CREATE INDEX partial_index ON items(category) WHERE api_key = 'private-condition';
+      CREATE INDEX protected_columns ON items(api_key);
+      CREATE INDEX api_key_private_index ON items(api_key);
+    `);
+    const result = await payload(indexes());
+    expect(result).toMatchObject({
+      data: {
+        appId: project.id,
+        resourceId: 'res_database',
+        action: 'database.indexes',
+        kind: 'records',
+        table: 'items',
+        checkedAt: expect.any(Number),
+        columns: [
+          { id: 'name', label: 'Index' },
+          { id: 'unique', label: 'Unique' },
+          { id: 'columns', label: 'Columns' },
+          { id: 'origin', label: 'Created by' },
+          { id: 'coverage', label: 'Coverage' },
+        ],
+        rows: [
+          {
+            id: 'composite_index',
+            cells: [
+              'composite_index',
+              false,
+              'category, quantity DESC',
+              'Created index',
+              'Full table',
+            ],
+          },
+          {
+            id: 'expression_index',
+            cells: [
+              'expression_index',
+              false,
+              'Expression (not shown)',
+              'Created index',
+              'Full table',
+            ],
+          },
+          {
+            id: 'named_unique',
+            cells: ['named_unique', true, 'name', 'Created index', 'Full table'],
+          },
+          {
+            id: 'partial_index',
+            cells: [
+              'partial_index',
+              false,
+              'category',
+              'Created index',
+              'Partial (condition not shown)',
+            ],
+          },
+          {
+            id: 'protected_columns',
+            cells: ['protected_columns', false, '[protected]', 'Created index', 'Full table'],
+          },
+        ],
+        truncated: true,
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /api_key|private-condition|lower\(name\)|CREATE INDEX/,
+    );
+    expect(queries).toHaveLength(4);
+    expect(queries.at(-1)?.params).toEqual(['items']);
+    expect(queries.every(({ sql }) => /^(SELECT|PRAGMA)/.test(sql))).toBe(true);
+  });
+  it('keeps automatic constraints, reports empty results, and handles quoted table names', async () => {
+    expect(await payload(indexes())).toMatchObject({ data: { rows: [], truncated: false } });
+    sqlite.exec('CREATE TABLE "quoted""table" (name TEXT UNIQUE);');
+    expect(await payload(indexes('quoted"table'))).toMatchObject({
+      data: {
+        table: 'quoted"table',
+        rows: [
+          {
+            id: 'sqlite_autoindex_quoted"table_1',
+            cells: [
+              'sqlite_autoindex_quoted"table_1',
+              true,
+              'name',
+              'Unique constraint',
+              'Full table',
+            ],
+          },
+        ],
+        truncated: false,
+      },
+    });
+    expect(queries.at(-1)?.params).toEqual(['quoted"table']);
+  });
+  it('caps index results at100 with a truthful truncated marker', async () => {
+    for (let i = 0; i < 102; i++) {
+      sqlite.exec(`CREATE INDEX idx_${i} ON items(name)`);
+    }
+    const result = await payload(indexes());
+    if (!isRecord(result) || !isRecord(result.data)) {
+      throw Error('Missing index result');
+    }
+    expect(result.data.rows).toHaveLength(100);
+    expect(result.data.truncated).toBe(true);
+  });
+  it('bounds long and repeated index keys without claiming complete metadata', async () => {
+    const column = 'x'.repeat(190);
+    sqlite.exec(
+      `CREATE TABLE wide ("${column}" TEXT); CREATE INDEX wide_index ON wide (${Array.from({ length: 101 }, () => `"${column}"`).join(',')})`,
+    );
+    const result = await payload(indexes('wide'));
+    if (!isRecord(result) || !isRecord(result.data) || !Array.isArray(result.data.rows)) {
+      throw Error('Missing index result');
+    }
+    const row: unknown = result.data.rows[0];
+    if (!isRecord(row) || !Array.isArray(row.cells) || typeof row.cells[2] !== 'string') {
+      throw Error('Missing index cells');
+    }
+    expect(row.cells[2]).toHaveLength(4096);
+    expect(result.data.truncated).toBe(true);
+  });
+  it.each(['sqlite_schema', '_void_migrations', 'missing', 'items"; DROP TABLE items;--'])(
+    'does not inspect forbidden or unowned table %s',
+    async (table) => {
+      expect(await payload(indexes(table))).toMatchObject({ data: { kind: 'unavailable' } });
+      expect(queries.some(({ sql }) => sql.includes('pragma_index_list'))).toBe(false);
+    },
+  );
+  it('refuses shadow tables and invalid index metadata instead of claiming an empty result', async () => {
+    sqlite.exec('CREATE VIRTUAL TABLE search USING fts5(content)');
+    expect(await payload(indexes('search_data'))).toMatchObject({ data: { kind: 'unavailable' } });
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return Response.json({
+        results: body.sql.includes('pragma_index_list')
+          ? [{ name: 'broken' }]
+          : sqlite.prepare(body.sql).all(...body.params),
+      });
+    });
+    expect(await payload(indexes())).toMatchObject({ data: { kind: 'unavailable' } });
+  });
+  it('keeps indexes behind owner and changing-resource fences', async () => {
+    expect(
+      (
+        await call('resources.execute', {
+          project: project.id,
+          resourceId: 'res_database',
+          action: 'database.indexes',
+          input: { table: 'items' },
+          owner: { person: 'someone-else' },
+        })
+      ).status,
+    ).toBe(404);
+    expect(proxy).not.toHaveBeenCalled();
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.sql.includes('pragma_index_list')) {
+        await env.db
+          .update(resources)
+          .set({ cf_id: 'changed-db' })
+          .where(eq(resources.id, 'res_database'));
+      }
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+    expect((await indexes()).status).toBe(409);
+  });
+  it.each([{}, { table: '' }, { table: 'items', sql: 'DROP TABLE items' }])(
+    'rejects invalid index input %j',
+    async (input) => {
+      expect(
+        (
+          await call('resources.execute', {
+            project: project.id,
+            resourceId: 'res_database',
+            action: 'database.indexes',
+            input,
+          })
+        ).status,
+      ).toBe(400);
+      expect(proxy).not.toHaveBeenCalled();
+    },
+  );
   it('returns declared structure and generated columns without defaults or credential values', async () => {
     const result = await payload(schema());
     expect(result).toMatchObject({

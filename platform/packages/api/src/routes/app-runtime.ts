@@ -383,7 +383,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
               ? 'The save could not be confirmed. Open the file again to check the result.'
               : body.action === 'queue.status'
                 ? 'Could not verify queue status. Refresh and try again.'
-                : body.action === 'database.schema'
+                : body.action === 'database.schema' || body.action === 'database.indexes'
                   ? 'Could not read this table structure. Refresh the table list and try again.'
                   : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },

@@ -128,6 +128,121 @@ export async function databaseSchema(
     columns: await columns(databaseQuery(env, project, resource), table),
   };
 }
+export async function databaseIndexes(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+  table: string,
+) {
+  const query = databaseQuery(env, project, resource);
+  const schema = await columns(query, table);
+  const listing = await query('PRAGMA table_list');
+  if (
+    !Array.isArray(listing.results) ||
+    !listing.results.some(
+      (row: unknown) =>
+        isRecord(row) && row.schema === 'main' && row.name === table && row.type === 'table',
+    )
+  ) {
+    throw new OperatorError(400, 'Choose a customer table from this database.');
+  }
+  // Decision: Table-valued PRAGMAs keep metadata reads bounded without one network request per index; no definition SQL or expression text is selected.
+  const result = await query(
+    `SELECT l.name, l."unique", l.origin, l.partial,
+      (SELECT json_group_array(json_object('name', k.name, 'cid', k.cid, 'desc', k.desc))
+       FROM (SELECT name, cid, desc FROM pragma_index_xinfo(l.name) WHERE key = 1 ORDER BY seqno LIMIT 101) AS k) AS keys
+     FROM pragma_index_list(?) AS l ORDER BY l.name LIMIT 101`,
+    [table],
+  );
+  if (!Array.isArray(result.results) || result.results.length > 101) {
+    throw Error('Invalid index metadata.');
+  }
+  let truncated = result.results.length > 100;
+  const rows: Array<{ id: string; cells: Array<string | boolean> }> = [];
+  for (const row of result.results.slice(0, 100)) {
+    if (
+      !isRecord(row) ||
+      !text(row.name) ||
+      (row.unique !== 0 && row.unique !== 1) ||
+      (row.partial !== 0 && row.partial !== 1) ||
+      !['c', 'u', 'pk'].includes(String(row.origin)) ||
+      typeof row.keys !== 'string' ||
+      row.keys.length > 65_536
+    ) {
+      throw Error('Invalid index metadata.');
+    }
+    if (secretColumn.test(row.name)) {
+      truncated = true;
+      continue;
+    }
+    const keys: unknown = JSON.parse(row.keys);
+    if (!Array.isArray(keys) || !keys.length || keys.length > 101) {
+      throw Error('Invalid index columns.');
+    }
+    if (keys.length > 100) {
+      truncated = true;
+    }
+    const names = keys.slice(0, 100).map((key: unknown) => {
+      if (
+        !isRecord(key) ||
+        !Number.isSafeInteger(key.cid) ||
+        Number(key.cid) < -2 ||
+        (key.desc !== 0 && key.desc !== 1)
+      ) {
+        throw Error('Invalid index column.');
+      }
+      if (key.cid === -2 && key.name === null) {
+        return 'Expression (not shown)';
+      }
+      if (key.cid === -1 && key.name === null) {
+        return 'Row ID';
+      }
+      if (Number(key.cid) < 0) {
+        throw Error('Invalid index column.');
+      }
+      const column = schema.find((entry) => entry.name === key.name);
+      if (!column) {
+        throw Error('Index column is not in this table.');
+      }
+      return column.redacted ? '[protected]' : `${column.name}${key.desc === 1 ? ' DESC' : ''}`;
+    });
+    const joined = names.join(', ');
+    if (joined.length > 4096) {
+      truncated = true;
+    }
+    rows.push({
+      id: row.name,
+      cells: [
+        row.name,
+        row.unique === 1,
+        joined.length > 4096 ? `${joined.slice(0, 4095)}…` : joined,
+        row.origin === 'c'
+          ? 'Created index'
+          : row.origin === 'u'
+            ? 'Unique constraint'
+            : 'Primary key',
+        row.partial === 1 ? 'Partial (condition not shown)' : 'Full table',
+      ],
+    });
+  }
+  if (new Set(rows.map((row) => row.id)).size !== rows.length) {
+    throw Error('Duplicate index metadata.');
+  }
+  return {
+    kind: 'records' as const,
+    table,
+    checkedAt: Date.now(),
+    columns: [
+      { id: 'name', label: 'Index' },
+      { id: 'unique', label: 'Unique' },
+      { id: 'columns', label: 'Columns' },
+      { id: 'origin', label: 'Created by' },
+      { id: 'coverage', label: 'Coverage' },
+    ],
+    rows,
+    truncated,
+  };
+}
 async function stableOrder(query: Query, table: string, schema: Array<Column>) {
   const result = await query('PRAGMA table_list');
   if (!Array.isArray(result.results)) {

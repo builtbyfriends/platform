@@ -2,7 +2,7 @@ import { isRecord } from '@builtbyfriends/deploy-core';
 import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
-import { databaseSchema } from './app-runtime-database.ts';
+import { databaseIndexes, databaseSchema } from './app-runtime-database.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
 
 const maxText = 65_536;
@@ -24,7 +24,15 @@ type Action = {
   label: string;
   effect: 'read' | 'write';
   fields: Array<Field>;
-  result: 'file-text' | 'file-saved' | 'keys' | 'key-value' | 'table-schema' | 'queue-status';
+  view?: { scope: 'table'; label: string };
+  result:
+    | 'file-text'
+    | 'file-saved'
+    | 'keys'
+    | 'key-value'
+    | 'table-schema'
+    | 'queue-status'
+    | 'records';
 };
 const key: Field = { name: 'key', label: 'Key', type: 'text', required: true, maxLength: 1024 };
 type ActionCatalog = {
@@ -59,6 +67,14 @@ const actions: ActionCatalog = {
     })),
   ],
   d1: [
+    {
+      id: 'database.indexes',
+      label: 'View indexes',
+      effect: 'read',
+      fields: [{ name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 }],
+      view: { scope: 'table', label: 'Indexes' },
+      result: 'records',
+    },
     {
       id: 'database.schema',
       label: 'View structure',
@@ -340,11 +356,12 @@ export async function executeResourceAction(
   if (!env.PLATFORM_PROXY) {
     return unavailable('This action is not available for this resource.');
   }
-  if (action === 'database.schema') {
+  if (action === 'database.schema' || action === 'database.indexes') {
     if (!input.table) {
       return unavailable('Choose a table from this database.');
     }
-    return { ...identity, ...(await databaseSchema(env, project, resource, input.table)) };
+    const read = action === 'database.indexes' ? databaseIndexes : databaseSchema;
+    return { ...identity, ...(await read(env, project, resource, input.table)) };
   }
   const proxy = env.PLATFORM_PROXY;
   const token = await deriveProxyToken(env.JWT_SECRET, project.id, project.proxy_token_gen);
