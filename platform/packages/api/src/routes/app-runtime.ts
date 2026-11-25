@@ -8,9 +8,16 @@ import { isDevBypass } from '../env.ts';
 import type { ApiEnv } from '../env.ts';
 import { OperatorError } from '../operator/common.ts';
 import { deploymentLogs } from '../operator/deployment-operations.ts';
-import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { actionInput, executeResourceAction, resourceActions } from './app-runtime-actions.ts';
+import {
+  databaseBrowseCapabilities,
+  databaseInspect,
+  validDatabaseFilter,
+  validDatabaseSort,
+} from './app-runtime-database.ts';
+import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
+import { proxyRead } from './app-runtime-storage-read.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
 type ResolveProject = (
@@ -22,19 +29,7 @@ const text = (value: unknown, max = 200): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
 const optionalText = (value: unknown, max: number) =>
   value === undefined || (typeof value === 'string' && value.length <= max);
-const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
-const secretColumn =
-  /password|secret|token|credential|private.?key|verification.?code|api[_-]?key|access[_-]?key/i;
 const pageSize = 50;
-const managedTables = new Set([
-  '_void_migrations',
-  '_void_migration_attempts',
-  '_void_migration_fences',
-  '_void_migration_lock',
-  '_migrations',
-  '__drizzle_migrations',
-]);
-const customerTable = (name: string) => !managedTables.has(name.toLowerCase());
 function runtimeOwner(value: unknown): RuntimeOwner | null {
   if (!isRecord(value)) {
     return null;
@@ -48,77 +43,18 @@ function runtimeOwner(value: unknown): RuntimeOwner | null {
   return null;
 }
 
-async function proxyRead(
-  env: ApiEnv['Bindings'],
-  project: Project,
-  resource: Resource,
-  path: '/r2/list' | '/d1/query',
-  input: {
-    prefix?: string;
-    cursor?: string;
-    limit?: number;
-    sql?: string;
-    params?: Array<string | number>;
-    method?: 'all';
-  },
-) {
-  if (!env.PLATFORM_PROXY) {
-    throw new Error('Storage inspection is not connected on this installation.');
-  }
-  const response = await env.PLATFORM_PROXY.fetch(`https://proxy${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({
-      ...input,
-      projectId: project.id,
-      binding: resource.binding_name,
-      aiToken: await deriveProxyToken(env.JWT_SECRET, project.id, project.proxy_token_gen),
-    }),
-  });
-  if (!response.ok || !response.body) {
-    throw new Error('Could not read this resource. Try again.');
-  }
-  const reader = response.body.getReader();
-  const chunks: Array<Uint8Array> = [];
-  let size = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        break;
-      }
-      const value: unknown = chunk.value;
-      if (!(value instanceof Uint8Array)) {
-        throw new Error('Invalid response stream.');
-      }
-      size += value.length;
-      if (size > 512 * 1024) {
-        throw new Error('This page is too large to inspect.');
-      }
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel();
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
-  }
-  const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
-  if (!isRecord(value)) {
-    throw new Error('Invalid storage response.');
-  }
-  return value;
-}
-
 async function inspect(
   env: ApiEnv['Bindings'],
   project: Project,
   resource: Resource,
-  body: { prefix?: string; cursor?: string; table?: string; offset?: number },
+  body: {
+    prefix?: string;
+    cursor?: string;
+    table?: string;
+    offset?: number;
+    filter?: DatabaseFilter;
+    sort?: DatabaseSort;
+  },
 ) {
   const identity = { appId: project.id, resourceId: resource.id };
   if (!env.PLATFORM_PROXY) {
@@ -127,6 +63,9 @@ async function inspect(
       kind: 'unavailable' as const,
       reason: 'Storage inspection is not connected on this installation.',
     };
+  }
+  if (resource.type !== 'd1' && (body.filter || body.sort)) {
+    throw new OperatorError(400, 'Filtering and sorting require a database table.');
   }
   if (resource.type === 'r2') {
     const result = await proxyRead(env, project, resource, '/r2/list', {
@@ -167,80 +106,7 @@ async function inspect(
       reason: 'This resource does not support data browsing yet.',
     };
   }
-  const query = (sql: string, params: Array<string | number> = []) =>
-    proxyRead(env, project, resource, '/d1/query', { sql, params, method: 'all' });
-  const listed = await query(
-    "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' ORDER BY name LIMIT 200",
-  );
-  if (!Array.isArray(listed.results)) {
-    throw new Error('Invalid database response.');
-  }
-  const tables = listed.results
-    .map((row: unknown) => {
-      if (!isRecord(row) || !text(row.name)) {
-        throw new Error('Invalid table metadata.');
-      }
-      return row.name;
-    })
-    .filter(customerTable);
-  if (body.table === undefined) {
-    return { ...identity, kind: 'tables' as const, tables };
-  }
-  if (!customerTable(body.table) || !tables.includes(body.table)) {
-    throw new OperatorError(400, 'Choose a table from this database.');
-  }
-  const described = await query(`PRAGMA table_info(${quote(body.table)})`);
-  if (!Array.isArray(described.results) || described.results.length > 100) {
-    throw new Error('This table has too many columns to inspect.');
-  }
-  const columns = described.results.map((row: unknown) => {
-    if (!isRecord(row) || !text(row.name)) {
-      throw new Error('Invalid column metadata.');
-    }
-    return row.name;
-  });
-  if (!columns.length) {
-    throw new Error('No columns are available for this table.');
-  }
-  // Decision: Fixed read queries cap cell size and redact credential columns before rows leave the database.
-  const selection = columns
-    .map((column) =>
-      secretColumn.test(column)
-        ? `'[redacted]' AS ${quote(column)}`
-        : `CASE WHEN typeof(${quote(column)}) = 'blob' THEN '[binary]' WHEN typeof(${quote(column)}) = 'text' THEN substr(${quote(column)}, 1, 1000) ELSE ${quote(column)} END AS ${quote(column)}`,
-    )
-    .join(', ');
-  const result = await query(`SELECT ${selection} FROM ${quote(body.table)} LIMIT ? OFFSET ?`, [
-    pageSize + 1,
-    body.offset ?? 0,
-  ]);
-  if (!Array.isArray(result.results)) {
-    throw new Error('Invalid database rows.');
-  }
-  const rows = result.results.slice(0, pageSize).map((row: unknown) => {
-    if (!isRecord(row)) {
-      throw new Error('Invalid database row.');
-    }
-    return columns.map((column) => {
-      const cell = row[column];
-      return typeof cell === 'string'
-        ? cell.slice(0, 1000)
-        : (typeof cell === 'number' && Number.isFinite(cell)) || typeof cell === 'boolean'
-          ? cell
-          : null;
-    });
-  });
-  return {
-    ...identity,
-    kind: 'rows' as const,
-    table: body.table,
-    columns,
-    rows,
-    nextOffset:
-      result.results.length > pageSize && (body.offset ?? 0) < 10_000
-        ? (body.offset ?? 0) + pageSize
-        : null,
-  };
+  return { ...identity, ...(await databaseInspect(env, project, resource, body)) };
 }
 
 function logMessage(value: unknown): string {
@@ -347,6 +213,10 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                     : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
           actions: context.env.PLATFORM_PROXY ? resourceActions(resource) : [],
+          browseCapabilities:
+            resource.type === 'd1' && context.env.PLATFORM_PROXY
+              ? databaseBrowseCapabilities
+              : undefined,
         })),
       },
     });
@@ -359,6 +229,8 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       !optionalText(body.prefix, 1024) ||
       !optionalText(body.cursor, 4096) ||
       !optionalText(body.table, 200) ||
+      (body.filter !== undefined && !validDatabaseFilter(body.filter)) ||
+      (body.sort !== undefined && !validDatabaseSort(body.sort)) ||
       (body.offset !== undefined &&
         (!Number.isSafeInteger(body.offset) ||
           Number(body.offset) < 0 ||
@@ -386,6 +258,8 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         cursor: typeof body.cursor === 'string' ? body.cursor : undefined,
         table: typeof body.table === 'string' ? body.table : undefined,
         offset: typeof body.offset === 'number' ? body.offset : undefined,
+        filter: validDatabaseFilter(body.filter) ? body.filter : undefined,
+        sort: validDatabaseSort(body.sort) ? body.sort : undefined,
       });
       const current = await resolveProject(context, project.id, owner);
       const currentResource = (await getProjectResources(context.get('db'), project.id)).find(
@@ -487,7 +361,9 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           reason:
             body.action === 'files.saveText'
               ? 'The save could not be confirmed. Open the file again to check the result.'
-              : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
+              : body.action === 'database.schema'
+                ? 'Could not read this table structure. Refresh the table list and try again.'
+                : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }
