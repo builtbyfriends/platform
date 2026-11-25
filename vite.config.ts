@@ -222,6 +222,10 @@ export default defineConfig({
         specifier: './scripts/lint-plugin.mjs',
       },
       'eslint-plugin-react-you-might-not-need-an-effect',
+      {
+        name: 'anti-slop',
+        specifier: '@aranlucas/oxlint-plugin-anti-slop',
+      },
     ],
     plugins: [...new Set([...(cloudflare.plugins ?? []), 'node', 'jsdoc'] as const)],
     ignorePatterns: [
@@ -387,6 +391,17 @@ export default defineConfig({
       'react-you-might-not-need-an-effect/no-pass-data-to-parent': 'error',
       'react-you-might-not-need-an-effect/no-external-store-subscription': 'error',
       'react-you-might-not-need-an-effect/no-initialize-state': 'error',
+      // Decision: Dillon Mulroy's anti-slop rules that Cloudflare's preset doesn't carry yet (it has the rest as
+      // `quality/*`), from a packaged copy of his repository. A cast is justified with a `Decision:` line, the one
+      // comment the comment rule keeps. Module mocking is an error, though it only knows `vi` from vitest, not from
+      // vite-plus/test, so it doesn't see our tests yet. The rest warn while older code still has reports, like the
+      // list above.
+      'anti-slop/no-module-mocking': 'error',
+      'anti-slop/no-runtime-typeof': 'warn',
+      'anti-slop/no-shape-in-symbol-names': 'warn',
+      'anti-slop/no-unknown-parameters': 'warn',
+      'anti-slop/require-readable-spacing': 'warn',
+      'anti-slop/require-safety-comment-for-type-assertion': ['warn', { markers: ['Decision'] }],
       '@typescript-eslint/array-type': [
         'error',
         {

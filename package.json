@@ -27,6 +27,7 @@
     "upstream:sync": "node scripts/upstream-sync.ts"
   },
   "devDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "catalog:",
     "@cloudflare/oxlint-config": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "cross-spawn": "^7.0.6",

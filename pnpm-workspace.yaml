@@ -79,6 +79,7 @@ catalog:
   happy-dom: 21.0.4
   eslint-plugin-react-you-might-not-need-an-effect: 1.3.1
   '@cloudflare/oxlint-config': 0.1.0
+  '@aranlucas/oxlint-plugin-anti-slop': 0.1.1
   tsrs: 0.25.0-ts7.1.0-beta
 
 catalogs:
