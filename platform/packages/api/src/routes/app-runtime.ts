@@ -25,6 +25,15 @@ const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const secretColumn =
   /password|secret|token|credential|private.?key|verification.?code|api[_-]?key|access[_-]?key/i;
 const pageSize = 50;
+const managedTables = new Set([
+  '_void_migrations',
+  '_void_migration_attempts',
+  '_void_migration_fences',
+  '_void_migration_lock',
+  '_migrations',
+  '__drizzle_migrations',
+]);
+const customerTable = (name: string) => !managedTables.has(name.toLowerCase());
 function runtimeOwner(value: unknown): RuntimeOwner | null {
   if (!isRecord(value)) {
     return null;
@@ -165,16 +174,18 @@ async function inspect(
   if (!Array.isArray(listed.results)) {
     throw new Error('Invalid database response.');
   }
-  const tables = listed.results.map((row: unknown) => {
-    if (!isRecord(row) || !text(row.name)) {
-      throw new Error('Invalid table metadata.');
-    }
-    return row.name;
-  });
+  const tables = listed.results
+    .map((row: unknown) => {
+      if (!isRecord(row) || !text(row.name)) {
+        throw new Error('Invalid table metadata.');
+      }
+      return row.name;
+    })
+    .filter(customerTable);
   if (body.table === undefined) {
     return { ...identity, kind: 'tables' as const, tables };
   }
-  if (!tables.includes(body.table)) {
+  if (!customerTable(body.table) || !tables.includes(body.table)) {
     throw new OperatorError(400, 'Choose a table from this database.');
   }
   const described = await query(`PRAGMA table_info(${quote(body.table)})`);

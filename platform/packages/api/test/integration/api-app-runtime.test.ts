@@ -241,6 +241,54 @@ describe('connected app runtime reads', () => {
     expect(JSON.stringify(result)).not.toContain(request.aiToken);
   });
 
+  it('hides known migration tables without hiding similarly named customer tables', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    const managed = [
+      '_void_migrations',
+      '_void_migration_attempts',
+      '_void_migration_fences',
+      '_void_migration_lock',
+      '_migrations',
+      '__drizzle_migrations',
+    ];
+    const customer = ['notes', 'attachments', '_void_customer_data', '_void_migrations_archive'];
+    for (const name of [...managed, ...customer]) {
+      sqlite.exec('CREATE TABLE "' + name + '" (content TEXT)');
+      sqlite.prepare('INSERT INTO "' + name + '" VALUES (?)').run('kept');
+    }
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+    try {
+      expect(
+        await payload(
+          call('resources.inspect', { project: project.id, resourceId: 'res_database' }),
+        ),
+      ).toMatchObject({ data: { kind: 'tables', tables: [...customer].sort() } });
+      for (const table of managed) {
+        expect(
+          (
+            await call('resources.inspect', {
+              project: project.id,
+              resourceId: 'res_database',
+              table,
+            })
+          ).status,
+        ).toBe(400);
+      }
+      for (const table of customer) {
+        expect(
+          await payload(
+            call('resources.inspect', { project: project.id, resourceId: 'res_database', table }),
+          ),
+        ).toMatchObject({ data: { kind: 'rows', rows: [['kept']] } });
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('uses fixed read-only SQLite queries, quotes identifiers, and masks credential cells', async () => {
     const sqlite = new DatabaseSync(':memory:');
     const table = 'users"; DROP TABLE users;--';
