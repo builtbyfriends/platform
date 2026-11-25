@@ -521,9 +521,25 @@ export async function normalizeEmail(opts: {
   headers?: Record<string, string>;
   attachments?: Array<Attachment>;
   threading?: SendEmailOptions['threading'];
+  calendar?: SendEmailOptions['calendar'];
 }): Promise<NormalizedEmail> {
   if (!opts.text && !opts.html) {
     throw new MimeError('MIME_ERROR', "email: at least one of 'text' or 'html' is required.");
+  }
+  let calendar: SendEmailOptions['calendar'];
+  if (opts.calendar !== undefined) {
+    const { method, content } = opts.calendar ?? {};
+    if (
+      (method !== 'REQUEST' && method !== 'CANCEL') ||
+      typeof content !== 'string' ||
+      content.trim() === ''
+    ) {
+      throw new MimeError(
+        'MIME_ERROR',
+        'email: calendar needs a REQUEST or CANCEL method and iCalendar content.',
+      );
+    }
+    calendar = { method, content };
   }
   if (opts.subject !== undefined) {
     rejectCRLF('subject', opts.subject);
@@ -636,6 +652,7 @@ export async function normalizeEmail(opts: {
     headers: opts.headers ? { ...opts.headers } : {},
     attachments,
     threading,
+    ...(calendar === undefined ? {} : { calendar }),
   };
 }
 
@@ -1314,6 +1331,7 @@ export function buildMime(email: NormalizedEmail): BuiltMime {
     minHeaderOctets(email) +
     (email.text ? minBodyOctets(email.text) : 0) +
     (email.html ? minBodyOctets(email.html) : 0) +
+    (email.calendar ? minBodyOctets(email.calendar.content) : 0) +
     email.attachments.reduce((sum, a) => sum + base64Octets(a.bytes.byteLength), 0);
   if (projected > MAX_MESSAGE_BYTES) {
     throw new MimeError(
@@ -1361,13 +1379,15 @@ export function buildMime(email: NormalizedEmail): BuiltMime {
   const textPart = email.text ? buildBodyPart('text/plain', email.text) : undefined;
   const htmlPart = email.html ? buildBodyPart('text/html', email.html) : undefined;
 
-  let bodyPart: MimePart;
-  if (textPart && htmlPart) {
-    bodyPart = wrapMultipart('alternative', [textPart, htmlPart]);
-  } else {
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an email with neither text nor html keeps the old behavior
-    bodyPart = (textPart ?? htmlPart) as MimePart;
+  const calendarPart = email.calendar
+    ? buildBodyPart(`text/calendar; method=${email.calendar.method}`, email.calendar.content)
+    : undefined;
+  const alternatives = [textPart, htmlPart, calendarPart].filter((part) => part !== undefined);
+  const [firstPart] = alternatives;
+  if (!firstPart) {
+    throw new MimeError('MIME_ERROR', "email: at least one of 'text' or 'html' is required.");
   }
+  let bodyPart = alternatives.length > 1 ? wrapMultipart('alternative', alternatives) : firstPart;
 
   if (email.attachments.length > 0) {
     const inlineAttachments = email.attachments.filter((a) => a.disposition === 'inline');

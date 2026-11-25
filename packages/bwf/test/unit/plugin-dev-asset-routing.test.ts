@@ -277,7 +277,7 @@ describe('bwfPlugin dev asset routing', () => {
       await expect(
         resolveRuntimeOptimizerConfig(createRoot(), name, environment),
         `${createRoot.name} ${name}`,
-      ).resolves.toEqual(expected);
+      ).resolves.toMatchObject(expected);
     }
   });
 

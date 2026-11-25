@@ -116,13 +116,14 @@ type RoutePathUrl = RoutePatternUrl<CheckedRoutePath<RoutePath | EncodedRoutePat
 // Decision: Use a structural marker so package and generated declarations agree when a
 // helper-built URL crosses into a navigation, form, or stream client.
 type BuiltRouteUrl = string & { readonly __platformRouteUrl: true };
+type RouteUrlBase = BuiltRouteUrl | RoutePathUrl;
 
 /** Whether `routing.typedRoutes` is on in the generated route types. */
 export type TypedRoutes = RouteTypesConfig extends { typedRoutes: true } ? true : false;
 
 /** The URL of one of the app's routes. A plain string unless `routing.typedRoutes` is on. */
 export type RouteUrl = TypedRoutes extends true
-  ? BuiltRouteUrl | RoutePathUrl | `${RoutePathUrl}${'?' | '#'}${string}`
+  ? RouteUrlBase | `${RouteUrlBase}${'?' | '#'}${string}`
   : string;
 
 /** Anything a link can point to: a route URL, a same-page query or hash, or an external URL. */

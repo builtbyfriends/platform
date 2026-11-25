@@ -1,5 +1,7 @@
+import { join } from 'pathslash';
 import { needsApplicationDatabase } from './application-features.ts';
 import { findBwfAuthConfig } from './auth/config.ts';
+import { findEnvFileForPaths } from './codegen/env-types.ts';
 import { getDatabaseDialect, resolveBindingNames } from './config.ts';
 import type { BwfConfig } from './config.ts';
 import { scanJobsSync } from './crons/scan.ts';
@@ -46,6 +48,29 @@ export type ApplicationAnalysis = {
   middleware: ReturnType<typeof scanMiddlewareSync>;
   reasons: ApplicationReasons;
 };
+
+/** Source files the native Worker reaches through generated or virtual modules. */
+export function getNativeWorkerSourceFiles(analysis: ApplicationAnalysis): Array<string> {
+  const { paths } = analysis;
+  const envFile = findEnvFileForPaths(analysis.root, paths);
+  const emailFiles = analysis.email.addresses.map(({ filePath }) => filePath);
+  if (analysis.email.defaultHandler !== undefined) {
+    emailFiles.push(analysis.email.defaultHandler);
+  }
+  return [
+    ...[...analysis.routes, ...analysis.websockets].flatMap((route) =>
+      isRouteEnabledForEnvironment(route, 'dev') ? [join(paths.routesDir, route.filePath)] : [],
+    ),
+    ...analysis.procedures.map(({ filePath }) => join(paths.proceduresDir, filePath)),
+    ...(analysis.authConfigPath === null ? [] : [analysis.authConfigPath]),
+    ...analysis.middleware.map(({ filePath }) => join(paths.middlewareDir, filePath)),
+    ...analysis.jobs.map(({ filePath }) => join(paths.cronsDir, filePath)),
+    ...analysis.queues.map(({ filePath }) => join(paths.queuesDir, filePath)),
+    ...emailFiles.map((filePath) => join(paths.emailDir, filePath)),
+    ...analysis.durableObjects.map(({ filePath }) => filePath),
+    ...(envFile !== null ? [envFile] : []),
+  ];
+}
 
 /**
  * Discover application source features once for a consumer's environment.
