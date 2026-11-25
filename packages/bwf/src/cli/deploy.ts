@@ -319,6 +319,11 @@ async function runManagedDeploy(
         preset = detectPreset(root, { spa: options?.spa, strictBackend: true });
       }
 
+      if (preset && bwfConfig.vectorize?.length) {
+        throw new Error(
+          'deploy: Vectorize requires a Worker deployment; static-only deploys cannot bind an index.',
+        );
+      }
       if (preset) {
         preset = {
           ...preset,

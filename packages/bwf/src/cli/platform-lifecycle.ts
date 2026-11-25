@@ -106,6 +106,7 @@ import {
   platformSetupLink,
 } from './platform-setup.ts';
 import { assertPlatformStorageSupported } from './platform-storage.ts';
+import { assertPlatformVectorizeSupported } from './platform-vectorize.ts';
 
 function isPlatformInstallDatabaseBound(
   checkpoint: Record<string, string> | null,
@@ -814,6 +815,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
       allowUnverifiedAiGateway: true,
       includeEmailGateway: runtime.manifest.artifacts.emailGateway !== undefined,
       enableSandbox: runtime.manifest.safetyProtocols.sandboxDrain >= 3,
+      enableVectorize: runtime.manifest.vectorize === 1,
       deploymentExecution: runtime.manifest.deploymentExecution === 1,
     };
     let plan = await withPlatformProgress('Preparing installation plan', () =>
@@ -821,6 +823,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
     );
     assertPlatformRuntimeLogsSupported(plan.deployment, runtime.manifest);
     assertPlatformStorageSupported(plan.deployment, runtime.manifest);
+    assertPlatformVectorizeSupported(plan.deployment, runtime.manifest);
     const commandOptions = {
       commandName: cliCommandName(),
       accountId,
@@ -1091,6 +1094,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
             applicationDomain,
             credential,
             customDomains: plan.deployment.capabilities.customDomains,
+            vectorize: plan.deployment.capabilities.vectorize,
             ...(plan.deployment.capabilities.email && plan.deployment.emailSharedZoneId
               ? { emailZoneId: plan.deployment.emailSharedZoneId }
               : {}),
@@ -1434,6 +1438,7 @@ export async function runPlatformLifecycleCommand(commandArgs: PlatformArgs): Pr
             repairMissing: true,
             includeEmailGateway: runtime.manifest.artifacts.emailGateway !== undefined,
             enableSandbox: runtime.manifest.safetyProtocols.sandboxDrain >= 3,
+            enableVectorize: runtime.manifest.vectorize === 1,
             deploymentExecution: runtime.manifest.deploymentExecution === 1,
           })
         ).actions.filter((action) => action.kind === 'worker'),
@@ -1594,6 +1599,7 @@ export async function verifyPlatformAiGatewayPlan(
       authoritativeProvisionIntents,
       includeEmailGateway: preview.actions.some((entry) => entry.key === 'email-gateway-worker'),
       enableSandbox: preview.deployment.capabilities.sandbox,
+      enableVectorize: preview.deployment.capabilities.vectorize,
       deploymentExecution: preview.actions.some((entry) => entry.key === 'deployment-queue'),
     });
   } catch (error) {

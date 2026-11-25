@@ -40,6 +40,7 @@ export const DEPLOY_BINDING_IDENTITY_FIELDS: Record<
   ProvisionDriftEntry['kind'],
   { field: string; idField: string }
 > = {
+  vectorize: { field: 'vectorize', idField: 'index_name' },
   d1: { field: 'd1_databases', idField: 'database_id' },
   kv: { field: 'kv_namespaces', idField: 'id' },
   r2: { field: 'r2_buckets', idField: 'bucket_name' },
@@ -62,6 +63,9 @@ export function desiredIdentityBindings(
   }
   if (desired.hyperdrive) {
     out.push({ kind: 'hyperdrive', binding: desired.hyperdrive.binding });
+  }
+  for (const index of desired.vectorize ?? []) {
+    out.push({ kind: 'vectorize', binding: index.bindingName });
   }
   return out;
 }
@@ -124,6 +128,7 @@ export const DEPLOY_PASSTHROUGH_EXCLUDE_FIELDS: ReadonlySet<string> = new Set<st
   'kv_namespaces',
   'r2_buckets',
   'hyperdrive',
+  'vectorize',
   'ai',
   'durable_objects',
   'assets',

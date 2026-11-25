@@ -69,6 +69,8 @@ The management token also needs **Zone Edit** with authority to create zones if 
 
 bwf checks access before provisioning. If it reports a missing permission, update the token's permissions for the selected account or zone and retry.
 
+For a runtime with managed Vectorize support, also select **Account → Vectorize → Edit** on the runtime token. The setup link doesn't preselect this permission. On upgrade, provide the current runtime token through `PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` if it isn't saved on this machine. bwf reads the index list before enabling support; this checks read access without creating an index. A read-only token can pass that check but can't create indexes, so Edit access is still required. A rejected creation stops the app deployment and preserves existing indexes.
+
 :::
 
 ## Enable Email {#enable-email}

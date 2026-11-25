@@ -200,6 +200,11 @@ export function platformSetupPages(plan: PlatformInstallPlan): PlatformSetupPage
       url: 'https://dash.cloudflare.com/?' + query,
       instructions: [
         'Create a Cloudflare runtime token that bwf can use to manage the platform. Please review the permissions and then paste the token here.',
+        ...(plan.deployment.capabilities.vectorize
+          ? [
+              'Also add Account → Vectorize → Edit for the selected account; the token link does not preselect it.',
+            ]
+          : []),
         // Decision: A zone that bwf creates later cannot be selected yet; All Domains
         // lets Cache Purge reach it once it exists.
         ...(zoneName && plansZoneCreation(plan)

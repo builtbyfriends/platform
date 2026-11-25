@@ -750,6 +750,21 @@ export class PlatformClient {
     }
   }
 
+  async requireVectorizeSupport(): Promise<void> {
+    const response = await this.request(`${this.baseUrl}/capabilities`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok && response.status !== 404) {
+      await throwPlatformApiError('Failed to check Vectorize support', response, 'deploy');
+    }
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.vectorize !== true) {
+      throw new Error(
+        'deploy: This bwf platform does not support managed Vectorize. Ask its administrator to enable Vectorize or upgrade with `bwf platform upgrade`.',
+      );
+    }
+  }
+
   /** Reads the platform version from public discovery, without credentials. */
   private async probePlatformVersion(): Promise<PlatformVersionProbe> {
     let response: Response;

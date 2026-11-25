@@ -398,6 +398,12 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       501,
     );
   }
+  if (incomingManifest.vectorize?.length && !getPlatformCapabilities(context.env).vectorize) {
+    return context.json(
+      { event: 'error', message: 'This Platform does not enable search index provisioning.' },
+      501,
+    );
+  }
   // Decision: Reject before any paid or slow work (Sandbox controllers, uploads, migrations) when routing can't
   // carry this project's protection yet. The cutover fence repeats the check under the lock.
   try {

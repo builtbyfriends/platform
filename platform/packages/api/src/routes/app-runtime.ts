@@ -18,6 +18,7 @@ import {
 } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
+import { vectorizeManifestOwns, vectorizeRuntimeAvailable } from './app-runtime-vectorize.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
 type ResolveProject = (
@@ -189,8 +190,17 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     const resources = await getProjectResources(context.get('db'), project.id);
+    const deployment =
+      resources.some((resource) => resource.type === 'vectorize') && project.active_deployment_id
+        ? await getDeployment(context.get('db'), project.active_deployment_id)
+        : null;
+    const manifest = deployment?.project_id === project.id ? deployment.manifest : null;
     const current = await resolveProject(context, project.id, owner);
-    if (!current || current.user_id !== project.user_id) {
+    if (
+      !current ||
+      current.user_id !== project.user_id ||
+      current.active_deployment_id !== project.active_deployment_id
+    ) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     return context.json({
@@ -210,15 +220,21 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                   ? 'key-value'
                   : resource.type === 'queue'
                     ? 'queue'
-                    : 'other',
+                    : resource.type === 'vectorize'
+                      ? 'vector-index'
+                      : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
           actions: (
-            resource.type === 'queue'
-              ? !!context.env.CF_ACCOUNT_ID &&
-                !!context.env.CF_API_TOKEN &&
-                !project.preview_client_id &&
-                !!project.active_deployment_id
-              : !!context.env.PLATFORM_PROXY
+            resource.type === 'vectorize'
+              ? vectorizeRuntimeAvailable(context.env, current) &&
+                resource.metadata.provisioned === true &&
+                vectorizeManifestOwns(manifest, resource)
+              : resource.type === 'queue'
+                ? !!context.env.CF_ACCOUNT_ID &&
+                  !!context.env.CF_API_TOKEN &&
+                  !project.preview_client_id &&
+                  !!project.active_deployment_id
+                : !!context.env.PLATFORM_PROXY
           )
             ? resourceActions(resource)
             : [],
@@ -334,11 +350,28 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         current.active_deployment_id === project.active_deployment_id &&
         currentResource?.cf_id === resource.cf_id &&
         currentResource.type === resource.type &&
-        currentResource?.binding_name === resource.binding_name,
+        currentResource?.binding_name === resource.binding_name &&
+        (resource.type !== 'vectorize' ||
+          (vectorizeRuntimeAvailable(context.env, current) &&
+            currentResource.metadata.provisioned === true &&
+            currentResource.metadata.dimensions === resource.metadata.dimensions &&
+            currentResource.metadata.metric === resource.metadata.metric)),
       );
     };
     const queueWrite = body.action === 'queue.pause' || body.action === 'queue.resume';
     try {
+      if (resource.type === 'vectorize') {
+        const deployment = project.active_deployment_id
+          ? await getDeployment(context.get('db'), project.active_deployment_id)
+          : null;
+        if (
+          !deployment ||
+          deployment.project_id !== project.id ||
+          !vectorizeManifestOwns(deployment.manifest, resource)
+        ) {
+          throw Error('Search index is not part of this deployment.');
+        }
+      }
       const data = await executeResourceAction(
         context.env,
         project,
@@ -379,13 +412,15 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           kind: body.action === 'files.saveText' || queueWrite ? 'unknown' : 'unavailable',
           reason: queueWrite
             ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
-            : body.action === 'files.saveText'
-              ? 'The save could not be confirmed. Open the file again to check the result.'
-              : body.action === 'queue.status'
-                ? 'Could not verify queue status. Refresh and try again.'
-                : body.action === 'database.schema' || body.action === 'database.indexes'
-                  ? 'Could not read this table structure. Refresh the table list and try again.'
-                  : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
+            : body.action === 'index.info' || body.action === 'index.query'
+              ? 'Could not read this search index. Check its connection and query dimensions, then try again.'
+              : body.action === 'files.saveText'
+                ? 'The save could not be confirmed. Open the file again to check the result.'
+                : body.action === 'queue.status'
+                  ? 'Could not verify queue status. Refresh and try again.'
+                  : body.action === 'database.schema' || body.action === 'database.indexes'
+                    ? 'Could not read this table structure. Refresh the table list and try again.'
+                    : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }

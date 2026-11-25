@@ -8,6 +8,7 @@ import {
   resolveAssetContentTypes,
 } from '../assets.ts';
 import type { AssetManifestEntry } from '../assets.ts';
+import { getPlatformCapabilities } from '../capabilities.ts';
 import { retryWithBackoff } from '../cf-api.ts';
 import { uploadPool } from '../concurrency.ts';
 import { getProjectSecrets, upsertProjectSecret } from '../db.ts';
@@ -209,6 +210,15 @@ export async function uploadDeploymentWorker(input: {
   markPhase('provisioning');
 
   const bindingLabels: Array<string> = [];
+  if (
+    manifest.vectorize?.length &&
+    (!getPlatformCapabilities(context.env).vectorize || project.preview_client_id)
+  ) {
+    throw Error('Search index provisioning is unavailable for this deployment.');
+  }
+  for (const index of manifest.vectorize ?? []) {
+    bindingLabels.push(`vectorize:${index.bindingName}`);
+  }
   for (const name of manifest.bindings.d1 ?? []) {
     bindingLabels.push(`d1:${name}`);
   }
@@ -246,6 +256,7 @@ export async function uploadDeploymentWorker(input: {
     context.env.PLATFORM_PROXY_SERVICE ?? 'platform-proxy',
     {
       projectSlug: project.slug,
+      ownerUserId: owner.id,
       proxyToken: proxyToken.token,
       emailSenderDomain: context.env.EMAIL_SENDER_DOMAIN,
       storageLocationHint: context.env.R2_LOCATION_HINT,

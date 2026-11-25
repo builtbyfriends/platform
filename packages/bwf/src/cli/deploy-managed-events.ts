@@ -301,6 +301,9 @@ export async function streamDirectR2Deploy({
   if (manifest.database?.readReplication !== undefined) {
     await client.requireD1ReadReplicationSupport();
   }
+  if (manifest.vectorize?.length) {
+    await client.requireVectorizeSupport();
+  }
   const workerInput =
     workerFiles && workerFiles.size > 0 && (await client.supportsDirectWorkerUpload())
       ? await uploadWorkerModules(client, projectId, workerFiles, s, cliLog)

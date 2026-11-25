@@ -5,7 +5,8 @@ export type DeployResource =
   | { type: 'kv'; bindingName: string }
   | { type: 'r2'; bindingName: string }
   | { type: 'queue'; bindingName: string; resourceName: string; consumer: QueueMeta }
-  | { type: 'hyperdrive'; bindingName: string };
+  | { type: 'hyperdrive'; bindingName: string }
+  | ({ type: 'vectorize' } & NonNullable<DeployManifest['vectorize']>[number]);
 
 export type DeployResourcePlan = {
   resources: Array<DeployResource>;
@@ -52,6 +53,10 @@ export function createDeployResourcePlan(manifest: DeployManifest): DeployResour
   }
   for (const bindingName of manifest.bindings.hyperdrive ?? []) {
     resources.push({ type: 'hyperdrive', bindingName });
+  }
+
+  for (const index of manifest.vectorize ?? []) {
+    resources.push({ type: 'vectorize', ...index });
   }
 
   return {

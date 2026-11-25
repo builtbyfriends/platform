@@ -54,6 +54,24 @@ function client(options: { checkPlatformVersion?: boolean } = {}): PlatformClien
 }
 
 describe('minimum platform version', () => {
+  it.each([true, false, undefined, null, 'true'])(
+    'requires explicit Vectorize support (advertised: %s)',
+    async (vectorize) => {
+      fetchMock.mockImplementation(async (input: string) =>
+        isPlatformDiscoveryRequest(input)
+          ? platformDiscoveryResponse(input, 'hosted')
+          : Response.json({ vectorize }),
+      );
+      const result = client().requireVectorizeSupport();
+      if (vectorize === true) {
+        await expect(result).resolves.toBeUndefined();
+      } else {
+        await expect(result).rejects.toThrow('does not support managed Vectorize');
+      }
+      expect(requestedPaths()).toEqual(['/.well-known/platform', '/capabilities']);
+    },
+  );
+
   it.each([true, false, undefined])(
     'requires explicit platform support before skipping migrations (advertised: %s)',
     async (skipMigrations) => {

@@ -122,6 +122,9 @@ export function cloudflarePermissionForPath(requestPath: string): string | undef
     if (area === 'queues') {
       return 'Account → Queues → Edit';
     }
+    if (area === 'vectorize') {
+      return 'Account → Vectorize → Edit';
+    }
     if (area === 'hyperdrive') {
       return 'Account → Hyperdrive → Edit';
     }

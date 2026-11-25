@@ -207,6 +207,7 @@ export async function verifyPlatformRuntimeTokenPermissions(
     accountId: string;
     applicationDomain: string;
     customDomains: boolean;
+    vectorize?: boolean;
     /** Where the token came from, so a failure can name it. */
     credential?: PlatformCredentialLabel;
     /** The shared email zone, only when platform email is on. */
@@ -240,6 +241,13 @@ export async function verifyPlatformRuntimeTokenPermissions(
   };
 
   await check('Account → Hyperdrive → Write', () => client.listHyperdriveConfigs(input.accountId));
+  if (input.vectorize) {
+    await check('Account → Vectorize → Edit', () =>
+      client.request(
+        `/accounts/${encodeURIComponent(input.accountId)}/vectorize/v2/indexes?per_page=1`,
+      ),
+    );
+  }
 
   if (input.emailZoneId) {
     try {

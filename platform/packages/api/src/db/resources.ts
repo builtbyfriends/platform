@@ -65,18 +65,21 @@ export function cleanupJobsForResource(
   if (resource.type === 'container') {
     return [];
   }
+  const payload: ProjectCleanupJobInput['payload'] = { type: resource.type, cfId: resource.cf_id };
+  if (resource.type === 'vectorize') {
+    payload.bindingName = resource.binding_name;
+    payload.metadata = JSON.stringify(resource.metadata);
+  }
+  if (resource.type === 'durable-object') {
+    payload.className = resource.binding_name;
+    payload.metadata = JSON.stringify(resource.metadata);
+  }
   const jobs: Array<ProjectCleanupJobInput> = [
     {
       target: `cf-resource:${projectId}:${resource.type}:${resource.cf_id}`,
       project_id: projectId,
       kind: 'cf-resource',
-      payload: {
-        type: resource.type,
-        cfId: resource.cf_id,
-        ...(resource.type === 'durable-object'
-          ? { className: resource.binding_name, metadata: JSON.stringify(resource.metadata) }
-          : {}),
-      },
+      payload,
     },
   ];
   if (resource.type === 'queue') {

@@ -1,5 +1,6 @@
 import { isRecord } from './is-record.ts';
 import { isR2LocationHint } from './storage.ts';
+import { validateVectorize } from './vectorize.ts';
 
 export const MANIFEST_REDIRECT_RULE_STATUSES: ReadonlySet<number> = new Set([
   200, 301, 302, 303, 307, 308,
@@ -130,7 +131,7 @@ export function validateManifestShape(manifest: unknown): string | null {
     return 'invalid manifest shape: expected a JSON object';
   }
   if (manifest.storage !== undefined) {
-    if (manifest.version !== 5) {
+    if (manifest.version !== 5 && manifest.version !== 6) {
       return 'invalid manifest shape: storage requires manifest version 5';
     }
     if (
@@ -139,6 +140,18 @@ export function validateManifestShape(manifest: unknown): string | null {
       Object.keys(manifest.storage).some((key) => key !== 'locationHint')
     ) {
       return 'invalid manifest shape: storage.locationHint must be a supported R2 location hint';
+    }
+  }
+  if (manifest.vectorize !== undefined) {
+    if (manifest.type === 'spa' || manifest.type === 'static') {
+      return 'vectorize requires a Worker deployment';
+    }
+    if (manifest.version !== 6) {
+      return 'invalid manifest shape: vectorize requires manifest version 6';
+    }
+    const error = validateVectorize(manifest.vectorize);
+    if (error) {
+      return 'invalid manifest shape: ' + error;
     }
   }
   if (manifest.emailProtocolVersion !== undefined && manifest.emailProtocolVersion !== 1) {
@@ -507,7 +520,7 @@ export function validateManifestShape(manifest: unknown): string | null {
   if (manifest.durableObjects !== undefined) {
     const durable = manifest.durableObjects;
     if (
-      (manifest.version !== 4 && manifest.version !== 5) ||
+      (manifest.version !== 4 && manifest.version !== 5 && manifest.version !== 6) ||
       !isRecord(durable) ||
       !Array.isArray(durable.bindings)
     ) {
@@ -552,6 +565,44 @@ export function validateManifestShape(manifest: unknown): string | null {
       }
       names.add(binding.bindingName);
       classes.add(binding.className);
+    }
+  }
+  if (Array.isArray(manifest.vectorize)) {
+    const other = new Set<unknown>(Object.keys(isRecord(manifest.vars) ? manifest.vars : {}));
+    for (const value of Object.values(bindings)) {
+      if (Array.isArray(value)) {
+        const names: ReadonlyArray<unknown> = value;
+        for (const name of names) {
+          other.add(name);
+        }
+      }
+    }
+    const addBindings = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        const entries: ReadonlyArray<unknown> = value;
+        for (const entry of entries) {
+          if (isRecord(entry)) {
+            other.add(entry.bindingName ?? entry.className);
+          }
+        }
+      }
+    };
+    addBindings(manifest.queues);
+    if (isRecord(manifest.websocket)) {
+      addBindings(manifest.websocket.routes);
+    }
+    if (isRecord(manifest.durableObjects)) {
+      addBindings(manifest.durableObjects.bindings);
+    }
+    for (const value of [manifest.live, manifest.sandbox]) {
+      if (isRecord(value)) {
+        other.add(value.bindingName);
+      }
+    }
+    if (
+      manifest.vectorize.some((index: unknown) => isRecord(index) && other.has(index.bindingName))
+    ) {
+      return 'invalid manifest shape: vectorize bindings must not collide with other bindings or vars';
     }
   }
   return null;

@@ -1,4 +1,5 @@
 import type { StorageConfig } from './storage.ts';
+import type { VectorizeConfig } from './vectorize.ts';
 export {
   R2_LOCATION_HINTS,
   isR2LocationHint,
@@ -6,7 +7,7 @@ export {
   type StorageConfig,
 } from './storage.ts';
 
-export const SUPPORTED_MANIFEST_VERSIONS: ReadonlyArray<number> = [3, 4, 5];
+export const SUPPORTED_MANIFEST_VERSIONS: ReadonlyArray<number> = [3, 4, 5, 6];
 
 export type MigrationMeta = {
   name: string;
@@ -245,7 +246,11 @@ export type DurableObjectManifestMeta = {
   runtime?: { protocol: 1; namespaces: Record<string, string> };
 };
 
+export { validateVectorize } from './vectorize.ts';
+export type { VectorizeConfig } from './vectorize.ts';
+
 export type DeployManifest = {
+  vectorize?: Array<VectorizeConfig>;
   version: number;
   /** D1 provisioning preferences. Omitted preserves existing replication; false disables it. */
   database?: { readReplication?: boolean };

@@ -4,6 +4,7 @@ import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { databaseIndexes, databaseSchema } from './app-runtime-database.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
+import { vectorQuery, vectorizeRecords } from './app-runtime-vectorize.ts';
 
 const maxText = 65_536;
 const secretKey =
@@ -18,13 +19,14 @@ type Field = {
   type: 'text' | 'textarea';
   required: boolean;
   maxLength: number;
+  description?: string;
 };
 type Action = {
   id: string;
   label: string;
   effect: 'read' | 'write';
   fields: Array<Field>;
-  view?: { scope: 'table'; label: string };
+  view?: { scope: 'table' | 'resource'; label: string };
   result:
     | 'file-text'
     | 'file-saved'
@@ -40,8 +42,45 @@ type ActionCatalog = {
   kv: Array<Action>;
   d1: Array<Action>;
   queue: Array<Action>;
+  vectorize: Array<Action>;
 };
 const actions: ActionCatalog = {
+  vectorize: [
+    {
+      id: 'index.info',
+      label: 'View index',
+      effect: 'read',
+      fields: [],
+      view: { scope: 'resource', label: 'Overview' },
+      result: 'records',
+    },
+    {
+      id: 'index.query',
+      label: 'Search index',
+      effect: 'read',
+      fields: [
+        {
+          name: 'vector',
+          label: 'Query vector',
+          type: 'textarea',
+          required: true,
+          maxLength: 32_768,
+          description:
+            'Enter a JSON array of finite numbers with the dimensions shown in Overview. Text is not automatically converted to an embedding.',
+        },
+        {
+          name: 'topK',
+          label: 'Results',
+          type: 'text',
+          required: false,
+          maxLength: 2,
+          description: 'Choose 1–20 results. Defaults to 5.',
+        },
+      ],
+      view: { scope: 'resource', label: 'Search' },
+      result: 'records',
+    },
+  ],
   queue: [
     {
       id: 'queue.status',
@@ -123,6 +162,9 @@ const actions: ActionCatalog = {
   ],
 };
 export function resourceActions(resource: Resource): Array<Action> {
+  if (resource.type === 'vectorize') {
+    return actions.vectorize;
+  }
   return resource.type === 'r2'
     ? actions.r2
     : resource.type === 'kv'
@@ -134,6 +176,8 @@ export function resourceActions(resource: Resource): Array<Action> {
           : [];
 }
 export type RuntimeActionInput = {
+  vector?: string;
+  topK?: string;
   expectedDelivery?: 'running' | 'paused';
   table?: string;
   key?: string;
@@ -146,10 +190,17 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   if (!isRecord(input)) {
     return null;
   }
-  const definition = [...actions.r2, ...actions.kv, ...actions.d1, ...actions.queue].find(
-    (entry) => entry.id === action,
-  );
+  const definition = [
+    ...actions.r2,
+    ...actions.kv,
+    ...actions.d1,
+    ...actions.queue,
+    ...actions.vectorize,
+  ].find((entry) => entry.id === action);
   if (!definition) {
+    return null;
+  }
+  if (action === 'index.query' && !vectorQuery(input.vector, input.topK)) {
     return null;
   }
   const allowed = new Set(definition.fields.map((field) => field.name));
@@ -186,6 +237,8 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     return null;
   }
   return {
+    vector: typeof input.vector === 'string' ? input.vector : undefined,
+    topK: typeof input.topK === 'string' ? input.topK : undefined,
     expectedDelivery:
       input.expectedDelivery === 'running' || input.expectedDelivery === 'paused'
         ? input.expectedDelivery
@@ -336,6 +389,9 @@ export async function executeResourceAction(
   }
   if (action === 'queue.status') {
     return { ...identity, ...(await queueStatus(env, project, resource)) };
+  }
+  if (action === 'index.info' || action === 'index.query') {
+    return { ...identity, ...(await vectorizeRecords(env, project, resource, action, input)) };
   }
   if (action === 'queue.pause' || action === 'queue.resume') {
     if (!input.expectedDelivery) {

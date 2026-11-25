@@ -1,6 +1,11 @@
 import type { RewriteDestination } from '@builtbyfriends/bwf/routes';
-import { isRecord, isR2LocationHint, R2_LOCATION_HINTS } from '@builtbyfriends/deploy-core';
-import type { AssetConfig, StorageConfig } from '@builtbyfriends/deploy-core';
+import {
+  isRecord,
+  isR2LocationHint,
+  R2_LOCATION_HINTS,
+  validateVectorize,
+} from '@builtbyfriends/deploy-core';
+import type { AssetConfig, StorageConfig, VectorizeConfig } from '@builtbyfriends/deploy-core';
 import { PLATFORM_AUTH_PROVIDERS, isBwfAuthProvider } from './auth/providers.ts';
 import type { BwfAuthProvider } from './auth/providers.ts';
 import type { DevRedirectRule, HeaderRule } from './cli/types.ts';
@@ -172,6 +177,7 @@ type CloudflareConfig = Record<string, unknown> & {
 
 /** Shape of the bwf project config. All fields optional. */
 export type BwfConfig = {
+  vectorize?: Array<VectorizeConfig>;
   storage?: StorageConfig;
   sourceDir?: string;
   /**
@@ -459,6 +465,62 @@ function validateConfigObject(obj: unknown): BwfConfig {
     }
   }
 
+  if (obj.vectorize !== undefined) {
+    const error = validateVectorize(obj.vectorize);
+    if (error) {
+      throw new Error('config: ' + error);
+    }
+    const names = new Set(
+      Array.isArray(obj.vectorize)
+        ? obj.vectorize.map((entry) => (isRecord(entry) ? entry.bindingName : undefined))
+        : [],
+    );
+    const check = (value: unknown): void => {
+      if (typeof value === 'string' && names.has(value)) {
+        throw new Error(
+          'config: vectorize binding collides with another binding or variable: ' + value,
+        );
+      }
+    };
+    for (const variables of [
+      obj.vars,
+      isRecord(obj.cloudflare) ? obj.cloudflare.vars : undefined,
+    ]) {
+      if (isRecord(variables)) {
+        for (const name of Object.keys(variables)) {
+          check(name);
+        }
+      }
+    }
+    if (isRecord(obj.inference) && isRecord(obj.inference.bindings)) {
+      for (const name of Object.values(obj.inference.bindings)) {
+        check(name);
+      }
+    }
+    if (isRecord(obj.cloudflare)) {
+      for (const [field, value] of Object.entries(obj.cloudflare)) {
+        if (field === 'vectorize') {
+          continue;
+        }
+        const entries = Array.isArray(value)
+          ? value
+          : isRecord(value) && Array.isArray(value.bindings)
+            ? value.bindings
+            : isRecord(value) && Array.isArray(value.producers)
+              ? value.producers
+              : [value];
+        for (const entry of entries) {
+          if (!isRecord(entry)) {
+            continue;
+          }
+          check(entry.binding);
+          if (field === 'durable_objects' || field === 'send_email' || field === 'ratelimits') {
+            check(entry.name);
+          }
+        }
+      }
+    }
+  }
   if (obj.storage !== undefined) {
     if (
       !isRecord(obj.storage) ||

@@ -1,4 +1,4 @@
-import type { R2LocationHint } from '@builtbyfriends/deploy-core';
+import type { R2LocationHint, VectorizeConfig } from '@builtbyfriends/deploy-core';
 
 /** Typed provider operations shared by app deployment and platform installation. */
 type ConfigTarget = { configPath?: string };
@@ -25,6 +25,14 @@ export type CloudflareOperation =
       configPath: string;
     }
   | { type: 'kv.namespace.create'; name: string; binding: string; configPath: string }
+  | ({ type: 'vectorize.info'; name: string } & ConfigTarget)
+  | ({
+      type: 'vectorize.create';
+      name: string;
+      dimensions: number;
+      metric: VectorizeConfig['metric'];
+      description: string;
+    } & ConfigTarget)
   | ({ type: 'r2.bucket.info'; name: string } & ConfigTarget)
   | {
       type: 'r2.bucket.create';

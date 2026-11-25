@@ -70,6 +70,7 @@ import {
 import { deleteManagedDurableObject } from './durable-objects.ts';
 import { runEmailDestinationCleanup } from './email-destination-cleanup.ts';
 import { deleteSandboxController, isManagedSandbox } from './sandbox-controller.ts';
+import { deleteOwnedVectorize, vectorizeConfig } from './vectorize.ts';
 
 function deleteCloudflareResource(
   accountId: string,
@@ -91,6 +92,8 @@ function deleteCloudflareResource(
       return deleteHyperdrive(accountId, apiToken, resource.cf_id);
     case 'durable-object':
       throw new Error('Custom Durable Object deletion requires project ownership verification.');
+    case 'vectorize':
+      throw new Error('Search index deletion requires project ownership verification.');
     case 'container':
       return deleteContainerApplicationIdempotent(accountId, apiToken, resource.cf_id);
     default:
@@ -146,6 +149,18 @@ async function executeCleanupJob(
 ): Promise<void> {
   switch (job.kind) {
     case 'cf-resource':
+      if (job.payload.type === 'vectorize') {
+        const metadata = vectorizeConfig(JSON.parse(jobValue(job, 'metadata')));
+        if (!metadata) {
+          throw new Error('Invalid search index cleanup metadata.');
+        }
+        await deleteOwnedVectorize(env.CF_ACCOUNT_ID, env.CF_API_TOKEN, job.project_id, {
+          cf_id: jobValue(job, 'cfId'),
+          binding_name: jobValue(job, 'bindingName'),
+          metadata,
+        });
+        return;
+      }
       if (job.payload.type === 'durable-object') {
         await deleteManagedDurableObject(env, job.project_id, {
           cf_id: jobValue(job, 'cfId'),

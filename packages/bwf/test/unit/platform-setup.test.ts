@@ -312,6 +312,26 @@ describe('platform credential setup links', () => {
     expect(permissions).toContainEqual({ key: 'query_cache', type: 'edit' });
     expect(permissions).toContainEqual({ key: 'workers_tail', type: 'read' });
   });
+  it.each([false, true])(
+    'explains the manual Vectorize permission only when enabled: %s',
+    (vectorize) => {
+      const original = plan();
+      const selected = {
+        ...original,
+        deployment: {
+          ...original.deployment,
+          capabilities: { ...original.deployment.capabilities, vectorize },
+        },
+      };
+      expect(
+        platformSetupPages(selected).runtime.instructions.includes('Account → Vectorize → Edit'),
+      ).toBe(vectorize);
+      expect(permissionGroupKeys(platformSetupPages(selected).runtime.url)).not.toContainEqual({
+        key: 'vectorize',
+        type: 'edit',
+      });
+    },
+  );
   it('includes the catalog SSL key only when custom hostnames are enabled', () => {
     const original = plan('example.com');
     const custom = {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { validateManifestShape } from '@builtbyfriends/deploy-core';
 import type { StorageConfig } from '@builtbyfriends/deploy-core';
 import { hash as blake3hash } from 'blake3-jit';
 import ignore from 'ignore';
@@ -452,6 +453,7 @@ export function buildBwfManifest(opts: {
   headerRules?: Array<HeaderRule>;
   alwaysUseHttps?: boolean;
   storage?: StorageConfig;
+  vectorize?: DeployManifest['vectorize'];
   redirectRules?: Array<DevRedirectRule>;
   fallbackRules?: Array<DevRedirectRule>;
   dialect?: 'sqlite' | 'postgresql' | 'mysql';
@@ -589,6 +591,14 @@ export function buildBwfManifest(opts: {
     manifest.websocket = websocketManifest;
   }
 
+  if (opts.vectorize?.length) {
+    manifest.version = 6;
+    manifest.vectorize = opts.vectorize;
+    const error = validateManifestShape(manifest);
+    if (error) {
+      throw new Error('deploy: ' + error);
+    }
+  }
   return manifest;
 }
 

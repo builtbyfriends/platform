@@ -126,6 +126,11 @@ export function bwfPlugin(options?: {
     name: 'platform:remove-implicit-cloudflare-deploy-pointer',
     enforce: 'pre',
     config(_config, environment) {
+      if (environment.command === 'serve' && config.vectorize?.length) {
+        throw new Error(
+          'Vectorize indexes require a published deployment. Local development and local preview do not emulate Vectorize; deploy this app to test its index bindings.',
+        );
+      }
       previewing = environment.isPreview === true;
       if (previewing) {
         restorePreviewPointer();

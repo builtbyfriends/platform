@@ -116,6 +116,7 @@ import {
   runPurgeResourcesTeardown,
 } from './platform-teardown.ts';
 import type { PurgeResourcesClient, PurgeResourcesCredential } from './platform-teardown.ts';
+import { assertPlatformVectorizeSupported } from './platform-vectorize.ts';
 import {
   assertProjectZeroTrustAllowsUninstall,
   formatZeroTrustApplications,
@@ -486,6 +487,7 @@ export async function runInstalledPlatformCommand(
         allowUnverifiedAiGateway: args.plan,
         includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
         enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
+        enableVectorize: runtime!.manifest.vectorize === 1,
         deploymentExecution: runtime!.manifest.deploymentExecution === 1,
         allowRuntimeLogsChange: args.subcommand === 'upgrade',
         allowStorageLocationChange: args.subcommand === 'upgrade',
@@ -493,6 +495,7 @@ export async function runInstalledPlatformCommand(
     );
     assertPlatformRuntimeLogsSupported(plan.deployment, runtime!.manifest);
     assertPlatformStorageSupported(plan.deployment, runtime!.manifest);
+    assertPlatformVectorizeSupported(plan.deployment, runtime!.manifest);
     markPhase('plan');
     note(
       formatPlatformInstallPlan(plan, manifest.deployment),
@@ -648,6 +651,9 @@ export async function runInstalledPlatformCommand(
       enablingCustomDomains:
         plan.deployment.capabilities.customDomains &&
         !manifest.deployment.capabilities.customDomains,
+      enablingVectorize:
+        plan.deployment.capabilities.vectorize === true &&
+        manifest.deployment.capabilities.vectorize !== true,
     });
     // Decision: Shared email setup runs after traffic pauses and uses the runtime token,
     // also when this run keeps the saved token. Check its email access first.
@@ -670,6 +676,7 @@ export async function runInstalledPlatformCommand(
           applicationDomain: deployment.application.baseDomain,
           credential,
           customDomains: plan.deployment.capabilities.customDomains,
+          vectorize: plan.deployment.capabilities.vectorize,
           ...(emailZoneId ? { emailZoneId } : {}),
           zoneId: plan.zone?.id ?? null,
         },
@@ -846,6 +853,7 @@ export async function runInstalledPlatformCommand(
             repairMissing: true,
             includeEmailGateway: runtime!.manifest.artifacts.emailGateway !== undefined,
             enableSandbox: runtime!.manifest.safetyProtocols.sandboxDrain >= 3,
+            enableVectorize: runtime!.manifest.vectorize === 1,
             deploymentExecution: runtime!.manifest.deploymentExecution === 1,
           })
         ).actions.filter((action) => action.kind === 'worker'),
@@ -1011,6 +1019,7 @@ export function assertPlatformRollbackCompatibility(
     );
   }
   assertPlatformStorageSupported(installation.deployment, target.manifest);
+  assertPlatformVectorizeSupported(installation.deployment, target.manifest);
   if (installation.deployment.runtimeLogs && target.manifest.runtimeLogs !== 1) {
     throw new Error(
       'platform: The rollback target cannot keep runtime logs minimal. Run `bwf platform upgrade --runtime-logs full` first, then roll back.',
@@ -1093,11 +1102,19 @@ export function resolvePlatformRuntimeTokenToPreflight(
     ReturnType<typeof createPlatformInstallationSecrets>,
     'cloudflareApiToken' | 'workerSecretUpdates'
   >,
-  options: { enablingCustomDomains?: boolean } = {},
+  options: { enablingCustomDomains?: boolean; enablingVectorize?: boolean } = {},
 ): string {
   const explicitUpdate = secrets.workerSecretUpdates?.CF_API_TOKEN;
   if (explicitUpdate) {
     return explicitUpdate;
+  }
+  if (options.enablingVectorize) {
+    if (!secrets.cloudflareApiToken) {
+      throw new Error(
+        'platform: Before enabling Vectorize, set PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN to the platform runtime token with Account → Vectorize → Edit so bwf can check its access.',
+      );
+    }
+    return secrets.cloudflareApiToken;
   }
   // Decision: Enabling custom hostnames adds a runtime permission even when the Workers
   // retain their token. Check it before the installer can pause traffic.

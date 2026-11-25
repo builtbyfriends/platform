@@ -1,3 +1,4 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
 import type { PlatformCapabilities } from '@builtbyfriends/platform';
 import type { MiddlewareHandler } from 'hono';
 import type { ApiEnv } from './env.ts';
@@ -11,9 +12,20 @@ const HOSTED_CAPABILITIES: PlatformCapabilities = {
   googleOAuth: true,
   managedBuilds: true,
   sandbox: true,
+  vectorize: false,
 };
 
-const CAPABILITY_NAMES = Object.keys(HOSTED_CAPABILITIES) as Array<keyof PlatformCapabilities>;
+const CAPABILITY_NAMES = [
+  'ai',
+  'customDomains',
+  'email',
+  'githubActions',
+  'githubOAuth',
+  'googleOAuth',
+  'managedBuilds',
+  'sandbox',
+  'vectorize',
+] as const satisfies ReadonlyArray<keyof PlatformCapabilities>;
 
 export function getPlatformCapabilities(
   env: Pick<ApiEnv['Bindings'], 'PLATFORM_CAPABILITIES'>,
@@ -27,11 +39,14 @@ export function getPlatformCapabilities(
   } catch {
     throw new Error('PLATFORM_CAPABILITIES must be valid JSON.');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error('PLATFORM_CAPABILITIES must be an object.');
   }
-  const record = parsed as Record<string, unknown>;
+  const record = parsed;
   for (const name of CAPABILITY_NAMES) {
+    if (name === 'vectorize' && record[name] === undefined) {
+      continue;
+    }
     if (typeof record[name] !== 'boolean') {
       throw new Error(`PLATFORM_CAPABILITIES.${name} must be a boolean.`);
     }

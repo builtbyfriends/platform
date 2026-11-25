@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   parseRootWranglerConfig,
@@ -20,6 +21,7 @@ import type { DesiredResourceSet, ProvisionDriftEntry } from './provision.ts';
 
 /** Human labels for a drifted resource kind, used in guidance messages. */
 export const CLOUDFLARE_RESOURCE_LABELS: Record<ProvisionDriftEntry['kind'], string> = {
+  vectorize: 'Vectorize index',
   d1: 'D1 database',
   kv: 'KV namespace',
   r2: 'R2 bucket',
@@ -165,6 +167,37 @@ export async function computeDesiredCloudflareResources(
 
   const desired: DesiredResourceSet = { kvNamespaces: [], queues: [] };
   const reasons = new Map<string, string>();
+  if (bwfConfig.vectorize?.length) {
+    desired.vectorize = bwfConfig.vectorize.map((index) => {
+      const pinned = readStoredResourceName(config, 'vectorize', index.bindingName, 'index_name');
+      const authored = readStoredResourceName(
+        bwfConfig.cloudflare ?? {},
+        'vectorize',
+        index.bindingName,
+        'index_name',
+      );
+      const suffix = createHash('sha256')
+        .update(JSON.stringify([workerName, index.bindingName]))
+        .digest('hex')
+        .slice(0, 16);
+      if (authored && pinned && authored !== pinned) {
+        throw new Error(
+          'deploy: Vectorize binding ' +
+            index.bindingName +
+            ' conflicts with its pinned index identity. Restore the configured name or explicitly choose a new binding.',
+        );
+      }
+      const name =
+        authored ?? pinned ?? workerName.slice(0, 40).replace(/-+$/, '') + '-vec-' + suffix;
+      reasons.set(index.bindingName, 'app declares a Vectorize index');
+      return {
+        ...index,
+        name,
+        description: 'bwf:' + workerName + ':' + index.bindingName,
+        ...(authored !== undefined && { existing: true }),
+      };
+    });
+  }
 
   // Decision: needsDatabase covers source use, auth and checked-in migrations, like the managed manifest.
   const databaseReason = analysis.reasons.database[0];

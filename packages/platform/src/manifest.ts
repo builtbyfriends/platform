@@ -9,6 +9,7 @@ export const PLATFORM_DEPLOYMENT_SCHEMA_VERSION = 1 as const;
 
 export type PlatformCapabilities = Readonly<{
   ai: boolean;
+  vectorize?: boolean;
   customDomains: boolean;
   email: boolean;
   githubActions: boolean;
@@ -120,6 +121,7 @@ export type PlatformApplicationRoute = Readonly<{
 
 const CORE_CAPABILITIES: PlatformCapabilities = {
   ai: true,
+  vectorize: false,
   customDomains: false,
   email: false,
   githubActions: false,
@@ -458,7 +460,8 @@ export function parsePlatformDeploymentManifest(value: unknown): PlatformDeploym
   );
   const capabilities: Partial<Record<keyof PlatformCapabilities, boolean>> = {};
   for (const key of capabilityKeys) {
-    const entry = rawCapabilities[key];
+    const entry =
+      key === 'vectorize' && rawCapabilities[key] === undefined ? false : rawCapabilities[key];
     if (typeof entry !== 'boolean') {
       throw new Error(`capabilities.${key} must be a boolean.`);
     }
