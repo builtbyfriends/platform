@@ -62,6 +62,7 @@ export default defineConfig({
     entry: [
       'src/index.ts',
       'src/config-entry.ts',
+      'src/lint.ts',
       'src/deploy.ts',
       'src/database-provider.ts',
       'src/edge.ts',

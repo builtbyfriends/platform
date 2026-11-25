@@ -1,5 +1,6 @@
 import { type } from 'arktype';
-import { requestPublishApproval, type PublishRequestBody } from '../../routes/oauth.ts';
+import { requestPublishApproval } from '../../routes/oauth.ts';
+import type { PublishRequestBody } from '../../routes/oauth.ts';
 import { appProcedure, connectedApp } from '../app-procedure.ts';
 import { previewRefusal } from './previews.ts';
 
@@ -19,6 +20,7 @@ export const request = appProcedure('publish.request')
       slug: 'string',
       checkpoint: 'string',
       artifact: 'object',
+      'payer?': 'string',
     }),
   )
   .output(type({ authorization_url: 'string', request_id: 'string', expires_in: 'number' }))
@@ -33,6 +35,7 @@ export const request = appProcedure('publish.request')
   .noCli({ reason: 'There is no CLI for connected applications' })
   .handler(async ({ env, ctx, input, fail }) => {
     try {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the callee validates the artifact at runtime
       return await requestPublishApproval(ctx.db, env, ctx.grant, input as PublishRequestBody);
     } catch (error) {
       const refusal = previewRefusal(error);

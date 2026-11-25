@@ -106,8 +106,8 @@ describe('bwf platform config billing', () => {
     const error = (() => {
       try {
         parsePlatformArgs(['config', 'billing', `STRIPE_SECRET_KEY=${SECRET_KEY}`]);
-      } catch (caught) {
-        return caught as Error;
+      } catch (error_) {
+        return error_ as Error;
       }
       return null;
     })();
@@ -130,6 +130,15 @@ describe('bwf platform config billing', () => {
     expect(() => readPlatformBillingInput({}, `${SECRET_KEY}`)).toThrow(
       /^platform: Line 1 of stdin is not NAME=value\.$/,
     );
+    expect(
+      readPlatformBillingInput(
+        { STRIPE_AUTOMATIC_TAX: 'true', STRIPE_PROMOTION_CODES: 'false' },
+        null,
+      ),
+    ).toEqual({ STRIPE_AUTOMATIC_TAX: 'true', STRIPE_PROMOTION_CODES: 'false' });
+    expect(() => readPlatformBillingInput({ STRIPE_AUTOMATIC_TAX: 'yes' }, null)).toThrow(
+      'STRIPE_AUTOMATIC_TAX must be true or false',
+    );
     expect(() => readPlatformBillingInput({ STRIPE_PRICE_SOLO: 'prod_1' }, null)).toThrow(
       'STRIPE_PRICE_SOLO must be a Stripe price ID',
     );
@@ -149,7 +158,7 @@ describe('bwf platform config billing', () => {
     const recovery = readInstallationRecoverySecrets(manifest, directory)!;
     expect(recovery.databaseUrl).toBe('postgres://db');
     expect(recovery.billingPending).toBe('true');
-    expect(JSON.parse(recovery.billingJson!)).toEqual({
+    expect(JSON.parse(recovery.billingJson)).toEqual({
       STRIPE_PRICE_SOLO: 'price_solo',
       STRIPE_SECRET_KEY: SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
@@ -168,7 +177,7 @@ describe('bwf platform config billing', () => {
     });
     expect(
       Object.keys(
-        JSON.parse(readInstallationRecoverySecrets(manifest, directory)!.billingJson!),
+        JSON.parse(readInstallationRecoverySecrets(manifest, directory)!.billingJson),
       ).sort(),
     ).toEqual([
       'STRIPE_PRICE_PRO',

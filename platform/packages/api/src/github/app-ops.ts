@@ -1,9 +1,5 @@
-import {
-  deleteOwnedGitHubInstallation,
-  getOwnedGitHubInstallation,
-  type Db,
-  type GitHubInstallationOwner,
-} from '../db.ts';
+import { deleteOwnedGitHubInstallation, getOwnedGitHubInstallation } from '../db.ts';
+import type { Db, GitHubInstallationOwner } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import {
   APP_INSTALL_STATE_TTL_MS,

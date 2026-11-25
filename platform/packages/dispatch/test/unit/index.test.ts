@@ -304,7 +304,7 @@ describe('dispatch fetch handler', () => {
     const response = await app.fetch(request, env, createCtx());
 
     expect(workerFetch).toHaveBeenCalledOnce();
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(forwarded.method).toBe('POST');
     expect(forwarded.bodyUsed).toBe(false);
     expect(forwarded.headers.has('content-length')).toBe(false);
@@ -321,7 +321,6 @@ describe('rebuildRequest preserves request.cf', () => {
 
   beforeEach(() => {
     RequestCalls = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).Request = class extends OriginalRequest {
       constructor(input: RequestInfo | URL, init?: RequestInit) {
         // Decision: `cf` is removed before delegating because Node would reject it.
@@ -468,6 +467,69 @@ describe('suspension check', () => {
       resource: 'requests',
       reason: 'monthly_quota',
     });
+  });
+
+  it("answers a page saying the app isn't available after an operator takedown", async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'operator_takedown' },
+    });
+
+    const page = await app.fetch(
+      new Request('https://my-app.void.app/', { headers: { Accept: 'text/html' } }),
+      env,
+      createCtx(),
+    );
+    expect(page.status).toBe(403);
+    expect(await page.text()).toContain("This app isn't available");
+    const api = await app.fetch(new Request('https://my-app.void.app/api/hello'), env, createCtx());
+    expect(api.status).toBe(403);
+    expect(await api.text()).not.toContain('usage limit');
+    expect(dispatchGet).not.toHaveBeenCalled();
+  });
+
+  it('answers a page saying the app is paused when its payer has been out of credits too long', async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'credits_paused' },
+    });
+    const page = await app.fetch(
+      new Request('https://my-app.void.app/', { headers: { Accept: 'text/html' } }),
+      env,
+      createCtx(),
+    );
+    expect(page.status).toBe(503);
+    const text = await page.text();
+    expect(text).toContain('This app is paused');
+    expect(text).not.toContain("isn't available");
+    expect(dispatchGet).not.toHaveBeenCalled();
+  });
+
+  it('serves an app in its grace days at the lower rate', async () => {
+    const { env, dispatchGet } = createEnv({
+      routing: { workerName: 'user-app', projectId: 'proj_1', suspended: 'credits_grace' },
+      workerResponse: new Response('api'),
+    });
+    const limit = vi.fn(async () => ({ success: true }));
+    const limited = { ...env, CREDITS_GRACE_LIMITER: { limit } } as Env;
+    const ok = await app.fetch(
+      new Request('https://my-app.void.app/api/hello'),
+      limited,
+      createCtx(),
+    );
+    expect(ok.status).toBe(200);
+    expect(limit).toHaveBeenCalledWith({ key: 'proj_1' });
+
+    limit.mockResolvedValueOnce({ success: false });
+    const over = await app.fetch(
+      new Request('https://my-app.void.app/api/hello'),
+      limited,
+      createCtx(),
+    );
+    expect(over.status).toBe(429);
+    expect(await over.json()).toMatchObject({ resource: 'requests', reason: 'rate_limit' });
+    expect(dispatchGet).toHaveBeenCalledTimes(1);
+
+    const old = await app.fetch(new Request('https://my-app.void.app/api/hello'), env, createCtx());
+    expect(old.status).toBe(200);
   });
 });
 
@@ -1537,7 +1599,7 @@ describe('queue relay', () => {
     await app.queue(batch, env);
 
     expect(workerFetch).toHaveBeenCalledOnce();
-    const req = workerFetch.mock.calls[0][0] as Request;
+    const req = workerFetch.mock.calls[0][0];
     expect(req.headers.get('x-platform-internal')).toBe('super-secret-token');
   });
 
@@ -1555,7 +1617,7 @@ describe('queue relay', () => {
 
     await app.queue(batch, env);
 
-    const req = workerFetch.mock.calls[0][0] as Request;
+    const req = workerFetch.mock.calls[0][0];
     expect(req.headers.get('x-platform-internal')).toBeNull();
   });
 
@@ -1857,7 +1919,7 @@ describe('rewrite rules', () => {
     expect(response.headers.has('Location')).toBe(false);
     expect(workerFetch).toHaveBeenCalledOnce();
 
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/en/docs');
   });
 
@@ -1880,7 +1942,7 @@ describe('rewrite rules', () => {
     expect(response.status).toBe(200);
     expect(workerFetch).toHaveBeenCalledOnce();
 
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/en/docs/getting-started');
   });
 
@@ -1903,7 +1965,7 @@ describe('rewrite rules', () => {
     );
 
     expect(response.status).toBe(200);
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/posts/jane/first-post');
   });
 
@@ -1920,7 +1982,7 @@ describe('rewrite rules', () => {
     const response = await app.fetch(new Request('https://test.void.app/docs'), env, createCtx());
 
     expect(response.status).toBe(200);
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(forwarded.headers.get('X-Platform-Original-URL')).toBe('https://test.void.app/docs');
   });
 
@@ -1941,7 +2003,7 @@ describe('rewrite rules', () => {
     );
 
     expect(response.status).toBe(200);
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     const forwardedUrl = new URL(forwarded.url);
     expect(forwardedUrl.pathname).toBe('/en/docs');
     expect(forwardedUrl.search).toBe('?lang=en');
@@ -1962,7 +2024,7 @@ describe('rewrite rules', () => {
     expect(response.status).toBe(200);
     expect(workerFetch).toHaveBeenCalledOnce();
 
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/other');
     expect(forwarded.headers.has('X-Platform-Original-URL')).toBe(false);
   });
@@ -2036,7 +2098,7 @@ describe('rewrite rules', () => {
     expect(response.headers.has('Location')).toBe(false);
     expect(workerFetch).toHaveBeenCalledOnce();
 
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/en/page');
   });
 
@@ -2059,7 +2121,7 @@ describe('rewrite rules', () => {
 
     expect(response.status).toBe(200);
     expect(workerFetch).toHaveBeenCalledOnce();
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(forwarded.headers.has('X-Platform-Original-URL')).toBe(false);
   });
 
@@ -2082,7 +2144,7 @@ describe('rewrite rules', () => {
     );
 
     expect(response.status).toBe(200);
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(forwarded.headers.get('X-Platform-Original-URL')).toBe('https://test.void.app/docs');
   });
 
@@ -2100,7 +2162,7 @@ describe('rewrite rules', () => {
     const response = await app.fetch(new Request(originalUrl), env, createCtx());
 
     expect(response.status).toBe(200);
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(new URL(forwarded.url).pathname).toBe('/new');
     expect(forwarded.headers.get('X-Platform-Original-URL')).toBe(originalUrl);
   });
@@ -2123,7 +2185,7 @@ describe('rewrite rules', () => {
     const response = await app.fetch(inbound, env, createCtx());
     expect(response.status).toBe(200);
 
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0] as Request;
     expect(forwarded.method).toBe('POST');
     expect(forwarded.body).toBeNull();
     expect(forwarded.headers.has('content-length')).toBe(false);
@@ -2168,7 +2230,7 @@ describe('rewrite rules', () => {
     expect(routingLookups.every((k) => !k.startsWith('app'))).toBe(true);
 
     expect(workerFetch).toHaveBeenCalledOnce();
-    const forwarded = workerFetch.mock.calls[0]![0] as Request;
+    const forwarded = workerFetch.mock.calls[0][0];
     expect(new URL(forwarded.url).pathname).toBe('/en/docs/intro');
     expect(forwarded.headers.get('X-Platform-Original-URL')).toBe(originalUrl);
   });
@@ -2274,7 +2336,7 @@ describe('static asset caching', () => {
           expect(await response.text()).toBe('Hidden');
         }
         expect(workerFetch).toHaveBeenCalledTimes(2);
-        expect(workerFetch.mock.calls[1]![0].url).toBe(url);
+        expect(workerFetch.mock.calls[1][0].url).toBe(url);
       });
 
       it.each(
@@ -3315,7 +3377,7 @@ describe('foreground worker duration', () => {
         });
       await vi.advanceTimersByTimeAsync(11_000);
       expect(get).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(9999);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
 
@@ -3594,7 +3656,7 @@ describe('request type metering for SSR routes with a file extension', () => {
 
     const response = await app.fetch(
       new Request('https://my-app.void.app/sponsors.svg'),
-      { ...env, DISPATCH_TIMEOUT_MS: '20' } as Env,
+      { ...env, DISPATCH_TIMEOUT_MS: '20' },
       createCtx(),
     );
 
@@ -3669,7 +3731,7 @@ describe('request type metering for SSR routes with a file extension', () => {
 
     const response = await app.fetch(
       new Request('https://my-app.void.app/sponsors.svg', { headers: { Cookie: 'a=1' } }),
-      { ...env, DISPATCH_TIMEOUT_MS: '20' } as Env,
+      { ...env, DISPATCH_TIMEOUT_MS: '20' },
       createCtx(),
     );
 
@@ -3732,7 +3794,7 @@ describe('request type metering when Cloudflare serves assets before the worker'
 
     const response = await app.fetch(
       new Request('https://my-app.void.app/og.png'),
-      { ...env, DISPATCH_TIMEOUT_MS: '20' } as Env,
+      { ...env, DISPATCH_TIMEOUT_MS: '20' },
       createCtx(),
     );
 
@@ -3835,7 +3897,7 @@ describe('request type metering when Cloudflare serves assets before the worker'
 
       const response = await app.fetch(
         new Request('https://my-app.void.app/robots.txt'),
-        { ...env, DISPATCH_TIMEOUT_MS: '20' } as Env,
+        { ...env, DISPATCH_TIMEOUT_MS: '20' },
         createCtx(),
       );
 

@@ -40,7 +40,7 @@ export async function promptProjectSetupAction(
     process.exit(0);
   }
 
-  return result as ProjectSetupAction;
+  return result === 'link' ? 'link' : 'create';
 }
 
 export async function promptProjectSelection(
@@ -74,7 +74,10 @@ export async function promptProjectSelection(
     return { action: 'create' };
   }
 
-  const project = projects.find((p) => p.id === result)!;
+  const project = projects.find((p) => p.id === result);
+  if (!project) {
+    throw new Error(`Project ${String(result)} is not in the list.`);
+  }
   if (options.confirmExisting) {
     const confirmed = await confirm({
       message:

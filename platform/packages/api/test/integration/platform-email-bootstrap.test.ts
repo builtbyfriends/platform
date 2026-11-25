@@ -21,7 +21,8 @@ import * as emailConnections from '../../src/email/connection-service.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
 import { callsByTag, stubCustomerCf } from './email-domain-cf-stub.ts';
-import { clearTables, setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { clearTables, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -104,19 +105,19 @@ describe('POST /internal/platform/email-bootstrap', () => {
     await env.db
       .update(emailOperationSteps)
       .set({ kind: 'catchall_ensure', outcome: { workerName: 'platform-email-gateway' } })
-      .where(eq(emailOperationSteps.id, plusStep!.id));
+      .where(eq(emailOperationSteps.id, plusStep.id));
     provider.routingSettingsStates.get('platform-mail-zone')!.support_subaddress = false;
     provider.calls.length = 0;
 
     const upgraded = await emailConnections.ensureSharedEmailConnection(env.db, bindings());
     expect(upgraded).not.toBe(first);
     expect((await env.db.select().from(emailDomainRoutes))[0]).toMatchObject({
-      id: originalRoute!.id,
+      id: originalRoute.id,
       inbound_status: 'pending',
-      desired_generation: originalRoute!.desired_generation + 1,
+      desired_generation: originalRoute.desired_generation + 1,
     });
     expect((await env.db.select().from(emailZoneConnections))[0]).toMatchObject({
-      id: legacy!.connection_id,
+      id: legacy.connection_id,
       inbound_status: 'pending',
     });
     const pending = (await env.db.select().from(emailOperationSteps)).filter(
@@ -163,7 +164,7 @@ describe('POST /internal/platform/email-bootstrap', () => {
     expect(response.status).toBe(503);
     const [operation] = await env.db.select().from(emailOperations);
     expect(operation).toBeDefined();
-    expect(await response.json()).toMatchObject({ state: 'failed', operationId: operation!.id });
+    expect(await response.json()).toMatchObject({ state: 'failed', operationId: operation.id });
   });
 
   it('completes the durable shared route before the installer opens traffic', async () => {
@@ -193,7 +194,7 @@ describe('POST /internal/platform/email-bootstrap', () => {
       await env.db
         .select()
         .from(emailDomainRoutes)
-        .where(eq(emailDomainRoutes.id, operation!.route_id!))
+        .where(eq(emailDomainRoutes.id, operation.route_id!))
     )[0];
     expect(operation?.status).toBe('completed');
     expect(route).toMatchObject({

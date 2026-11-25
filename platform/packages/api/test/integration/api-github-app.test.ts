@@ -7,7 +7,8 @@ import {
   verifyAppInstallState,
 } from '../../src/github/app-installations.ts';
 import app from '../../src/index.ts';
-import { deriveProxyInternalAuth, type ProxyInternalRoute } from '../../src/proxy-token.ts';
+import { deriveProxyInternalAuth } from '../../src/proxy-token.ts';
+import type { ProxyInternalRoute } from '../../src/proxy-token.ts';
 import {
   clearTables,
   createTestProject,
@@ -15,8 +16,8 @@ import {
   JWT_SECRET,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 vi.mock('../../src/github/installation-token.ts', async (original) => ({
   ...(await original<typeof import('../../src/github/installation-token.ts')>()),
@@ -89,7 +90,7 @@ beforeEach(async () => {
       });
     }
     return Response.json({}, { status: 404 });
-  }) as unknown as typeof fetch;
+  });
   return () => {
     globalThis.fetch = originalFetch;
   };

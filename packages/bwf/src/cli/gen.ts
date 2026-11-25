@@ -2,13 +2,15 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { log, select, isCancel, cancel } from '@voidzero-dev/vite-plus-prompts';
 import { join, dirname, relative } from 'pathslash';
-import { readConfig, getDatabaseDialect, type DatabaseDialect } from '../config.ts';
+import { readConfig, getDatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { PLACEHOLDER_DB_URL, writeDrizzleConfig } from '../drizzle/config.ts';
 import { snapshotDrizzleOutputs } from '../drizzle/generate.ts';
 import { collectMigrations, readJournal } from '../migrations/collect.ts';
 import { assertJournalCoherence } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
 import type { GenArgs } from './gen-args.ts';
+import { isJsonObject } from './json-value.ts';
 import { printSuccess } from './output.ts';
 import { buildDrizzleKitSpawnEnv, drizzleKitBin } from './yarn-pnp.ts';
 
@@ -43,8 +45,11 @@ function writeIfNotExists(filePath: string, content: string): boolean {
   return true;
 }
 
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 export function formatTimestamp(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
   return (
     String(date.getUTCFullYear()) +
     pad(date.getUTCMonth() + 1) +
@@ -152,8 +157,11 @@ export function detectValidator(root: string): Validator | null {
     return null;
   }
 
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-  const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  const dependencies = isJsonObject(pkg) && isJsonObject(pkg.dependencies) ? pkg.dependencies : {};
+  const devDependencies =
+    isJsonObject(pkg) && isJsonObject(pkg.devDependencies) ? pkg.devDependencies : {};
+  const allDeps = { ...dependencies, ...devDependencies };
 
   if ('valibot' in allDeps) {
     return 'valibot';
@@ -193,7 +201,7 @@ async function resolveValidator(root: string): Promise<Validator> {
     log.warn(`Remember to install ${choice}: npm install ${choice}`);
   }
 
-  return choice as Validator;
+  return choice;
 }
 
 type SchemaValidator = Exclude<Validator, 'none'>;
@@ -231,16 +239,16 @@ const VALIDATOR_TYPES: Record<SchemaValidator, ValidatorTypes> = {
 };
 
 // Decision: Column types not listed here (`string`, `text`, `datetime`) validate as strings.
-const VALUE_KINDS: Partial<Record<string, 'number' | 'boolean' | 'blob'>> = {
-  integer: 'number',
-  real: 'number',
-  boolean: 'boolean',
-  blob: 'blob',
-};
+const VALUE_KINDS = new Map<string, 'number' | 'boolean' | 'blob'>([
+  ['integer', 'number'],
+  ['real', 'number'],
+  ['boolean', 'boolean'],
+  ['blob', 'blob'],
+]);
 
 function validatorType(validator: SchemaValidator, col: ColumnSpec): string {
   const types = VALIDATOR_TYPES[validator];
-  const base = types[VALUE_KINDS[col.type] ?? 'string'];
+  const base = types[VALUE_KINDS.get(col.type) ?? 'string'];
   return col.nullable ? types.optional(base) : base;
 }
 
@@ -351,7 +359,7 @@ export const GET = defineHandler(async (c) => {
 `;
   }
 
-  const importLine = getImportLine(validator)!;
+  const importLine = getImportLine(validator) ?? '';
   const paramsSchema = getParamsSchema(validator);
 
   return `${importLine}
@@ -429,7 +437,7 @@ async function runModel(root: string, name: string, columns: Array<ColumnSpec>):
 
   const exportLine = `export * from "./schema/${name}";`;
   if (existsSync(barrelPath)) {
-    const existing = readFileSync(barrelPath, 'utf-8');
+    const existing = readFileSync(barrelPath, 'utf8');
     if (!existing.includes(exportLine)) {
       writeFileSync(barrelPath, existing.trimEnd() + '\n' + exportLine + '\n');
     }
@@ -464,8 +472,8 @@ function runMigration(root: string, name: string): void {
   const currentMigrations = collectMigrations(migrationsDir);
   try {
     assertJournalCoherence(migrationsDir, currentMigrations, paths.sourceRelative);
-  } catch (err: unknown) {
-    log.error(err instanceof Error ? err.message : String(err));
+  } catch (error: unknown) {
+    log.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 
@@ -486,8 +494,8 @@ function runMigration(root: string, name: string): void {
   // Decision: With journal entries, delegate to `drizzle-kit generate --custom`: it also snapshots the current
   // schema, so the next `bwf db generate` doesn't emit again DDL that the custom migration applies.
   const existingJournal = readJournal(migrationsDir, paths.sourceRelative);
-  if (existingJournal !== undefined && existingJournal.entries.length > 0) {
-    const lastEntry = existingJournal.entries[existingJournal.entries.length - 1];
+  const lastEntry = existingJournal?.entries.at(-1);
+  if (existingJournal !== undefined && lastEntry !== undefined) {
     const metaDir = join(migrationsDir, 'meta');
     // Decision: Use the snapshot named by the last journal tag, not the newest file in meta/, which may be a
     // stale leftover.
@@ -549,7 +557,7 @@ function runMigration(root: string, name: string): void {
       {
         cwd: root,
         stdio: 'pipe',
-        encoding: 'utf-8',
+        encoding: 'utf8',
         // Decision: Yarn PnP projects need the PnP loader to resolve `@builtbyfriends/bwf/schema-*`.
         env: buildDrizzleKitSpawnEnv(root),
       },
@@ -665,7 +673,7 @@ export default defineQueue<Message>(async (batch, env) => {
 
 function runProcedure(root: string, name: string): void {
   const segments = name.split('.');
-  const exportName = segments.pop()!;
+  const exportName = segments.pop() ?? name;
   const filePath = join(readProjectPaths(root).proceduresDir, ...segments) + '.ts';
   const existing = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
   if (existing && new RegExp(`export const ${exportName}\\b`).test(existing)) {

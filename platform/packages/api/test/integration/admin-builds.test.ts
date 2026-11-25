@@ -12,8 +12,8 @@ import {
   createTestUser,
   createTestProject,
   createTestDeployment,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -339,7 +339,7 @@ describe('GET /admin/builds/:id (build page)', () => {
       JSON.parse(
         html.match(
           /<script type="application\/json" id="platform-admin-page">([\s\S]*?)<\/script>/,
-        )![1]!,
+        )![1],
       ),
     ).toMatchObject({ component: 'buildDetail' });
     expect(html).toContain('Loading logs...');

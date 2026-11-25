@@ -10,7 +10,8 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { build, createBuilder, resolveConfig, type InlineConfig } from 'vite';
+import { build, createBuilder, resolveConfig } from 'vite';
+import type { InlineConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { envClientFoldPlugin } from '../../src/plugin-env-client-fold.ts';
 import { envSchemaPlugin } from '../../src/plugin-env-schema.ts';
@@ -71,7 +72,7 @@ async function buildEntry(
   // same process, as `vite build` does with the Cloudflare plugin.
   const output = app
     ? await createBuilder({ ...inline, builder: {} }).then((builder) =>
-        builder.build(builder.environments.client!),
+        builder.build(builder.environments.client),
       )
     : await build(inline);
   return [output]
@@ -137,7 +138,7 @@ describe('envSchemaPlugin auto-discovery', () => {
     const dtsPath = join(root, '.bwf', 'env.d.ts');
     expect(existsSync(dtsPath)).toBe(true);
 
-    const dts = readFileSync(dtsPath, 'utf-8');
+    const dts = readFileSync(dtsPath, 'utf8');
     // Decision: `export {}` makes the file an augmentation instead of an ambient module.
     expect(dts).toContain('export {}');
     expect(dts).toContain('declare module "@builtbyfriends/bwf/env"');
@@ -159,7 +160,7 @@ describe('envSchemaPlugin auto-discovery', () => {
     const plugin = envSchemaPlugin(root);
     await runConfig(plugin);
 
-    const dts = readFileSync(join(root, '.bwf', 'env.d.ts'), 'utf-8');
+    const dts = readFileSync(join(root, '.bwf', 'env.d.ts'), 'utf8');
     expect(dts).toContain('typeof import("../src/env.ts")');
   });
 

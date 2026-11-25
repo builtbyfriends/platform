@@ -1,7 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+const backups = vi.hoisted(() => ({
+  created: [] as Array<{ storage: unknown }>,
+  intercept: vi.fn(async () => {}),
+  backup: vi.fn(async (options: { dir: string }) => ({ id: 'b1', dir: options.dir })),
+  restore: vi.fn(async () => {}),
+  delete: vi.fn(async () => {}),
+}));
 vi.mock('@cloudflare/sandbox', () => ({
   Files: class {},
-  DirectoryBackup: class {},
+  DirectoryBackup: class {
+    constructor(_container: unknown, _gateway: unknown, storage: unknown) {
+      backups.created.push({ storage });
+    }
+    intercept = backups.intercept;
+    backup = backups.backup;
+    restore = backups.restore;
+    delete = backups.delete;
+  },
   DirectoryBackupGateway: class {},
   S3Mount: class {},
   S3Gateway: class {},
@@ -52,6 +67,8 @@ function fixture() {
       stdout: new Blob(['ok']).stream(),
     })),
     setInactivityTimeout: vi.fn(),
+    interceptAllOutboundHttp: vi.fn(),
+    interceptOutboundHttps: vi.fn(),
     destroy: vi.fn(async () => {
       container.running = false;
     }),
@@ -66,6 +83,10 @@ function fixture() {
     blockConcurrencyWhile: (fn: () => Promise<void>) => fn(),
     id: { toString: () => 'namespace-instance' },
     container,
+    exports: {
+      SandboxOutboundHandler: vi.fn((options: { props: unknown }) => ({ outbound: options.props })),
+      DirectoryBackupGateway: vi.fn(),
+    },
     storage: {
       get: async (key: string) => structuredClone(data.get(key)),
       put: async (key: string, value: unknown) => {
@@ -76,7 +97,12 @@ function fixture() {
       deleteAlarm: vi.fn(),
     },
   };
-  const env = { SANDBOX: { getByName: vi.fn() }, __PLATFORM_SANDBOX_CONTROL: control };
+  const env: Record<string, unknown> & { SANDBOX: { getByName: ReturnType<typeof vi.fn> } } = {
+    SANDBOX: { getByName: vi.fn() },
+    __PLATFORM_SANDBOX_CONTROL: control,
+    __PLATFORM_SANDBOX_BACKUPS: {},
+    __PROJECT_ID: 'proj_1',
+  };
   const controller = new SandboxController(ctx as never, env as never);
   env.SANDBOX.getByName.mockReturnValue(controller);
   return {
@@ -91,6 +117,7 @@ function fixture() {
   };
 }
 afterEach(() => {
+  backups.created.length = 0;
   vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -105,10 +132,10 @@ describe('trusted Sandbox lifecycle', () => {
     });
     await f.start();
     expect(f.container.start.mock.invocationCallOrder[0]).toBeLessThan(
-      f.container.setInactivityTimeout.mock.invocationCallOrder[0]!,
+      f.container.setInactivityTimeout.mock.invocationCallOrder[0],
     );
     expect(f.container.setInactivityTimeout.mock.invocationCallOrder[0]).toBeLessThan(
-      f.container.exec.mock.invocationCallOrder[0]!,
+      f.container.exec.mock.invocationCallOrder[0],
     );
   });
   it('reserves before boot and confirms readiness before billing', async () => {
@@ -426,9 +453,7 @@ describe('trusted Sandbox lifecycle', () => {
     });
     await f.controller.invoke('exec', [['true'], { abort: cancellation }]);
     await vi.advanceTimersByTimeAsync(0);
-    const signals = f.container.exec.mock.calls.map(
-      ([, options]) => options?.signal as AbortSignal | undefined,
-    );
+    const signals = f.container.exec.mock.calls.map(([, options]) => options?.signal);
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal && !signal.aborted)).toBe(true);
     abort.abort();
@@ -477,6 +502,37 @@ describe('Sandbox capability boundary', () => {
       'Unsupported Sandbox operation',
     );
   });
+  it('routes HTTP and HTTPS through the outbound rules, registered before boot with the internet off', async () => {
+    const f = fixture();
+    const outbound = {
+      mode: 'hosts' as const,
+      hosts: ['registry.npmjs.org'],
+      secrets: [{ hosts: ['api.example.com'], header: 'authorization', value: 'Bearer s' }],
+    };
+    await f.controller.configure({ outbound });
+    await f.start();
+    expect(f.ctx.exports.SandboxOutboundHandler).toHaveBeenCalledWith({ props: outbound });
+    expect(f.container.interceptAllOutboundHttp).toHaveBeenCalledWith({ outbound });
+    expect(f.container.interceptOutboundHttps).toHaveBeenCalledWith('*', { outbound });
+    expect(f.container.interceptOutboundHttps.mock.invocationCallOrder[0]).toBeLessThan(
+      f.container.start.mock.invocationCallOrder[0],
+    );
+    expect(f.container.start).toHaveBeenCalledWith(
+      expect.objectContaining({ enableInternet: false }),
+    );
+  });
+  it('replaces the rules of a running container in place, and restarts it when internet access changes', async () => {
+    const f = fixture();
+    await f.controller.configure({ outbound: { mode: 'hosts', hosts: ['a.example.com'] } });
+    await f.start();
+    await f.controller.configure({ outbound: { mode: 'hosts', hosts: ['b.example.com'] } });
+    expect(f.container.destroy).not.toHaveBeenCalled();
+    expect(f.container.interceptOutboundHttps).toHaveBeenLastCalledWith('*', {
+      outbound: { mode: 'hosts', hosts: ['b.example.com'] },
+    });
+    await f.controller.configure({ outbound: { mode: 'full' } });
+    expect(f.container.destroy).toHaveBeenCalled();
+  });
   it('validates new options and rejects removed SDK options', async () => {
     const f = service();
     await expect(f.host.getSandbox('default', { keepAlive: true } as never)).rejects.toThrow(
@@ -491,6 +547,38 @@ describe('Sandbox capability boundary', () => {
     await expect(
       f.host.getSandbox('default', { inactivityTimeoutMs: 1000, enableInternet: true }),
     ).resolves.toBeDefined();
+  });
+  it('registers the backup route before the outbound catch-all', async () => {
+    const f = fixture();
+    await f.controller.configure({ outbound: { mode: 'none' } });
+    await f.start();
+    expect(backups.created[0]?.storage).toEqual({
+      binding: '__PLATFORM_SANDBOX_BACKUPS',
+      prefix: 'sandbox-backups/proj_1/',
+    });
+    expect(backups.intercept.mock.invocationCallOrder[0]).toBeLessThan(
+      f.container.interceptAllOutboundHttp.mock.invocationCallOrder[0],
+    );
+  });
+  it('backs up, restores and deletes directories through the capability', async () => {
+    const f = service();
+    const c = await f.host.getSandbox('default');
+    const record = await c.invoke('backup', [{ dir: '/workspace', exclude: ['node_modules/'] }]);
+    expect(record).toEqual({ id: 'b1', dir: '/workspace' });
+    expect(f.container.start).toHaveBeenCalled();
+    expect(backups.backup).toHaveBeenCalledWith({ dir: '/workspace', exclude: ['node_modules/'] });
+    await c.invoke('restore', [record, { dir: '/workspace/copy' }]);
+    expect(backups.restore).toHaveBeenCalledWith(record, { dir: '/workspace/copy' });
+    await c.invoke('deleteBackup', [record]);
+    expect(backups.delete).toHaveBeenCalledWith(record);
+    await expect(c.invoke('backup', [{}])).rejects.toThrow('dir');
+  });
+  it('reports backups as unavailable on a controller without the backup bucket', async () => {
+    const f = service();
+    delete f.env.__PLATFORM_SANDBOX_BACKUPS;
+    await expect(
+      (await f.host.getSandbox('default')).invoke('backup', [{ dir: '/w' }]),
+    ).rejects.toThrow('backups are unavailable');
   });
   it('rejects arbitrary file methods before boot', async () => {
     const f = service();

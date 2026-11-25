@@ -3,12 +3,8 @@ import { createElement, useEffect } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vite-plus/test';
-import {
-  useCall,
-  useCallPages,
-  type CallOptions,
-  type PagesState,
-} from '../../src/runtime/rpc-react.ts';
+import { useCall, useCallPages } from '../../src/runtime/rpc-react.ts';
+import type { CallOptions, PagesState } from '../../src/runtime/rpc-react.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

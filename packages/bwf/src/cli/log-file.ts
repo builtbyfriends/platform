@@ -2,14 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'pathslash';
+import { Buffer } from './node-buffer.ts';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
 export type CliLogger = {
-  info(msg: string, fields?: Record<string, unknown>): void;
-  warn(msg: string, fields?: Record<string, unknown>): void;
-  error(msg: string, err?: unknown, fields?: Record<string, unknown>): void;
-  debug(msg: string, fields?: Record<string, unknown>): void;
+  info<TFields extends Record<string, unknown>>(msg: string, fields?: TFields): void;
+  warn<TFields extends Record<string, unknown>>(msg: string, fields?: TFields): void;
+  error<TFields extends Record<string, unknown>>(
+    msg: string,
+    err?: unknown,
+    fields?: TFields,
+  ): void;
+  debug<TFields extends Record<string, unknown>>(msg: string, fields?: TFields): void;
   /** path to the file backing this logger, or null if unable to open */
   readonly path: string | null;
   /** Release the file. Every record is already on disk when its call returns. Idempotent. */
@@ -34,13 +39,13 @@ export function formatErrorNodeInline(
   depth = 0,
 ): string {
   // Decision: `typeof null` is `'object'`, so the null check has to come first.
-  if (node == null || typeof node !== 'object') {
+  if (node === null || node === undefined || typeof node !== 'object') {
     return String(node);
   }
   // Decision: A JSONL record is data, not a typed value. Coerce each part instead of trusting the declared
   // shape: a hand-edited log, or an `Error` subclass that assigned a non-string `message`, mustn't
   // make a postmortem aid throw.
-  const message = node.message == null ? '' : String(node.message);
+  const message = node.message === null || node.message === undefined ? '' : String(node.message);
   if (depth > 5) {
     return message;
   }
@@ -55,10 +60,22 @@ export function formatErrorNodeInline(
   if (tags.length > 0) {
     head = `${head} (${tags.join(' ')})`;
   }
-  if (node.cause != null) {
+  if (node.cause !== null && node.cause !== undefined) {
     return `${head} -> ${formatErrorNodeInline(node.cause, depth + 1)}`;
   }
   return head;
+}
+
+function errorProperty(err: Error, key: 'code' | 'errno'): string | number | undefined {
+  const value: unknown =
+    key === 'code'
+      ? 'code' in err
+        ? err.code
+        : undefined
+      : 'errno' in err
+        ? err.errno
+        : undefined;
+  return typeof value === 'string' || typeof value === 'number' ? value : undefined;
 }
 
 /**
@@ -66,7 +83,7 @@ export function formatErrorNodeInline(
  * Skips stack traces deliberately — keeps output line-oriented and readable.
  */
 function describeErrorChain(err: unknown, depth = 0): ErrChainNode | string {
-  if (depth > 5 || err == null) {
+  if (depth > 5 || err === null || err === undefined) {
     return String(err);
   }
   if (err instanceof Error) {
@@ -74,16 +91,16 @@ function describeErrorChain(err: unknown, depth = 0): ErrChainNode | string {
       name: err.name,
       message: err.message,
     };
-    const code = (err as Error & { code?: string | number }).code;
+    const code = errorProperty(err, 'code');
     if (code !== undefined) {
       node.code = code;
     }
-    const errno = (err as Error & { errno?: string | number }).errno;
+    const errno = errorProperty(err, 'errno');
     if (errno !== undefined) {
       node.errno = errno;
     }
-    const cause = (err as Error & { cause?: unknown }).cause;
-    if (cause != null) {
+    const cause = err.cause;
+    if (cause !== null && cause !== undefined) {
       const sub = describeErrorChain(cause, depth + 1);
       if (typeof sub === 'object') {
         node.cause = sub;
@@ -96,11 +113,11 @@ function describeErrorChain(err: unknown, depth = 0): ErrChainNode | string {
   return String(err);
 }
 
-function formatStderrLine(
+function formatStderrLine<TFields extends Record<string, unknown>>(
   level: Level,
   msg: string,
   err: unknown | undefined,
-  fields?: Record<string, unknown>,
+  fields?: TFields,
 ): string {
   const parts: Array<string> = [level, msg];
   if (fields) {
@@ -109,7 +126,7 @@ function formatStderrLine(
         continue;
       }
       let s: string;
-      if (v == null || typeof v === 'number' || typeof v === 'boolean') {
+      if (v === null || v === undefined || typeof v === 'number' || typeof v === 'boolean') {
         s = String(v);
       } else if (typeof v === 'string') {
         s = v.length > 200 ? `${v.slice(0, 200)}...` : v;
@@ -144,7 +161,7 @@ export function openDeployLog(opts?: { mirrorToStderr?: boolean }): CliLogger {
   try {
     const dir = join(homedir(), '.bwf', 'logs');
     mkdirSync(dir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const ts = new Date().toISOString().replaceAll(/[:.]/g, '-');
     // Decision: Deploys started in the same millisecond (parallel deploys from one machine) mustn't share a file,
     // so add the pid and a random suffix and refuse to open a file that already exists.
     const suffix = randomBytes(3).toString('hex');
@@ -159,11 +176,11 @@ export function openDeployLog(opts?: { mirrorToStderr?: boolean }): CliLogger {
     fd = null;
   }
 
-  function write(
+  function write<TFields extends Record<string, unknown>>(
     level: Level,
     msg: string,
     err: unknown | undefined,
-    fields?: Record<string, unknown>,
+    fields?: TFields,
   ): void {
     if (msg === 'deploy_end') {
       if (ended) {
@@ -182,12 +199,12 @@ export function openDeployLog(opts?: { mirrorToStderr?: boolean }): CliLogger {
       return;
     }
     const now = Date.now();
-    const record: Record<string, unknown> = {
-      ts: now,
-      elapsedMs: now - startedAt,
-      lvl: level,
-      msg,
-    };
+    const record = new Map<string, unknown>([
+      ['ts', now],
+      ['elapsedMs', now - startedAt],
+      ['lvl', level],
+      ['msg', msg],
+    ]);
     if (fields) {
       for (const [k, v] of Object.entries(fields)) {
         if (
@@ -198,16 +215,16 @@ export function openDeployLog(opts?: { mirrorToStderr?: boolean }): CliLogger {
           k !== 'msg' &&
           k !== 'err'
         ) {
-          record[k] = v;
+          record.set(k, v);
         }
       }
     }
     if (err !== undefined) {
-      record.err = describeErrorChain(err);
+      record.set('err', describeErrorChain(err));
     }
     let line: string;
     try {
-      line = `${JSON.stringify(record)}\n`;
+      line = `${JSON.stringify(Object.fromEntries(record))}\n`;
     } catch {
       // Decision: Non-serializable fields shouldn't crash the logger; fall back to a minimal record.
       line = `${JSON.stringify({ ts: now, elapsedMs: now - startedAt, lvl: level, msg, err: 'unserializable fields' })}\n`;

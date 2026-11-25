@@ -24,9 +24,12 @@ import { dashboardHandler, adminSystem } from './admin/routes/system.tsx';
 import adminUsers from './admin/routes/users.tsx';
 import adminZeroTrust from './admin/routes/zero-trust.tsx';
 import { sweepAiLogging } from './ai-logging-sweep.ts';
+import { billedAccountPlanId } from './app-payer.ts';
+import { syncHostedUse } from './app-usage-sync.ts';
 import { pendingAuthenticationSetup } from './auth/bootstrap.ts';
 import { readAuthSettings, readEnabledLoginConnections } from './auth/configuration.ts';
 import { purgeExpiredOAuthRequests } from './auth/oauth.ts';
+import { deliverBillingEvents } from './billing-events.ts';
 import { BuildManager, BuildManagerLarge } from './build-manager.ts';
 import { BuildScheduler } from './build-scheduler.ts';
 import { capabilityMiddleware, getPlatformCapabilities } from './capabilities.ts';
@@ -72,6 +75,7 @@ import { repairEmailRecipientPolicyMirror } from './email/settings.ts';
 import { reconcileSharedEmailRecipients } from './email/shared-recipient-service.ts';
 import { isDevBypass, type ApiEnv } from './env.ts';
 import { ErrorAlertMonitor } from './error-alert-monitor.ts';
+import { armFastMaintenance, fastMaintenanceArmedAt } from './fast-maintenance.ts';
 import { cancelContainerBuildDos } from './github/cancel-builds.ts';
 import { withCurrentRequestNames } from './legacy-request-names.ts';
 import { authMiddleware } from './middleware/auth.ts';
@@ -139,6 +143,7 @@ import {
   platformLoginTests,
   platformHumanSessions,
 } from './schema.ts';
+import { withOptionalSentry } from './sentry.ts';
 import { isAdminSuspended, REASON_REQUESTS_EXCEEDED } from './suspension.ts';
 import { getCurrentBillingPeriodStart } from './tiers.ts';
 import type { Domain } from './types.ts';
@@ -292,6 +297,19 @@ const app = new Hono<ApiEnv>()
   .use('*', async (context, next) => {
     context.set('db', createDb(context.env.HYPERDRIVE.connectionString));
     await next();
+  })
+
+  // Decision: Procedures under /rpc are all POST, so a read call arms the two-minute tier too. Arming too often
+  // only keeps that cron running longer; arming too rarely would delay work.
+  .use('*', async (context, next) => {
+    await next();
+    const status = context.res.status;
+    if (
+      !['GET', 'HEAD', 'OPTIONS'].includes(context.req.method) &&
+      (status < 400 || status >= 500)
+    ) {
+      await armFastMaintenance(context.env);
+    }
   })
 
   .use('*', platformAccessProtection)
@@ -641,13 +659,41 @@ async function scheduled(
   env: ApiEnv['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
+  const armedAt = controller.cron === FAST_CRON ? await fastMaintenanceArmedAt(env) : undefined;
+  if (armedAt === null) {
+    return;
+  }
+  const fastTier = { unfinished: false };
+  try {
+    await runScheduledMaintenance(controller, env, fastTier);
+  } finally {
+    if (fastTier.unfinished) {
+      await armFastMaintenance(env, armedAt);
+    }
+  }
+}
+
+/**
+ * `fastTier.unfinished` is set when a step leaves work that the next
+ * two-minute tick should continue, and keeps that tier armed. Only work that
+ * ends by itself may set it. Retries that can repeat indefinitely (failed
+ * project cleanup, email operations awaiting recovery) rely on the request
+ * that created them and on the hourly cron.
+ */
+async function runScheduledMaintenance(
+  controller: ScheduledController,
+  env: ApiEnv['Bindings'],
+  fastTier: { unfinished: boolean },
+): Promise<void> {
   env = await resolvePlatformApplicationEnvironment(env);
   const deploymentDb = env.DEPLOYMENTS_QUEUE ? createDb(env.HYPERDRIVE.connectionString) : null;
   // Decision: Durable jobs admitted before maintenance must still run and settle.
   if (deploymentDb) {
-    await dispatchPendingDeployments(env, deploymentDb).catch((error) =>
-      console.error('[scheduled] deployment outbox failed', error),
-    );
+    await dispatchPendingDeployments(env, deploymentDb)
+      .then((found) => {
+        fastTier.unfinished ||= found;
+      })
+      .catch((error) => console.error('[scheduled] deployment outbox failed', error));
   }
   if (
     env.PLATFORM_TRAFFIC_STATE === 'staging' ||
@@ -671,6 +717,12 @@ async function scheduled(
     console.error('[scheduled] project cleanup retry failed:', error),
   );
 
+  await deliverBillingEvents(db)
+    .then((waiting) => {
+      fastTier.unfinished ||= waiting;
+    })
+    .catch((error) => console.error('[scheduled] billing event delivery failed:', error));
+
   // Decision: Fast tier: a resumable Zero Trust batch owns the rest of this invocation so it stays inside the
   // per-invocation subrequest budget. A failed batch doesn't, so the pending-domain and email work
   // below still runs. An operation already in error waits for the hourly tier or an explicit reconcile.
@@ -680,6 +732,7 @@ async function scheduled(
       return false;
     });
     if (zeroTrustProgressed) {
+      fastTier.unfinished = true;
       return;
     }
   }
@@ -687,9 +740,11 @@ async function scheduled(
   // Decision: Proxy token rotations are bounded per tick so deploys keep their share of the Cloudflare API rate
   // limit.
   if (!isDevBypass(env) && env.CF_API_TOKEN) {
-    await reconcileProxyTokenRotations(db, env, { maxCfCalls: 100, maxMs: 25_000 }).catch((error) =>
-      console.error('[scheduled] proxy token rotation failed:', error),
-    );
+    await reconcileProxyTokenRotations(db, env, { maxCfCalls: 100, maxMs: 25_000 })
+      .then((summary) => {
+        fastTier.unfinished ||= summary.done + summary.pending > 0;
+      })
+      .catch((error) => console.error('[scheduled] proxy token rotation failed:', error));
   }
 
   if (capabilities.email) {
@@ -728,6 +783,7 @@ async function scheduled(
     }
     const cutoff = new Date(controller.scheduledTime - RECENT_PENDING_WINDOW_MS).toISOString();
     const young = await getPendingDomainsNewerThan(db, cutoff, MAX_PENDING_RECONCILE_PER_RUN);
+    fastTier.unfinished ||= young.length > 0;
     if (young.length === MAX_PENDING_RECONCILE_PER_RUN) {
       console.warn(
         `[scheduled] fast pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
@@ -749,6 +805,10 @@ async function scheduled(
 
   await reconcilePendingProjectZeroTrust(env, db).catch((error) =>
     console.error('[scheduled] Zero Trust reconciliation failed:', error),
+  );
+
+  await syncHostedUse(env, db).catch((error) =>
+    console.error('[scheduled] hosted use sync failed:', error),
   );
 
   await sweepAiLogging(db, env.ROUTING, initialPlanDefaultFor(env)).catch((error) =>
@@ -859,6 +919,8 @@ async function scheduled(
   // validating (even one near the 7-day cutoff) is activated instead of collected.
   if (capabilities.customDomains) {
     const allPending = await getPendingDomains(db, MAX_PENDING_RECONCILE_PER_RUN);
+    const youngCutoff = new Date(Date.now() - RECENT_PENDING_WINDOW_MS).toISOString();
+    fastTier.unfinished ||= (await getPendingDomainsNewerThan(db, youngCutoff, 1)).length > 0;
     if (allPending.length === MAX_PENDING_RECONCILE_PER_RUN) {
       console.warn(
         `[scheduled] hourly pending-domain reconcile hit the per-run cap (${MAX_PENDING_RECONCILE_PER_RUN}); remaining pending domains will be processed on the next run`,
@@ -1062,6 +1124,9 @@ export async function cleanupStalePendingDomains(
 
     // Decision: Keep the row visible until provider and routing cleanup finish so a concurrent add can't publish a
     // replacement that this run then removes.
+    // Decision: The row is the only record of the Cloudflare hostname id. When the provider delete fails twice,
+    // the row stays so the next run can try again.
+    let providerDeleteFailed = false;
     const claimed = await cleanupPendingDomainUnderProjectFence(env, db, domain, async () => {
       try {
         await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
@@ -1071,14 +1136,21 @@ export async function cleanupStalePendingDomains(
             await deleteCustomHostname(env.CF_ZONE_ID, env.CF_API_TOKEN, domain.cf_hostname_id);
           } catch (retryErr) {
             if (!(retryErr instanceof CloudflareApiError && retryErr.status === 404)) {
-              console.error(
-                `[scheduled] failed to delete stale CF hostname for ${domain.hostname} after retry — CF hostname ${domain.cf_hostname_id} is ORPHANED:`,
-                retryErr,
-              );
+              providerDeleteFailed = true;
+              throw retryErr;
             }
           }
         }
       }
+    }).catch((error: unknown) => {
+      if (!providerDeleteFailed) {
+        throw error;
+      }
+      console.error(
+        `[scheduled] failed to delete stale CF hostname for ${domain.hostname}; keeping the row for the next run:`,
+        error,
+      );
+      return false;
     });
     if (!claimed) {
       continue;
@@ -1100,7 +1172,14 @@ export async function cleanupStalePendingDomains(
 async function processUserRollover(
   env: ApiEnv['Bindings'],
   db: Db,
-  user: { id: string; plan: string; billing_cycle_start: string; suspended_reason: string | null },
+  user: {
+    id: string;
+    plan: string;
+    provider: string;
+    provider_id: string;
+    billing_cycle_start: string;
+    suspended_reason: string | null;
+  },
   userProjects: ReadonlyArray<{ id: string; slug: string; created_at: string }>,
   needsUsageReconciliation: boolean,
 ): Promise<void> {
@@ -1166,6 +1245,7 @@ async function processUserRollover(
 
   const doId = env.USAGE_COUNTER.idFromName(user.id);
   const stub = env.USAGE_COUNTER.get(doId);
+  const plan = await billedAccountPlanId(db, user);
 
   // Decision: The rollover check (the DO resets only if the period changed). The DO does the sandbox-block KV
   // delete and the sandbox_runtime DB unsuspend inline because it owns that state; request-suspension
@@ -1174,7 +1254,7 @@ async function processUserRollover(
     new Request('https://do/rollover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billingPeriodStart, plan: user.plan, userId: user.id }),
+      body: JSON.stringify({ billingPeriodStart, plan, userId: user.id }),
     }),
   );
 
@@ -1218,7 +1298,7 @@ async function processUserRollover(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        plan: user.plan,
+        plan,
         billingPeriodStart,
         projectSlugs,
         projectOwnershipStarts,
@@ -1240,7 +1320,7 @@ export {
 };
 export { app, scheduled };
 
-export default {
+export default withOptionalSentry('api', {
   fetch: ((request, ...rest) =>
     app.fetch(withCurrentRequestNames(request), ...rest)) as typeof app.fetch,
   scheduled,
@@ -1248,4 +1328,4 @@ export default {
     env = await resolvePlatformApplicationEnvironment(env);
     await processPlatformQueue(batch, env);
   },
-} satisfies ExportedHandler<ApiEnv['Bindings']>;
+} satisfies ExportedHandler<ApiEnv['Bindings']>);

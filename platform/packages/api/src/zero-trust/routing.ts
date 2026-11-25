@@ -1,5 +1,6 @@
 import type { ProjectZeroTrustRouting } from '@builtbyfriends/edge';
 import { and, eq, gt } from 'drizzle-orm';
+import { billedPlanLimits } from '../app-payer.ts';
 import type { Db, DbOrTx } from '../db.ts';
 import {
   getActiveDeployment,
@@ -9,18 +10,13 @@ import {
   getUser,
 } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { computeDispatchLimits } from '../routing-limits.ts';
 import { projectRouteKey } from '../routing.ts';
 import { domains } from '../schema.ts';
-import { routingSuspensionReason } from '../suspension.ts';
+import { projectRoutingSuspensionReason } from '../suspension.ts';
 import type { DeployManifest, Project, ProjectZeroTrust } from '../types.ts';
-import {
-  type ManagedAccessApplication,
-  type ZeroTrustConfiguration,
-  ZeroTrustConfigurationError,
-  readZeroTrustConfigurationStrict,
-} from './configuration.ts';
+import { ZeroTrustConfigurationError, readZeroTrustConfigurationStrict } from './configuration.ts';
+import type { ManagedAccessApplication, ZeroTrustConfiguration } from './configuration.ts';
 import { ZeroTrustUnavailableError } from './errors.ts';
 import { lockZeroTrustConfiguration } from './lock.ts';
 import {
@@ -124,10 +120,10 @@ async function readProjectZeroTrustRouting(
   if (!row.effective_protected) {
     throw new ZeroTrustUnavailableError('Project Zero Trust is still reconciling.');
   }
-  const protectedApplication = managedProtectedApplication(
-    row,
-    (await getDomainsByProjectId(db as Db, projectId)).map((domain) => domain.hostname),
-  );
+  const protectedApplication = managedProtectedApplication(row, [
+    ...(row.protected_application_platform_hosts ?? []),
+    ...(await getDomainsByProjectId(db as Db, projectId)).map((domain) => domain.hostname),
+  ]);
   return routingProtection(configuration, protectedApplication);
 }
 
@@ -268,7 +264,10 @@ function routingMatchesDeployment(
 export async function publishProjectZeroTrustRoutingLocked(
   env: Pick<ApiEnv['Bindings'], 'ROUTING'>,
   db: Db,
-  project: Pick<Project, 'id' | 'slug' | 'user_id' | 'active_deployment_id'>,
+  project: Pick<
+    Project,
+    'id' | 'slug' | 'user_id' | 'active_deployment_id' | 'payer_person_id' | 'suspended_reason'
+  >,
   protection: ProjectZeroTrustRouting | null,
   budget = { remaining: MAX_ROUTING_KEYS_PER_RUN },
 ): Promise<boolean> {
@@ -297,10 +296,10 @@ export async function publishProjectZeroTrustRoutingLocked(
     ? (JSON.parse(routeDeployment.manifest) as DeployManifest)
     : null;
   const dispatchLimits = computeDispatchLimits(
-    await resolvePlanLimits(db, owner.plan),
+    await billedPlanLimits(db, owner, project),
     manifest?.limits,
   );
-  const suspensionReason = routingSuspensionReason(owner.suspended_reason);
+  const suspensionReason = projectRoutingSuspensionReason(project, owner);
   // Decision: Protected destinations are capped separately. Clearing public routing has no domain cap and
   // checkpoints progress while holding the project lock.
   const cursor = protection ? null : (row?.routing_cursor ?? null);

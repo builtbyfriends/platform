@@ -1,4 +1,5 @@
 import { jwtVerify, SignJWT } from 'jose';
+import type { JWTPayload } from 'jose';
 
 export type JwtPayload = Readonly<{
   sub: string;
@@ -33,6 +34,16 @@ export type JwtPayload = Readonly<{
   /** Private preview view, tied to a live connected-app grant. */
   oauthGrant?: string;
 }>;
+
+function isJwtPayload(payload: JWTPayload): payload is JWTPayload & JwtPayload {
+  return (
+    typeof payload.sub === 'string' &&
+    typeof payload.login === 'string' &&
+    typeof payload.aud === 'string' &&
+    typeof payload.iat === 'number' &&
+    typeof payload.exp === 'number'
+  );
+}
 
 const EXPIRY_SECONDS = 30 * 24 * 60 * 60;
 
@@ -80,7 +91,7 @@ export async function verifyJwt(
       audience: expectedAud || undefined,
       requiredClaims: ['exp'],
     });
-    return payload as unknown as JwtPayload;
+    return isJwtPayload(payload) ? payload : null;
   } catch {
     return null;
   }

@@ -1,28 +1,36 @@
 import { parseSync } from 'vite';
 import {
+  astChild,
+  astChildren,
+  isAstProgram,
   isCallExpression,
   isIdentifier,
+  isImportDeclaration,
+  isImportNamespaceSpecifier,
+  isImportSpecifier,
   isMemberExpression,
   isObjectExpression,
-  type AstImportDeclaration,
-  type AstImportNamespaceSpecifier,
-  type AstImportSpecifier,
-  type AstNode,
-  type AstProgram,
-  type AstVariableDeclaration,
+  isVariableDeclaration,
 } from './ast.ts';
+import type { AstNode, AstProgram } from './ast.ts';
 import { isResourceName } from './resource-name.ts';
 import { staticLiteral, unwrapStaticExpression } from './static-exports.ts';
+
+type ResourceDefinition = { helper: string; options?: AstNode; name?: string };
 
 /** Inspect default helper definitions without running application code. */
 export function readResourceDefinition(
   filename: string,
   source: string,
   helpers: ReadonlySet<string>,
-): { helper: string; options?: AstNode; name?: string } | null {
+): ResourceDefinition | null {
   let program: AstProgram;
   try {
-    program = parseSync(filename, source).program as unknown as AstProgram;
+    const parsed = parseSync(filename, source).program;
+    if (!isAstProgram(parsed)) {
+      return null;
+    }
+    program = parsed;
   } catch {
     return null;
   }
@@ -36,24 +44,20 @@ export function readResourceDefinition(
     if (isIdentifier(node)) {
       bindings.add(node.name);
     } else if (node?.type === 'ObjectPattern') {
-      for (const property of (node.properties as Array<AstNode> | undefined) ?? []) {
-        recordBindings(
-          (property.type === 'RestElement' ? property.argument : property.value) as
-            | AstNode
-            | undefined,
-        );
+      for (const property of astChildren(node, 'properties')) {
+        recordBindings(astChild(property, property.type === 'RestElement' ? 'argument' : 'value'));
       }
     } else if (node?.type === 'ArrayPattern') {
-      for (const element of (node.elements as Array<AstNode> | undefined) ?? []) {
+      for (const element of astChildren(node, 'elements')) {
         recordBindings(element);
       }
     } else if (node?.type === 'AssignmentPattern' || node?.type === 'RestElement') {
-      recordBindings((node.left ?? node.argument) as AstNode | undefined);
+      recordBindings(astChild(node, 'left') ?? astChild(node, 'argument'));
     }
   }
   for (const statement of program.body ?? []) {
-    if (statement.type === 'ImportDeclaration') {
-      const declaration = statement as AstImportDeclaration;
+    if (isImportDeclaration(statement)) {
+      const declaration = statement;
       const source = declaration.source.value;
       const supported =
         source === '@builtbyfriends/bwf/ws'
@@ -62,12 +66,11 @@ export function readResourceDefinition(
             ? new Set(['defineDurableState', 'defineDurableObject'])
             : new Set<string>();
       for (const specifier of declaration.specifiers ?? []) {
-        const local = specifier.local as AstNode | undefined;
-        recordBindings(local);
-        if (specifier.type === 'ImportNamespaceSpecifier') {
-          namespaces.set((specifier as AstImportNamespaceSpecifier).local.name, supported);
-        } else if (specifier.type === 'ImportSpecifier') {
-          const named = specifier as AstImportSpecifier;
+        recordBindings(astChild(specifier, 'local'));
+        if (isImportNamespaceSpecifier(specifier)) {
+          namespaces.set(specifier.local.name, supported);
+        } else if (isImportSpecifier(specifier)) {
+          const named = specifier;
           const imported = isIdentifier(named.imported)
             ? named.imported.name
             : staticLiteral(named.imported);
@@ -79,14 +82,14 @@ export function readResourceDefinition(
       continue;
     }
     const declaration =
-      statement.type === 'ExportNamedDeclaration'
-        ? (statement.declaration as AstNode | undefined)
-        : statement;
-    recordBindings(declaration?.id as AstNode | undefined);
-    if (declaration?.type !== 'VariableDeclaration') {
+      statement.type === 'ExportNamedDeclaration' ? astChild(statement, 'declaration') : statement;
+    if (declaration) {
+      recordBindings(astChild(declaration, 'id'));
+    }
+    if (!declaration || !isVariableDeclaration(declaration)) {
       continue;
     }
-    for (const variable of (declaration as AstVariableDeclaration).declarations ?? []) {
+    for (const variable of declaration.declarations ?? []) {
       recordBindings(variable.id);
       if (isIdentifier(variable.id) && variable.init) {
         definitions.set(variable.id.name, variable.init);
@@ -122,7 +125,7 @@ export function readResourceDefinition(
     let name: StaticName = { present: false };
     for (const property of options.properties ?? []) {
       if (property.type === 'SpreadElement') {
-        const spread = resolve(property.argument as AstNode | undefined);
+        const spread = resolve(astChild(property, 'argument'));
         if (isObjectExpression(spread)) {
           const spreadName = readName(spread, seen);
           if (spreadName.present) {
@@ -136,7 +139,7 @@ export function readResourceDefinition(
       if (property.type !== 'Property') {
         continue;
       }
-      const key = property.key as AstNode | undefined;
+      const key = astChild(property, 'key');
       const keyName = !property.computed && isIdentifier(key) ? key.name : staticLiteral(key);
       if (keyName !== 'name') {
         if (property.computed && keyName === undefined && name.value !== undefined) {
@@ -144,7 +147,7 @@ export function readResourceDefinition(
         }
         continue;
       }
-      const valueNode = property.value as AstNode | undefined;
+      const valueNode = astChild(property, 'value');
       if (isStaticUndefined(valueNode)) {
         name = { present: true };
         continue;
@@ -162,7 +165,9 @@ export function readResourceDefinition(
   }
 
   const statement = program.body?.find((node) => node.type === 'ExportDefaultDeclaration');
-  const declaration = unwrapStaticExpression(statement?.declaration as AstNode | undefined);
+  const declaration = unwrapStaticExpression(
+    statement ? astChild(statement, 'declaration') : undefined,
+  );
   const call = resolve(isIdentifier(declaration) ? definitions.get(declaration.name) : declaration);
   if (!isCallExpression(call)) {
     return null;
@@ -190,5 +195,9 @@ export function readResourceDefinition(
   }
   const options = resolve(call.arguments?.[0]);
   const name = readName(options).value;
-  return { helper, options, ...(name === undefined ? {} : { name }) };
+  const definition: ResourceDefinition = { helper, options };
+  if (name !== undefined) {
+    definition.name = name;
+  }
+  return definition;
 }

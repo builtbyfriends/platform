@@ -19,7 +19,7 @@ async function signAiToken(projectId: string): Promise<string> {
   for (const byte of sig) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 function createEnv(credential: Response | null) {
@@ -65,7 +65,7 @@ describe('POST /github/request', () => {
 
   it('attaches the stored token and never returns it', async () => {
     const upstream = vi.fn(async () => Response.json({ number: 7 }, { status: 201 }));
-    globalThis.fetch = upstream as unknown as typeof fetch;
+    globalThis.fetch = upstream;
     const env = createEnv(stored());
     const res = await worker.fetch(
       post({
@@ -85,7 +85,7 @@ describe('POST /github/request', () => {
   });
 
   it('refuses a repository the credential does not cover', async () => {
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    globalThis.fetch = vi.fn();
     const res = await worker.fetch(
       post({ projectId: PROJECT, aiToken, path: '/repos/other/repo/pulls' }),
       createEnv(stored()),
@@ -97,10 +97,13 @@ describe('POST /github/request', () => {
   it.each([
     '/user',
     '/repos/acme/widgets/../../user',
+    '/repos/acme/widgets/%2e%2e/%2e%2e/user',
+    '/repos/acme/widgets/%2E./%2e%2E/orgs/acme/repos',
+    '/repos/acme/widgets/./pulls',
     '/repos//x/y',
     'https://evil.test/repos/a/b',
   ])('refuses path %s', async (path) => {
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    globalThis.fetch = vi.fn();
     const res = await worker.fetch(
       post({ projectId: PROJECT, aiToken, path }),
       createEnv(stored()),
@@ -141,7 +144,7 @@ describe('GitHub App installations', () => {
 
   it('uses the scope’s installation token for any repository the installation reaches', async () => {
     const upstream = vi.fn(async () => Response.json({ ok: true }));
-    globalThis.fetch = upstream as unknown as typeof fetch;
+    globalThis.fetch = upstream;
     const env = createEnv(Response.json({ token: 'ghs_install', installation: true }));
     const res = await worker.fetch(
       post({ projectId: PROJECT, aiToken, scope: 'server_1', path: '/repos/anyone/repo/pulls' }),

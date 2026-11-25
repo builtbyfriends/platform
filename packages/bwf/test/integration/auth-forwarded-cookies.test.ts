@@ -4,12 +4,12 @@ import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { getCookieCache } from 'better-auth/cookies';
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vite-plus/test';
-import { getAuth, getSession, getUser, type BwfAuthConfig } from '../../src/runtime/auth.ts';
-import {
-  createBwfAuthRuntime,
-  type BwfAuthRuntimeOptions,
-} from '../../src/runtime/better-auth-shared.ts';
-import { createRoutingRuntime, type RoutingContext } from '../../src/runtime/routing.ts';
+import { getAuth, getSession, getUser } from '../../src/runtime/auth.ts';
+import type { BwfAuthConfig } from '../../src/runtime/auth.ts';
+import { createBwfAuthRuntime } from '../../src/runtime/better-auth-shared.ts';
+import type { BwfAuthRuntimeOptions } from '../../src/runtime/better-auth-shared.ts';
+import { createRoutingRuntime } from '../../src/runtime/routing.ts';
+import type { RoutingContext } from '../../src/runtime/routing.ts';
 
 const env = { BETTER_AUTH_SECRET: 'local-test-secret-with-at-least-32-characters' };
 const origin = 'https://app.test';
@@ -73,7 +73,7 @@ function authCookies(response: Response, suffix: string): Array<string> {
 }
 
 function cachedUser(cookie: string): { name: string; image?: string | null } {
-  const value = decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1).split(';')[0]!);
+  const value = decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1).split(';')[0]);
   const cache = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
     session: { user: { name: string; image?: string | null } };
   };
@@ -103,8 +103,7 @@ function fixture(userConfig: BwfAuthConfig = cookieCache, beforeRoutes?: (app: H
     waitUntil() {},
     passThroughOnException() {},
   } as unknown as ExecutionContext;
-  app.request = ((input, init, env, ctx) =>
-    request(input, init, env, ctx ?? executionCtx)) as typeof app.request;
+  app.request = (input, init, env, ctx) => request(input, init, env, ctx ?? executionCtx);
   const routing = createRoutingRuntime(app);
   app.use(routing.contextMiddleware);
   app.use(async (c, next) => runtime.runBwfAuthMiddleware(c, next, options, database));
@@ -210,8 +209,8 @@ describe('cookies set by auth.api calls during a request', () => {
     const data = authCookies(response, 'session_data');
     expect(token).toHaveLength(1);
     expect(data).toHaveLength(1);
-    expect(isCleared(token[0]!)).toBe(true);
-    expect(isCleared(data[0]!)).toBe(true);
+    expect(isCleared(token[0])).toBe(true);
+    expect(isCleared(data[0])).toBe(true);
     expectNoDuplicateCookies(response);
 
     jar.apply(response);
@@ -387,8 +386,8 @@ describe('cookies set by auth.api calls during a request', () => {
     const token = authCookies(logout, 'session_token');
     expect(data).toHaveLength(1);
     expect(token).toHaveLength(1);
-    expect(isCleared(data[0]!)).toBe(true);
-    expect(isCleared(token[0]!)).toBe(true);
+    expect(isCleared(data[0])).toBe(true);
+    expect(isCleared(token[0])).toBe(true);
     expectNoDuplicateCookies(logout);
     jar.apply(logout);
     expect([...jar.cookies.keys()].filter((name) => name.includes('better-auth.'))).toEqual([]);
@@ -638,8 +637,8 @@ describe('merging session lookup cookies with auth.api cookies', () => {
     const token = authCookies(response, 'session_token');
     expect(data).toHaveLength(1);
     expect(token).toHaveLength(1);
-    expect(isCleared(data[0]!)).toBe(true);
-    expect(isCleared(token[0]!)).toBe(true);
+    expect(isCleared(data[0])).toBe(true);
+    expect(isCleared(token[0])).toBe(true);
     expectNoDuplicateCookies(response);
     jar.apply(response);
     expect([...jar.cookies.keys()].filter((name) => name.includes('better-auth.'))).toEqual([]);
@@ -659,14 +658,14 @@ describe('merging session lookup cookies with auth.api cookies', () => {
     const jar = await signIn(app);
     const refresh = await send(app, '/me', { jar });
     expect(authCookies(refresh, 'session_token')).toHaveLength(1);
-    expect(isCleared(authCookies(refresh, 'session_token')[0]!)).toBe(false);
+    expect(isCleared(authCookies(refresh, 'session_token')[0])).toBe(false);
 
     const response = await send(app, '/logout', { jar, body: {} });
 
     expect(response.status).toBe(200);
     const token = authCookies(response, 'session_token');
     expect(token).toHaveLength(1);
-    expect(isCleared(token[0]!)).toBe(true);
+    expect(isCleared(token[0])).toBe(true);
     jar.apply(response);
     expect([...jar.cookies.keys()].filter((name) => name.includes('better-auth.'))).toEqual([]);
     await expect(me(app, jar)).resolves.toEqual({ user: null, session: null });
@@ -801,7 +800,7 @@ describe('auth.api cookies on requests from another origin', () => {
     });
     app.get('/login', async (c) => {
       const { email, password } = c.req.query();
-      await getAuth(c).api.signInEmail({ body: { email: email!, password: password! } });
+      await getAuth(c).api.signInEmail({ body: { email, password } });
       return c.json({ ok: true });
     });
     return app;
@@ -836,7 +835,7 @@ describe('auth.api cookies on requests from another origin', () => {
     const response = await postLogin(app, evil);
 
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toMatch(/^auth: Did not send cookies set by auth\.api calls/);
+    expect(warn.mock.calls[0][0]).toMatch(/^auth: Did not send cookies set by auth\.api calls/);
     warn.mockRestore();
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });

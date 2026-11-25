@@ -80,7 +80,7 @@ async function main() {
   p.outro(`cd ${appName} && ${pm === 'npm' ? 'npm run' : pm} dev`);
 }
 
-main().catch((err) => {
-  p.log.error(err.message);
+main().catch((error) => {
+  p.log.error(error.message);
   process.exit(1);
 });

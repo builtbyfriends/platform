@@ -1,10 +1,9 @@
-import {
-  createDefaultPlanCatalog,
-  parsePlatformPlanCatalog,
-  type BuiltinPlanId,
-  type PlanLimits,
-  type PlatformPlanCatalog,
-  type PlatformPlanDefinition,
+import { createDefaultPlanCatalog, parsePlatformPlanCatalog } from '@builtbyfriends/platform/plans';
+import type {
+  BuiltinPlanId,
+  PlanLimits,
+  PlatformPlanCatalog,
+  PlatformPlanDefinition,
 } from '@builtbyfriends/platform/plans';
 import { count, sql } from 'drizzle-orm';
 import type { DbOrTx } from './db.ts';
@@ -108,6 +107,14 @@ export async function getDefaultPlan(
 ): Promise<PlatformPlanDefinition> {
   const catalog = await readPlanCatalog(db, initialDefaultPlanId);
   return catalog.plans.find((plan) => plan.id === catalog.defaultPlanId)!;
+}
+
+/** The default plan as the admin screens show it, including before an operator saves a catalog. */
+export function installationDefaultPlan(
+  db: DbOrTx,
+  env: { PLATFORM_INSTALLATION_ID?: string | undefined },
+): Promise<PlatformPlanDefinition> {
+  return getDefaultPlan(db, initialPlanDefaultFor(env));
 }
 
 export async function requireAssignablePlan(

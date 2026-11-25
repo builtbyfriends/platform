@@ -32,6 +32,7 @@ import { isUnmaskActive, redactMessage } from '../shared/env-mask.ts';
 import type { StandardSchemaV1 } from '../standard-schema.ts';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { getRuntimeEnv, isInternalBinding } from './env.ts';
+import type { BwfPlatformSandbox } from './sandbox.ts';
 
 type AnyValidator = StandardSchemaV1<unknown, unknown>;
 type AnySchema = Record<string, AnyValidator>;
@@ -74,6 +75,7 @@ const registry = (registryGlobal[ENV_REGISTRY_SYMBOL] ??= {
 // is gone.
 let validatedCache = new WeakMap<object, Map<string, unknown>>();
 
+// oxlint-disable-next-line quality/no-object-parameters
 function getValidatedCache(rawEnv: object): Map<string, unknown> {
   let cache = validatedCache.get(rawEnv);
   if (!cache) {
@@ -84,8 +86,10 @@ function getValidatedCache(rawEnv: object): Map<string, unknown> {
 }
 
 /** Vite embeds the same public build inputs into server and browser bundles. */
+// oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
 function getClientEnvValues(): Record<string, unknown> {
-  const values = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- import.meta.env shape is bundler defined
+  const values = (import.meta as { env?: Record<string, unknown> }).env;
   return Object.fromEntries(
     Object.entries(values ?? {}).filter(([key]) => key.startsWith('VITE_')),
   );
@@ -98,6 +102,7 @@ function getClientEnvValues(): Record<string, unknown> {
  * a hard error) for bindings and keys not declared in the schema.
  */
 export interface ValidatedEnv {
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env index signature is the documented shape
   readonly [key: string]: unknown;
 }
 
@@ -125,7 +130,8 @@ export function defineEnv<S extends AnySchema>(schema: S): InferEnv<S> {
   validatedCache = new WeakMap();
   // Decision: Reset boot-time validation state so a re-imported schema is re-checked.
   registry.validation = null;
-  return env as unknown as InferEnv<S>;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- proxy is typed by the schema
+  return env as InferEnv<S>;
 }
 
 /**
@@ -167,6 +173,7 @@ export async function _validateEnvOnce(envValues: unknown): Promise<void> {
 
 /** The raw value of each schema key that `readKey` would validate for this env. */
 function readSchemaInputs(schema: AnySchema, envValues: unknown): Map<string, unknown> {
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type,typescript/no-unsafe-type-assertion -- env values are untyped
   const values = (typeof envValues === 'object' && envValues !== null ? envValues : {}) as Record<
     string,
     unknown
@@ -261,6 +268,7 @@ export function _hasRegisteredSchema(): boolean {
 export function _getSchemaDefaults(): Record<string, string> {
   const defaults: Record<string, string> = {};
   if (!registry.schema) {
+    // oxlint-disable-next-line quality/no-known-value-widening -- exported return type
     return defaults;
   }
   for (const [key, validator] of Object.entries(registry.schema)) {
@@ -273,6 +281,7 @@ export function _getSchemaDefaults(): Record<string, string> {
     if (result instanceof Promise) {
       continue;
     }
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- standard schema result is a union
     const r = result as { value?: unknown; issues?: unknown };
     if (r.issues) {
       continue;
@@ -282,6 +291,7 @@ export function _getSchemaDefaults(): Record<string, string> {
     }
     defaults[key] = typeof r.value === 'string' ? r.value : String(r.value);
   }
+  // oxlint-disable-next-line quality/no-known-value-widening -- accumulator keyed by schema
   return defaults;
 }
 
@@ -298,12 +308,14 @@ export class EnvValidationError extends Error {
   }
 }
 
+// oxlint-disable-next-line quality/no-unknown-returns -- env values are untyped
 function readKey(key: string): unknown {
   // Decision: Internal bindings stay hidden even when the schema declares them.
   const rawEnv = getRawRuntimeEnv();
   if (isInternalBinding(key)) {
     return undefined;
   }
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
   const filtered = getRuntimeEnv() as Record<string, unknown>;
   const clientValues = getClientEnvValues();
   const rawValue = Object.hasOwn(clientValues, key) ? clientValues[key] : filtered[key];
@@ -362,35 +374,38 @@ function readKey(key: string): unknown {
  * on first access and passing through bindings / unknown keys unchanged.
  * Async validators must be resolved first by `_validateEnvOnce()`.
  */
-export const env = new Proxy({} as Record<string, unknown>, {
-  get(_target, key) {
-    if (typeof key === 'symbol') {
-      return undefined;
-    }
-    return readKey(key);
+export const env = new Proxy(
+  {},
+  {
+    get(_target, key) {
+      if (typeof key === 'symbol') {
+        return undefined;
+      }
+      return readKey(key);
+    },
+    has(_target, key) {
+      if (typeof key === 'symbol') {
+        return false;
+      }
+      return Object.hasOwn(getClientEnvValues(), key) || Reflect.has(getRuntimeEnv(), key);
+    },
+    ownKeys() {
+      return [
+        ...new Set([...Reflect.ownKeys(getRuntimeEnv()), ...Object.keys(getClientEnvValues())]),
+      ];
+    },
+    getOwnPropertyDescriptor(_target, key) {
+      if (typeof key === 'symbol') {
+        return undefined;
+      }
+      return {
+        enumerable: true,
+        configurable: true,
+        value: readKey(String(key)),
+      };
+    },
   },
-  has(_target, key) {
-    if (typeof key === 'symbol') {
-      return false;
-    }
-    return Object.hasOwn(getClientEnvValues(), key) || Reflect.has(getRuntimeEnv() as object, key);
-  },
-  ownKeys() {
-    return [
-      ...new Set([...Reflect.ownKeys(getRuntimeEnv()), ...Object.keys(getClientEnvValues())]),
-    ];
-  },
-  getOwnPropertyDescriptor(_target, key) {
-    if (typeof key === 'symbol') {
-      return undefined;
-    }
-    return {
-      enumerable: true,
-      configurable: true,
-      value: readKey(String(key)),
-    };
-  },
-}) as ValidatedEnv;
+) as ValidatedEnv;
 
 /** Aggregate report from validating an entire env object against the schema. */
 export type EnvValidationReport = {
@@ -413,6 +428,7 @@ export type EnvValidationReport = {
  * arktype narrows, etc.). Callers already run in async contexts.
  */
 export async function validateAllEnv(
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
   envValues: Record<string, unknown>,
 ): Promise<EnvValidationReport> {
   if (!registry.schema) {
@@ -427,6 +443,7 @@ export async function validateAllEnv(
  */
 async function validateAllEnvWithValues(
   schema: AnySchema,
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- env values are untyped
   envValues: Record<string, unknown>,
 ): Promise<EnvValidationReport> {
   const report: EnvValidationReport = {
@@ -470,7 +487,7 @@ declare global {
       KV: KVNamespace;
       STORAGE: R2Bucket;
       AI: Ai;
-      SANDBOX: DurableObjectNamespace<import('./sandbox.ts').BwfPlatformSandbox>;
+      SANDBOX: DurableObjectNamespace<BwfPlatformSandbox>;
       ASSETS: Fetcher;
       /** @internal Service binding to proxy worker (AI, revalidation, future features) */
       __PLATFORM_PROXY?: Fetcher;

@@ -102,7 +102,9 @@ describe('CLI help resolver', () => {
     (command) => {
       printHelpPage(['platform', command]);
 
-      expect(vi.mocked(note).mock.calls[0]?.[0]).toContain(`bwf platform ${command} [id] [--plan]`);
+      expect(vi.mocked(note).mock.calls[0]?.[0]).toContain(
+        `bwf platform ${command} ${command === 'upgrade' ? '[id...]' : '[id]'} [--plan]`,
+      );
     },
   );
 });
@@ -118,7 +120,7 @@ describe('rendered help advertises the flags the parser honours', () => {
     printHelpPage(path);
     const lines = vi.mocked(note).mock.calls.map((call) => String(call[0]));
     // eslint-disable-next-line no-control-regex
-    return lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
+    return lines.join('\n').replaceAll(/\u001b\[[0-9;]*m/g, '');
   }
 
   it('shows --runtime-logs only on platform install and upgrade', () => {

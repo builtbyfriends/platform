@@ -2,14 +2,16 @@ import {
   createDeployArtifact,
   deployArtifactDigest,
   validateManifestShape,
-  type DeployArtifact,
 } from '@builtbyfriends/deploy-core';
+import type { DeployArtifact } from '@builtbyfriends/deploy-core';
 import { browserPageLead, escapeBrowserHtml } from '@builtbyfriends/platform/browser-page';
 import { and, eq, gt, isNull, desc, or } from 'drizzle-orm';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { calculatePKCECodeChallenge } from 'oauth4webapi';
+import { namedPayer } from '../app-payer.ts';
 import { readAuthSettings, readEnabledLoginConnections } from '../auth/configuration.ts';
 import { signJwt, verifyJwt } from '../auth/jwt.ts';
 import type { OAuthRequestData, OAuthSession, OAuthScope } from '../auth/oauth-types.ts';
@@ -26,14 +28,21 @@ import { hashLoginProof, randomLoginProof } from '../auth/proofs.ts';
 import { validateHumanSession } from '../auth/sessions.ts';
 import { platformBrowserPage, platformBrowserError } from '../browser-page.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
-import { consumeCliAuthCode, getProjectBySlug, getUser, type Db, type DbOrTx } from '../db.ts';
-import { isDevBypass, type ApiEnv } from '../env.ts';
+import { consumeCliAuthCode, getProjectBySlug, getUser } from '../db.ts';
+import type { Db, DbOrTx } from '../db.ts';
+import { isDevBypass } from '../env.ts';
+import type { ApiEnv } from '../env.ts';
 import { MAX_SLUG_LENGTH } from '../project-names.ts';
 import { oauthClients, oauthGrants, oauthRefreshTokens, oauthRequests } from '../schema.ts';
 import { isAdminSuspended } from '../suspension.ts';
 import { APP_PERSON_GRANT, appPersonToken } from './oauth-app-person.ts';
 import previews from './previews.ts';
-import { createProjectForUser, ProjectCreateError, scheduleAfterResponse } from './projects.ts';
+import {
+  createProjectForUser,
+  ProjectCreateError,
+  runScheduledAfterCommit,
+  scheduleAfterCommit,
+} from './projects.ts';
 
 const app = new Hono<ApiEnv>();
 const FLOW_SECONDS = 300;
@@ -170,7 +179,7 @@ async function newRequest(
   if (bindBrowser) {
     setCookie(context, browserCookie, proof, cookieOptions(context, FLOW_SECONDS));
   }
-  return request!;
+  return request;
 }
 async function loginPage(context: Context<ApiEnv>, id: string) {
   const settings = await readAuthSettings(context.get('db'));
@@ -260,7 +269,7 @@ app.use('*', (context, next) =>
           context.req.path,
         )
           ? 48 * 1024 * 1024
-          : 32768,
+          : 32_768,
       })(context, next),
 );
 app.onError((error, context) =>
@@ -437,7 +446,8 @@ async function publishProject(
           env: context.env,
           db: tx,
           user,
-          schedule: (work) => scheduleAfterResponse(context, work),
+          // Decision: `tx` belongs to the caller's transaction, so the work waits for its commit.
+          schedule: async (work) => scheduleAfterCommit(context, work),
         },
         slug,
       )) as NonNullable<typeof project>;
@@ -537,7 +547,7 @@ app.post('/approve', async (context) => {
     if (data.kind === 'deployment') {
       data = {
         ...data,
-        projectId: await publishProject(context, tx as Db, data.slug!, context.get('user')),
+        projectId: await publishProject(context, tx, data.slug!, context.get('user')),
       };
     } else {
       const grantId = crypto.randomUUID();
@@ -566,6 +576,7 @@ app.post('/approve', async (context) => {
       })
       .where(eq(oauthRequests.id, request.id));
   });
+  await runScheduledAfterCommit(context);
   const redirect = new URL(request.data.redirectUri);
   redirect.searchParams.set('state', request.data.state);
   if (body.decision === 'approve') {
@@ -833,6 +844,7 @@ export type PublishRequestBody = {
   slug: string;
   checkpoint: string;
   artifact: DeployArtifact;
+  payer?: string;
 };
 
 /** Starts a publish: the returned URL is where the signed-in user approves or refuses it. */
@@ -874,7 +886,9 @@ export async function requestPublishApproval(
     );
   }
   const artifact = createDeployArtifact(body.artifact);
+  const payer = await namedPayer(db, grant, body.payer);
   const data: OAuthRequestData = {
+    ...(payer === undefined ? {} : { payer }),
     kind: 'deployment',
     grantId: grant.id,
     ...(grant.session.actingPerson ? { actingPerson: grant.session.actingPerson } : {}),
@@ -901,8 +915,8 @@ export async function requestPublishApproval(
     })
     .returning();
   return {
-    authorization_url: authOrigin(env) + '/oauth/authorize?request=' + request!.id,
-    request_id: request!.id,
+    authorization_url: authOrigin(env) + '/oauth/authorize?request=' + request.id,
+    request_id: request.id,
     expires_in: FLOW_SECONDS,
   };
 }

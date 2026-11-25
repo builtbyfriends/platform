@@ -29,20 +29,12 @@
  *   expect(result.params).toEqual({ ticket: "abc-1" });
  */
 
-import {
-  compareEmailRoutes,
-  compileEmailPattern,
-  type CompiledEmailPattern,
-} from '../../router/email.ts';
-import { registerEmailSink, type CapturedMessage } from './dev-inbox.ts';
-import {
-  createMessageProxy,
-  type EmailAction,
-  type EmailHandler,
-  type EmailHandlerInfo,
-  MAX_INBOUND_BYTES,
-  MAX_INBOUND_HEADERS,
-} from './inbound.ts';
+import { compareEmailRoutes, compileEmailPattern } from '../../router/email.ts';
+import type { CompiledEmailPattern } from '../../router/email.ts';
+import { registerEmailSink } from './dev-inbox.ts';
+import type { CapturedMessage } from './dev-inbox.ts';
+import { createMessageProxy, MAX_INBOUND_BYTES, MAX_INBOUND_HEADERS } from './inbound.ts';
+import type { EmailAction, EmailHandler, EmailHandlerInfo } from './inbound.ts';
 import { buildMime, normalizeEmail } from './mime.ts';
 
 export interface EmailTestHarness {
@@ -146,10 +138,12 @@ interface CompiledRoute {
   handler: EmailHandler;
 }
 
-function compileRoutes(routes: Record<string, EmailHandler>): {
+type CompiledRoutes = {
   compiled: Array<CompiledRoute>;
   defaultHandler?: EmailHandler;
-} {
+};
+
+function compileRoutes(routes: Record<string, EmailHandler>): CompiledRoutes {
   const compiled: Array<CompiledRoute> = [];
   let defaultHandler: EmailHandler | undefined;
   for (const [key, handler] of Object.entries(routes)) {
@@ -276,11 +270,11 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       }
       try {
         headers = parseHeaderBlock(raw, MAX_INBOUND_HEADERS);
-      } catch (e) {
-        if (e instanceof InboundTooManyHeadersError) {
+      } catch (error) {
+        if (error instanceof InboundTooManyHeadersError) {
           return refuse(`${label}: too many headers (max ${MAX_INBOUND_HEADERS})`);
         }
-        throw e;
+        throw error;
       }
     }
     // Decision: The caller's own headers win, applied after admission: they are not on
@@ -314,7 +308,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
 
     // Decision: Production's own proxy, built as the generated `email()` entry builds
     // it, so every proxy check throws here as it does after deploy.
-    const { message, getActions } = createMessageProxy(
+    const proxy = createMessageProxy(
       {
         from: input.from,
         to: input.to,
@@ -324,7 +318,9 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
       },
       { slug },
     );
+    const { message } = proxy;
 
+    // oxlint-disable-next-line quality/no-chained-type-assertions,typescript/no-unsafe-type-assertion -- the harness stubs only the methods the proxy calls
     const ctx = {
       waitUntil() {
         // Decision: Nothing to extend: the harness has no request lifetime.
@@ -371,7 +367,7 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
 
     const result = await dispatch();
     // Decision: Recorded after the handler returns: a throwing handler enacts nothing.
-    record(getActions());
+    record(proxy.getActions());
     deliveries.push(result);
     return result;
   }
@@ -394,10 +390,13 @@ export function createInboundTestHarness(opts: InboundTestHarnessOptions): Inbou
           rejects.push(action.reason);
           break;
         case 'forward':
-          forwards.push({
-            to: action.to,
-            ...(action.headers ? { headers: new Headers(action.headers) } : {}),
-          });
+          {
+            const forward: InboundForwardCapture = { to: action.to };
+            if (action.headers) {
+              forward.headers = new Headers(action.headers);
+            }
+            forwards.push(forward);
+          }
           break;
         case 'reply':
           replies.push({ from: action.from, to: action.to, raw: action.raw });

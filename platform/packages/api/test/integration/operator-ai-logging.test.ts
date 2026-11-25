@@ -47,9 +47,9 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 // Decision: Hosted Platform doesn't set PLATFORM_AUTH_DATABASE_UNCACHED, so nothing here can depend on it.
 let env: TestEnv;
@@ -292,8 +292,8 @@ describe('operator project override', () => {
     const [lock, inputs] = queries.filter((query) =>
       query.trim().toLowerCase().startsWith('update'),
     );
-    expect(lock!.toLowerCase()).not.toContain(' from ');
-    expect(lock!.toLowerCase()).not.toContain(' join ');
+    expect(lock.toLowerCase()).not.toContain(' from ');
+    expect(lock.toLowerCase()).not.toContain(' join ');
     expect(inputs).toContain('"project_ai_logging"');
     expect((await published(project.id)).value).toBe('metadata');
   });

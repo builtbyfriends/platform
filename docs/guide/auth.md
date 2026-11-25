@@ -132,23 +132,9 @@ Import `AuthUser` and `AuthSession` from `@builtbyfriends/bwf/auth` for type ann
 
 ## Querying Authentication Tables
 
-To query users or reference them from your own tables, import bwf's generated authentication schema. It exports `userTable`, `sessionTable`, `accountTable`, `verificationTable`, and any tables added by your Better Auth plugins.
+To query users or reference them from your own tables, import bwf's generated authentication schema from `@auth-schema`. It exports `userTable`, `sessionTable`, `accountTable`, `verificationTable`, and any tables added by your Better Auth plugins. Like `@schema`, it needs no setup when your root `tsconfig.json` extends `.bwf/tsconfig.json`.
 
-Add an alias to your root `tsconfig.json`:
-
-```json
-{
-  "compilerOptions": {
-    "paths": {
-      "@auth-schema": ["./.bwf/better-auth-schema.ts"]
-    }
-  }
-}
-```
-
-Keep your other path aliases, including any you use from `.bwf/tsconfig.json`, such as `@schema`.
-
-You can now query users with Drizzle:
+Query users with Drizzle:
 
 ```ts
 import { userTable } from '@auth-schema';

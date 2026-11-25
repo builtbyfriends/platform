@@ -18,6 +18,7 @@ import type {
   DeployManifest,
   DevRedirectRule,
   HeaderRule,
+  LiveManifestMeta,
   QueueMeta,
   RedirectRule,
   SandboxManifestMeta,
@@ -25,12 +26,11 @@ import type {
   WebSocketManifestMeta,
 } from './types.ts';
 export type { DeployAssetManifestEntry as AssetManifestEntry } from './types.ts';
-import {
-  DEFAULT_LIVE_BINDING,
-  DEFAULT_LIVE_CLASS,
-  LIVE_MIGRATION_TAG,
-  type LiveBindingConfig,
-} from './wrangler.ts';
+import { errorCode } from './error-code.ts';
+import { isJsonObject } from './json-value.ts';
+import { Buffer } from './node-buffer.ts';
+import { DEFAULT_LIVE_BINDING, DEFAULT_LIVE_CLASS, LIVE_MIGRATION_TAG } from './wrangler.ts';
+import type { LiveBindingConfig } from './wrangler.ts';
 
 const textEncoder = new TextEncoder();
 
@@ -61,6 +61,11 @@ function stripDevOnlyRuleFields(
   return rules.map(({ origin: _origin, force: _force, ...rest }) => rest);
 }
 
+type SpaFallbackChain = {
+  assetConfig: AssetConfig;
+  fallbackRules: Array<DevRedirectRule> | undefined;
+};
+
 /**
  * Layer user `routing.fallbacks` over the SPA default. The platform SPA switch
  * is global, so a SPA with user fallbacks turns it off and appends a synthetic
@@ -73,10 +78,7 @@ export function resolveSpaFallbackChain(
   appType: 'spa' | 'static' | undefined,
   fallbackRules: Array<DevRedirectRule> | undefined,
   notFound?: NotFoundHandling,
-): {
-  assetConfig: AssetConfig;
-  fallbackRules: Array<DevRedirectRule> | undefined;
-} {
+): SpaFallbackChain {
   const userRules = fallbackRules && fallbackRules.length > 0 ? fallbackRules : undefined;
 
   const handling: NotFoundHandling =
@@ -120,7 +122,7 @@ export function resolveSpaFallbackChain(
 }
 
 function isNotFoundError(err: unknown): boolean {
-  return err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT';
+  return err instanceof Error && errorCode(err) === 'ENOENT';
 }
 
 const PROGRESS_CHUNK = 50;
@@ -143,7 +145,9 @@ async function tickProgress(
     return;
   }
   onProgress(`${label} (${i}/${total})`);
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 /**
@@ -153,7 +157,7 @@ async function tickProgress(
  */
 export function computeAssetHash(content: Buffer, filePath: string): string {
   const base64 = content.toString('base64');
-  const ext = extname(filePath).substring(1);
+  const ext = extname(filePath).slice(1);
   const input = textEncoder.encode(base64 + ext);
   return Buffer.from(blake3hash(input)).toString('hex').slice(0, 32);
 }
@@ -173,6 +177,11 @@ function computeMd5(content: Buffer): string {
   return createHash('md5').update(content).digest('hex');
 }
 
+type AssetsIgnoreFunction = {
+  isIgnored: (relativePath: string) => boolean;
+  assetsIgnoreFilePresent: boolean;
+};
+
 /**
  * Create a filter function that excludes .assetsignore, _headers, _redirects,
  * OS metadata files, dotenv files, deploy-internal patterns, and any patterns
@@ -182,10 +191,7 @@ function computeMd5(content: Buffer): string {
 function createAssetsIgnoreFunction(
   dir: string,
   extraPatterns: Array<string> = [],
-): {
-  isIgnored: (relativePath: string) => boolean;
-  assetsIgnoreFilePresent: boolean;
-} {
+): AssetsIgnoreFunction {
   const patterns = [
     '/.assetsignore',
     '/_redirects',
@@ -199,7 +205,7 @@ function createAssetsIgnoreFunction(
   let assetsIgnoreFilePresent = false;
   if (existsSync(assetsIgnorePath)) {
     assetsIgnoreFilePresent = true;
-    const content = readFileSync(assetsIgnorePath, 'utf-8');
+    const content = readFileSync(assetsIgnorePath, 'utf8');
     patterns.push(...content.split('\n'));
   }
   const ig = ignore().add(patterns);
@@ -275,11 +281,11 @@ export async function collectAndHashAssets(
       };
       assetFiles.set(relativePath, content);
     }
-  } catch (err) {
+  } catch (error) {
     // Decision: Only swallow directory-not-found errors; rethrow everything else (such as the _worker.js safety
     // guard).
-    if (!isNotFoundError(err)) {
-      throw err;
+    if (!isNotFoundError(error)) {
+      throw error;
     }
   }
 
@@ -333,7 +339,7 @@ function toSandboxManifest(sandbox: ResolvedSandboxConfig): SandboxManifestMeta 
   };
 }
 
-function toLiveManifest(live?: LiveBindingConfig): import('./types.ts').LiveManifestMeta {
+function toLiveManifest(live?: LiveBindingConfig): LiveManifestMeta {
   const bindingName = live?.bindingName ?? DEFAULT_LIVE_BINDING;
   const className = live?.className ?? DEFAULT_LIVE_CLASS;
   return {
@@ -410,18 +416,15 @@ function toMigrationsManifest(
   dialect: 'sqlite' | 'postgresql' | 'mysql',
 ): NonNullable<DeployManifest['migrations']> {
   const planBundle = dialect === 'sqlite' ? buildMigrationPlanBundle(migrations) : undefined;
+  if (!planBundle) {
+    return { dialect, pending: migrations.length };
+  }
   return {
     dialect,
-    ...(planBundle
-      ? {
-          classifierVersion: planBundle.classifierVersion,
-          migrationListHash: planBundle.migrationListHash,
-          protocolVersion: planBundle.protocolVersion,
-          stability: planBundle.plans.some((plan) => plan.stability === 'legacy')
-            ? 'legacy'
-            : 'stable',
-        }
-      : {}),
+    classifierVersion: planBundle.classifierVersion,
+    migrationListHash: planBundle.migrationListHash,
+    protocolVersion: planBundle.protocolVersion,
+    stability: planBundle.plans.some((plan) => plan.stability === 'legacy') ? 'legacy' : 'stable',
     pending: migrations.length,
   };
 }
@@ -601,11 +604,11 @@ export function collectWorkerFiles(workerDir: string): Map<string, Buffer> {
   let workerPaths: Array<string>;
   try {
     workerPaths = collectFiles(workerDir);
-  } catch (err) {
-    if (isNotFoundError(err)) {
+  } catch (error) {
+    if (isNotFoundError(error)) {
       return out;
     }
-    throw err;
+    throw error;
   }
   for (const filePath of workerPaths) {
     const relativePath = relative(workerDir, filePath);
@@ -617,26 +620,23 @@ export function collectWorkerFiles(workerDir: string): Map<string, Buffer> {
   return out;
 }
 
-const WRANGLER_HTML_HANDLING = new Set<AssetConfig['html_handling']>([
+const WRANGLER_HTML_HANDLING = [
   'auto-trailing-slash',
   'force-trailing-slash',
   'drop-trailing-slash',
   'none',
-]);
+] as const;
 
 /** Read `assets.html_handling` from a materialized root Wrangler config object. */
-export function readWranglerHtmlHandling(
-  rootConfig: Record<string, unknown>,
+export function readWranglerHtmlHandling<T extends Record<string, unknown>>(
+  rootConfig: T,
 ): AssetConfig['html_handling'] | undefined {
   const assets = rootConfig.assets;
-  if (typeof assets !== 'object' || assets === null || Array.isArray(assets)) {
+  if (!isJsonObject(assets)) {
     return undefined;
   }
-  const value = (assets as Record<string, unknown>).html_handling;
-  return typeof value === 'string' &&
-    WRANGLER_HTML_HANDLING.has(value as AssetConfig['html_handling'])
-    ? (value as AssetConfig['html_handling'])
-    : undefined;
+  const value = assets.html_handling;
+  return WRANGLER_HTML_HANDLING.find((handling) => handling === value);
 }
 
 /**
@@ -671,12 +671,14 @@ export function buildStaticManifest(opts: {
   const resolvedAssetConfig =
     html_handling === undefined ? assetConfig : { ...assetConfig, html_handling };
 
+  const alwaysUseHttps =
+    opts.alwaysUseHttps === undefined ? undefined : { alwaysUseHttps: opts.alwaysUseHttps };
   const manifest: DeployManifest = {
     version: 3,
     assetManifestVersion: 2,
     bindings: {},
     type: appType,
-    ...(opts.alwaysUseHttps !== undefined ? { alwaysUseHttps: opts.alwaysUseHttps } : {}),
+    ...alwaysUseHttps,
     assetConfig: resolvedAssetConfig,
   };
 
@@ -704,7 +706,7 @@ export function buildStaticManifest(opts: {
  * Skips build metadata and files with extensions CF Workers can't handle as modules.
  */
 function isWorkerModule(relativePath: string): boolean {
-  const norm = relativePath.replace(/\\/g, '/');
+  const norm = relativePath.replaceAll('\\', '/');
   if (norm.includes('/.vite/') || norm.startsWith('.vite/')) {
     return false;
   }

@@ -1,6 +1,7 @@
 import { rpcHandler } from '@builtbyfriends/realtime-http';
 import { mcpHandler } from '@builtbyfriends/realtime-mcp';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ApiEnv } from '../env.ts';
 import { rememberCaller } from './procedure.ts';
 import { registry } from './registry.ts';
@@ -30,7 +31,7 @@ function rememberRequestCaller(context: Context<ApiEnv>): void {
 }
 
 /** Runs `handle`, finishing any background work first when there is no execution context. */
-async function withBackgroundWork(
+export async function withBackgroundWork(
   context: Context<ApiEnv>,
   handle: (waitUntil: (work: Promise<unknown>) => void) => Promise<Response>,
 ): Promise<Response> {

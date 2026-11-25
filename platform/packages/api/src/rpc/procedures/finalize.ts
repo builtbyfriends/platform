@@ -26,6 +26,14 @@ const ERRORS = {
 
 type Code = keyof typeof ERRORS;
 
+interface FinalizeResult {
+  deploymentId?: string;
+  events: Array<object>;
+}
+
+const refusalBody = type({ 'error?': 'unknown', 'message?': 'unknown', 'deployment?': 'unknown' });
+const eventLine = type({ 'event?': 'string', 'deploymentId?': 'string' });
+
 function codeFor(status: number, body: { deployment?: unknown; error?: unknown }): Code | null {
   switch (status) {
     case 400:
@@ -113,26 +121,32 @@ export const finalize = procedure('deploy.finalize')
       })
       .post('/:id/deploy', handleManifestOnlyDeploy);
     const cliVersion = request.headers.get('x-platform-cli-version');
+    const headers = new Headers({
+      'content-type': request.headers.get('content-type') ?? 'application/json',
+    });
+    if (cliVersion) {
+      headers.set('x-platform-cli-version', cliVersion);
+    }
+    if (input.idempotencyKey) {
+      headers.set('x-platform-deploy-idempotency-key', input.idempotencyKey);
+    }
     const response = await deployApp.fetch(
       new Request(`https://deploy.invalid/${input.projectId}/deploy`, {
         method: 'POST',
-        headers: {
-          'content-type': request.headers.get('content-type') ?? 'application/json',
-          ...(cliVersion ? { 'x-platform-cli-version': cliVersion } : {}),
-          ...(input.idempotencyKey
-            ? { 'x-platform-deploy-idempotency-key': input.idempotencyKey }
-            : {}),
-        },
+        headers,
         body: JSON.stringify(input.body),
       }),
       env,
-      { waitUntil, passThroughOnException() {} } as unknown as ExecutionContext,
+      { waitUntil, passThroughOnException() {}, props: {} },
     );
     if (!response.ok) {
       const text = await response.text();
-      let body: { error?: unknown; message?: unknown; deployment?: unknown } = {};
+      let body: typeof refusalBody.infer = {};
       try {
-        body = JSON.parse(text) as typeof body;
+        const parsed = refusalBody(JSON.parse(text));
+        if (!(parsed instanceof type.errors)) {
+          body = parsed;
+        }
       } catch {}
       const code = codeFor(response.status, body);
       if (!code) {
@@ -162,10 +176,22 @@ export const finalize = procedure('deploy.finalize')
     const events = (await response.text())
       .split('\n')
       .filter((line) => line.trim())
-      .map((line) => JSON.parse(line) as { event?: string; deploymentId?: string });
-    const deploymentId = receipt ?? events.find((event) => event.event === 'start')?.deploymentId;
-    if (!deploymentId && !events.some((event) => event.event === 'error')) {
+      .flatMap((line) => {
+        const parsed: unknown = JSON.parse(line);
+        return typeof parsed === 'object' && parsed !== null ? [parsed] : [];
+      });
+    const eventNames = events.flatMap((event) => {
+      const named = eventLine(event);
+      return named instanceof type.errors ? [] : [named];
+    });
+    const deploymentId =
+      receipt ?? eventNames.find((event) => event.event === 'start')?.deploymentId;
+    if (!deploymentId && !eventNames.some((event) => event.event === 'error')) {
       throw new Error('deploy admission returned no deployment receipt');
     }
-    return { ...(deploymentId ? { deploymentId } : {}), events };
+    const result: FinalizeResult = { events };
+    if (deploymentId) {
+      result.deploymentId = deploymentId;
+    }
+    return result;
   });

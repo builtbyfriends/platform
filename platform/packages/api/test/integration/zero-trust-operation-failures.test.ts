@@ -11,13 +11,12 @@ import {
 } from 'vite-plus/test';
 import * as db from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
+import { FAST_MAINTENANCE_KEY } from '../../src/fast-maintenance.ts';
 import app, { FAST_CRON, scheduled } from '../../src/index.ts';
 import { domains, platformSettings, projectZeroTrust } from '../../src/schema.ts';
 import * as zeroTrustConfiguration from '../../src/zero-trust/configuration.ts';
-import {
-  type ZeroTrustConfigureInput,
-  readZeroTrustConfigurationStrict,
-} from '../../src/zero-trust/configuration.ts';
+import { readZeroTrustConfigurationStrict } from '../../src/zero-trust/configuration.ts';
+import type { ZeroTrustConfigureInput } from '../../src/zero-trust/configuration.ts';
 import {
   configurePlatformZeroTrust,
   disablePlatformZeroTrust,
@@ -42,9 +41,9 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcData,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -141,7 +140,7 @@ function accessApi() {
     }
     const match = path.match(/^apps\/([^/]+)$/);
     if (match) {
-      const id = match[1]!;
+      const id = match[1];
       const previous = applications.get(id);
       if (!previous) {
         return providerError('application not found', 404);
@@ -240,6 +239,7 @@ describe('Zero Trust operation failures', () => {
       })
       .where(eq(platformSettings.key, 'zeroTrust.configuration'));
     cloudflare.revoke(true);
+    await env.ROUTING.put(FAST_MAINTENANCE_KEY, 'armed');
     const pendingDomains = vi.spyOn(db, 'getPendingDomainsNewerThan');
     const fast = () =>
       scheduled(

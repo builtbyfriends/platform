@@ -1,6 +1,7 @@
 import { defineHandler } from '@builtbyfriends/bwf';
 import { env } from '@builtbyfriends/bwf/env';
-import { getSandbox, SandboxLimitError, type SandboxClient } from '@builtbyfriends/bwf/sandbox';
+import { getSandbox, SandboxLimitError } from '@builtbyfriends/bwf/sandbox';
+import type { SandboxClient } from '@builtbyfriends/bwf/sandbox';
 import { internetAccessProbe } from '../../../lib/internet-probe.ts';
 
 function assert(condition: unknown, message: string): asserts condition {

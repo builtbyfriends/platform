@@ -13,6 +13,11 @@ const PLATFORM_PLAN_ACTIONS = [
   'sync',
 ] as const;
 type PlatformPlanAction = (typeof PLATFORM_PLAN_ACTIONS)[number];
+
+function isPlanAction(value: string): value is PlatformPlanAction {
+  return PLATFORM_PLAN_ACTIONS.some((candidate) => candidate === value);
+}
+
 export type PlatformPlansArgs = Readonly<{
   subcommand: 'config';
   configGroup: 'plans';
@@ -37,7 +42,7 @@ export function parsePlatformPlansArgs(args: ReadonlyArray<string>): PlatformPla
     'replacement',
   ]);
   const [action = '', target = '', ...extra] = positional;
-  if (extra.length || (action && !PLATFORM_PLAN_ACTIONS.includes(action as PlatformPlanAction))) {
+  if (extra.length || (action && !isPlanAction(action))) {
     throw new Error(
       `platform: Usage: bwf platform config plans [${PLATFORM_PLAN_ACTIONS.join('|')}] [plan-id] [options].`,
     );
@@ -70,7 +75,7 @@ export function parsePlatformPlansArgs(args: ReadonlyArray<string>): PlatformPla
   return {
     subcommand: 'config',
     configGroup: 'plans',
-    action: action as PlatformPlanAction | '',
+    action: isPlanAction(action) ? action : '',
     target,
     connection: values.get('connection') ?? '',
     file: values.get('file') ?? '',

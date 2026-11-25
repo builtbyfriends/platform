@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { chromium, type Browser } from 'playwright';
+import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 import { afterAll } from 'vite-plus/test';
 import { app } from '../../src/index.ts';
 import type { TestEnv } from './helpers.ts';

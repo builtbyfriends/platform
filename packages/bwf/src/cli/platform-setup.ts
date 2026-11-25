@@ -1,5 +1,6 @@
 import type { PlatformDeploymentManifest } from '@builtbyfriends/platform';
-import { type CANCEL_SYMBOL, isCancel, log } from '@voidzero-dev/vite-plus-prompts';
+import { isCancel, log } from '@voidzero-dev/vite-plus-prompts';
+import type { CANCEL_SYMBOL } from '@voidzero-dev/vite-plus-prompts';
 import { openBrowser } from './auth.ts';
 import { formatLink, pc } from './output.ts';
 import type { PlatformManagementAccess } from './platform-auth.ts';
@@ -14,6 +15,12 @@ type PlatformSetupPage = Readonly<{
   linkInTitle?: boolean;
 }>;
 
+type PlatformSetupPages = Readonly<{
+  runtime: PlatformSetupPage;
+  github: PlatformSetupPage;
+  r2: PlatformSetupPage;
+}>;
+
 /** Return a prompt answer, or stop the platform command when the prompt was cancelled. */
 export function platformPromptAnswer<T>(value: T | typeof CANCEL_SYMBOL): T {
   if (isCancel(value) || typeof value === 'symbol') {
@@ -26,14 +33,16 @@ export function platformSetupLink(page: Pick<PlatformSetupPage, 'title' | 'url'>
   return formatLink(pc.underline(page.title), page.url);
 }
 
+function docs(page: string, section: string, title: string): string {
+  return platformSetupLink({
+    title,
+    url: `https://github.com/builtbyfriends/platform/blob/main/docs/guide/platform/installation/${page}.md#${section}`,
+  });
+}
+
 export function platformSetupFieldHelp(
   key: string,
 ): Readonly<{ description: string; placeholder?: string }> | undefined {
-  const docs = (page: string, section: string, title: string) =>
-    platformSetupLink({
-      title,
-      url: `https://github.com/builtbyfriends/platform/blob/main/docs/guide/platform/installation/${page}.md#${section}`,
-    });
   switch (key) {
     case 'databaseUrl':
       return {
@@ -61,11 +70,14 @@ export function platformSetupFieldHelp(
   }
 }
 
-/** Dashboard keys use permission-catalog labels, which can differ from product names. */
+const confirmWorkersAdmin = 'Confirm Workers → Admin is selected for the account.';
+
+/** Account-token links accept canonical permission group IDs as well as short keys. */
 function platformAccountTokenPermissions(includeAiGateway: boolean) {
   return [
     { key: 'account_settings', type: 'read' },
-    { key: 'workers_scripts', type: 'edit' },
+    // Decision: Workers Admin lets bwf create account Workers and deploy Workers into dispatch namespaces.
+    { key: '98d78cd2433d4c3687191bc0244ef948', type: 'edit' },
     { key: 'workers_kv_storage', type: 'edit' },
     { key: 'workers_r2', type: 'edit' },
     { key: 'd1', type: 'edit' },
@@ -142,6 +154,7 @@ export function platformManagementSetupPage(
     instructions: [
       'This token lets the bwf CLI install your platform. bwf will now open a pre-configured token creation site. Please review the permissions and then paste the token here.',
       `Scope it to ${plan.account.name}.`,
+      confirmWorkersAdmin,
       ...(createsZone
         ? [`Keep the zone policy on All Domains so bwf can create ${zoneName}.`]
         : zones.length
@@ -151,11 +164,7 @@ export function platformManagementSetupPage(
   };
 }
 
-export function platformSetupPages(plan: PlatformInstallPlan): {
-  runtime: PlatformSetupPage;
-  github: PlatformSetupPage;
-  r2: PlatformSetupPage;
-} {
+export function platformSetupPages(plan: PlatformInstallPlan): PlatformSetupPages {
   const needsGateway = plan.actions.some(
     (action) => action.kind === 'ai-gateway' && action.action === 'inspect',
   );
@@ -195,6 +204,7 @@ export function platformSetupPages(plan: PlatformInstallPlan): {
       url: 'https://dash.cloudflare.com/?' + query,
       instructions: [
         'Create a Cloudflare runtime token that bwf can use to manage the platform. Please review the permissions and then paste the token here.',
+        confirmWorkersAdmin,
         // Decision: A zone that bwf creates later cannot be selected yet; All Domains
         // lets Cache Purge reach it once it exists.
         ...(zoneName && plansZoneCreation(plan)
@@ -376,7 +386,7 @@ export function formatPlatformInstallCommand(options: PlatformInstallCommandOpti
       }
       return process.platform === 'win32'
         ? `'${value.replaceAll("'", "''")}'`
-        : `'${value.replaceAll("'", "'\\''")}'`;
+        : `'${value.replaceAll("'", String.raw`'\''`)}'`;
     })
     .join(' ');
 }

@@ -4,15 +4,15 @@ import {
   normalizeApplicationDomain,
   PLATFORM_HEALTH_HOSTNAME_LABEL,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
-  type PlatformApplication,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformApplication, PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { confirm, isCancel, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { printSuccess, note } from './output.ts';
 import type { PlatformArgs } from './platform-args.ts';
 import {
   assertPlatformOperatorCredentialCanApplyPlan,
+  platformOperatorCredentialLabel,
   resolvePlatformCloudflareCredential,
 } from './platform-auth.ts';
 import { PlatformCloudflareClient } from './platform-cloudflare.ts';
@@ -30,7 +30,8 @@ import {
   selectAuthoritativePlatformManifest,
   verifyPlatformInstallationOwnership,
 } from './platform-management.ts';
-import { createPlatformInstallPlan, type PlatformInstallPlan } from './platform-plan.ts';
+import { createPlatformInstallPlan } from './platform-plan.ts';
+import type { PlatformInstallPlan } from './platform-plan.ts';
 import {
   acquirePlatformLifecycleLock,
   readInstallationRecoverySecrets,
@@ -288,7 +289,9 @@ export async function runPlatformDomainCommand(args: DomainArgs): Promise<void> 
   assertNoninteractivePlatformMutationAcknowledged(args, process.stdin.isTTY === true);
   const selected = await resolveInstalledPlatformManifest(args.selector);
   const credential = await resolvePlatformCloudflareCredential();
-  const client = new PlatformCloudflareClient(credential.token);
+  const client = new PlatformCloudflareClient(credential.token, {
+    credential: platformOperatorCredentialLabel(credential),
+  });
   const domainInput =
     args.domain || (await text({ message: 'Application domain:', placeholder: 'example.com' }));
   if (isCancel(domainInput)) {

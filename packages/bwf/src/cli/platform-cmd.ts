@@ -16,8 +16,8 @@ import {
   selectPlatformConnection,
   listInstallationManifests,
   platformConnectionSlug,
-  type PlatformConnection,
 } from './platform-registry.ts';
+import type { PlatformConnection } from './platform-registry.ts';
 
 function normalizePlatformInputUrl(input: string): string {
   const value = input.trim();
@@ -81,7 +81,7 @@ async function resolveConnection(selector: string): Promise<PlatformConnection> 
     throw new Error('platform: No platforms configured. Run `bwf connect <url>`.');
   }
   if (connections.length === 1) {
-    return selectPlatformConnection(connections[0]!.id);
+    return selectPlatformConnection(connections[0].id);
   }
   if (!process.stdin.isTTY) {
     throw new Error(
@@ -169,6 +169,11 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
   if (args.subcommand === 'operator') {
     const { runOperatorCommand } = await import('./operator-cmd.ts');
     await runOperatorCommand(args);
+    return;
+  }
+  if (args.subcommand === 'list' && args.health) {
+    const { listPlatformHealth } = await import('./platform-fleet.ts');
+    await listPlatformHealth();
     return;
   }
   if (args.subcommand === 'list') {
@@ -271,6 +276,14 @@ export async function runPlatformCommand(_root: string, args: PlatformArgs): Pro
   }
 
   const { runPlatformLifecycleCommand } = await import('./platform-lifecycle.ts');
+  if (args.subcommand === 'upgrade' && args.selectors) {
+    const { upgradeInstallations } = await import('./platform-fleet.ts');
+    await upgradeInstallations({ ...args, selectors: args.selectors }, (one) => {
+      const { selectors: _selectors, ...single } = one;
+      return runPlatformLifecycleCommand(single);
+    });
+    return;
+  }
   await runPlatformLifecycleCommand(args);
 }
 

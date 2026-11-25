@@ -9,7 +9,7 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 async function signAiToken(projectId: string, secret: string): Promise<string> {
@@ -216,7 +216,7 @@ describe('R2 proxy endpoints', () => {
           value: 'new',
           onlyIf: { etagMatches: 'old' },
         }),
-        env as never,
+        env,
       );
       expect(res.status).toBe(501);
       expect(await res.text()).toContain('conditional');
@@ -463,7 +463,7 @@ describe('R2 proxy endpoints', () => {
         contentType: string;
       };
       expect(data.key).toBe('avatar.png');
-      expect(data.size).toBe(12345);
+      expect(data.size).toBe(12_345);
       expect(data.etag).toBe('"abc"');
       expect(data.contentType).toBe('image/png');
     });

@@ -1,13 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { join, resolve } from 'pathslash';
-import { loadEnv, normalizePath, resolveEnvPrefix, type Plugin, type ResolvedConfig } from 'vite';
+import { loadEnv, normalizePath, resolveEnvPrefix } from 'vite';
+import type { Plugin, ResolvedConfig } from 'vite';
 import { findEnvFile, generateEnvTypes } from './codegen/env-types.ts';
 import { writeFileIfChanged } from './codegen/write-if-changed.ts';
 import { loadUserEnvFile } from './host/load-user-env.ts';
 import { bwfLog, bwfWarn } from './log.ts';
 import { afterServerReady } from './plugin-dev-config.ts';
 import { loadEnvPublic } from './plugin-env-client-guard.ts';
+import { readProjectPaths } from './project-paths.ts';
 import { scanWranglerDotenvKeys } from './shared/dotenv.ts';
 import {
   findLegacyEnvFiles,
@@ -123,7 +125,7 @@ function envFileIdsFor(envFile: string | null): Set<string> {
 
 /** A hook filter pattern that matches exactly `id`. */
 function exactId(id: string): RegExp {
-  return new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  return new RegExp(`^${id.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)}$`);
 }
 
 /** Patterns Vite's `define` typically uses for env-shaped constants. */
@@ -179,7 +181,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     const serverKeys = keys.filter((key) => !clientKeySet.has(key));
     const requiredServerKeys: Array<string> = [];
     for (const key of serverKeys) {
-      const result = schema[key]!['~standard'].validate(undefined);
+      const result = schema[key]['~standard'].validate(undefined);
       const resolved = result instanceof Promise ? await result : result;
       if (resolved.issues) {
         requiredServerKeys.push(key);
@@ -201,6 +203,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
 
   function regenerateTypes() {
     if (!envFile) {
+      rmSync(join(outDir, 'env.d.ts'), { force: true });
       return;
     }
     mkdirSync(outDir, { recursive: true });
@@ -214,11 +217,11 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
     }
     try {
       await loadUserEnvFile(envFile);
-    } catch (err) {
+    } catch (error) {
       if (strict) {
-        throw err;
+        throw error;
       }
-      bwfWarn((err as Error).message);
+      bwfWarn((error as Error).message);
     }
   }
 
@@ -237,7 +240,7 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
       if (!match) {
         continue;
       }
-      const name = match[1]!;
+      const name = match[1];
       if (name in schema) {
         overlaps.push({ defineKey, schemaKey: name });
       }
@@ -394,24 +397,32 @@ export function envSchemaPlugin(root: string, options: EnvSchemaPluginOptions = 
       }
     },
     async configureServer(server) {
-      if (!envFile) {
-        return;
+      if (envFile) {
+        afterServerReady(server, () => {
+          void validateAndWarn();
+        });
       }
-      afterServerReady(server, () => {
-        void validateAndWarn();
-      });
-      server.watcher.add(envFile);
-      server.watcher.on('change', async (file) => {
-        if (file === envFile) {
-          bwfLog('env.ts changed — regenerating types');
-          regenerateTypes();
+      const candidates = readProjectPaths(root).envFileCandidates;
+      server.watcher.add(candidates);
+      const onEnvFileEvent = async (file: string) => {
+        if (!candidates.some((candidate) => normalizePath(candidate) === normalizePath(file))) {
+          return;
+        }
+        envFile = findEnvFile(root);
+        envFileIds = envFileIdsFor(envFile);
+        bwfLog(envFile ? 'env.ts changed — regenerating types' : 'env.ts removed — clearing types');
+        regenerateTypes();
+        if (envFile) {
           await importUserEnv();
           await emitSchemaFacts();
           await applyClientValuesToViteEnv(server.config);
           await validateAndWarn();
-          server.ws.send({ type: 'full-reload' });
         }
-      });
+        server.ws.send({ type: 'full-reload' });
+      };
+      server.watcher.on('add', onEnvFileEvent);
+      server.watcher.on('change', onEnvFileEvent);
+      server.watcher.on('unlink', onEnvFileEvent);
     },
     async buildStart() {
       // Decision: `config` runs once per `vite build --watch` session; re-import so

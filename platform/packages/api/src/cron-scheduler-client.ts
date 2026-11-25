@@ -33,8 +33,8 @@ async function callWithRetry(
         throw new Error(`CronScheduler ${label} returned HTTP ${response.status}`);
       }
       return response;
-    } catch (err) {
-      lastErr = err;
+    } catch (error) {
+      lastErr = error;
     }
   }
   throw new Error(

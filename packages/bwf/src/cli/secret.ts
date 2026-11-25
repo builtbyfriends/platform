@@ -194,7 +194,11 @@ async function readSecretValue(): Promise<string> {
     for await (const chunk of process.stdin) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
     }
-    const value = Buffer.concat(chunks).toString('utf-8');
+    // Decision: A shell pipe ends the value with a line break that isn't part of the secret. Drop one,
+    // so `echo value | bwf secret put NAME` stores the same value on a platform as on Cloudflare.
+    const value = Buffer.concat(chunks)
+      .toString('utf-8')
+      .replace(/\r?\n$/, '');
     if (value.length === 0) {
       throw new Error('Secret value is required.');
     }

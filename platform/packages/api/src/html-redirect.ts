@@ -16,8 +16,8 @@ export function localhostRedirectResponse(target: string, title = 'Redirectingâ€
   // literal is safe for any input. Don't escape `&`: HTML doesn't decode entities inside <script>, and
   // escaping it would corrupt the query string the browser navigates to.
   const targetLiteral = JSON.stringify(target)
-    .replaceAll('<', '\\u003c')
-    .replaceAll('>', '\\u003e');
+    .replaceAll('<', String.raw`\u003c`)
+    .replaceAll('>', String.raw`\u003e`);
   // Decision: The noscript fallback puts `target` in a double-quoted HTML attribute. Escape `&` first, then `"`,
   // `<` and `>`, so it can't break the attribute or inject markup.
   const targetAttr = target

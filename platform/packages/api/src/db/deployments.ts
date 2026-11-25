@@ -22,7 +22,7 @@ import {
   projectMigrations,
 } from '../schema.ts';
 import type { Deployment, DeploymentStatus } from '../types.ts';
-import { type Db } from './client.ts';
+import type { Db } from './client.ts';
 import { getProject } from './projects.ts';
 
 export const TERMINAL_DEPLOYMENT_STATUSES: Array<DeploymentStatus> = ['live', 'failed', 'canceled'];
@@ -462,8 +462,8 @@ export async function appendAppliedMigrations(
     if (rows.length === 0) {
       return;
     }
-    const existing: Array<string> = rows[0]!.applied_migrations
-      ? JSON.parse(rows[0]!.applied_migrations)
+    const existing: Array<string> = rows[0].applied_migrations
+      ? JSON.parse(rows[0].applied_migrations)
       : [];
     const existingSet = new Set(existing);
     const toAdd = newMigrations.filter((m) => !existingSet.has(m));

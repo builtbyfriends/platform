@@ -152,9 +152,9 @@ export async function runAiSetupPrompt(
           return slugResult.trim();
         },
       );
-    } catch (err: unknown) {
+    } catch (error: unknown) {
       bwfError(
-        `project: Failed to create project: '${err instanceof Error ? err.message : String(err)}'.`,
+        `project: Failed to create project: '${error instanceof Error ? error.message : String(error)}'.`,
       );
       return;
     }

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { toSlash } from 'pathslash';
 import { describe, expect, it, beforeEach, afterEach } from 'vite-plus/test';
+import { resolveCloudflareStaticPreset } from '../../src/cli/deploy-cloudflare-static.ts';
 import {
   detectPreset,
   findBackendSources,
@@ -10,6 +11,7 @@ import {
   hasBackendFiles,
   resolveProjectCommand,
 } from '../../src/cli/preset.ts';
+import type { BwfConfig } from '../../src/config.ts';
 
 const TMP = join(import.meta.dirname, '.tmp-preset');
 
@@ -150,6 +152,50 @@ describe('detectPreset', () => {
     });
   });
 
+  it('uploads only dist/client for a Vite app built with bwf and no backend', () => {
+    const root = setupProject({
+      pkg: { devDependencies: { 'vite-plus': '^1.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+      files: {
+        'index.html': '<html></html>',
+        'main.js': '',
+        'vite.config.ts':
+          "import { defineConfig } from 'vite-plus';\nimport { bwfPlugin } from '@builtbyfriends/bwf';\nexport default defineConfig({ plugins: [bwfPlugin()] });\n",
+      },
+    });
+    expect(detectPreset(root)).toEqual({
+      buildCommand: 'vp build',
+      outputDir: toSlash(resolve(root, 'dist/client')),
+      appType: 'spa',
+    });
+  });
+
+  it('keeps dist for a Vite app that installs bwf without bwfPlugin()', () => {
+    for (const config of [
+      null,
+      "import { defineConfig } from 'vite';\nexport default defineConfig({});\n",
+    ]) {
+      const root = setupProject({
+        pkg: { devDependencies: { vite: '^6.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+        files: { 'index.html': '<html></html>', ...(config ? { 'vite.config.ts': config } : {}) },
+      });
+      expect(detectPreset(root)?.outputDir).toBe(toSlash(resolve(root, 'dist')));
+    }
+  });
+
+  it('uses dist/client for a configured static app built with bwf', () => {
+    const root = setupProject({
+      pkg: { dependencies: { vite: '^6.0.0', '@builtbyfriends/bwf': '^1.9.0' } },
+      files: {
+        'vite.config.ts':
+          "import { bwfPlugin } from '@builtbyfriends/bwf';\nexport default { plugins: [bwfPlugin()] };\n",
+      },
+    });
+    const config = { inference: { appType: 'spa' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, config, {})?.outputDir).toBe(
+      toSlash(resolve(root, 'dist/client')),
+    );
+  });
+
   it('detects pre-built dist/index.html as static', () => {
     const root = setupProject({
       files: { 'dist/index.html': '<html></html>' },
@@ -204,8 +250,8 @@ describe('detectPreset — strictBackend', () => {
     let message = '';
     try {
       detectPreset(root, { strictBackend: true });
-    } catch (err) {
-      message = err instanceof Error ? err.message : String(err);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
     }
     expect(message).toContain('routes/');
     expect(message).toContain('middleware/');
@@ -250,6 +296,31 @@ describe('detectPreset — strictBackend', () => {
       dirs: ['routes'],
     });
     expect(detectPreset(root, { strictBackend: true })).toBeNull();
+  });
+});
+
+describe('resolveCloudflareStaticPreset — configured app type', () => {
+  const vitepressPkg = { devDependencies: { vitepress: '^1.0.0' } };
+
+  it('returns null for a configured appType "platform" with an SSG plus backend', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    const bwfConfig = { inference: { appType: 'platform' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, bwfConfig, {})).toBeNull();
+  });
+
+  it('still refuses the unconfigured SSG plus backend case', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    expect(() => resolveCloudflareStaticPreset(root, {}, {})).toThrow('vitepress');
+  });
+
+  it('keeps resolving a configured static app that also has backend sources', () => {
+    const root = setupProject({ pkg: vitepressPkg, dirs: ['.vitepress', 'routes'] });
+    const bwfConfig = { inference: { appType: 'static' } } as BwfConfig;
+    expect(resolveCloudflareStaticPreset(root, bwfConfig, {})).toEqual({
+      buildCommand: 'vitepress build',
+      outputDir: toSlash(resolve(root, '.vitepress/dist')),
+      appType: 'static',
+    });
   });
 });
 
@@ -304,6 +375,109 @@ describe('project Vite commands', () => {
     );
   });
 
+  it.each(['pnpm', 'npm'])('detects Vite+ in a %s workspace root', (manager) => {
+    const workspaces = ['apps/*', '!apps/excluded'];
+    const workspace = setupProject({
+      pkg: {
+        devDependencies: { 'vite-plus': '^1.0.0' },
+        ...(manager === 'npm' ? { workspaces } : {}),
+      },
+      files: {
+        ...(manager === 'pnpm'
+          ? { 'pnpm-workspace.yaml': 'packages: ' + JSON.stringify(workspaces) + '\n' }
+          : {}),
+        'apps/site/package.json': '{}',
+        'apps/site/index.html': '<!doctype html>',
+        'apps/plain-vite/package.json': '{"devDependencies":{"vite":"^8.0.0"}}',
+        'apps/excluded/package.json': '{}',
+        'tools/standalone/package.json': '{}',
+        'node_modules/.bin/vp': '',
+      },
+    });
+    const app = join(workspace, 'apps/site');
+    const buildCommand = toSlash(join(workspace, 'node_modules/.bin/vp')) + ' build';
+
+    expect(formatProjectCommand(app, 'vite dev')).toBe('vp dev');
+    expect(resolveProjectCommand(app, 'vite build')).toBe(buildCommand);
+    expect(detectPreset(app)).toEqual({
+      appType: 'spa',
+      buildCommand,
+      outputDir: toSlash(join(app, 'dist')),
+    });
+    for (const appPath of ['apps/plain-vite', 'apps/excluded', 'tools/standalone']) {
+      expect(formatProjectCommand(join(workspace, appPath), 'vite dev')).toBe('vite dev');
+    }
+  });
+
+  it('uses only browser output for workspace apps configured with the bwf plugin', () => {
+    const workspace = setupProject({
+      pkg: {
+        workspaces: ['apps/*'],
+        devDependencies: { 'vite-plus': '^1.0.0', '@builtbyfriends/bwf': '^1.0.0' },
+      },
+      files: {
+        'apps/site/package.json': '{}',
+        'apps/site/index.html': '<!doctype html>',
+        'apps/site/vite.config.ts':
+          "import { bwfPlugin } from '@builtbyfriends/bwf'; export default { plugins: [bwfPlugin()] };",
+      },
+    });
+    const app = join(workspace, 'apps/site');
+
+    expect(detectPreset(app)).toEqual({
+      appType: 'spa',
+      buildCommand: 'vp build',
+      outputDir: toSlash(join(app, 'dist/client')),
+    });
+  });
+
+  it('preserves prebuilt static output for workspace apps with no build inputs', () => {
+    const workspace = setupProject({
+      pkg: { workspaces: ['apps/*'], devDependencies: { 'vite-plus': '^1.0.0' } },
+      files: {
+        'apps/site/package.json': '{}',
+        'apps/site/dist/index.html': '<!doctype html>',
+      },
+    });
+    const app = join(workspace, 'apps/site');
+
+    expect(detectPreset(app)).toEqual({
+      appType: 'static',
+      buildCommand: null,
+      outputDir: toSlash(join(app, 'dist')),
+    });
+  });
+
+  it('respects workspace glob exclusions and optional local Vite', () => {
+    const workspace = setupProject({
+      pkg: {
+        workspaces: ['apps/*', '!apps/legacy-[0-9]'],
+        devDependencies: { 'vite-plus': '^1.0.0' },
+      },
+      files: {
+        'apps/legacy-1/package.json': '{}',
+        'apps/optional-vite/package.json': '{"optionalDependencies":{"vite":"^8.0.0"}}',
+      },
+    });
+    for (const appPath of ['apps/legacy-1', 'apps/optional-vite']) {
+      expect(formatProjectCommand(join(workspace, appPath), 'vite dev')).toBe('vite dev');
+    }
+  });
+
+  it.each([
+    ['pnpm', 'pnpm-lock.yaml'],
+    ['yarn', 'yarn.lock'],
+  ])('runs an inherited Vite+ build script with the workspace’s %s', (manager, lockfile) => {
+    const workspace = setupProject({
+      pkg: { workspaces: ['apps/*'], devDependencies: { 'vite-plus': '^1.0.0' } },
+      files: {
+        [lockfile]: '',
+        'apps/site/package.json': '{"scripts":{"build":"vp build"}}',
+      },
+    });
+    expect(detectPreset(join(workspace, 'apps/site'))?.buildCommand).toBe(manager + ' build');
+  });
+
   it('keeps plain Vite commands unchanged', () => {
     const root = setupProject({
       pkg: { devDependencies: { vite: '^6.0.0' } },
@@ -347,7 +521,7 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
     if (process.platform === 'win32') {
       expect(cmd).toBe(`"${toSlash(binPath)}" build`);
     } else {
-      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' build`);
+      expect(cmd).toBe(`'${binPath.replaceAll("'", String.raw`'\''`)}' build`);
     }
   });
 
@@ -356,7 +530,7 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
     () => {
       const { root } = setupSpacedProject('vitepress');
       const cmd = resolveProjectCommand(root, 'vitepress build docs');
-      const out = execSync(cmd, { encoding: 'utf-8' });
+      const out = execSync(cmd, { encoding: 'utf8' });
       expect(out).toContain('PLATFORM_BIN_OK');
       expect(out).toContain('args=build docs');
     },
@@ -371,8 +545,8 @@ describe('resolveProjectCommand shell safety (project root with spaces)', () => 
         JSON.stringify({ devDependencies: { 'vite-plus': '^1.0.0' } }),
       );
       const cmd = resolveProjectCommand(SPACED_TMP, 'vite build');
-      expect(cmd).toBe(`'${binPath.replace(/'/g, "'\\''")}' build`);
-      const out = execSync(cmd, { encoding: 'utf-8' });
+      expect(cmd).toBe(`'${binPath.replaceAll("'", String.raw`'\''`)}' build`);
+      const out = execSync(cmd, { encoding: 'utf8' });
       expect(out).toContain('PLATFORM_BIN_OK');
       expect(out).toContain('args=build');
     },

@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "types": ["@builtbyfriends/bwf/env"],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src", "routes", "middleware", "jobs"]
 }

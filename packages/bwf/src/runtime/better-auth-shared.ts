@@ -1,5 +1,6 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from 'better-auth';
+import { betterAuth } from 'better-auth';
+import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
 import { createAuthMiddleware } from 'better-auth/api';
 import type { Context } from 'hono';
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
@@ -8,11 +9,11 @@ import {
   getBwfAuthProviderEnvNames,
   getBwfAuthProviderSettingEnvNames,
   isBwfSocialAuthProvider,
-  type BwfAuthProvider,
-  type BwfSocialAuthProvider,
 } from '../auth/providers.ts';
+import type { BwfAuthProvider, BwfSocialAuthProvider } from '../auth/providers.ts';
 import { SHARED_CACHE_HEADERS, authDependentRequests } from './auth-response.ts';
-import { authContext, type AuthState, type BwfAuthConfig } from './auth.ts';
+import { authContext } from './auth.ts';
+import type { AuthState, BwfAuthConfig } from './auth.ts';
 import { isUnchangedStaticAsset } from './static-asset-marker.ts';
 
 export type BwfAuthDialect = 'sqlite' | 'postgresql' | 'mysql';
@@ -229,7 +230,7 @@ function assertSocialProviderSettings(
 
 /** `a`, `a and b`, `a, b and c`. */
 function joinNames(names: Array<string>): string {
-  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]!;
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
 }
 
 function resolveSocialProviders(
@@ -382,7 +383,7 @@ export function privateCachePolicy(policy: string | null): string {
     return policy!;
   }
   const kept = directives.filter((_directive, index) => {
-    const directive = lowered[index]!;
+    const directive = lowered[index];
     const equals = directive.indexOf('=');
     const name = (equals === -1 ? directive : directive.slice(0, equals)).trim();
     return !['public', 'proxy-revalidate', 's-maxage', 'private'].includes(name);
@@ -749,7 +750,7 @@ export function createBwfAuthRuntime(
       returnHeaders: true,
     });
 
-    return (result.response ?? null) as AuthState | null;
+    return result.response ?? null;
   }
 
   async function runBwfAuthMiddleware(
@@ -780,7 +781,7 @@ export function createBwfAuthRuntime(
       returnHeaders: true,
     });
 
-    const state = (result.response ?? null) as AuthState | null;
+    const state = result.response ?? null;
     c.set('user', state?.user ?? null);
     c.set('session', state?.session ?? null);
 

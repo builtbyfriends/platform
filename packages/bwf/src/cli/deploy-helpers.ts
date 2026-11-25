@@ -1,47 +1,37 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { isCancel, log as clackLog, text } from '@voidzero-dev/vite-plus-prompts';
 import { join, resolve } from 'pathslash';
 import { findEnvFile } from '../codegen/env-types.ts';
-import { type DatabaseDialect, type BwfConfig } from '../config.ts';
+import type { DatabaseDialect, BwfConfig } from '../config.ts';
 import type { JobDefinition } from '../crons/scan.ts';
-import {
-  assertJournalCoherence,
-  validateMigrations,
-  type MigrationFile,
-} from '../migrations/validate.ts';
+import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
+import type { MigrationFile } from '../migrations/validate.ts';
 import type { QueueDefinition } from '../queues/scan.ts';
 import { buildEnv } from '../shared/untrusted-env.ts';
-import { PlatformClient, type DeploymentResponse, type ProjectResponse } from './client.ts';
+import type { PlatformClient } from './client.ts';
+import type { DeploymentResponse, ProjectResponse } from './client.ts';
 import { formatCloudflareUserMessage } from './cloudflare-user-output.ts';
 import { promptAndCreateProject, reportProjectCreationWarnings } from './create-project.ts';
-import { type ResourceSummary, type RunDeployOptions } from './deploy-types.ts';
+import type { ResourceSummary, RunDeployOptions } from './deploy-types.ts';
 import { fetchRemoteSecretNames, formatEnvReport, validateProdEnv } from './env-validation.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CliLogger } from './log-file.ts';
 import { formatCount, getErrorMessage, pc } from './output.ts';
-import {
-  detectPreset,
-  formatProjectCommand,
-  resolveProjectCommand,
-  type StaticPreset,
-} from './preset.ts';
-import {
-  attachSelectedPlatform,
-  shouldLinkDeployProject,
-  writeProjectConfig,
-  type ProjectConfig,
-} from './project.ts';
+import { detectPreset, formatProjectCommand, resolveProjectCommand } from './preset.ts';
+import type { StaticPreset } from './preset.ts';
+import { attachSelectedPlatform, shouldLinkDeployProject, writeProjectConfig } from './project.ts';
+import type { ProjectConfig } from './project.ts';
 import { promptProjectSelection, promptProjectSetupAction } from './prompt.ts';
-import type { DeployManifest, QueueMeta, ScheduleMeta } from './types.ts';
+import type { QueueMeta, ScheduleMeta } from './types.ts';
 import {
   readExistingLiveBindingConfig,
   normalizeWranglerCompatibilityFlags,
   ensureWranglerCompat,
   resolveLiveBindingConfig,
   syncWranglerBindings,
-  type LiveBindingConfig,
-  type WranglerCompat,
 } from './wrangler.ts';
+import type { LiveBindingConfig, WranglerCompat } from './wrangler.ts';
 
 export const log: Record<
   'error' | 'info' | 'message' | 'step' | 'warn',
@@ -72,21 +62,23 @@ function readLiveBindingConfigFromDeployment(
   if (!deployment?.manifest) {
     return undefined;
   }
-  let manifest: DeployManifest;
+  let manifest: unknown;
   try {
-    manifest = JSON.parse(deployment.manifest) as DeployManifest;
+    manifest = JSON.parse(deployment.manifest);
   } catch {
     return undefined;
   }
+  const live = isRecord(manifest) ? manifest.live : undefined;
   if (
-    typeof manifest.live?.bindingName !== 'string' ||
-    typeof manifest.live.className !== 'string'
+    !isRecord(live) ||
+    typeof live.bindingName !== 'string' ||
+    typeof live.className !== 'string'
   ) {
     return undefined;
   }
   return {
-    bindingName: manifest.live.bindingName,
-    className: manifest.live.className,
+    bindingName: live.bindingName,
+    className: live.className,
   };
 }
 
@@ -145,9 +137,9 @@ export function getExitCode(error: unknown): number {
     typeof error === 'object' &&
     error !== null &&
     'status' in error &&
-    typeof (error as { status: unknown }).status === 'number'
+    typeof error.status === 'number'
   ) {
-    return (error as { status: number }).status;
+    return error.status;
   }
   return 1;
 }
@@ -179,10 +171,10 @@ export function resolveDeployWorkerMain(
   buildOutputDir: string,
 ): string | undefined {
   try {
-    const wrangler = JSON.parse(readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf-8')) as {
-      main?: unknown;
-    };
-    return typeof wrangler.main === 'string' && wrangler.main.length > 0
+    const wrangler: unknown = JSON.parse(
+      readFileSync(join(buildOutputDir, 'wrangler.json'), 'utf8'),
+    );
+    return isRecord(wrangler) && typeof wrangler.main === 'string' && wrangler.main.length > 0
       ? wrangler.main
       : undefined;
   } catch {
@@ -229,7 +221,7 @@ export async function promptDeployProjectConfig(
   }
   const action = await promptProjectSetupAction('Set up a bwf project for deploy:', {
     includeLink: deployableProjects.length > 0,
-    ...(link ? {} : { link: false }),
+    ...(!link && { link: false }),
   });
 
   if (action === 'create') {
@@ -243,7 +235,7 @@ export async function promptDeployProjectConfig(
     deployableProjects,
     'Select a project to deploy to:',
     root,
-    { confirmExisting: true, includeCreate: false, ...(link ? {} : { link: false }) },
+    { confirmExisting: true, includeCreate: false, ...(!link && { link: false }) },
   );
 
   if (result.action === 'create') {
@@ -365,13 +357,13 @@ export function getGitCommit(root: string): string | null {
     execSync('git rev-parse --is-inside-work-tree', { cwd: root, stdio: 'ignore', env: gitEnv });
     const status = execSync('git status --porcelain', {
       cwd: root,
-      encoding: 'utf-8',
+      encoding: 'utf8',
       env: gitEnv,
     }).trim();
     if (status !== '') {
       return null;
     }
-    return execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf-8', env: gitEnv }).trim();
+    return execSync('git rev-parse HEAD', { cwd: root, encoding: 'utf8', env: gitEnv }).trim();
   } catch {
     return null;
   }
@@ -388,8 +380,8 @@ export function validateDeployMigrations(
 ): Array<MigrationFile> | undefined {
   try {
     assertJournalCoherence(migrationsDir, rawMigrations, sourceRelative);
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
   if (rawMigrations.length === 0) {
@@ -399,8 +391,8 @@ export function validateDeployMigrations(
     const validated = validateMigrations(rawMigrations);
     log.info(`Found ${formatCount(validated.length, 'migration')}`);
     return validated;
-  } catch (err: unknown) {
-    log.error(getErrorMessage(err));
+  } catch (error: unknown) {
+    log.error(getErrorMessage(error));
     process.exit(1);
   }
 }
@@ -445,7 +437,7 @@ export async function ensureManagedHyperdrive(
     log.info('Deploy cancelled.');
     process.exit(0);
   }
-  await client.provisionDatabase(projectId, connectionString as string);
+  await client.provisionDatabase(projectId, connectionString);
   log.step('Hyperdrive provisioned.');
 }
 
@@ -459,11 +451,11 @@ export function toManifestSchedulesAndQueues(
     queues: queues.map((q) => ({
       name: q.name,
       bindingName: q.bindingName,
-      ...(q.maxBatchSize != null && { maxBatchSize: q.maxBatchSize }),
-      ...(q.maxBatchTimeout != null && { maxBatchTimeout: q.maxBatchTimeout }),
-      ...(q.maxConcurrency != null && { maxConcurrency: q.maxConcurrency }),
-      ...(q.maxRetries != null && { maxRetries: q.maxRetries }),
-      ...(q.retryDelay != null && { retryDelay: q.retryDelay }),
+      ...(q.maxBatchSize !== undefined && { maxBatchSize: q.maxBatchSize }),
+      ...(q.maxBatchTimeout !== undefined && { maxBatchTimeout: q.maxBatchTimeout }),
+      ...(q.maxConcurrency !== undefined && { maxConcurrency: q.maxConcurrency }),
+      ...(q.maxRetries !== undefined && { maxRetries: q.maxRetries }),
+      ...(q.retryDelay !== undefined && { retryDelay: q.retryDelay }),
     })),
   };
 }
@@ -479,7 +471,7 @@ export async function assertEnvSchemaValid(
   projectId: string,
   workerVars: Record<string, string> | undefined,
 ): Promise<void> {
-  if (findEnvFile(root) == null) {
+  if (findEnvFile(root) === null) {
     return;
   }
 

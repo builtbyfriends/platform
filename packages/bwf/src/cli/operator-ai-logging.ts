@@ -1,6 +1,8 @@
 import { AI_LOGGING_SETTLE_MS } from '@builtbyfriends/platform/ai-logging';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { ensurePlatformAccessToken } from './cf-access.ts';
+import { isJsonObject } from './json-value.ts';
+import type { JsonObject } from './json-value.ts';
 import { OperatorClientError } from './operator-client.ts';
 import { sanitizeTerminalText } from './output.ts';
 import { readPlatformDiscoveryResponse } from './platform-discovery.ts';
@@ -8,14 +10,14 @@ import { readPlatformDiscoveryResponse } from './platform-discovery.ts';
 /** The first platform release with per-project AI logging settings. */
 const AI_LOGGING_PLATFORM_VERSION = '1.8.0';
 
-type Fields = Record<string, unknown>;
+type Fields = JsonObject;
 
 function text(value: unknown): string {
   return typeof value === 'string' ? sanitizeTerminalText(value) : '';
 }
 
 function record(value: unknown): Fields | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : null;
+  return isJsonObject(value) ? value : null;
 }
 
 /** `14:03:20 UTC`, or null when the value is not a time. */
@@ -88,16 +90,18 @@ export function aiLoggingPreviewLines(projectId: string, preview: Fields): Array
   ];
 }
 
-const STATES: Record<string, (fields: Fields) => string> = {
-  applied: () => 'applied',
-  pending: (fields) => {
-    const by = utcTime(fields.publishedAt, AI_LOGGING_SETTLE_MS);
-    return by ? `pending (expected by ${by})` : 'pending (normally within 2 minutes)';
-  },
-  pending_plan_publish: () => 'pending (the plan default is still being published)',
-  drift: (fields) => `drift (published: ${text(fields.published) || 'unknown value'})`,
-  unknown: () => 'state unknown (the published setting could not be read)',
-};
+const STATES = new Map(
+  Object.entries({
+    applied: () => 'applied',
+    pending: (fields) => {
+      const by = utcTime(fields.publishedAt, AI_LOGGING_SETTLE_MS);
+      return by ? `pending (expected by ${by})` : 'pending (normally within 2 minutes)';
+    },
+    pending_plan_publish: () => 'pending (the plan default is still being published)',
+    drift: (fields) => `drift (published: ${text(fields.published) || 'unknown value'})`,
+    unknown: () => 'state unknown (the published setting could not be read)',
+  } satisfies Record<string, (fields: Fields) => string>),
+);
 
 /**
  * `project show` line, such as `metadata (from plan "pro") — applied`, or null
@@ -108,10 +112,7 @@ export function aiLoggingStatusLine(value: unknown): string | null {
   if (!fields || typeof fields.mode !== 'string') {
     return null;
   }
-  const state =
-    typeof fields.state === 'string' && Object.hasOwn(STATES, fields.state)
-      ? STATES[fields.state]
-      : undefined;
+  const state = typeof fields.state === 'string' ? STATES.get(fields.state) : undefined;
   const summary = withSource(effective(fields), fields);
   return `AI Gateway logging: ${state ? `${summary} — ${state(fields)}` : summary}`;
 }

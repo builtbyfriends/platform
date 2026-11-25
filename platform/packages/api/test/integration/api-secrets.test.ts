@@ -22,10 +22,10 @@ import {
   createTestProjectSecret,
   cfError,
   mockCfApi,
-  type TestEnv,
   rpcData,
   rpcRequest,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -134,7 +134,7 @@ describe('project secrets API', () => {
       const res = await app.fetch(
         rpcRequest('secrets.set', user.jwt, {
           projectId: project.id,
-          name: name,
+          name,
           value: 'whatever',
         }),
         env,

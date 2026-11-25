@@ -36,11 +36,11 @@ import {
   cfSuccess,
   cfError,
   captureQueries,
-  type TestEnv,
   rpcRequest,
   rpcData,
   rpcError,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -568,6 +568,20 @@ describe('POST /projects/:id/domains', () => {
 
     const res = await app.fetch(
       rpcRequest('domains.add', user.jwt, { projectId: project.id, hostname: 'bad.buildwf.dev' }),
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    expect(rpcError(await res.json())).toBe('cannot use buildwf.dev subdomains');
+  });
+
+  it('rejects the platform domain itself', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'reject-apex');
+    mockCfApi();
+
+    const res = await app.fetch(
+      rpcRequest('domains.add', user.jwt, { projectId: project.id, hostname: 'buildwf.dev' }),
       env,
     );
 
@@ -1714,7 +1728,7 @@ describe('scheduled() — stale pending domain janitor', () => {
     const activation = await tryActivateDomain(
       bindings,
       env.db,
-      pendingDomain as unknown as Domain,
+      pendingDomain,
       project as unknown as Project,
     );
     expect(activation).toMatchObject({ activated: false, awaitingDeployment: true });
@@ -1996,7 +2010,36 @@ describe('scheduled() — stale pending domain janitor', () => {
     const errMessages = errSpy.mock.calls.map((call) =>
       call.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' '),
     );
-    expect(errMessages.some((msg) => msg.includes('ORPHANED'))).toBe(false);
+    expect(errMessages.some((msg) => msg.includes('keeping the row'))).toBe(false);
+  });
+
+  it('keeps the row when the CF delete fails twice, so the next run can try again', async () => {
+    const user = await createTestUser(env.db);
+    const project = await createTestProject(env.db, user.id, 'janitor-delete-fails');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockCfApi({
+      getCustomHostname: () =>
+        cfSuccess({
+          id: 'ch-del-fails',
+          hostname: 'del-fails.example.com',
+          status: 'pending',
+          ssl: { status: 'pending_validation', method: 'http', type: 'dv' },
+        }),
+      deleteCustomHostname: () => cfError('internal server error', 500),
+    });
+    await env.db.insert(domains).values({
+      id: 'dom_del_fails',
+      project_id: project.id,
+      hostname: 'del-fails.example.com',
+      cf_hostname_id: 'ch-del-fails',
+      status: 'pending',
+      created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    await cleanupStalePendingDomains(makeBindings(env), env.db, Date.now());
+
+    const [row] = await env.db.select().from(domains).where(eq(domains.id, 'dom_del_fails'));
+    expect(row?.cf_hostname_id).toBe('ch-del-fails');
   });
 });
 
@@ -2658,7 +2701,7 @@ describe('scheduled() — cron-driven auto-activation reconciliation', () => {
     const result = await tryActivateDomain(
       makeBindings(env),
       env.db,
-      pendingRow as unknown as Domain,
+      pendingRow,
       project as unknown as Project,
     );
 

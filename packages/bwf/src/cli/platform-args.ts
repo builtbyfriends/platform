@@ -1,18 +1,13 @@
-import {
-  normalizePlatformDashboardUrl,
-  PLATFORM_LOGIN_KINDS,
-  type PlatformLoginKind,
-  type PlatformAppAccess,
-} from '@builtbyfriends/platform';
-import { operatorGroups, parseOperatorArgs, type OperatorArgs } from './operator-args.ts';
-import {
-  parsePlatformBillingArgs,
-  parsePlatformConfigArgs,
-  type PlatformBillingArgs,
-  type PlatformConfigArgs,
-} from './platform-config-args.ts';
-import { parsePlatformPlansArgs, type PlatformPlansArgs } from './platform-plans-args.ts';
-import { parsePlatformStorageLocation, type PlatformStorageLocation } from './platform-storage.ts';
+import { normalizePlatformDashboardUrl, PLATFORM_LOGIN_KINDS } from '@builtbyfriends/platform';
+import type { PlatformLoginKind, PlatformAppAccess } from '@builtbyfriends/platform';
+import { operatorGroups, parseOperatorArgs } from './operator-args.ts';
+import type { OperatorArgs } from './operator-args.ts';
+import { parsePlatformBillingArgs, parsePlatformConfigArgs } from './platform-config-args.ts';
+import type { PlatformBillingArgs, PlatformConfigArgs } from './platform-config-args.ts';
+import { parsePlatformPlansArgs } from './platform-plans-args.ts';
+import type { PlatformPlansArgs } from './platform-plans-args.ts';
+import { parsePlatformStorageLocation } from './platform-storage.ts';
+import type { PlatformStorageLocation } from './platform-storage.ts';
 import type { SubcommandDef } from './subcommand-prompt.ts';
 
 export const platformSubcommands: Array<SubcommandDef> = [
@@ -33,7 +28,11 @@ export const platformSubcommands: Array<SubcommandDef> = [
             : 'Operator commands',
     description: `Administer platform ${name}`,
   })),
-  { name: 'list', description: 'List installed and connected platforms' },
+  {
+    name: 'list',
+    hint: 'Add --health for each live version and health',
+    description: 'List installed and connected platforms',
+  },
   { name: 'use', arg: '[id]', description: 'Select the default bwf platform' },
   { name: 'status', arg: '[id]', description: 'Inspect a platform and its health' },
   { name: 'discover', description: 'Recover installations from a Cloudflare account' },
@@ -47,7 +46,12 @@ export const platformSubcommands: Array<SubcommandDef> = [
     hint: 'Preview and save choices with --plan, then select the saved plan to install',
     description: 'Install a bwf platform and choose who can access its apps',
   },
-  { name: 'upgrade', arg: '[id]', description: 'Upgrade an installed bwf platform' },
+  {
+    name: 'upgrade',
+    arg: '[id...]',
+    hint: 'Name several to upgrade them one at a time, stopping at the first failure',
+    description: 'Upgrade installed bwf platforms',
+  },
   { name: 'rollback', arg: '[id]', description: 'Restore a compatible earlier platform runtime' },
   {
     name: 'repair',
@@ -65,7 +69,7 @@ export type PlatformArgs =
   | PlatformBillingArgs
   | { subcommand: 'config'; configGroup: ''; plan: false; yes: false }
   | OperatorArgs
-  | { subcommand: 'list' }
+  | { subcommand: 'list'; health?: true }
   | { subcommand: 'use'; selector: string }
   | { subcommand: 'status'; selector: string }
   | { subcommand: 'discover'; account: string; selector: string }
@@ -117,6 +121,8 @@ export type PlatformArgs =
       runtimeLogs?: PlatformRuntimeLogsChoice;
       storageLocation?: PlatformStorageLocation;
       selector: string;
+      /** upgrade only: two or more installations, upgraded in this order. */
+      selectors?: ReadonlyArray<string>;
       plan: boolean;
       runtime: string;
       yes: boolean;
@@ -159,9 +165,10 @@ function readValue(rest: Array<string>, index: number, flag: string): [string, n
 function parseSelector(
   rest: Array<string>,
   subcommand: string,
-  options: { allowYes?: boolean } = {},
-): { selector: string; plan: boolean; yes: boolean } {
+  options: { allowYes?: boolean; allowMany?: boolean } = {},
+): { selector: string; selectors: Array<string>; plan: boolean; yes: boolean } {
   let selector = '';
+  const selectors: Array<string> = [];
   let plan = false;
   let yes = false;
   for (const arg of rest) {
@@ -171,16 +178,17 @@ function parseSelector(
       yes = true;
     } else if (arg.startsWith('-')) {
       throw new Error(`platform: Unknown flag '${arg}'.`);
-    } else if (selector) {
+    } else if (selector && !options.allowMany) {
       throw new Error(`platform: Unexpected argument '${arg}'.`);
     } else {
-      selector = arg;
+      selector ||= arg;
+      selectors.push(arg);
     }
   }
   if ((subcommand === 'use' || subcommand === 'status') && plan) {
     throw new Error("platform: Unknown flag '--plan'.");
   }
-  return { selector, plan, yes };
+  return { selector, selectors, plan, yes };
 }
 
 function parseLifecycleSelector(
@@ -188,6 +196,7 @@ function parseLifecycleSelector(
   subcommand: 'upgrade' | 'rollback' | 'repair' | 'disable' | 'enable',
 ): {
   selector: string;
+  selectors: Array<string>;
   plan: boolean;
   runtime: string;
   fromRuntime: string;
@@ -209,7 +218,7 @@ function parseLifecycleSelector(
   let dashboardUrl: string | undefined;
   let customDomains = false;
   for (let index = 0; index < rest.length; index++) {
-    const arg = rest[index]!;
+    const arg = rest[index];
     if (arg === '--runtime') {
       if (subcommand === 'disable') {
         throw new Error("platform: Unknown flag '--runtime'.");
@@ -251,7 +260,10 @@ function parseLifecycleSelector(
       positional.push(arg);
     }
   }
-  const parsed = parseSelector(positional, subcommand, { allowYes: true });
+  const parsed = parseSelector(positional, subcommand, {
+    allowYes: true,
+    allowMany: subcommand === 'upgrade',
+  });
   if (subcommand === 'rollback' && !runtime) {
     throw new Error('platform: rollback requires --runtime <earlier-runtime-directory>.');
   }
@@ -311,7 +323,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let yes = false;
     let dedicatedZone = false;
     for (let index = 1; index < rest.length; index++) {
-      const arg = rest[index]!;
+      const arg = rest[index];
       if (arg === '--installation' || arg === '--zone') {
         const [value, next] = readValue(rest, index, arg);
         index = next;
@@ -342,10 +354,11 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   }
 
   if (subcommand === 'list') {
-    if (rest.length > 0) {
-      throw new Error(`platform: Unexpected argument '${rest[0]}'.`);
+    const unexpected = rest.find((arg) => arg !== '--health');
+    if (unexpected) {
+      throw new Error(`platform: Unexpected argument '${unexpected}'.`);
     }
-    return { subcommand };
+    return rest.length > 0 ? { subcommand, health: true } : { subcommand };
   }
   if (subcommand === 'use' || subcommand === 'status') {
     const { selector } = parseSelector(rest, subcommand);
@@ -355,7 +368,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let account = '';
     let selector = '';
     for (let index = 0; index < rest.length; index++) {
-      const arg = rest[index]!;
+      const arg = rest[index];
       if (arg === '--account' || arg === '--installation') {
         const [value, next] = readValue(rest, index, arg);
         if (arg === '--account') {
@@ -381,6 +394,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
   ) {
     const {
       selector,
+      selectors,
       plan,
       runtime,
       fromRuntime,
@@ -397,6 +411,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
       : {
           subcommand,
           selector,
+          ...(subcommand === 'upgrade' && selectors.length > 1 ? { selectors } : {}),
           plan,
           runtime,
           yes,
@@ -452,7 +467,7 @@ export function parsePlatformArgs(args: Array<string>): PlatformArgs {
     let workersDev = false;
     let customDomains = false;
     for (let i = 0; i < rest.length; i++) {
-      const arg = rest[i]!;
+      const arg = rest[i];
       if (valueFlags.has(arg)) {
         const [value, next] = readValue(rest, i, arg);
         values.set(arg, value);

@@ -1,4 +1,5 @@
-import { createProcedures, type AuthProvider } from '@builtbyfriends/realtime';
+import { createProcedures } from '@builtbyfriends/realtime';
+import type { AuthProvider } from '@builtbyfriends/realtime';
 import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import type { PreviewScope } from '../routes/previews.ts';

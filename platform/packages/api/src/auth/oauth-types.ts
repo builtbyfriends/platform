@@ -17,6 +17,9 @@ export type OAuthRequestData = {
   artifactDigest?: string;
   workerModules?: Array<string>;
   projectId?: string;
+  /** The person the application named to pay for the published project. */
+  payer?: string;
+  /** For a group's token: the application's person who asked for this. */
   actingPerson?: string;
 };
 export type OAuthSession = Pick<JwtPayload, 'sub' | 'aud' | 'sid' | 'exp'> & {
@@ -28,5 +31,6 @@ export type OAuthSession = Pick<JwtPayload, 'sub' | 'aud' | 'sid' | 'exp'> & {
    * the application is the person's sign-in, so the human-session check does not apply.
    */
   appPerson?: true;
+  /** For a token that acts for a group: the application's person who acts for it. */
   actingPerson?: string;
 };

@@ -5,7 +5,9 @@ export const CLOUDFLARE_PRESERVE_BINDINGS_BUILD_ENV = 'PLATFORM_CLOUDFLARE_PRESE
 export const DEFAULT_VERSION_METADATA_BINDING = '__PLATFORM_VERSION_METADATA';
 
 /** Keep the authored singleton name, and reject a cross-type binding collision. */
-export function readVersionMetadataBinding(config: Record<string, unknown>): string | undefined {
+export function readVersionMetadataBinding<T extends Record<string, unknown>>(
+  config: T,
+): string | undefined {
   const names = bindingNamesForField('version_metadata', config.version_metadata);
   const name = names[0];
   if (!name) {
@@ -19,8 +21,8 @@ export function readVersionMetadataBinding(config: Record<string, unknown>): str
 }
 
 /** Self-metadata adds no remote resource or plan entitlement. */
-export function selectNativeVersionMetadataBinding(
-  config: Record<string, unknown>,
+export function selectNativeVersionMetadataBinding<T extends Record<string, unknown>>(
+  config: T,
   options: { nativeBuild: boolean; preserveBindings: boolean },
 ): string | undefined {
   if (!options.nativeBuild) {

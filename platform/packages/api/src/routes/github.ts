@@ -557,8 +557,8 @@ export const githubRoutes = new Hono<ApiEnv>()
       // the link.
       try {
         await linkGitHubInstallationToUser(context.get('db'), linkCode.providerId, user.id);
-      } catch (err) {
-        console.error(`[github-link] Failed to backfill installations for ${user.id}:`, err);
+      } catch (error) {
+        console.error(`[github-link] Failed to backfill installations for ${user.id}:`, error);
       }
 
       return context.json({ status: result });
@@ -789,7 +789,7 @@ export const githubRoutes = new Hono<ApiEnv>()
     }
     const installationId = context.req.query('installationId');
     const repoFullName = context.req.query('repoFullName');
-    if (!installationId) {
+    if (!installationId || !/^\d{1,20}$/.test(installationId)) {
       return context.json({ error: 'installationId is required' }, 400);
     }
     if (!repoFullName) {
@@ -1428,7 +1428,7 @@ export const githubProjectRoutes = new Hono<ApiEnv>()
       return context.json({ error: 'invalid workflowPath' }, 400);
     }
     const newBranch: string | undefined = body.branch;
-    const newExecutor = body.buildExecutor as Build['executor'] | undefined;
+    const newExecutor = body.buildExecutor;
     const newWorkflowPath: string | undefined = body.workflowPath;
 
     // Decision: A branch or executor change orphans in-flight builds for the old config, so revoke their deploy

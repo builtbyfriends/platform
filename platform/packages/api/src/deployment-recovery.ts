@@ -7,8 +7,8 @@ import {
   getDomainsByProjectId,
   getProject,
   updateDeploymentStatus,
-  type Db,
 } from './db.ts';
+import type { Db } from './db.ts';
 import { projectPublicUrls } from './deploy/shared.ts';
 import type { ApiEnv } from './env.ts';
 import { deleteSandboxController } from './provisioning/sandbox-controller.ts';
@@ -31,7 +31,7 @@ async function committedEvent(
   return {
     event: 'done',
     deployment: deployment.id,
-    url: urls[0]!,
+    url: urls[0],
     urls,
     assets: deployment.asset_hashes ? Object.keys(JSON.parse(deployment.asset_hashes)).length : 0,
     // Decision: The operation journal keeps the original module count. This describes the serving target when a

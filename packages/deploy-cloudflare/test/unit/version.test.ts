@@ -12,9 +12,11 @@ import {
   normalizeWorkersDevSubdomain,
   parseCloudflareVersionMessage,
   readCloudflareTriggerConfig,
-  type CloudflareCommandResult,
-  type CloudflareOperation,
-  type CloudflareTriggerConfig,
+} from '../../src/index.ts';
+import type {
+  CloudflareCommandResult,
+  CloudflareOperation,
+  CloudflareTriggerConfig,
 } from '../../src/index.ts';
 import { operationFixture } from '../operation-fixture.ts';
 import { apiSecretDraftVersion, bwfSecretDraftVersion } from '../secret-draft-fixture.ts';
@@ -55,7 +57,7 @@ function preservedTriggerMessage(): string {
 }
 
 function readConfigArg(args: Array<string>): Record<string, unknown> {
-  return JSON.parse(readFileSync(args[args.indexOf('-c') + 1]!, 'utf8')) as Record<string, unknown>;
+  return JSON.parse(readFileSync(args[args.indexOf('-c') + 1], 'utf8')) as Record<string, unknown>;
 }
 
 function sdkDraftActivation(
@@ -263,7 +265,7 @@ function runner(overrides?: {
       if (result.status === 0) {
         deploymentVersions = args.flatMap((argument) => {
           const matched = argument.match(/^([^@]+)@(\d+(?:\.\d+)?)$/);
-          return matched ? [{ version_id: matched[1]!, percentage: Number(matched[2]) }] : [];
+          return matched ? [{ version_id: matched[1], percentage: Number(matched[2]) }] : [];
         });
         activeVersionId =
           deploymentVersions.find((version) => version.percentage === 100)?.version_id ?? null;
@@ -519,6 +521,21 @@ describe('Cloudflare version activation', () => {
       expect(fixture.fetcher).not.toHaveBeenCalled();
     },
   );
+
+  it('keeps the reason an active-secret pin gives for refusing', async () => {
+    const fixture = sdkDraftActivation();
+    fixture.ordinary();
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      pinActiveSecrets: async () => ({ diagnostic: 'TOKEN is also a var.' }),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'inheritance-source-changed',
+      diagnostic: 'TOKEN is also a var.',
+    });
+    expect(fixture.events).not.toContain('upload');
+  });
 
   it.each([
     [{ name: '', type: 'secret_text' }],
@@ -1208,7 +1225,7 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({
       ok: false,
       reason: 'readiness-staging-failed',
-      cloudflareErrorCode: 10210,
+      cloudflareErrorCode: 10_210,
       diagnostic: expect.stringContaining('Durable Object migration fate-live-v1'),
     });
   });
@@ -1354,9 +1371,7 @@ describe('Cloudflare version activation', () => {
       expect(result).toMatchObject({ ok: true, previousVersionId: CURRENT, versionId: NEXT });
       expect(validateUploadedVersion).toHaveBeenCalledWith(NEXT);
       expect(
-        runWrangler.mock.calls.some(([args]) =>
-          ['triggers', 'deploy', 'secret'].includes(args[0]!),
-        ),
+        runWrangler.mock.calls.some(([args]) => ['triggers', 'deploy', 'secret'].includes(args[0])),
       ).toBe(false);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -1513,7 +1528,7 @@ describe('Cloudflare version activation', () => {
       });
       const runWrangler = operationFixture((args: Array<string>) => {
         if (args[0] === 'versions' && args[1] === 'view') {
-          const versionId = args[2]!;
+          const versionId = args[2];
           return ok(
             JSON.stringify({
               id: versionId,
@@ -2460,10 +2475,10 @@ describe('Cloudflare version activation', () => {
       ['triggers', 'deploy'],
       ['deployments', 'status'],
     ]);
-    expect(runWrangler.mock.calls[1]![0]).toContain('--assets');
-    expect(runWrangler.mock.calls[1]![0]).toContain('/app/.bwf/deploy/cloudflare/assets');
-    expect(runWrangler.mock.calls[3]![0]).toContain(`${NEXT}@100`);
-    expect(runWrangler.mock.calls[5]![0]).toEqual([
+    expect(runWrangler.mock.calls[1][0]).toContain('--assets');
+    expect(runWrangler.mock.calls[1][0]).toContain('/app/.bwf/deploy/cloudflare/assets');
+    expect(runWrangler.mock.calls[3][0]).toContain(`${NEXT}@100`);
+    expect(runWrangler.mock.calls[5][0]).toEqual([
       'triggers',
       'deploy',
       '-c',
@@ -2788,9 +2803,9 @@ describe('Cloudflare version activation', () => {
     const runWrangler = operationFixture((args: Array<string>) => {
       if (args[0] === 'versions' && args[1] === 'upload') {
         secretsPath = args[args.indexOf('--secrets-file') + 1];
-        uploadedSecrets = JSON.parse(readFileSync(secretsPath!, 'utf8'));
+        uploadedSecrets = JSON.parse(readFileSync(secretsPath, 'utf8'));
         if (process.platform !== 'win32') {
-          expect(statSync(secretsPath!).mode & 0o777).toBe(0o600);
+          expect(statSync(secretsPath).mode & 0o777).toBe(0o600);
         }
       }
       return base(args);
@@ -2913,8 +2928,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${NEXT}@100`);
   });
 
   it('never sends Access headers to an unverified cached workers.dev subdomain', async () => {
@@ -2989,8 +3004,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
@@ -3097,8 +3112,8 @@ describe('Cloudflare version activation', () => {
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
     expect(deployCalls).toHaveLength(1);
-    expect(deployCalls[0]![0]).toContain(`${NEXT}@100`);
-    expect(deployCalls[0]![0].join(' ')).not.toContain(`${NEXT}@0`);
+    expect(deployCalls[0][0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0].join(' ')).not.toContain(`${NEXT}@0`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(true);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
@@ -3280,8 +3295,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${NEXT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${NEXT}@100`);
     expect(fetcher).toHaveBeenCalledWith(
       'https://my-worker.developer-platform-experience.workers.dev/__platform/ready',
       expect.objectContaining({
@@ -3390,8 +3405,8 @@ describe('Cloudflare version activation', () => {
     const deployCalls = runWrangler.mock.calls.filter(
       ([args]) => args[0] === 'versions' && args[1] === 'deploy',
     );
-    expect(deployCalls[0]![0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
-    expect(deployCalls[1]![0]).toContain(`${CURRENT}@100`);
+    expect(deployCalls[0][0]).toEqual(expect.arrayContaining([`${CURRENT}@100`, `${NEXT}@0`]));
+    expect(deployCalls[1][0]).toContain(`${CURRENT}@100`);
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'triggers')).toBe(false);
   });
 
@@ -3604,7 +3619,7 @@ describe('Cloudflare version activation', () => {
             expect(url).toBe('https://app.example.com/__platform/ready');
             expect(options?.headers).toEqual({ 'user-agent': 'platform-deploy-readiness/1' });
             probes++;
-            time += 2_000;
+            time += 2000;
             if (becomesReady && probes > 30) {
               return Response.json({ ready: true });
             }
@@ -3622,8 +3637,8 @@ describe('Cloudflare version activation', () => {
             diagnostic: expect.stringContaining('retry `bwf deploy --platform cloudflare`'),
           });
         }
-        expect(time).toBeLessThanOrEqual(timeout + 2_000);
-        expect(probes).toBeLessThanOrEqual(Math.ceil(timeout / 2_000));
+        expect(time).toBeLessThanOrEqual(timeout + 2000);
+        expect(probes).toBeLessThanOrEqual(Math.ceil(timeout / 2000));
       } finally {
         clock.mockRestore();
       }
@@ -4144,7 +4159,7 @@ describe('Cloudflare version activation', () => {
           customRouteReadinessOrigin: 'https://app.example.com',
         });
         expect(fetcher).toHaveBeenCalledTimes(1);
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://app.example.com/__platform/ready');
         expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
       },
@@ -4166,7 +4181,7 @@ describe('Cloudflare version activation', () => {
       });
       expect(result).toMatchObject({ ok: false, reason: 'readiness-access-denied' });
       expect(result).not.toHaveProperty('customRouteReadinessOrigin');
-      expect(probeCalls(fetcher)[0]![1].headers).toMatchObject(accessHeaders);
+      expect(probeCalls(fetcher)[0][1].headers).toMatchObject(accessHeaders);
     });
 
     it('sends Access headers when a denied preview alias falls back to the opted-in custom route', async () => {
@@ -4234,7 +4249,7 @@ describe('Cloudflare version activation', () => {
             fetch: fetcher,
           }),
         ).resolves.toMatchObject({ ok: true, previewUrl: 'https://bootstrap.example.com' });
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://bootstrap.example.com/__platform/ready');
         expect(init.headers).toMatchObject(accessHeaders);
       },
@@ -4272,7 +4287,7 @@ describe('Cloudflare version activation', () => {
           reason: `${kind}-readiness-access-denied`,
           customRouteReadinessOrigin: 'https://bootstrap.example.com',
         });
-        const [url, init] = probeCalls(fetcher)[0]!;
+        const [url, init] = probeCalls(fetcher)[0];
         expect(url).toBe('https://bootstrap.example.com/__platform/ready');
         expect(init.headers).not.toHaveProperty('CF-Access-Client-Secret');
       },
@@ -4445,7 +4460,7 @@ describe('Cloudflare version activation', () => {
   it('bootstraps first-deploy Durable Object migrations after Cloudflare error 10211', async () => {
     const base = runner({
       status: { stdout: '', stderr: 'The Worker first has no deployments.', status: 1 },
-      upload: { stdout: '', stderr: '', status: 1, errorCode: 10211 },
+      upload: { stdout: '', stderr: '', status: 1, errorCode: 10_211 },
       bootstrap: ok(
         `Current Version ID: ${NEXT}\nVersion Preview URL: https://2e209d56-first.example.workers.dev`,
       ),
@@ -4457,7 +4472,7 @@ describe('Cloudflare version activation', () => {
         (args[0] === 'deploy' || (args[0] === 'versions' && args[1] === 'upload')) &&
         args.includes('--secrets-file')
       ) {
-        const path = args[args.indexOf('--secrets-file') + 1]!;
+        const path = args[args.indexOf('--secrets-file') + 1];
         secretPaths.push(path);
         secretPayloads.push(JSON.parse(readFileSync(path, 'utf8')));
       }
@@ -4586,7 +4601,7 @@ describe('Cloudflare version activation', () => {
       ok: false,
       reason: 'upload-failed',
       status: 1,
-      cloudflareErrorCode: 10211,
+      cloudflareErrorCode: 10_211,
       diagnostic: 'Durable Object migrations require deploy. [code: 10211]',
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
@@ -4612,7 +4627,7 @@ describe('Cloudflare version activation', () => {
     expect(result).toMatchObject({
       ok: false,
       reason: 'upload-failed',
-      cloudflareErrorCode: 10021,
+      cloudflareErrorCode: 10_021,
       diagnostic: expect.stringContaining('Uncaught TypeError:'),
     });
     expect(JSON.stringify(result)).not.toContain('do-not-echo');
@@ -4645,7 +4660,7 @@ describe('Cloudflare version activation', () => {
     ).resolves.toMatchObject({
       ok: false,
       reason: 'bootstrap-failed',
-      cloudflareErrorCode: 10021,
+      cloudflareErrorCode: 10_021,
       diagnostic: 'Script startup exceeded CPU time limit. [code: 10021]',
     });
   });
@@ -4793,7 +4808,7 @@ describe('Cloudflare version activation', () => {
       ok: false,
       reason: 'upload-failed',
       status: 1,
-      cloudflareErrorCode: 10211,
+      cloudflareErrorCode: 10_211,
       diagnostic: 'Durable Object migrations require deploy. [code: 10211]',
     });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
@@ -4925,7 +4940,7 @@ describe('Cloudflare version activation', () => {
         verifyUploader: () => true,
         message: encodeCloudflareVersionMessage([]),
       }),
-    ).resolves.toMatchObject({ ok: false, reason: 'upload-failed', cloudflareErrorCode: 10000 });
+    ).resolves.toMatchObject({ ok: false, reason: 'upload-failed', cloudflareErrorCode: 10_000 });
     expect(runWrangler.mock.calls.some(([args]) => args[0] === 'deploy')).toBe(false);
   });
 
@@ -5178,7 +5193,7 @@ describe('Cloudflare trigger synchronization recovery', () => {
       triggers: [TRIGGER_FAILURE],
       deploys: [
         ok(),
-        { stdout: '', stderr: 'Secrets changed. [code: 10220]', status: 1, errorCode: 10220 },
+        { stdout: '', stderr: 'Secrets changed. [code: 10220]', status: 1, errorCode: 10_220 },
         { stdout: '', stderr: '', status: 1, error: 'socket hang up', applied: true },
       ],
     });

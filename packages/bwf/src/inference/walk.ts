@@ -1,6 +1,7 @@
 import { walk } from 'estree-walker';
 import { parseSync } from 'vite';
-import { isIdentifier, isMemberExpression, type AstNode } from '../shared/ast.ts';
+import { isIdentifier, isMemberExpression } from '../shared/ast.ts';
+import type { AstNode } from '../shared/ast.ts';
 import { staticModuleReferences } from '../shared/module-references.ts';
 import { staticLiteral, unwrapStaticExpression } from '../shared/static-exports.ts';
 import { CLIENT_MODULES, inferClientAuth } from './client-auth.ts';
@@ -177,7 +178,7 @@ export function inferBindingsFromSource(code: string, filename: string): Inferre
     }
   }
 
-  walk(parsed.program as unknown as Parameters<typeof walk>[0], {
+  walk(parsed.program as Parameters<typeof walk>[0], {
     enter(node) {
       const current = node as AstNode;
       if (isMemberExpression(current) && isEnv(current.object)) {

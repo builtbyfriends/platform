@@ -3,10 +3,9 @@ import { readFileSync } from 'node:fs';
 import {
   parsePlatformInstallationManifest,
   recordInstallationStep,
-  type PlatformInstallationManifest,
   parsePlatformAccessProtection,
-  type PlatformLoginKind,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest, PlatformLoginKind } from '@builtbyfriends/platform';
 import type {
   PlatformRuntimeDatabaseManifest,
   PlatformRuntimeManifest,
@@ -16,24 +15,26 @@ import { join } from 'pathslash';
 import type { Pool } from 'pg';
 import { projectPlatformAiLoggingConnection } from './platform-ai-logging-projection.ts';
 import { verifyPlatformDatabaseArtifacts } from './platform-installer-runtime.ts';
-import {
-  type PlatformAdministratorSetupState,
-  type PlatformInstallerDependencies,
-  type PlatformDatabaseLifecycleLock,
-  type InstallationCheckpointWriter,
-  type PlatformDatabaseState,
-  type PlatformDatabaseMigrationResult,
-  type PlatformSandboxDrainPreparation,
+import type {
+  PlatformAdministratorSetupState,
+  PlatformInstallerDependencies,
+  PlatformDatabaseLifecycleLock,
+  InstallationCheckpointWriter,
+  PlatformDatabaseState,
+  PlatformDatabaseMigrationResult,
+  PlatformSandboxDrainPreparation,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan } from './platform-plan.ts';
+import type { PlatformInstallPlan } from './platform-plan.ts';
 import { writeInstallationManifest } from './platform-registry.ts';
 import {
   fencePlatformProjectZeroTrustConnection,
   liftPlatformProjectZeroTrustFenceConnection,
   lockPlatformProjectZeroTrustConnection,
   readPlatformProjectZeroTrustStateConnection,
-  type PlatformProjectZeroTrustState,
-  type QueryConnection,
+} from './platform-zero-trust-uninstall.ts';
+import type {
+  PlatformProjectZeroTrustState,
+  QueryConnection,
 } from './platform-zero-trust-uninstall.ts';
 
 // Decision: onManifestChange keeps migration checkpoints visible to the outer failure handler.
@@ -204,6 +205,14 @@ export function claimPlatformDatabase(
   });
 }
 
+/** The error a lifecycle-lock operation fails with once pg reported the held client closed. */
+function lostLockConnectionError(cause: Error): Error {
+  return new Error(
+    `platform: The PostgreSQL connection that holds the lifecycle lock was closed (${cause.message}). Rerun the command to continue.`,
+    { cause },
+  );
+}
+
 export async function acquirePlatformDatabaseLifecycleLock(
   databaseUrl: string,
   installationId: string,
@@ -211,18 +220,45 @@ export async function acquirePlatformDatabaseLifecycleLock(
 ): Promise<PlatformDatabaseLifecycleLock> {
   const { Pool } = await import('pg');
   const pool = new Pool({ connectionString: platformDatabaseClientUrl(databaseUrl), max: 1 });
+  // Decision: pg emits 'error' on the pool and on a checked-out client when the server drops the socket,
+  // and Node exits on an unhandled one. The lock client can sit idle for minutes while Workers deploy,
+  // so the first error is kept and the next lock operation fails with it.
+  pool.on('error', () => {});
   const client = await pool.connect();
+  let lost: Error | undefined;
+  client.on('error', (error) => {
+    lost ??= error;
+  });
+  const connection: QueryConnection = {
+    query: async <Row extends Record<string, unknown>>(
+      sql: string,
+      values?: ReadonlyArray<unknown>,
+    ) => {
+      if (lost) {
+        throw lostLockConnectionError(lost);
+      }
+      try {
+        return await client.query<Row>(sql, values ? [...values] : undefined);
+      } catch (error) {
+        throw lost ? lostLockConnectionError(lost) : error;
+      }
+    },
+  };
   try {
     const releaseConnectionLock = await acquirePlatformDatabaseLifecycleLockConnection(
-      client,
+      connection,
       installationId,
       ownershipNonce,
     );
     const release: PlatformDatabaseLifecycleLock = async () => {
       try {
-        await releaseConnectionLock();
+        // Decision: the server ends a session advisory lock with its connection, so a lost connection
+        // has nothing left to unlock. Passing the error to release() destroys the broken client.
+        if (!lost) {
+          await releaseConnectionLock();
+        }
       } finally {
-        client.release();
+        client.release(lost);
         await pool.end();
       }
     };
@@ -230,7 +266,7 @@ export async function acquirePlatformDatabaseLifecycleLock(
     // and verification hooks must not disappear at this wrapper boundary.
     return Object.assign(release, releaseConnectionLock);
   } catch (error) {
-    client.release();
+    client.release(lost);
     await pool.end();
     throw error;
   }
@@ -254,6 +290,7 @@ export async function readPlatformDatabaseLifecycleManifest(
       }
       throw new Error(
         `platform: Could not read the PostgreSQL lifecycle checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   });
@@ -353,6 +390,25 @@ type PlatformDatabaseMigrationRow = Readonly<{
   hash: unknown;
   id: unknown;
 }>;
+
+/**
+ * Connections the server accepts from roles without SUPERUSER. PostgreSQL 16 added
+ * reserved_connections; older servers report it as missing, which counts as zero.
+ */
+export async function readPlatformDatabaseConnectionSlotsConnection(
+  client: QueryConnection,
+): Promise<number> {
+  const result = await client.query<{ max: number; superuser: number; reserved: number }>(
+    `SELECT current_setting('max_connections')::int AS "max",
+            current_setting('superuser_reserved_connections')::int AS "superuser",
+            COALESCE(current_setting('reserved_connections', true), '0')::int AS "reserved"`,
+  );
+  const row = result.rows[0];
+  if (!row || ![row.max, row.superuser, row.reserved].every(Number.isInteger)) {
+    throw new Error('platform: Could not read the PostgreSQL connection limit.');
+  }
+  return Math.max(0, row.max - row.superuser - row.reserved);
+}
 
 export async function inspectPlatformDatabaseStateConnection(
   client: QueryConnection,
@@ -588,6 +644,7 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
     }
     throw new Error(
       `platform: The PostgreSQL lifecycle checkpoint is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   let released = false;
@@ -627,6 +684,7 @@ export async function acquirePlatformDatabaseLifecycleLockConnection(
   release.readAdministratorSetup = () => readPlatformAdministratorSetupConnection(client);
   release.readProjectZeroTrust = () => readPlatformProjectZeroTrustStateConnection(client);
   release.readProjects = () => readPlatformProjectSlugsConnection(client);
+  release.readConnectionSlots = () => readPlatformDatabaseConnectionSlotsConnection(client);
   release.publishAiLogging = (kv, onProgress) =>
     projectPlatformAiLoggingConnection(client, kv, { onProgress });
   release.lockProjectZeroTrust = () => lockPlatformProjectZeroTrustConnection(client);
@@ -983,7 +1041,7 @@ async function claimPlatformDatabaseConnection(
          LIMIT 1`,
       );
       if (contents.rows.length > 0) {
-        const table = contents.rows[0]!;
+        const table = contents.rows[0];
         throw new Error(
           `platform: Refusing to claim a non-empty PostgreSQL database (found ${table.schemaname}.${table.tablename}). Use a dedicated empty database for each installation.`,
         );

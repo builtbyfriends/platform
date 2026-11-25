@@ -34,8 +34,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 let env: TestEnv;
 beforeAll(async () => {
   env = await setupEnv();
@@ -112,7 +112,7 @@ function accessApi() {
     }
     const match = path.match(/^apps\/([^/]+)$/);
     if (match) {
-      const id = match[1]!;
+      const id = match[1];
       const previous = applications.get(id);
       if (!previous) {
         return providerError('application not found', 404);
@@ -559,7 +559,7 @@ describe('Zero Trust routing read retries', () => {
       puts.mockRestore();
       expect(await getProjectZeroTrustState(env.db, project.id)).toMatchObject({
         status: 'reconciling',
-        routing_cursor: domainRows[298]!.hostname,
+        routing_cursor: domainRows[298].hostname,
         bypass_application_id: expect.any(String),
       });
       if (state === 'error') {
@@ -567,7 +567,7 @@ describe('Zero Trust routing read retries', () => {
         const getSpy = vi
           .spyOn(env.ROUTING, 'get')
           .mockImplementation((async (key: string | Array<string>, ...args: Array<unknown>) =>
-            key === `domain:${domainRows[299]!.hostname}`
+            key === `domain:${domainRows[299].hostname}`
               ? null
               : Reflect.apply(originalGet, env.ROUTING, [key, ...args])) as typeof env.ROUTING.get);
         await reconcilePendingProjectZeroTrust(platform, env.db);

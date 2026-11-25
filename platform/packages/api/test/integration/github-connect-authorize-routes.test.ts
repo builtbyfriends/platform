@@ -15,14 +15,8 @@ import type { Db } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import { githubRoutes } from '../../src/routes/github.ts';
 import { githubInstallationMembers } from '../../src/schema.ts';
-import {
-  JWT_SECRET,
-  clearTables,
-  createTestUser,
-  setupEnv,
-  teardownEnv,
-  type TestEnv,
-} from './helpers.ts';
+import { JWT_SECRET, clearTables, createTestUser, setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -149,7 +143,7 @@ async function mintConnectState(payload: {
 // mangles `Location: http://localhost:*` headers.
 function extractRedirectTarget(body: string): string | null {
   const match = /location\.replace\("([^"]+)"\)/.exec(body);
-  return match ? match[1]! : null;
+  return match ? match[1] : null;
 }
 
 async function runConnectCallback(opts: {

@@ -12,6 +12,7 @@ import type {
   CloudflareCommandResult as Result,
   CloudflareOperation,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { parse } from 'jsonc-parser';
 import { dirname, join, resolve } from 'pathslash';
 import {
@@ -31,15 +32,18 @@ import {
   printCloudflareLoginPrompt,
 } from './cloudflare-login-output.ts';
 import { normalizeD1SqlLineEndings } from './d1-sql-line-endings.ts';
+import { Buffer } from './node-buffer.ts';
 import { platformWorkerUploadAttribution } from './platform-worker-user-agent.ts';
 import { sanitizeTerminalLogText } from './terminal-log-text.ts';
 
 type Json = Record<string, unknown>;
 
 const cf = join(dirname(fileURLToPath(import.meta.resolve('cf/package.json'))), 'bin', 'cf');
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the parent process serializes a typed CloudflareOperation into argv
 const operation = (() => {
   try {
-    return JSON.parse(process.argv[2] ?? 'null');
+    const parsed: unknown = JSON.parse(process.argv[2] ?? 'null');
+    return parsed;
   } catch {
     return null;
   }
@@ -102,9 +106,9 @@ function result(status: number, stdout = '', stderr = '', data?: unknown): Resul
     status,
     stdout,
     stderr,
-    ...(data !== undefined ? { data } : {}),
-    ...(errorCode ? { errorCode } : {}),
-    ...([10006, 10007, 10090].includes(errorCode ?? 0) ? { failure: 'not-found' as const } : {}),
+    ...(data !== undefined && { data }),
+    ...(!!errorCode && { errorCode }),
+    ...([10_006, 10_007, 10_090].includes(errorCode ?? 0) && { failure: 'not-found' as const }),
   };
 }
 
@@ -123,7 +127,7 @@ function runCf(
     shell: false,
     windowsHide: true,
     maxBuffer: bounds?.maxOutputBytes ?? 32 * 1024 * 1024,
-    ...(bounds ? { timeout: bounds.timeoutMs } : {}),
+    ...(!!bounds && { timeout: bounds.timeoutMs }),
     // Decision: An interactive command shares this process's terminal, so cf can ask there.
     stdio: interactive ? 'inherit' : ['ignore', 'pipe', 'pipe'],
   });
@@ -134,7 +138,7 @@ function runCf(
   ]
     .filter(Boolean)
     .join('\n')
-    .replace(/\[(\d{4,})\]/g, '[code: $1]');
+    .replaceAll(/\[(\d{4,})\]/g, '[code: $1]');
   if (child.signal || child.error || child.status === null) {
     return {
       status: 1,
@@ -246,15 +250,11 @@ async function withBuildOutput(
   }
 }
 
-function parsedJson(value: string): unknown {
-  return JSON.parse(value) as unknown;
-}
-
 function object(value: unknown): Json {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error('Cloudflare returned an unexpected response.');
   }
-  return value as Json;
+  return value;
 }
 
 function configPath(): string | undefined {
@@ -281,7 +281,7 @@ function updateBinding(section: string, binding: string, values: Json): void {
     throw new Error('Cloudflare resource binding and config are required.');
   }
   const current = config();
-  const previous = Array.isArray(current[section]) ? current[section] : [];
+  const previous: Array<unknown> = Array.isArray(current[section]) ? current[section] : [];
   const existing = previous.map(object).find((entry) => entry.binding === binding);
   current[section] = [
     ...previous.filter((entry) => object(entry).binding !== binding),
@@ -290,7 +290,9 @@ function updateBinding(section: string, binding: string, values: Json): void {
   writeFileSync(path, `${JSON.stringify(current, null, 2)}\n`);
 }
 
-function d1Database(token: string): { id: string; dir: string; table: string; pattern?: string } {
+type D1DatabaseSelection = { id: string; dir: string; table: string; pattern?: string };
+
+function d1Database(token: string): D1DatabaseSelection {
   const entries = config().d1_databases;
   if (!Array.isArray(entries)) {
     throw new Error('D1 database binding is unavailable.');
@@ -307,9 +309,9 @@ function d1Database(token: string): { id: string; dir: string; table: string; pa
   return {
     id: selected.database_id,
     dir: typeof selected.migrations_dir === 'string' ? selected.migrations_dir : './migrations',
-    ...(typeof selected.migrations_pattern === 'string'
-      ? { pattern: selected.migrations_pattern }
-      : {}),
+    ...(typeof selected.migrations_pattern === 'string' && {
+      pattern: selected.migrations_pattern,
+    }),
     table:
       typeof selected.migrations_table === 'string' ? selected.migrations_table : 'd1_migrations',
   };
@@ -317,7 +319,7 @@ function d1Database(token: string): { id: string; dir: string; table: string; pa
 
 function previousD1Bookmark(stdout: string): string | undefined {
   try {
-    const previous = object(parsedJson(stdout)).previous_bookmark;
+    const previous = object(JSON.parse(stdout)).previous_bookmark;
     return isD1Bookmark(previous) ? previous : undefined;
   } catch {
     return undefined;
@@ -329,7 +331,7 @@ function cleanJson(command: Array<string>, transform?: (value: unknown) => unkno
   if (called.status !== 0 || !transform) {
     return called;
   }
-  return result(0, `${JSON.stringify(transform(parsedJson(called.stdout)))}\n`, called.stderr);
+  return result(0, `${JSON.stringify(transform(JSON.parse(called.stdout)))}\n`, called.stderr);
 }
 
 function accountId(): string {
@@ -553,7 +555,7 @@ async function sessionCredential(): Promise<
         .join('\n'),
     };
   }
-  const state = object(parsedJson(identity.stdout));
+  const state = object(JSON.parse(identity.stdout));
   if (state.authenticated !== true || state.tokenValid !== true) {
     return { failure: NO_OAUTH_BEARER };
   }
@@ -577,7 +579,7 @@ async function auth(): Promise<Result> {
     if (called.status !== 0) {
       return called;
     }
-    const identity = object(parsedJson(called.stdout));
+    const identity = object(JSON.parse(called.stdout));
     if (identity.authenticated !== true || identity.tokenValid !== true) {
       return result(1, '', 'Cloudflare authentication is required.', { loggedIn: false });
     }
@@ -628,11 +630,12 @@ function listAllResourcePages(command: Array<string>, extraFlags: Array<string> 
     if (listed.status !== 0) {
       return listed;
     }
-    const items = parsedJson(listed.stdout);
+    const items: unknown = JSON.parse(listed.stdout);
     if (!Array.isArray(items) || items.length > pageSize) {
       throw new Error(`Cloudflare returned an invalid ${command.join(' ')} page.`);
     }
-    entries.push(...items);
+    const pageItems: Array<unknown> = items;
+    entries.push(...pageItems);
     if (items.length < pageSize) {
       return result(0, `${JSON.stringify(entries)}\n`);
     }
@@ -687,13 +690,15 @@ async function readAllQueues(): Promise<Array<Json>> {
     );
     const entries = body.result;
     const info = object(body.result_info);
+    const totalPages = info.total_pages;
     if (
       !Array.isArray(entries) ||
       !Number.isSafeInteger(info.page) ||
       info.page !== page ||
-      !Number.isSafeInteger(info.total_pages) ||
-      (info.total_pages as number) < 0 ||
-      (info.total_pages as number) > 1000
+      typeof totalPages !== 'number' ||
+      !Number.isSafeInteger(totalPages) ||
+      totalPages < 0 ||
+      totalPages > 1000
     ) {
       throw new Error('Cloudflare returned incomplete Queue pagination.');
     }
@@ -709,7 +714,7 @@ async function readAllQueues(): Promise<Array<Json>> {
       seen.add(queue.queue_id);
       queues.push(queue);
     }
-    if (page >= (info.total_pages as number)) {
+    if (page >= totalPages) {
       return queues;
     }
   }
@@ -766,7 +771,7 @@ async function resources(): Promise<Result> {
       if (called.status !== 0 || verb !== 'list') {
         return called;
       }
-      const pending = parsedJson(called.stdout);
+      const pending: unknown = JSON.parse(called.stdout);
       if (
         !Array.isArray(pending) ||
         pending.some((item) => typeof object(item).Name !== 'string')
@@ -781,7 +786,7 @@ async function resources(): Promise<Result> {
       if (called.status !== 0) {
         return called;
       }
-      const bookmark = object(parsedJson(called.stdout)).bookmark;
+      const bookmark = object(JSON.parse(called.stdout)).bookmark;
       if (!isD1Bookmark(bookmark)) {
         throw new Error('D1 Time Travel bookmark was malformed.');
       }
@@ -815,11 +820,11 @@ async function resources(): Promise<Result> {
       if (listed.status !== 0) {
         return listed;
       }
-      const list = parsedJson(listed.stdout);
+      const list: unknown = JSON.parse(listed.stdout);
       if (!Array.isArray(list)) {
         throw new Error('D1 list was malformed.');
       }
-      const value = list.find((item) => object(item).name === operation.name);
+      const value: unknown = list.find((item: unknown) => object(item).name === operation.name);
       return value === undefined
         ? { ...result(1, '', 'D1 database does not exist.'), failure: 'not-found' }
         : result(0, '', '', value);
@@ -829,7 +834,7 @@ async function resources(): Promise<Result> {
       if (created.status !== 0) {
         return created;
       }
-      const database = object(parsedJson(created.stdout));
+      const database = object(JSON.parse(created.stdout));
       if (typeof database.uuid !== 'string') {
         throw new Error('D1 creation returned no database ID.');
       }
@@ -849,7 +854,7 @@ async function resources(): Promise<Result> {
       if (created.status !== 0) {
         return created;
       }
-      const namespace = object(parsedJson(created.stdout));
+      const namespace = object(JSON.parse(created.stdout));
       if (typeof namespace.id !== 'string') {
         throw new Error('KV creation returned no namespace ID.');
       }
@@ -892,7 +897,7 @@ async function resources(): Promise<Result> {
       if (created.status !== 0) {
         return { ...created, stdout: '', stderr: 'Hyperdrive creation failed.' };
       }
-      const hyperdrive = object(parsedJson(created.stdout));
+      const hyperdrive = object(JSON.parse(created.stdout));
       if (typeof hyperdrive.id !== 'string') {
         throw new Error('Hyperdrive creation returned no ID.');
       }
@@ -908,7 +913,7 @@ async function resources(): Promise<Result> {
         ? result(0, '', '', {
             id: queue.queue_id,
             name: queue.queue_name,
-            ...(consumers ? { consumers } : {}),
+            ...(!!consumers && { consumers }),
           })
         : { ...result(1, '', 'Cloudflare Queue does not exist.'), failure: 'not-found' };
     }
@@ -953,7 +958,7 @@ function email(): Result {
       if (listed.status !== 0) {
         return listed;
       }
-      const values = parsedJson(listed.stdout);
+      const values: unknown = JSON.parse(listed.stdout);
       if (!Array.isArray(values)) {
         throw new Error('Email Sending subdomains were malformed.');
       }
@@ -991,7 +996,7 @@ async function postWorkersApi(
   const parsed: unknown = await response.json().catch(() => null);
   return {
     status: response.status,
-    body: parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Json) : null,
+    body: isRecord(parsed) ? parsed : null,
   };
 }
 
@@ -999,10 +1004,10 @@ async function postWorkersApi(
 function workersApiFailure(action: string, response: { status: number; body: Json | null }): Error {
   const errors = Array.isArray(response.body?.errors) ? response.body.errors : [];
   const reasons = errors.slice(0, 3).flatMap((error: unknown) => {
-    if (!error || typeof error !== 'object') {
+    if (!isRecord(error)) {
       return [];
     }
-    const { code, message } = error as Json;
+    const { code, message } = error;
     if (typeof message !== 'string' || !message) {
       return [];
     }
@@ -1045,7 +1050,7 @@ async function setSecretsOnWorkerWithoutCode(
   if (created.status === 409) {
     const retried = retry();
     // Decision: 10007 or 10013: the Worker still has no deployment.
-    if (retried.status === 0 || (retried.errorCode !== 10007 && retried.errorCode !== 10013)) {
+    if (retried.status === 0 || (retried.errorCode !== 10_007 && retried.errorCode !== 10_013)) {
       return retried;
     }
     return result(1, '', workerWithoutDeploymentMessage(worker));
@@ -1078,7 +1083,7 @@ async function secrets(): Promise<Result> {
   const worker = workerName();
   const apply = async (values: Record<string, string>, action: () => Result): Promise<Result> => {
     const first = action();
-    if (first.status === 0 || first.errorCode !== 10007) {
+    if (first.status === 0 || first.errorCode !== 10_007) {
       return first;
     }
     return setSecretsOnWorkerWithoutCode(worker, values, action);
@@ -1087,7 +1092,7 @@ async function secrets(): Promise<Result> {
     case 'secret.list':
       return runCf(['workers', 'secrets', 'list', '--worker', worker]);
     case 'secret.put': {
-      const value = readFileSync(0, 'utf8').replace(/\n$/, '');
+      const value = readFileSync(0, 'utf8').replace(/\r?\n$/, '');
       const name = operation.name;
       return withSecretFile(JSON.stringify({ name, text: value, type: 'secret_text' }), (path) =>
         apply({ [name]: value }, () =>
@@ -1096,7 +1101,7 @@ async function secrets(): Promise<Result> {
       );
     }
     case 'secret.bulk': {
-      const values = object(parsedJson(readFileSync(0, 'utf8')));
+      const values = object(JSON.parse(readFileSync(0, 'utf8')));
       const texts: Record<string, string> = {};
       for (const [name, text] of Object.entries(values)) {
         if (typeof text !== 'string') {
@@ -1129,7 +1134,7 @@ async function workerHistory(): Promise<Result> {
       if (called.status !== 0) {
         return called;
       }
-      const deployments = object(parsedJson(called.stdout)).deployments;
+      const deployments = object(JSON.parse(called.stdout)).deployments;
       if (!Array.isArray(deployments)) {
         throw new Error('Worker deployments were malformed.');
       }
@@ -1169,7 +1174,7 @@ async function workerHistory(): Promise<Result> {
       if (called.status !== 0) {
         return called;
       }
-      const version = object(parsedJson(called.stdout));
+      const version = object(JSON.parse(called.stdout));
       if (version.id !== versionId || !Array.isArray(version.bindings)) {
         throw new Error('Worker version bindings were malformed.');
       }
@@ -1207,7 +1212,7 @@ async function workerHistory(): Promise<Result> {
         JSON.stringify({
           strategy: 'percentage',
           versions,
-          ...(operation.message ? { annotations: { 'workers/message': operation.message } } : {}),
+          ...(!!operation.message && { annotations: { 'workers/message': operation.message } }),
         }),
         ...(operation.bypassDeploymentChecks ? ['--bypass-deployment-checks'] : []),
       ]);
@@ -1227,7 +1232,7 @@ async function workerChanges(): Promise<Result> {
     if (consumers.status !== 0) {
       return consumers;
     }
-    const members = parsedJson(consumers.stdout);
+    const members: unknown = JSON.parse(consumers.stdout);
     if (!Array.isArray(members)) {
       throw new Error('Queue consumer list was malformed.');
     }
@@ -1302,7 +1307,10 @@ async function workerChanges(): Promise<Result> {
     return deployed;
   }
   if (operation.type === 'versions.upload' || operation.type === 'worker.deploy') {
-    const path = configPath()!;
+    const path = configPath();
+    if (!path) {
+      throw new Error('Cloudflare config path is required for this operation.');
+    }
     if (typeof raw.main !== 'string' || !raw.main || raw.no_bundle !== true) {
       throw new Error('Cloudflare Worker upload requires a prebuilt platform Worker.');
     }
@@ -1330,7 +1338,7 @@ async function workerChanges(): Promise<Result> {
     // Callers get an identity and URLs, not a made-up CLI transcript.
     let uploaded: Json = {};
     try {
-      uploaded = object(parsedJson(called.stdout));
+      uploaded = object(JSON.parse(called.stdout));
     } catch {}
     const printed = readCfUploadOutput(called);
     const versionId = uploaded.version_id ?? uploaded.id ?? uploaded.versionId ?? printed.versionId;
@@ -1345,8 +1353,8 @@ async function workerChanges(): Promise<Result> {
         : printed.workersDevUrl;
     return result(0, '', called.stderr, {
       versionId,
-      ...(previewUrl ? { previewUrl } : {}),
-      ...(workersDevUrl ? { workersDevUrl } : {}),
+      ...(!!previewUrl && { previewUrl }),
+      ...(!!workersDevUrl && { workersDevUrl }),
     });
   }
   throw new Error('Unsupported Cloudflare Worker operation.');
@@ -1407,9 +1415,10 @@ async function tail(): Promise<Result> {
     await new Promise<void>((resolve, reject) => {
       finish = resolve;
       let pendingMessages = Promise.resolve();
-      socket = new WebSocket(tailUrl, 'trace-v1');
-      socket.addEventListener('open', () => {
-        socket!.send(JSON.stringify({ debug: false }));
+      const tail = new WebSocket(tailUrl, 'trace-v1');
+      socket = tail;
+      tail.addEventListener('open', () => {
+        tail.send(JSON.stringify({ debug: false }));
       });
       socket.addEventListener('message', (event) => {
         pendingMessages = pendingMessages
@@ -1426,7 +1435,7 @@ async function tail(): Promise<Result> {
             if (text === null) {
               throw new Error('Unsupported Cloudflare tail frame.');
             }
-            const log = object(parsedJson(text));
+            const log = object(JSON.parse(text));
             const detail = object(log.event ?? {});
             const request = object(detail.request ?? {});
             const prefix =
@@ -1483,7 +1492,7 @@ async function tail(): Promise<Result> {
       await fetch(`${endpoint}/${encodeURIComponent(record.id)}`, {
         method: 'DELETE',
         headers,
-        signal: AbortSignal.timeout(5_000),
+        signal: AbortSignal.timeout(5000),
       }).catch(() => {});
     }
     // Decision: Node's WebSocket can stay in CLOSING after the remote tail is deleted. This is a dedicated CLI
@@ -1544,7 +1553,7 @@ try {
     let humanOutput = '';
     if (data === undefined && output.stdout.trim()) {
       try {
-        data = parsedJson(output.stdout);
+        data = JSON.parse(output.stdout);
       } catch {
         humanOutput = output.stdout;
       }
@@ -1552,13 +1561,13 @@ try {
     process.stdout.write(
       JSON.stringify({
         operationResult: 1,
-        ...(output.signal ? { signal: output.signal } : {}),
-        ...(output.error ? { error: output.error } : {}),
-        ...(data !== undefined ? { data } : {}),
-        ...(output.errorCode !== undefined ? { errorCode: output.errorCode } : {}),
-        ...(output.failure ? { failure: output.failure } : {}),
-        ...(output.stderr ? { errors: [{ code: output.errorCode, message: output.stderr }] } : {}),
-        ...(humanOutput ? { output: humanOutput } : {}),
+        ...(!!output.signal && { signal: output.signal }),
+        ...(!!output.error && { error: output.error }),
+        ...(data !== undefined && { data }),
+        ...(output.errorCode !== undefined && { errorCode: output.errorCode }),
+        ...(!!output.failure && { failure: output.failure }),
+        ...(!!output.stderr && { errors: [{ code: output.errorCode, message: output.stderr }] }),
+        ...(!!humanOutput && { output: humanOutput }),
       }) + '\n',
     );
   }

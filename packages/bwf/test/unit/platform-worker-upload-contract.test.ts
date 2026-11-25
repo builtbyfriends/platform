@@ -78,7 +78,7 @@ it.each(['none', 'batch', 'single-file'] as const)(
           response.end(
             JSON.stringify({
               success: false,
-              errors: [{ code: 10007, message: 'Worker not found.' }],
+              errors: [{ code: 10_007, message: 'Worker not found.' }],
             }),
           );
         }
@@ -119,7 +119,7 @@ it.each(['none', 'batch', 'single-file'] as const)(
         async (apiBase) => {
           await new Promise<void>((resolve) => {
             const child = execFile(
-              command!,
+              command,
               [
                 ...prefix,
                 ...encodeCloudflareOperation({ type: 'worker.deploy', configPath: config }),

@@ -1,8 +1,6 @@
 import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
-import {
-  PLATFORM_WORKER_SECRET_UPDATE_NAMES,
-  type PlatformWorkerSecretUpdates,
-} from './platform-installer-types.ts';
+import { PLATFORM_WORKER_SECRET_UPDATE_NAMES } from './platform-installer-types.ts';
+import type { PlatformWorkerSecretUpdates } from './platform-installer-types.ts';
 
 type PendingWorkerSecretUpdateIntent = Readonly<{
   generation: number | null;
@@ -52,14 +50,9 @@ function unresolvedWorkerSecretUpdate(
 ): WorkerSecretUpdateMarker | null {
   const markers = manifest.steps.flatMap((step) => {
     const match = /^worker-secret-updates:(\d+):(pending|committed)$/.exec(step.key);
-    return match
-      ? [
-          {
-            generation: Number(match[1]),
-            id: step.resultHash,
-            state: match[2] as 'committed' | 'pending',
-          },
-        ]
+    const state = match?.[2];
+    return match && (state === 'pending' || state === 'committed')
+      ? [{ generation: Number(match[1]), id: step.resultHash, state }]
       : [];
   });
   const latestGeneration = Math.max(0, ...markers.map((marker) => marker.generation));
@@ -73,7 +66,7 @@ function unresolvedWorkerSecretUpdate(
   if (pending.length === 0) {
     return null;
   }
-  return { generation: latestGeneration, id: pending[0]!.id };
+  return { generation: latestGeneration, id: pending[0].id };
 }
 
 function readLatestWorkerGeneration(manifest: PlatformInstallationManifest): number {

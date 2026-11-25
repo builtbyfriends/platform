@@ -1,3 +1,4 @@
+import { billedAccountPlanId } from './app-payer.ts';
 import { createDb, getProjectUsageOwnershipSnapshot, getUser } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import { getCurrentBillingPeriodStart } from './tiers.ts';
@@ -108,6 +109,7 @@ export async function processUsageEventBatch(
       return event
         ? {
             event,
+            message,
             at: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now(),
           }
         : null;
@@ -142,7 +144,7 @@ export async function processUsageEventBatch(
   for (const period of ownershipSnapshot.ownershipPeriods) {
     ownershipPeriodsByProject.get(period.project_id)?.push(period);
   }
-  const records = authenticatedRecords.flatMap(({ event, at }) => {
+  const records = authenticatedRecords.flatMap(({ event, at, message }) => {
     const project = projectsById.get(event.projectId);
     if (!project) {
       return [];
@@ -173,6 +175,7 @@ export async function processUsageEventBatch(
           ownershipStartedAt: ownershipPeriod?.starts_at ?? project.created_at,
         },
         at,
+        message,
       },
     ];
   });
@@ -180,6 +183,7 @@ export async function processUsageEventBatch(
 
   const grouped = groupEventsByUser(events);
 
+  const userIds = [...grouped.keys()];
   const results = await Promise.allSettled(
     [...grouped.entries()].map(async ([userId, userEvents]) => {
       // Decision: Resolve each account so request and sandbox accounting share the same ledger.
@@ -195,7 +199,7 @@ export async function processUsageEventBatch(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             events: userEvents,
-            plan: user.plan,
+            plan: await billedAccountPlanId(db, user),
             userId,
             billingPeriodStart: getCurrentBillingPeriodStart(
               user.billing_cycle_start ?? user.created_at,
@@ -210,11 +214,23 @@ export async function processUsageEventBatch(
     }),
   );
 
-  // Decision: If any UsageCounter call failed, retry the whole batch. Route 5xx events only on the ack path so a
-  // redelivery doesn't count them twice.
-  const failures = results.filter((result) => result.status === 'rejected');
-  if (failures.length > 0) {
-    batch.retryAll();
+  // Decision: Request counts have no replay receipt, so a redelivery counts them again. When a UsageCounter call
+  // fails, retry only that account's messages and acknowledge the rest. Route 5xx events only when the
+  // whole batch is acknowledged so a redelivery doesn't count them twice.
+  const failedUserIds = new Set(
+    userIds.filter((_userId, index) => results[index]?.status === 'rejected'),
+  );
+  if (failedUserIds.size > 0) {
+    const retried = new Set(
+      records.filter(({ event }) => failedUserIds.has(event.userId)).map(({ message }) => message),
+    );
+    for (const message of batch.messages) {
+      if (retried.has(message)) {
+        message.retry();
+      } else {
+        message.ack();
+      }
+    }
   } else {
     // Decision: Routing 5xx events to ErrorAlertMonitor is best effort and doesn't block the ack.
     // Platform-owned static storage failures stay billed and visible in request analytics, but don't

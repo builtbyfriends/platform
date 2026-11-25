@@ -72,7 +72,7 @@ const originalLocation = (globalThis as { location?: unknown }).location;
 describe('typed websocket client', () => {
   beforeEach(() => {
     MockWebSocket.instances = [];
-    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('location', { href: 'https://platform.test/app' });
   });
 
@@ -86,28 +86,28 @@ describe('typed websocket client', () => {
     'expands catch-all tokens in %s',
     (path) => {
       connect(path, { params: { path: 'docs/start here' } });
-      expect(MockWebSocket.instances[0]!.url).toBe('wss://platform.test/files/docs/start%20here');
+      expect(MockWebSocket.instances[0].url).toBe('wss://platform.test/files/docs/start%20here');
     },
   );
 
   it('interpolates bracket parameters in WebSocket URLs', () => {
     connect('/chat/[room]', { params: { room: 'a/b' } });
-    expect(MockWebSocket.instances[0]!.url).toBe('wss://platform.test/chat/a%2Fb');
+    expect(MockWebSocket.instances[0].url).toBe('wss://platform.test/chat/a%2Fb');
   });
 
   it('keeps a secure wss baseURL secure', () => {
     connect('/notifications', { baseURL: 'wss://api.example.com' });
-    expect(MockWebSocket.instances[0]!.url).toBe('wss://api.example.com/notifications');
+    expect(MockWebSocket.instances[0].url).toBe('wss://api.example.com/notifications');
   });
 
   it('uses ws for an http baseURL', () => {
     connect('/notifications', { baseURL: 'http://localhost:5173' });
-    expect(MockWebSocket.instances[0]!.url).toBe('ws://localhost:5173/notifications');
+    expect(MockWebSocket.instances[0].url).toBe('ws://localhost:5173/notifications');
   });
 
   it('buffers messages until the socket opens', () => {
     const socket = connect('/chat/:room', { params: { room: 'general' } });
-    const ws = MockWebSocket.instances[0]!;
+    const ws = MockWebSocket.instances[0];
 
     socket.send({ type: 'chat.message', text: 'hello' });
     expect(ws.sent).toEqual([]);
@@ -120,7 +120,7 @@ describe('typed websocket client', () => {
 
   it('parses incoming messages for subscribers', () => {
     const socket = connect('/notifications');
-    const ws = MockWebSocket.instances[0]!;
+    const ws = MockWebSocket.instances[0];
     const handler = vi.fn();
     socket.on('message', handler);
 
@@ -139,7 +139,7 @@ describe('typed websocket client', () => {
 
     it('reconnects after the server drops the socket', () => {
       connect('/notifications', { reconnectDelayMs: 50 });
-      MockWebSocket.instances[0]!.emit('close', { code: 1006, wasClean: false });
+      MockWebSocket.instances[0].emit('close', { code: 1006, wasClean: false });
 
       vi.advanceTimersByTime(50);
 
@@ -148,12 +148,53 @@ describe('typed websocket client', () => {
 
     it('does not reconnect when closed during the reconnect delay', () => {
       const socket = connect('/notifications', { reconnectDelayMs: 50 });
-      MockWebSocket.instances[0]!.emit('close', { code: 1006, wasClean: false });
+      MockWebSocket.instances[0].emit('close', { code: 1006, wasClean: false });
 
       socket.close(1000, 'unmount');
-      vi.advanceTimersByTime(1_000);
+      vi.advanceTimersByTime(1000);
 
       expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    it('waits longer each time and stops at the limit when the server accepts and then drops', () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      connect('/notifications', { reconnectDelayMs: 50, maxReconnectAttempts: 3 });
+      const dropAfterOpen = () => {
+        const ws = MockWebSocket.instances.at(-1)!;
+        ws.emit('open', {});
+        ws.emit('close', { code: 1011, wasClean: true });
+      };
+
+      dropAfterOpen();
+      vi.advanceTimersByTime(50);
+      expect(MockWebSocket.instances).toHaveLength(2);
+
+      dropAfterOpen();
+      vi.advanceTimersByTime(99);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      vi.advanceTimersByTime(1);
+      expect(MockWebSocket.instances).toHaveLength(3);
+
+      dropAfterOpen();
+      vi.advanceTimersByTime(200);
+      expect(MockWebSocket.instances).toHaveLength(4);
+
+      dropAfterOpen();
+      vi.advanceTimersByTime(60_000);
+      expect(MockWebSocket.instances).toHaveLength(4);
+    });
+
+    it('starts the count again once a message arrives', () => {
+      connect('/notifications', { reconnectDelayMs: 50, maxReconnectAttempts: 1 });
+      for (let round = 0; round < 3; round += 1) {
+        const ws = MockWebSocket.instances.at(-1)!;
+        ws.emit('open', {});
+        ws.emit('message', { data: JSON.stringify({ type: 'notifications.item', title: 'x' }) });
+        ws.emit('close', { code: 1006, wasClean: false });
+        vi.advanceTimersByTime(50);
+      }
+
+      expect(MockWebSocket.instances).toHaveLength(4);
     });
   });
 });

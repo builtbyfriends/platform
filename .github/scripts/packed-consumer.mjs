@@ -62,7 +62,7 @@ function launch(command, args, cwd, env = environment) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', (chunk) => {
       log.write(chunk);
-      tail = (tail + chunk.toString()).slice(-16000);
+      tail = (tail + chunk.toString()).slice(-16_000);
     });
   }
   const completion = new Promise((resolve, reject) => {
@@ -180,8 +180,9 @@ try {
           work,
         );
         const agentInstructions = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
-        assert.equal(agentInstructions.match(/^- /gm)?.length, 2);
+        assert.equal(agentInstructions.match(/^- /gm)?.length, 3);
         assert(agentInstructions.includes('node_modules/@builtbyfriends/bwf/docs/'));
+        assert(agentInstructions.includes('@builtbyfriends/bwf/lint'));
         assert(
           existsSync(join(fixture, 'node_modules/@builtbyfriends/bwf/docs/guide/quickstart.md')),
         );
@@ -230,7 +231,7 @@ try {
         if (useVitePlus) {
           assert.equal(
             manifest.devDependencies['vite-plus'],
-            `^${vitePlusVersion}`,
+            vitePlusVersion,
             'Vite+ init must match the tested workspace toolchain',
           );
           assert.equal(

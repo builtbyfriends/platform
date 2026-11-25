@@ -816,33 +816,6 @@ export function readWranglerWebSocketTombstones(
   ].sort();
 }
 
-/** Write the resolved compatibility date for frameworks that read the Wrangler config. */
-export function ensureWranglerCompatibilityDate(root: string, compatibilityDate: string): boolean {
-  const { configPath, parsed } = readOrCreateProjectWranglerConfig(root);
-  if (parsed.compatibility_date === compatibilityDate) {
-    return false;
-  }
-
-  parsed.compatibility_date = compatibilityDate;
-  writeProjectWranglerFile(configPath, JSON.stringify(parsed, null, 2) + '\n');
-  return true;
-}
-
-/** Add the `nodejs_als` compatibility flag. Returns true if the file was written. */
-export function ensureWranglerNodejsAlsFlag(root: string): boolean {
-  const { configPath, parsed } = readOrCreateProjectWranglerConfig(root);
-  const compatibilityFlags = Array.isArray(parsed.compatibility_flags)
-    ? (parsed.compatibility_flags as Array<unknown>)
-    : [];
-  if (compatibilityFlags.includes(NODEJS_ALS_FLAG)) {
-    return false;
-  }
-
-  parsed.compatibility_flags = [...compatibilityFlags, NODEJS_ALS_FLAG];
-  writeProjectWranglerFile(configPath, JSON.stringify(parsed, null, 2) + '\n');
-  return true;
-}
-
 /** A Wrangler `queues.producers[]` entry. */
 type WranglerQueueProducer = {
   queue: string;

@@ -2,6 +2,12 @@ export const adminComponents = {
   connectedApps: async () => ({
     default: (await import('./views/ConnectedAppsPage.tsx')).ConnectedAppsPage,
   }),
+  appPeople: async () => ({
+    default: (await import('./views/AppPeoplePage.tsx')).AppPeoplePage,
+  }),
+  appPerson: async () => ({
+    default: (await import('./views/AppPeoplePage.tsx')).AppPersonPage,
+  }),
   platformStatus: async () => ({
     default: (await import('./views/PlatformStatusPage.tsx')).PlatformStatusPage,
   }),

@@ -159,10 +159,11 @@ export async function getD1DatabaseByName(
     `${CF_API_BASE}/${accountId}/d1/database?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((database) => database.name === name);
+  if (!match) {
     throw new Error(`D1 database not found: ${name}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function getKVNamespaceByTitle(
@@ -174,10 +175,11 @@ export async function getKVNamespaceByTitle(
     `${CF_API_BASE}/${accountId}/storage/kv/namespaces?title=${encodeURIComponent(title)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((namespace) => namespace.title === title);
+  if (!match) {
     throw new Error(`KV namespace not found: ${title}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function getQueueByName(
@@ -189,10 +191,11 @@ export async function getQueueByName(
     `${CF_API_BASE}/${accountId}/queues?name=${encodeURIComponent(name)}`,
     apiToken,
   );
-  if (result.length === 0) {
+  const match = result.find((queue) => queue.queue_name === name);
+  if (!match) {
     throw new Error(`Queue not found: ${name}`);
   }
-  return result[0];
+  return match;
 }
 
 export async function deleteD1Database(
@@ -355,13 +358,13 @@ export async function addQueueConsumer(
       body: JSON.stringify(consumerBody),
     });
     return { status: 'created' };
-  } catch (err) {
+  } catch (error) {
     if (
-      !(err instanceof Error) ||
-      (!err.message.toLowerCase().includes('already exists') &&
-        !err.message.toLowerCase().includes('already has a consumer'))
+      !(error instanceof Error) ||
+      (!error.message.toLowerCase().includes('already exists') &&
+        !error.message.toLowerCase().includes('already has a consumer'))
     ) {
-      throw err;
+      throw error;
     }
   }
 
@@ -432,8 +435,8 @@ export async function getDispatchWorkerProxyToken(
   let bindings: ReadonlyArray<DispatchWorkerBinding>;
   try {
     bindings = await cfFetch<ReadonlyArray<DispatchWorkerBinding>>(url, apiToken);
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
+  } catch (error_) {
+    const error = error_ instanceof Error ? error_ : new Error(String(error_));
     return { kind: 'error', error };
   }
   const token = bindings.find(

@@ -5,9 +5,21 @@ const LOG_LEVELS = new Set(['error', 'warn', 'info', 'log', 'debug', 'all']);
 // `all`. Exact codes are range-bounded so a typo like `600` errors instead of
 // silently returning an empty result.
 const STATUS_FILTER = /^([1-5]xx|[1-5]\d{2}|all)$/;
-const TEAM_ROLES = new Set(['reader', 'collaborator', 'admin']);
-
 type TeamRole = 'reader' | 'collaborator' | 'admin';
+type TokenAction = 'create' | 'list' | 'renew' | 'revoke';
+type ZeroTrustAction = 'status' | 'protect' | 'public' | 'reconcile';
+
+function isTeamRole(value: string): value is TeamRole {
+  return value === 'reader' || value === 'collaborator' || value === 'admin';
+}
+
+function isTokenAction(value: string): value is TokenAction {
+  return value === 'create' || value === 'list' || value === 'renew' || value === 'revoke';
+}
+
+function isZeroTrustAction(value: string): value is ZeroTrustAction {
+  return value === 'status' || value === 'protect' || value === 'public' || value === 'reconcile';
+}
 
 export const projectSubcommands: Array<SubcommandDef> = [
   { name: 'status', arg: '[name]', description: 'Show deployments (omit name for linked project)' },
@@ -137,7 +149,7 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
 
   if (subcommand === 'token') {
     const action = rest.shift();
-    if (!action || !['create', 'list', 'renew', 'revoke'].includes(action)) {
+    if (!action || !isTokenAction(action)) {
       throw new Error('project: Usage: bwf project token <create|list|renew|revoke>.');
     }
     let credentialId = '';
@@ -146,13 +158,17 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
     let expiresInDays: number | undefined;
     let json = false;
     for (let index = 0; index < rest.length; index++) {
-      const value = rest[index]!;
-      if (value === '--project' && rest[index + 1]) {
-        projectSlug = rest[++index]!;
-      } else if (value === '--name' && rest[index + 1]) {
-        name = rest[++index]!;
-      } else if (value === '--expires-in' && rest[index + 1]) {
-        const parsed = Number(rest[++index]);
+      const value = rest[index];
+      const next = rest[index + 1];
+      if (value === '--project' && next) {
+        projectSlug = next;
+        index++;
+      } else if (value === '--name' && next) {
+        name = next;
+        index++;
+      } else if (value === '--expires-in' && next) {
+        index++;
+        const parsed = Number(next);
         if (!Number.isInteger(parsed) || parsed < 1 || parsed > 90) {
           throw new Error('project: --expires-in must be an integer from 1 to 90 days.');
         }
@@ -178,7 +194,7 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
     }
     return {
       subcommand,
-      action: action as 'create' | 'list' | 'renew' | 'revoke',
+      action,
       credentialId,
       projectSlug,
       name,
@@ -192,15 +208,16 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
   }
 
   if (subcommand === 'zero-trust') {
-    const [action = '', ...args] = rest;
-    if (action && !['status', 'protect', 'public', 'reconcile'].includes(action)) {
+    const [rawAction = '', ...args] = rest;
+    if (rawAction && !isZeroTrustAction(rawAction)) {
       throw new Error(
         'project: Usage: bwf project zero-trust <status|protect|public|reconcile> [--project <slug>].',
       );
     }
+    const action = isZeroTrustAction(rawAction) ? rawAction : '';
     let projectSlug = '';
     for (let index = 0; index < args.length; index++) {
-      const arg = args[index]!;
+      const arg = args[index];
       if (arg === '--project') {
         const value = args[++index];
         if (!value || value.startsWith('-')) {
@@ -216,7 +233,7 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
     }
     return {
       subcommand,
-      action: action as '' | 'status' | 'protect' | 'public' | 'reconcile',
+      action,
       projectSlug,
     };
   }
@@ -286,11 +303,14 @@ export function parseProjectArgs(args: Array<string>): ProjectArgs {
         positional.push(arg);
       }
     }
-    return {
+    const result: Extract<ProjectArgs, { subcommand: 'rollback' }> = {
       subcommand,
       deployId: parseOptionalPositional(positional),
-      ...(platform ? { platform } : {}),
     };
+    if (platform) {
+      result.platform = platform;
+    }
+    return result;
   }
 
   if (subcommand === 'cancel') {
@@ -342,7 +362,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
   let projectSlug = '';
   let role = '';
   for (let index = 0; index < args.length; index++) {
-    const arg = args[index]!;
+    const arg = args[index];
     if (arg === '--project' || arg === '--role') {
       const value = args[++index];
       if (!value || value.startsWith('-')) {
@@ -366,7 +386,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     }
   }
 
-  if (role && !TEAM_ROLES.has(role)) {
+  if (role && !isTeamRole(role)) {
     throw new Error(`project: Invalid role '${role}'. Use one of reader|collaborator|admin.`);
   }
   if (['pending', 'accept', 'decline'].includes(action) && projectSlug) {
@@ -380,16 +400,16 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     return { subcommand: 'team', action, projectSlug };
   }
   if (action === 'invite') {
-    if (positionals.length !== 1 || !role) {
+    if (positionals.length !== 1 || !role || !isTeamRole(role)) {
       throw new Error(
         'project: Usage: bwf project team invite <registered-email> --role <reader|collaborator|admin> [--project <slug>].',
       );
     }
-    const email = positionals[0]!;
+    const email = positionals[0];
     if (email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) {
       throw new Error('project: Invitee must be a registered email address.');
     }
-    return { subcommand: 'team', action, email, role: role as TeamRole, projectSlug };
+    return { subcommand: 'team', action, email, role, projectSlug };
   }
   if (action === 'role') {
     if (positionals.length !== 2 || role) {
@@ -397,15 +417,15 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
         'project: Usage: bwf project team role <user-id> <reader|collaborator|admin> [--project <slug>].',
       );
     }
-    const nextRole = positionals[1]!;
-    if (!TEAM_ROLES.has(nextRole)) {
+    const nextRole = positionals[1];
+    if (!isTeamRole(nextRole)) {
       throw new Error(`project: Invalid role '${nextRole}'. Use one of reader|collaborator|admin.`);
     }
     return {
       subcommand: 'team',
       action,
-      userId: positionals[0]!,
-      role: nextRole as TeamRole,
+      userId: positionals[0],
+      role: nextRole,
       projectSlug,
     };
   }
@@ -413,7 +433,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     if (positionals.length !== 1 || role) {
       throw new Error('project: Usage: bwf project team remove <user-id> [--project <slug>].');
     }
-    return { subcommand: 'team', action, userId: positionals[0]!, projectSlug };
+    return { subcommand: 'team', action, userId: positionals[0], projectSlug };
   }
   if (action === 'revoke') {
     if (positionals.length !== 1 || role) {
@@ -421,7 +441,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
         'project: Usage: bwf project team revoke <invitation-id> [--project <slug>].',
       );
     }
-    return { subcommand: 'team', action, invitationId: positionals[0]!, projectSlug };
+    return { subcommand: 'team', action, invitationId: positionals[0], projectSlug };
   }
   if (action === 'pending') {
     if (positionals.length || role) {
@@ -433,7 +453,7 @@ function parseTeamArgs(rest: Array<string>): ProjectArgs {
     if (positionals.length !== 1 || role) {
       throw new Error(`project: Usage: bwf project team ${action} <invitation-id>.`);
     }
-    return { subcommand: 'team', action, invitationId: positionals[0]! };
+    return { subcommand: 'team', action, invitationId: positionals[0] };
   }
   throw new Error(usage);
 }

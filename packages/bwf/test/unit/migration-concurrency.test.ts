@@ -1,11 +1,9 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
+import type { SQLInputValue } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { buildMigrationPlanBundle } from '../../src/migrations/plan.ts';
-import {
-  createMigrationHandler,
-  type MigrationEntry,
-  type MigrationResponse,
-} from '../../src/runtime/migration-handler.ts';
+import { createMigrationHandler } from '../../src/runtime/migration-handler.ts';
+import type { MigrationEntry, MigrationResponse } from '../../src/runtime/migration-handler.ts';
 
 const databases: Array<DatabaseSync> = [];
 afterEach(() => {
@@ -242,7 +240,7 @@ describe('D1 migration ownership', () => {
     const resume = deferred();
     const { sqlite, handler } = createDatabase({
       beforeBatch: async (sql) => {
-        if (sql.includes(migrations[0]!.sql)) {
+        if (sql.includes(migrations[0].sql)) {
           paused.resolve();
           await resume.promise;
         }
@@ -267,7 +265,7 @@ describe('D1 migration ownership', () => {
     const resume = deferred();
     const { sqlite, handler } = createDatabase({
       beforeBatch: async (sql) => {
-        if (sql.includes(migrations[0]!.sql)) {
+        if (sql.includes(migrations[0].sql)) {
           paused.resolve();
           await resume.promise;
         }

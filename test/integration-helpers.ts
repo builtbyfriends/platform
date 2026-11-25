@@ -1,4 +1,5 @@
-import { execSync, type spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
+import type { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
   cpSync,
@@ -12,7 +13,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createServer, type AddressInfo } from 'node:net';
+import { createServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { basename, join, relative } from 'node:path/posix';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
@@ -113,7 +115,7 @@ export function createIsolatedPlayground(
 
   // Decision: Avoids duplicate workspace package names when several copies exist at once.
   const packagePath = join(root, 'package.json');
-  const packageJson = JSON.parse(readFileSync(packagePath, 'utf-8')) as { name?: string };
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as { name?: string };
   packageJson.name = `${packageJson.name ?? basename(sourceWorkspacePath)}-${basename(root)}`;
   writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
 
@@ -201,7 +203,7 @@ export async function startServer(
     } catch (error) {
       if (exited()) {
         // Decision: The last output can arrive after the exit.
-        await Promise.race([closed, delay(1_000)]);
+        await Promise.race([closed, delay(1000)]);
       }
       // Decision: Vite with `--strictPort`, Node, Bun and Deno exit with one of these messages.
       const portTaken = moved() || (exited() && /already in use|EADDRINUSE/.test(output()));
@@ -264,7 +266,7 @@ export async function waitForServer(
     try {
       const remainingMs = effectiveTimeout - (Date.now() - start);
       const response = await fetch(url, {
-        signal: AbortSignal.timeout(Math.min(options?.requestTimeoutMs ?? 5_000, remainingMs)),
+        signal: AbortSignal.timeout(Math.min(options?.requestTimeoutMs ?? 5000, remainingMs)),
       });
       const statusMatches =
         options?.expectStatus === undefined
@@ -294,10 +296,10 @@ export function collectServerOutput(child: ReturnType<typeof spawn>): () => stri
   let stdout = '';
   let stderr = '';
   child.stdout?.on('data', (chunk) => {
-    stdout = (stdout + String(chunk)).slice(-16000);
+    stdout = (stdout + String(chunk)).slice(-16_000);
   });
   child.stderr?.on('data', (chunk) => {
-    stderr = (stderr + String(chunk)).slice(-16000);
+    stderr = (stderr + String(chunk)).slice(-16_000);
   });
   return () => `Server stdout:\n${stdout}\nServer stderr:\n${stderr}`;
 }
@@ -322,7 +324,7 @@ export async function killChild(child: ReturnType<typeof spawn>): Promise<void> 
       await Promise.race([
         once(child, 'exit'),
         new Promise((resolve) => {
-          deadline = setTimeout(resolve, 5_000);
+          deadline = setTimeout(resolve, 5000);
         }),
       ]);
     } finally {

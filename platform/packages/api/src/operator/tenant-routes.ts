@@ -22,7 +22,9 @@ import {
   getOperatorUser,
   listOperatorProjects,
   listOperatorUsers,
+  restoreOperatorProject,
   restoreOperatorUser,
+  suspendOperatorProject,
   suspendOperatorUser,
   transferOperatorProjectOwner,
 } from './tenant-service.ts';
@@ -150,6 +152,21 @@ tenantRoutes.post('/projects/:id/owner', async (context) => {
       dryRun(body),
     ),
   );
+});
+tenantRoutes.post('/projects/:id/suspend', async (context) => {
+  const body = await readBody(context);
+  return context.json(
+    await suspendOperatorProject(
+      context,
+      context.req.param('id'),
+      stringField(body, 'note', { optional: true, maxLength: 1000 }) || undefined,
+      dryRun(body),
+    ),
+  );
+});
+tenantRoutes.post('/projects/:id/restore', async (context) => {
+  const body = await readBody(context);
+  return context.json(await restoreOperatorProject(context, context.req.param('id'), dryRun(body)));
 });
 tenantRoutes.post('/projects/:id/delete', async (context) => {
   const body = await readBody(context);

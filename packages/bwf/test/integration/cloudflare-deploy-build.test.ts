@@ -4,10 +4,8 @@ import { parseRootWranglerConfig } from '@builtbyfriends/deploy-cloudflare';
 import spawn from 'cross-spawn';
 import { toSlash } from 'pathslash';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import {
-  createIsolatedPlayground,
-  type IsolatedPlayground,
-} from '../../../../test/integration-helpers.ts';
+import { createIsolatedPlayground } from '../../../../test/integration-helpers.ts';
+import type { IsolatedPlayground } from '../../../../test/integration-helpers.ts';
 import { verifyGeneratedDeployConfig } from '../../src/cli/deploy-artifact-validation.ts';
 import {
   reconstructExpectedContainers,
@@ -119,7 +117,7 @@ describe('playground/kitchen-sink --platform cloudflare real-build deploy guard'
     expect(result.status, `${result.stdout ?? ''}${result.stderr ?? ''}`).toBe(0);
 
     pristineEmitted = JSON.parse(
-      readFileSync(join(pg, 'dist', 'ssr', 'wrangler.json'), 'utf-8'),
+      readFileSync(join(pg, 'dist', 'ssr', 'wrangler.json'), 'utf8'),
     ) as Record<string, unknown>;
   });
 
@@ -129,7 +127,7 @@ describe('playground/kitchen-sink --platform cloudflare real-build deploy guard'
 
   it('emits the CF-plugin deploy pointer the guard follows', () => {
     const pointer = JSON.parse(
-      readFileSync(join(pg, '.wrangler', 'deploy', 'config.json'), 'utf-8'),
+      readFileSync(join(pg, '.wrangler', 'deploy', 'config.json'), 'utf8'),
     ) as { configPath?: string };
     expect(toSlash(normalize(pointer.configPath ?? ''))).toBe('../../dist/ssr/wrangler.json');
   });

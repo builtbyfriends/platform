@@ -8,7 +8,8 @@ import {
 } from './auth/deploy-token.ts';
 import { constantTimeEqual } from './auth/hmac.ts';
 import { TERMINAL_STATUSES, isTerminalBuildStatus } from './build-status.ts';
-import { type BuildConfig, type BuildLogLine, isContainerCapacityError } from './build-types.ts';
+import { isContainerCapacityError } from './build-types.ts';
+import type { BuildConfig, BuildLogLine } from './build-types.ts';
 import { SITE_DOMAIN } from './constants.ts';
 import {
   createDb,
@@ -20,15 +21,15 @@ import {
   markBuildTerminalIfActive,
   requeueBuildIfStarting,
   setBuildCheckRunId,
-  type Db,
 } from './db.ts';
+import type { Db } from './db.ts';
 import type { ApiEnv } from './env.ts';
 import {
-  type CheckRunConclusion,
   PLATFORM_BUILD_CHECK_RUN_NAME,
   completeCheckRun,
   createCheckRun,
 } from './github/check-run.ts';
+import type { CheckRunConclusion } from './github/check-run.ts';
 import {
   generateSourceTarballUrl,
   getBranchHeadComparisonStatus,
@@ -50,7 +51,7 @@ const STORAGE_KEY_LOG_DRAIN = 'logDrainState';
 // WebSocket replay on connect. `ingestLines` evicts the oldest rows past this cap, keeping the
 // most recent window. Mirrors the container agent's in-memory ring bound (build-agent.mjs
 // MAX_BUFFERED_LOG_LINES).
-export const MAX_STORED_LOG_LINES = 10000;
+export const MAX_STORED_LOG_LINES = 10_000;
 
 // Decision: Bounds for the log tail embedded in the completed check-run's `output.text`. Both caps are
 // UTF-8 byte caps, because that's what GitHub validates (its 422 reads "maximum bytesize of
@@ -59,7 +60,7 @@ export const MAX_STORED_LOG_LINES = 10000;
 // under 65535, but the fence is sized past the content's backtick runs (see below), so the
 // hard cap is enforced on the whole rendered string too.
 export const CHECK_RUN_LOG_TAIL_LINES = 100;
-export const CHECK_RUN_LOG_TAIL_MAX_BYTES = 60000;
+export const CHECK_RUN_LOG_TAIL_MAX_BYTES = 60_000;
 
 // Decision: GitHub's hard cap on a check run's output.text: 65535 UTF-8 BYTES (GitHub validates bytesize, not
 // character count). A longer string makes GitHub reject the entire PATCH — stranding the run with no
@@ -67,7 +68,7 @@ export const CHECK_RUN_LOG_TAIL_MAX_BYTES = 60000;
 // honor it, not just the content: the fence delimiters grow past the longest backtick run in the
 // content, so a pathological all-backtick line can blow far past the fixed small overhead the 60000
 // content cap budgeted for.
-export const CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65535;
+export const CHECK_RUN_OUTPUT_TEXT_MAX_BYTES = 65_535;
 
 // Decision: Cadence of the DO→container log pull-loop. The agent buffers stdout/stderr and serves `GET
 // /logs?since=N`; the DO polls on this interval, ingesting any new lines into the SQLite `logs`
@@ -242,9 +243,9 @@ function withDeadline<T>(work: Promise<T>, ms: number, reason: string): Promise<
         clearTimeout(timer);
         resolve(value);
       },
-      (err: unknown) => {
+      (error: unknown) => {
         clearTimeout(timer);
-        reject(err);
+        reject(error);
       },
     );
   });
@@ -285,7 +286,7 @@ function utf8Length(text: string): number {
  */
 function sliceTailAtUnit(line: string, cut: number): string {
   const code = line.charCodeAt(cut);
-  return line.slice(code >= 0xdc00 && code <= 0xdfff ? cut + 1 : cut);
+  return line.slice(code >= 0xdc_00 && code <= 0xdf_ff ? cut + 1 : cut);
 }
 
 /** Longest run of consecutive backticks in `text` (0 when there are none). */
@@ -1131,6 +1132,16 @@ type ContainerPortSurface = {
   getTcpPort(port: number): { fetch(url: string, init?: RequestInit): Promise<Response> };
 };
 
+function isContainerPortSurface(value: unknown): value is ContainerPortSurface {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'running' in value &&
+    'getTcpPort' in value &&
+    typeof value.getTcpPort === 'function'
+  );
+}
+
 /**
  * Per-build DO (keyed by build id) that runs one build inside a Cloudflare
  * Container, streams the container's logs to attached WebSocket consumers,
@@ -1295,10 +1306,10 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         state: 'complete',
         finalSeq: maxRow?.max ?? 0,
       });
-    } catch (err) {
+    } catch (error) {
       // Decision: Completion metadata is a reader hint. It must never bypass the existing Postgres terminalization
       // or scheduler release guarantees.
-      console.warn('build-manager: log drain completion persist failed', err);
+      console.warn('build-manager: log drain completion persist failed', error);
     }
   }
 
@@ -1546,17 +1557,17 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           try {
             await this.ctx.storage.put<string>(STORAGE_KEY_CHECK_RUN, checkRunId);
             cached = true;
-          } catch (err) {
-            console.warn('startBuild: caching check_run_id in DO storage failed', err);
+          } catch (error) {
+            console.warn('startBuild: caching check_run_id in DO storage failed', error);
           }
           try {
             await setBuildCheckRunId(this.db(), config.buildId, checkRunId);
-          } catch (err) {
+          } catch (error) {
             console.warn(
               cached
                 ? 'startBuild: persisting check_run_id failed (DO cache retains it)'
                 : 'startBuild: persisting check_run_id failed (DO cache also failed)',
-              err,
+              error,
             );
           }
         }
@@ -1817,8 +1828,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
             completedAt: new Date().toISOString(),
           }),
         };
-      } catch (err) {
-        terminalError = err;
+      } catch (error_) {
+        terminalError = error_;
       }
       // Decision: If the container already launched, a throw here (the onStart-reject inside start(), or schedule
       // arming) must force it down. `forceStopContainer` SIGTERMs THEN SIGKILLs (idempotent / TERMINAL-
@@ -1923,8 +1934,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // before it gets there.
       try {
         await this.schedule(RECONCILE_RETRY_SECONDS, 'reconcileTerminalWrite');
-      } catch (err) {
-        console.warn('finalizeCheckRun: scheduling startup finalization failed', err);
+      } catch (error) {
+        console.warn('finalizeCheckRun: scheduling startup finalization failed', error);
       }
       return;
     }
@@ -1943,8 +1954,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // failed), but never issue a redundant row read.
       try {
         checkRunId = (await getBuild(this.db(), config.buildId))?.check_run_id ?? undefined;
-      } catch (err) {
-        console.warn('finalizeCheckRun: builds.check_run_id fallback read failed', err);
+      } catch (error) {
+        console.warn('finalizeCheckRun: builds.check_run_id fallback read failed', error);
       }
     }
     if (!checkRunId) {
@@ -1955,8 +1966,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     let text: string | undefined;
     try {
       text = (await this.readLogTailMarkdown()) ?? undefined;
-    } catch (err) {
-      console.warn('finalizeCheckRun: log tail read failed (best-effort)', err);
+    } catch (error) {
+      console.warn('finalizeCheckRun: log tail read failed (best-effort)', error);
     }
     try {
       await completeCheckRun(this.env, config.installationId, config.repoFullName, checkRunId, {
@@ -1964,8 +1975,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         ...opts,
         ...(text ? { text } : {}),
       });
-    } catch (err) {
-      console.warn('finalizeCheckRun: best-effort PATCH failed', err);
+    } catch (error) {
+      console.warn('finalizeCheckRun: best-effort PATCH failed', error);
     }
   }
 
@@ -1996,7 +2007,7 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     }
     await this.finalizeCheckRun(
       config,
-      conclusion as CheckRunConclusion,
+      conclusion,
       {
         detailsUrl: this.projectUrl(config),
         title: `Platform build ${conclusion === 'success' ? 'succeeded' : conclusion}`,
@@ -2018,8 +2029,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
     let row: Awaited<ReturnType<typeof getBuild>>;
     try {
       row = await getBuild(this.db(), config.buildId);
-    } catch (err) {
-      console.warn('finalizeCheckRunToRecordedOutcome: getBuild failed (best-effort)', err);
+    } catch (error) {
+      console.warn('finalizeCheckRunToRecordedOutcome: getBuild failed (best-effort)', error);
       return;
     }
     if (row) {
@@ -2068,9 +2079,9 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         TERMINAL_WRITE_TIMEOUT_MS,
         `build ${config.buildId}: reconciliation read did not settle within ${TERMINAL_WRITE_TIMEOUT_MS}ms`,
       );
-    } catch (err) {
+    } catch (error) {
       // Decision: A failed or timed-out read says nothing about the write. Not yet known.
-      console.warn('reconcileTerminalWrite: getBuild failed (best-effort)', err);
+      console.warn('reconcileTerminalWrite: getBuild failed (best-effort)', error);
       await this.schedule(RECONCILE_RETRY_SECONDS, 'reconcileTerminalWrite');
       return;
     }
@@ -2234,8 +2245,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
             config.commitSha,
           );
           deploymentId = deployment?.id ?? null;
-        } catch (err) {
-          console.error('onStop: deployment lookup failed; finalizing without link', err);
+        } catch (error) {
+          console.error('onStop: deployment lookup failed; finalizing without link', error);
         }
         // Decision: CAS terminal-if-active: the in-memory guard above is defense in depth; this is the authoritative
         // check against clobbering an outcome a concurrent terminal write (e.g. the timeout) already
@@ -2316,8 +2327,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           error: message,
           completedAt: new Date().toISOString(),
         });
-      } catch (err) {
-        terminalError = err;
+      } catch (error_) {
+        terminalError = error_;
       }
       // Decision: Drain BEFORE finalizing, because `finalizeCheckRun` embeds the last CHECK_RUN_LOG_TAIL_LINES rows
       // and this is the ONE terminalizer that does not force-stop — so nothing else has pulled.
@@ -2568,8 +2579,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
             ts: Date.now(),
           },
         ]);
-      } catch (err) {
-        console.warn('forceStopContainer: terminated marker ingest failed', err);
+      } catch (error) {
+        console.warn('forceStopContainer: terminated marker ingest failed', error);
       }
     }
     if (markerAuthoritative && producerStopped) {
@@ -2578,8 +2589,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
       // waiting to append it.
       await this.markLogDrainComplete();
       if (resumeFinalization) {
-        await this.reconcileTerminalWrite().catch((err) => {
-          console.warn('forceStopContainer: deferred startup finalization failed', err);
+        await this.reconcileTerminalWrite().catch((error) => {
+          console.warn('forceStopContainer: deferred startup finalization failed', error);
         });
       }
     } else if (markerAuthoritative) {
@@ -2634,8 +2645,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           );
           authorityRevoked = row === null || TERMINAL_STATUSES.includes(row.status);
         }
-      } catch (err) {
-        terminalError = err;
+      } catch (error) {
+        terminalError = error;
       }
       try {
         await this.forceStopContainer(
@@ -2689,8 +2700,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           completedAt: new Date().toISOString(),
         }),
       };
-    } catch (err) {
-      terminalError = err;
+    } catch (error) {
+      terminalError = error;
     }
     try {
       // Decision: Marker ownership was claimed before this branch's terminal transition. The Postgres CAS can still
@@ -2810,8 +2821,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
           }),
           config,
         };
-      } catch (err) {
-        terminalError = err;
+      } catch (error) {
+        terminalError = error;
       }
     } else if (config != null) {
       // Decision: A terminal DO-local status is not proof that Postgres revoked the deploy token: enforceTimeout
@@ -2829,10 +2840,10 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         if (row !== null && authoritativeRowIsTerminal) {
           authoritativeTerminalRow = row;
         }
-      } catch (err) {
+      } catch (error) {
         authoritativeRowIsTerminal = false;
         needsTerminalReconciliation = true;
-        console.warn('cancelBuild: authoritative terminal read failed; skipping drain', err);
+        console.warn('cancelBuild: authoritative terminal read failed; skipping drain', error);
       }
     }
     try {
@@ -3170,7 +3181,8 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
    * `getTcpPort` for the NON-starting fetch.
    */
   private rawContainer(): ContainerPortSurface | undefined {
-    return (this as unknown as { container?: ContainerPortSurface }).container;
+    const container: unknown = Reflect.get(this, 'container');
+    return isContainerPortSurface(container) ? container : undefined;
   }
 
   /**
@@ -3310,10 +3322,10 @@ export class BuildManager extends Container<ApiEnv['Bindings']> {
         }
       }
       return false;
-    } catch (err) {
+    } catch (error) {
       // Decision: Container gone / mid-start / transient — swallow. Normal polling re-arms; the onError path
       // observes false and retries inside its bounded window. Must NOT throw out of a scheduled callback.
-      console.warn('pollLogs: container log fetch failed', err);
+      console.warn('pollLogs: container log fetch failed', error);
       return false;
     }
   }

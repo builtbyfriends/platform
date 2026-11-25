@@ -13,16 +13,15 @@ import {
   PROXY_INTERNAL_AUTH_HEADER,
   PROXY_TOKEN_ISOLATE_TTL_MS,
   PROXY_TOKEN_KV_CACHE_TTL_SECONDS,
-  type ProxyInternalRoute,
   proxyTokenGeneration,
   proxyTokenStateKey,
-  type ProxyTokenState,
   ProxyTokenStateError,
   readProxyTokenState,
   serializeProxyTokenState,
   verifyProxyInternalAuth,
   verifyProxyToken,
 } from '../../src/proxy-token.ts';
+import type { ProxyInternalRoute, ProxyTokenState } from '../../src/proxy-token.ts';
 
 const SECRET = 'test-secret-key';
 const PROJECT = 'proj_000000000001';
@@ -295,7 +294,7 @@ describe('readProxyTokenState', () => {
 
   it('wraps a KV error', async () => {
     const { routing } = throwingKv();
-    const error = await readProxyTokenState(routing, PROJECT).catch((caught: unknown) => caught);
+    const error = await readProxyTokenState(routing, PROJECT).catch((error_: unknown) => error_);
     expect(error).toBeInstanceOf(ProxyTokenStateError);
     expect((error as Error).cause).toEqual(new Error('kv down'));
   });

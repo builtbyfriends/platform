@@ -56,7 +56,7 @@ it('identifies the unreachable endpoint after bounded transport retries', async 
     }
     return healthy(url);
   }) as typeof fetch;
-  const error = await check(fetcher).catch((value: unknown) => value);
+  const error = await check(fetcher).catch((error_: unknown) => error_);
   expect(error).toMatchObject({
     message: `platform: Health check could not reach ${proxy}/health after 3 attempts.`,
     cause: failure,

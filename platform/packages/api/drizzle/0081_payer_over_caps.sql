@@ -1,0 +1,1 @@
+ALTER TABLE "app_payers" ADD COLUMN "over_caps" text[] DEFAULT '{}'::text[] NOT NULL;

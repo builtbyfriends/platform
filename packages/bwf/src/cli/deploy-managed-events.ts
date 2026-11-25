@@ -1,23 +1,25 @@
 import { createHash } from 'node:crypto';
 import { createDeployArtifact, createDeployUploadPayload } from '@builtbyfriends/deploy-core';
 import { getContentType } from '@builtbyfriends/edge';
-import { type SpinnerResult } from '@voidzero-dev/vite-plus-prompts';
-import { type NotFoundHandling, type RoutingConfig } from '../config.ts';
+import type { SpinnerResult } from '@voidzero-dev/vite-plus-prompts';
+import type { NotFoundHandling, RoutingConfig } from '../config.ts';
 import { getTokenSource } from './auth.ts';
-import { PlatformClient, type ManifestOnlyDeployPayload } from './client.ts';
+import type { PlatformClient } from './client.ts';
+import type { ManifestOnlyDeployPayload } from './client.ts';
 import {
   formatConnectionLostMessage,
   formatDeployFailureMessage,
   formatStreamDeployError,
 } from './deploy-errors.ts';
 import { log, DeployEventError } from './deploy-helpers.ts';
-import { type ApplyDeployEventResult, type StreamDeployResult } from './deploy-types.ts';
-import { uploadAssetsToR2, type DirectR2PutItem } from './direct-r2-upload.ts';
-import { type GitDeployMetadata } from './git-metadata.ts';
+import type { ApplyDeployEventResult, StreamDeployResult } from './deploy-types.ts';
+import { uploadAssetsToR2 } from './direct-r2-upload.ts';
+import type { DirectR2PutItem } from './direct-r2-upload.ts';
+import type { GitDeployMetadata } from './git-metadata.ts';
 import { lintRoutingPhases, mergeRoutingRules } from './headers.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CliLogger } from './log-file.ts';
 import { formatCount } from './output.ts';
-import { type AssetManifestEntry } from './package.ts';
+import type { AssetManifestEntry } from './package.ts';
 import type { DeployEvent, DeployManifest, DeployWorkerInput } from './types.ts';
 
 /**
@@ -45,6 +47,10 @@ export function applyDeployEvent(event: DeployEvent, s: SpinnerResult): ApplyDep
       return { kind: 'continue' };
     case 'provisioning':
       s.message(`Provisioning ${event.bindings.join(', ')}`);
+      return { kind: 'continue' };
+    case 'asset_upload_done':
+    case 'provisioning_done':
+    case 'worker_upload_done':
       return { kind: 'continue' };
     case 'worker_readiness':
       s.message('Waiting for worker to become reachable...');
@@ -186,13 +192,13 @@ export async function streamDeployEvents(
         );
       }
     }
-  } catch (err) {
-    if (err instanceof DeployEventError || interrupted) {
-      throw err;
+  } catch (error) {
+    if (error instanceof DeployEventError || interrupted) {
+      throw error;
     }
-    cliLog?.error('stream_deploy_caught', err, { deploymentId });
+    cliLog?.error('stream_deploy_caught', error, { deploymentId });
     s.stop('Deploy failed');
-    throw formatStreamDeployError(err, deploymentId, cliLog?.path ?? null);
+    throw formatStreamDeployError(error, deploymentId, cliLog?.path ?? null);
   } finally {
     process.removeListener('SIGINT', onSigint);
   }

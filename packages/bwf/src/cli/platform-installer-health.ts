@@ -4,7 +4,7 @@ import {
   PLATFORM_HEALTH_HOSTNAME_LABEL,
 } from '@builtbyfriends/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import { type PlatformHealthCheckContext } from './platform-installer-types.ts';
+import type { PlatformHealthCheckContext } from './platform-installer-types.ts';
 
 export class PlatformAccessBlockedError extends Error {
   constructor(url: string, context?: PlatformHealthCheckContext) {
@@ -314,7 +314,7 @@ export async function bootstrapPlatformSharedEmail(
     if (remaining <= 0) {
       throw timedOut();
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1_000, remaining)));
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1000, remaining)));
   };
   let response: Response;
   let value: unknown;
@@ -342,6 +342,7 @@ export async function bootstrapPlatformSharedEmail(
       }
       throw new Error(
         `platform: Shared email bootstrap request failed at ${apiUrl}. Traffic remains disabled. Retry the installation's repair or resume command to reconcile the existing email operation.`,
+        { cause: error },
       );
     }
     try {
@@ -353,6 +354,7 @@ export async function bootstrapPlatformSharedEmail(
       }
       throw new Error(
         `platform: Shared email bootstrap failed at ${apiUrl} (HTTP ${response.status}). Traffic remains disabled.`,
+        { cause: error },
       );
     }
     status =

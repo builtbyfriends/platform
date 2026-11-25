@@ -3,7 +3,8 @@ import {
   createWebSocketDurableObject,
   createWebSocketTombstoneDurableObject,
 } from '../../src/runtime/ws-server.ts';
-import { defineRoom, defineWebSocket, type WebSocketBaseContext } from '../../src/runtime/ws.ts';
+import { defineRoom, defineWebSocket } from '../../src/runtime/ws.ts';
+import type { WebSocketBaseContext } from '../../src/runtime/ws.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
 vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));

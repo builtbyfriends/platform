@@ -1,6 +1,7 @@
 import type { IconOption } from '@voidzero-dev/vitepress-theme';
 import { extendConfig } from '@voidzero-dev/vitepress-theme/config';
-import { defineConfig, type DefaultTheme } from 'vitepress';
+import { defineConfig } from 'vitepress';
+import type { DefaultTheme } from 'vitepress';
 import { groupIconMdPlugin, groupIconVitePlugin } from 'vitepress-plugin-group-icons';
 import llmstxt from 'vitepress-plugin-llms';
 
@@ -163,6 +164,7 @@ const platformSidebar = [
       { text: 'Domains and Resources', link: '/guide/platform/installation/domains' },
       { text: 'Maintenance and Recovery', link: '/guide/platform/installation/maintenance' },
       { text: 'Install from CI', link: '/guide/platform/installation/ci' },
+      { text: 'Run Several Installations', link: '/guide/platform/installation/several' },
       { text: 'Disable and Uninstall', link: '/guide/platform/installation/uninstall' },
     ],
   },
@@ -176,6 +178,7 @@ const platformSidebar = [
       { text: 'Connected apps', link: '/guide/platform/administration/connected-apps' },
       { text: 'Users and Projects', link: '/guide/platform/administration/projects' },
       { text: 'Plans and Limits', link: '/guide/platform/administration/plans' },
+      { text: 'Paying for AI', link: '/guide/platform/administration/ai-billing' },
       { text: 'Project Zero Trust', link: '/guide/platform/administration/zero-trust' },
       { text: 'Email', link: '/guide/platform/administration/email' },
       { text: 'Operations', link: '/guide/platform/administration/operations' },

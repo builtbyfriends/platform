@@ -20,6 +20,80 @@ const MAX_R2_PUT_RETRIES = 3;
  */
 const RETRY_BACKOFF_MS = [250, 500, 1000];
 
+export const R2_CREDENTIALS_DOCS_URL =
+  'https://github.com/builtbyfriends/platform/blob/main/docs/guide/platform/installation/credentials.md#r2-upload-credentials';
+
+/**
+ * S3 error codes that mean R2 did not accept the signature on a presigned
+ * upload link. The platform signs every link with its own R2 key pair, so
+ * these usually point at that pair. Expiry and clock-skew codes are left out:
+ * they have other causes.
+ */
+export const R2_CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set([
+  'Unauthorized',
+  'AccessDenied',
+  'SignatureDoesNotMatch',
+  'InvalidAccessKeyId',
+]);
+
+/**
+ * S3 error codes R2 answers with HTTP 400 when the Access Key ID is malformed,
+ * for example the token value pasted in place of the 32-character key ID.
+ */
+export const R2_MALFORMED_CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set([
+  'InvalidArgument',
+  'AuthorizationHeaderMalformed',
+]);
+
+/** Whether an R2 error answer means R2 rejected the key pair itself. */
+export function isR2CredentialRejection(status: number, code: string | undefined): boolean {
+  if (!code) {
+    return false;
+  }
+  if (status === 401 || status === 403) {
+    return R2_CREDENTIAL_ERROR_CODES.has(code);
+  }
+  return status === 400 && R2_MALFORMED_CREDENTIAL_ERROR_CODES.has(code);
+}
+
+/**
+ * Read the `<Code>` value from an S3-style XML error body. Returns
+ * `undefined` when the body has no complete, non-empty `<Code>` element.
+ */
+export function r2ErrorCode(body: string): string | undefined {
+  const open = '<Code>';
+  const start = body.indexOf(open);
+  if (start === -1) {
+    return undefined;
+  }
+  const valueStart = start + open.length;
+  const end = body.indexOf('</Code>', valueStart);
+  if (end === -1) {
+    return undefined;
+  }
+  const code = body.slice(valueStart, end).trim();
+  return code === '' ? undefined : code;
+}
+
+function directR2PutErrorMessage(
+  status: number,
+  hash: string,
+  path: string,
+  body: string,
+  code: string | undefined,
+): string {
+  if (isR2CredentialRejection(status, code)) {
+    return (
+      `R2 rejected the upload signature (${code}) for ${path} (${hash}). ` +
+      "This usually means the platform's R2 upload credentials are wrong. " +
+      'Ask the platform operator to fix it. ' +
+      'If you run this platform: set PLATFORM_R2_ACCESS_KEY_ID and PLATFORM_R2_SECRET_ACCESS_KEY ' +
+      `to a working pair and run \`bwf platform repair\`. See ${R2_CREDENTIALS_DOCS_URL}`
+    );
+  }
+  return `R2 PUT failed for ${path} (${hash}): ${status}${body ? ` ${body}` : ''}`;
+}
+
 export class DirectR2PutError extends Error {
   readonly status: number;
   readonly hash: string;
@@ -30,14 +104,18 @@ export class DirectR2PutError extends Error {
    * `BadDigest` (Content-MD5 mismatch) or signature errors.
    */
   readonly body: string;
+  /** S3 `<Code>` parsed from `body`, when R2 returned an XML error. */
+  readonly code: string | undefined;
 
   constructor(status: number, hash: string, path: string, body: string) {
-    super(`R2 PUT failed for ${path} (${hash}): ${status}${body ? ` ${body}` : ''}`);
+    const code = r2ErrorCode(body);
+    super(directR2PutErrorMessage(status, hash, path, body, code));
     this.name = 'DirectR2PutError';
     this.status = status;
     this.hash = hash;
     this.path = path;
     this.body = body;
+    this.code = code;
   }
 }
 
@@ -87,7 +165,7 @@ export async function uploadAssetsToR2(
     return;
   }
 
-  let firstError: unknown = null;
+  const errors: Array<Error> = [];
   let nextIndex = 0;
 
   // Decision: Bounded-pool worker pattern: each worker pulls the next index until exhausted or a sibling worker
@@ -97,16 +175,18 @@ export async function uploadAssetsToR2(
   for (let w = 0; w < workerCount; w++) {
     workers.push(
       (async () => {
-        while (firstError === null) {
+        while (errors.length === 0) {
           const i = nextIndex++;
           if (i >= items.length) {
             return;
           }
           try {
             await uploadOne(items[i], cliLog, fetchImpl);
-          } catch (err) {
-            if (firstError === null) {
-              firstError = err;
+          } catch (error) {
+            if (errors.length === 0) {
+              errors.push(
+                error instanceof Error ? error : new Error(String(error), { cause: error }),
+              );
             }
             return;
           }
@@ -117,7 +197,8 @@ export async function uploadAssetsToR2(
     );
   }
   await Promise.all(workers);
-  if (firstError !== null) {
+  const [firstError] = errors;
+  if (firstError) {
     throw firstError;
   }
 }
@@ -144,10 +225,10 @@ async function uploadOne(
     try {
       res = await fetchImpl(item.url, {
         method: 'PUT',
-        body: new Uint8Array(body) as unknown as BodyInit,
+        body: new Uint8Array(body) as BodyInit,
         headers: item.headers,
       });
-    } catch (err) {
+    } catch (error) {
       // Decision: A network-level error is treated like a 5xx for retries (it's transient by nature), but
       // exhaustion still throws.
       if (attempt < MAX_R2_PUT_RETRIES) {
@@ -156,13 +237,13 @@ async function uploadOne(
           path: item.path,
           attempt: attempt + 1,
           status: 0,
-          error: err instanceof Error ? err.message : String(err),
+          error: error instanceof Error ? error.message : String(error),
         });
         await sleep(RETRY_BACKOFF_MS[attempt]);
         attempt++;
         continue;
       }
-      cliLog?.error('r2_put_end', err, {
+      cliLog?.error('r2_put_end', error, {
         hash: item.hash,
         path: item.path,
         durationMs: Date.now() - startedAt,
@@ -172,7 +253,7 @@ async function uploadOne(
         0,
         item.hash,
         item.path,
-        err instanceof Error ? err.message : String(err),
+        error instanceof Error ? error.message : String(error),
       );
     }
 
@@ -230,5 +311,7 @@ function truncate(s: string): string {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

@@ -18,6 +18,7 @@ const items = [
   { name: ".bwf/", description: "Auto-generated (gitignored)", link: "#void" },
   { name: "vite.config.ts", description: "Vite config with bwfPlugin()", link: "#config-files" },
   { name: "bwf.config.ts", description: "bwf project config (optional)", link: "#config-files" },
+  { name: "oxlint.config.ts", description: "Lint config from the bwf preset", link: "#config-files" },
   { name: ".env", description: "Local environment values", link: "#config-files" },
   { name: "env.ts", description: "Environment schema", link: "#config-files" },
   { name: "package.json" },
@@ -127,12 +128,13 @@ Generated types and local development state (gitignored). Run `bwf prepare` to c
 
 ## Config Files
 
-| File             | Purpose                                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vite.config.ts` | Vite configuration. Must include `bwfPlugin()`.                                                                                                         |
-| `bwf.config.ts`  | Optional bwf config for [routing](/reference/config#routing), [inference](/reference/config#inference), and [worker settings](/reference/config#worker) |
-| `tsconfig.json`  | TypeScript config. Extend `.bwf/tsconfig.json` for auto-generated types; run `bwf init --tsconfig` when an existing config already uses `extends`.      |
-| `.env`           | Local development values only (gitignored; never deployed)                                                                                              |
-| `env.ts`         | Checked-in env names, types, defaults, and requiredness                                                                                                 |
+| File               | Purpose                                                                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite.config.ts`   | Vite configuration. Must include `bwfPlugin()`.                                                                                                         |
+| `bwf.config.ts`    | Optional bwf config for [routing](/reference/config#routing), [inference](/reference/config#inference), and [worker settings](/reference/config#worker) |
+| `oxlint.config.ts` | Oxlint config. The starter uses `@builtbyfriends/bwf/lint`, the checks bwf apps share. Add or relax rules on top of it.                                 |
+| `tsconfig.json`    | TypeScript config. Extend `.bwf/tsconfig.json` for auto-generated types; run `bwf init --tsconfig` when an existing config already uses `extends`.      |
+| `.env`             | Local development values only (gitignored; never deployed)                                                                                              |
+| `env.ts`           | Checked-in env names, types, defaults, and requiredness                                                                                                 |
 
 See [Environment Variables](/guide/env-vars) for local, production-secret, and client build behavior.

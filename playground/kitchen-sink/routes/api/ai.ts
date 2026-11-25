@@ -36,11 +36,13 @@ export const POST = defineHandler(async (c) => {
     }
 
     return await ai.stream(model, inputs);
-  } catch (err) {
-    if (err instanceof UsageLimit) {
-      return err.response({ message: 'AI is temporarily unavailable. Your prompt has been kept.' });
+  } catch (error) {
+    if (error instanceof UsageLimit) {
+      return error.response({
+        message: 'AI is temporarily unavailable. Your prompt has been kept.',
+      });
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = error instanceof Error ? error.message : String(error);
     return c.json({ error: message }, 400);
   }
 });

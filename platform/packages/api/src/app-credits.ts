@@ -1,0 +1,560 @@
+import { and, eq, like, ne, or, sql } from 'drizzle-orm';
+import { queueBillingEvent, type BillingEventType } from './billing-events.ts';
+import { stripeLiveMode, type StripeEnv } from './billing/stripe.ts';
+import { creditBalance, markLow, markOut, markOverCaps, spendCredits } from './credit-ledger.ts';
+import { topUpIfLow } from './credit-purchase.ts';
+import { DAY_MS, creditsReason, readGraceDays, setCreditsPause } from './credits-pause.ts';
+import type { Db, DbOrTx } from './db.ts';
+import type { ApiEnv } from './env.ts';
+import { installationDefaultPlan, resolvePlanLimits } from './plans.ts';
+import { getPlatformSetting, setPlatformSetting } from './platform-settings.ts';
+import {
+  appCreditGrants,
+  appPayers,
+  appPeople,
+  appUsage,
+  appUsageDaily,
+  oauthClients,
+  projects,
+  users,
+  type PayerCap,
+} from './schema.ts';
+import { REASON_CREDITS_PAUSED } from './suspension.ts';
+
+type Bindings = ApiEnv['Bindings'];
+
+/**
+ * What a connected application's person can be charged for. `unit` is how many of the meter one
+ * price buys, and `price` is the default in dollars, which an operator can change.
+ */
+export const METERS = {
+  aiNeurons: { unit: 1, price: 0.000011 },
+  sandboxSeconds: { unit: 3600, price: 0.1 },
+  hostedRequests: { unit: 1e6, price: 0.3 },
+  hostedBandwidthBytes: { unit: 1e9, price: 0 },
+  hostedAiNeurons: { unit: 1, price: 0.000011 },
+  hostedSandboxSeconds: { unit: 3600, price: 0.1 },
+  hostedCpuMs: { unit: 1e6, price: 0.02 },
+  hostedD1ByteDays: { unit: 30e9, price: 0.75 },
+  hostedR2ByteDays: { unit: 30e9, price: 0.015 },
+  hostedKvByteDays: { unit: 30e9, price: 0.5 },
+  hostedD1RowsRead: { unit: 1e6, price: 0.001 },
+  hostedD1RowsWritten: { unit: 1e6, price: 1 },
+  hostedR2ClassAOps: { unit: 1e6, price: 4.5 },
+  hostedR2ClassBOps: { unit: 1e6, price: 0.36 },
+  hostedKvReads: { unit: 1e6, price: 0.5 },
+  hostedKvWrites: { unit: 1e6, price: 5 },
+  hostedQueueOps: { unit: 1e6, price: 0.4 },
+} as const;
+export type Meter = keyof typeof METERS;
+export type MeterPrices = Record<Meter, number>;
+export type MeterUse = Record<Meter, number>;
+const METER_NAMES = Object.keys(METERS) as Array<Meter>;
+
+export const METER_PRICES_SETTING = 'app-usage:prices';
+export const SYNCED_AT_SETTING = 'app-usage:synced-at';
+
+const isPrice = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+/** Reads prices an operator typed in. Null when a meter is unknown or a price isn't a number from 0 up. */
+export function parseMeterPrices(value: unknown): Partial<MeterPrices> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const entries = Object.entries(value);
+  return entries.every(([meter, price]) => Object.hasOwn(METERS, meter) && isPrice(price))
+    ? (Object.fromEntries(entries) as Partial<MeterPrices>)
+    : null;
+}
+
+export async function readMeterPrices(db: DbOrTx): Promise<MeterPrices> {
+  const saved = parseMeterPrices(await getPlatformSetting(db, METER_PRICES_SETTING)) ?? {};
+  return Object.fromEntries(
+    METER_NAMES.map((meter) => [meter, saved[meter] ?? METERS[meter].price]),
+  ) as MeterPrices;
+}
+
+export async function writeMeterPrices(db: DbOrTx, prices: Partial<MeterPrices>): Promise<void> {
+  await setPlatformSetting(db, METER_PRICES_SETTING, prices);
+}
+
+/** A meter's cost in millionths of a dollar. */
+export function costMicros(meter: Meter, quantity: number, prices: MeterPrices): number {
+  return Math.round((quantity / METERS[meter].unit) * prices[meter] * 1e6);
+}
+
+/**
+ * One plan an application sells. creditMicros is what one unit brings each month. A plan sold by
+ * the seat is bought in any count, and each seat brings creditMicros. A plan billed for longer
+ * than a month still brings creditMicros once a month.
+ */
+export type ClientPlan = {
+  stripePriceId: string;
+  creditMicros: number;
+  perSeat?: boolean;
+  /** Whether the payer's apps can have custom domains, and be put behind sign-in. */
+  customDomains?: boolean;
+  protection?: boolean;
+};
+export type ClientPlans = Record<string, ClientPlan>;
+
+/** Reads the plans an operator typed in for an application. Null when the shape is wrong. */
+export function parseClientPlans(value: unknown): ClientPlans | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const plans: ClientPlans = {};
+  for (const [id, plan] of Object.entries(value as Record<string, Record<string, unknown>>)) {
+    if (
+      !/^[a-z0-9-]{1,64}$/.test(id) ||
+      typeof plan?.stripePriceId !== 'string' ||
+      !Number.isSafeInteger(plan.creditMicros) ||
+      (plan.creditMicros as number) < 0 ||
+      (['perSeat', 'customDomains', 'protection'] as const).some(
+        (flag) => plan[flag] !== undefined && typeof plan[flag] !== 'boolean',
+      )
+    ) {
+      return null;
+    }
+    plans[id] = {
+      stripePriceId: plan.stripePriceId,
+      creditMicros: plan.creditMicros as number,
+      ...(plan.perSeat ? { perSeat: true } : {}),
+      ...(plan.customDomains ? { customDomains: true } : {}),
+      ...(plan.protection ? { protection: true } : {}),
+    };
+  }
+  return plans;
+}
+
+/** The plans an application's people can buy. An application without its own list sells none. */
+export async function clientPlans(db: DbOrTx, clientId: string): Promise<ClientPlans> {
+  const [client] = await db
+    .select({ plans: oauthClients.plans })
+    .from(oauthClients)
+    .where(eq(oauthClients.id, clientId));
+  return client?.plans ?? {};
+}
+
+/** What a payer's plan brings each month: one unit's credits, or each seat's. */
+export const monthlyCredits = (plan: ClientPlan, row: { seats: number | null }) =>
+  plan.creditMicros * (plan.perSeat ? (row.seats ?? 1) : 1);
+
+/** First day of this calendar month in UTC, as `YYYY-MM-01`. */
+export const currentPeriod = (now = new Date()) => `${now.toISOString().slice(0, 7)}-01`;
+export const dayOf = (date: Date) => date.toISOString().slice(0, 10);
+
+const payerRows = (clientId: string, person: string) =>
+  and(eq(appUsageDaily.client_id, clientId), eq(appUsageDaily.person_id, person));
+const inPeriod = (period: string) => like(appUsageDaily.day, `${period.slice(0, 7)}-%`);
+
+/**
+ * What one payer used this month, by meter: what the application reported for them and what the
+ * hosted projects they pay for used.
+ */
+export async function payerUse(
+  db: DbOrTx,
+  clientId: string,
+  person: string,
+  period = currentPeriod(),
+): Promise<MeterUse> {
+  const [[reported], hosted] = await Promise.all([
+    db
+      .select()
+      .from(appUsage)
+      .where(
+        and(
+          eq(appUsage.client_id, clientId),
+          eq(appUsage.person_id, person),
+          eq(appUsage.period, period),
+        ),
+      ),
+    db
+      .select({ meter: appUsageDaily.meter, quantity: sql<number>`sum(${appUsageDaily.quantity})` })
+      .from(appUsageDaily)
+      .where(and(payerRows(clientId, person), inPeriod(period), ne(appUsageDaily.project_id, '')))
+      .groupBy(appUsageDaily.meter),
+  ]);
+  const use = Object.fromEntries(METER_NAMES.map((meter) => [meter, 0])) as MeterUse;
+  for (const row of hosted) {
+    if (Object.hasOwn(use, row.meter)) {
+      use[row.meter as Meter] = Number(row.quantity);
+    }
+  }
+  // Decision: app_usage holds the totals for what the application reports, as it did before the daily rows.
+  use.aiNeurons = reported?.ai_neurons ?? 0;
+  use.sandboxSeconds = reported?.sandbox_seconds ?? 0;
+  return use;
+}
+
+/** Each meter's quantity and cost, and the credit balance when the payer has credits. */
+export function creditStanding(
+  use: MeterUse,
+  prices: MeterPrices,
+  includedMicros: number,
+  balance: Awaited<ReturnType<typeof creditBalance>>,
+) {
+  const meters = METER_NAMES.map((meter) => ({
+    meter,
+    quantity: use[meter],
+    costMicros: costMicros(meter, use[meter], prices),
+  }));
+  const usedMicros = meters.reduce((sum, meter) => sum + meter.costMicros, 0);
+  return {
+    meters,
+    // Decision: The one place that says how much a payer may spend. remainingMicros stops at zero for the
+    // applications that read it, and balanceMicros shows a shortfall.
+    credits: balance
+      ? {
+          includedMicros,
+          usedMicros,
+          remainingMicros: Math.max(0, balance.balanceMicros),
+          balanceMicros: balance.balanceMicros,
+          owedMicros: balance.owedMicros,
+          out: balance.balanceMicros <= 0,
+          outSince: balance.outSince,
+          lowSince: balance.lowSince,
+          starterMicros: balance.grants
+            .filter((grant) => grant.source === 'starter')
+            .reduce((sum, grant) => sum + grant.remainingMicros, 0),
+          grants: balance.grants,
+        }
+      : null,
+  };
+}
+
+/** Adds use to a payer's day and charges it to their credits at today's price. */
+export async function addUse(
+  db: DbOrTx,
+  row: { clientId: string; person: string; projectId?: string; meter: Meter; quantity: number },
+  now = new Date(),
+): Promise<void> {
+  if (row.quantity <= 0) {
+    return;
+  }
+  const cost = costMicros(row.meter, row.quantity, await readMeterPrices(db));
+  await db
+    .insert(appUsageDaily)
+    .values({
+      client_id: row.clientId,
+      person_id: row.person,
+      project_id: row.projectId ?? '',
+      day: dayOf(now),
+      meter: row.meter,
+      quantity: row.quantity,
+      cost_micros: cost,
+    })
+    .onConflictDoUpdate({
+      target: [
+        appUsageDaily.client_id,
+        appUsageDaily.person_id,
+        appUsageDaily.project_id,
+        appUsageDaily.day,
+        appUsageDaily.meter,
+      ],
+      set: {
+        quantity: sql`${appUsageDaily.quantity} + ${row.quantity}`,
+        cost_micros: sql`${appUsageDaily.cost_micros} + ${cost}`,
+      },
+    });
+  await spendCredits(db, { clientId: row.clientId, payer: row.person }, cost, now);
+}
+
+/** Adds use that Platform counted for a hosted project, under whoever pays for it now. */
+export async function addProjectUse(
+  db: DbOrTx,
+  projectId: string,
+  meter: Meter,
+  quantity: number,
+): Promise<void> {
+  if (quantity <= 0) {
+    return;
+  }
+  const [payer] = await db
+    .select({ clientId: sql<string>`substr(${users.provider}, 5)`, person: payerOf })
+    .from(projects)
+    .innerJoin(users, eq(users.id, projects.user_id))
+    .where(and(eq(projects.id, projectId), like(users.provider, `${APP}%`)));
+  if (payer) {
+    await addUse(db, { ...payer, projectId, meter, quantity });
+  }
+}
+
+/** A payer's use for each day of the month so far, days with none included. */
+export async function payerDaily(
+  db: DbOrTx,
+  clientId: string,
+  person: string,
+  prices: MeterPrices,
+  now = new Date(),
+) {
+  const rows = await db
+    .select({
+      day: appUsageDaily.day,
+      meter: appUsageDaily.meter,
+      quantity: sql<number>`sum(${appUsageDaily.quantity})`,
+    })
+    .from(appUsageDaily)
+    .where(and(payerRows(clientId, person), inPeriod(currentPeriod(now))))
+    .groupBy(appUsageDaily.day, appUsageDaily.meter);
+  const month = dayOf(now).slice(0, 8);
+  return Array.from({ length: now.getUTCDate() }, (_, index) => {
+    const day = month + String(index + 1).padStart(2, '0');
+    const meters: Partial<MeterUse> = {};
+    for (const row of rows) {
+      if (row.day === day && Object.hasOwn(METERS, row.meter)) {
+        meters[row.meter as Meter] = Number(row.quantity);
+      }
+    }
+    return {
+      day,
+      costMicros: Object.entries(meters).reduce(
+        (sum, [meter, quantity]) => sum + costMicros(meter as Meter, quantity, prices),
+        0,
+      ),
+      meters,
+    };
+  });
+}
+
+/** When the hosted numbers were last read from analytics, or null before the first read. */
+export async function hostedAsOf(db: DbOrTx): Promise<string | null> {
+  const value = await getPlatformSetting(db, SYNCED_AT_SETTING);
+  return typeof value === 'string' ? value : null;
+}
+
+export const APP = 'app:';
+export const payerOf = sql<string>`coalesce(${projects.payer_person_id}, ${users.provider_id})`;
+
+/** The hosted projects a person pays for, each with the person it was built for. */
+export function paidProjects(db: DbOrTx, clientId: string, person: string) {
+  return db
+    .select({ project: projects, person: users.provider_id })
+    .from(projects)
+    .innerJoin(users, eq(users.id, projects.user_id))
+    .where(
+      and(
+        eq(users.provider, APP + clientId),
+        ne(projects.status, 'deleting'),
+        sql`${payerOf} = ${person}`,
+      ),
+    );
+}
+
+/** This month's hosted use of one payer, by project and meter: the month's sum and the latest day's number. */
+export async function paidProjectUse(db: DbOrTx, clientId: string, person: string) {
+  const rows = await db
+    .select({
+      projectId: appUsageDaily.project_id,
+      meter: appUsageDaily.meter,
+      quantity: sql<number>`sum(${appUsageDaily.quantity})`,
+      latest: sql<number>`(array_agg(${appUsageDaily.quantity} order by ${appUsageDaily.day} desc))[1]`,
+    })
+    .from(appUsageDaily)
+    .where(
+      and(payerRows(clientId, person), inPeriod(currentPeriod()), ne(appUsageDaily.project_id, '')),
+    )
+    .groupBy(appUsageDaily.project_id, appUsageDaily.meter);
+  const byProject = new Map<string, { use: Partial<MeterUse>; latest: Partial<MeterUse> }>();
+  for (const row of rows) {
+    const project = byProject.get(row.projectId) ?? { use: {}, latest: {} };
+    project.use[row.meter as Meter] = Number(row.quantity);
+    project.latest[row.meter as Meter] = Number(row.latest);
+    byProject.set(row.projectId, project);
+  }
+  return byProject;
+}
+
+/**
+ * True while the person who pays for a project is out of credits, or, with no credits, past their
+ * plan's monthly cap on `cap` for hosted apps.
+ */
+export async function payerOutOfCredits(
+  db: DbOrTx,
+  projectId: string,
+  cap: PayerCap = 'ai',
+): Promise<boolean> {
+  const rows = await db
+    .select({ one: sql<number>`1` })
+    .from(projects)
+    .innerJoin(users, eq(users.id, projects.user_id))
+    .innerJoin(
+      appPayers,
+      and(
+        sql`${users.provider} = ${APP} || ${appPayers.client_id}`,
+        sql`${appPayers.payer_id} = ${payerOf}`,
+      ),
+    )
+    .where(
+      and(
+        eq(projects.id, projectId),
+        or(sql`${appPayers.out_since} is not null`, sql`${cap} = any(${appPayers.over_caps})`),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** The accounts whose projects a person pays for, their own account included. */
+export async function paidOwnerIds(db: DbOrTx, clientId: string, person: string) {
+  const owners = await db
+    .selectDistinct({ id: users.id })
+    .from(users)
+    .leftJoin(projects, eq(projects.user_id, users.id))
+    .where(
+      and(
+        eq(users.provider, APP + clientId),
+        or(eq(users.provider_id, person), eq(projects.payer_person_id, person)),
+      ),
+    );
+  return owners.map((owner) => owner.id);
+}
+
+/**
+ * On a live installation, ends the plans and grants that came from Stripe test mode. Plan limits
+ * are read in many places without the Stripe key, so the test rows are changed once instead of
+ * skipped on each read.
+ */
+export async function dropTestPlans(
+  db: DbOrTx,
+  env: { PLATFORM_INSTALLATION_ID?: string | undefined },
+): Promise<void> {
+  const free = (await installationDefaultPlan(db, env)).id;
+  await db
+    .update(appPeople)
+    .set({
+      plan: free,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(appPeople.livemode, false),
+        or(ne(appPeople.plan, free), sql`${appPeople.stripe_customer_id} is not null`),
+      ),
+    );
+  await db
+    .update(appCreditGrants)
+    .set({ voided_at: new Date().toISOString(), void_reason: 'test mode' })
+    .where(and(eq(appCreditGrants.livemode, false), sql`${appCreditGrants.voided_at} is null`));
+}
+
+/**
+ * Works out whether a payer is out of credits and, when that changed, has the usage counters of
+ * the accounts they pay for stamp or lift the AI pause on their hosted projects. Then slows down
+ * or pauses those projects by how long the payer has been at zero (see credits-pause.ts).
+ */
+export async function applyCredits(
+  env: StripeEnv & Pick<Bindings, 'USAGE_COUNTER' | 'PLATFORM_INSTALLATION_ID' | 'ROUTING'>,
+  db: Db,
+  clientId: string,
+  person: string,
+) {
+  const period = currentPeriod();
+  const payer = { clientId, payer: person };
+  const now = new Date();
+  await topUpIfLow(env, db, payer);
+  const [[stored], plans, prices, use, balance, defaultPlan, [client], graceDays] =
+    await Promise.all([
+      db
+        .select()
+        .from(appPeople)
+        .where(and(eq(appPeople.client_id, clientId), eq(appPeople.person_id, person))),
+      clientPlans(db, clientId),
+      readMeterPrices(db),
+      payerUse(db, clientId, person, period),
+      creditBalance(db, payer),
+      installationDefaultPlan(db, env),
+      db
+        .select({ lowMark: oauthClients.low_balance_micros })
+        .from(oauthClients)
+        .where(eq(oauthClients.id, clientId)),
+      readGraceDays(db),
+    ]);
+  const row = stored?.livemode === stripeLiveMode(env) ? stored : undefined;
+  // Decision: The default plan is never a paid plan, even when the app lists the same id, because a subscription
+  // that ends writes the default plan on the row.
+  const paid = Boolean(row && row.plan !== defaultPlan.id && Object.hasOwn(plans, row.plan));
+  const standing = creditStanding(
+    use,
+    prices,
+    paid ? monthlyCredits(plans[row!.plan]!, row!) : 0,
+    balance,
+  );
+  const event = (type: BillingEventType, data: object) =>
+    queueBillingEvent(db, env, { clientId, type, person, data });
+  // Decision: A payer who never had a grant has no balance to run out, and their plan's caps decide. They are
+  // read from the daily totals, so they can be up to an hour behind.
+  const limits = balance ? null : await resolvePlanLimits(db, row?.plan ?? defaultPlan.id);
+  const past = (cap: number, used: number) => limits !== null && cap > 0 && used >= cap;
+  const overCaps = [
+    ...(past(limits?.aiNeuronsPerMonth ?? 0, use.hostedAiNeurons) ? (['ai'] as const) : []),
+    ...(past(limits?.sandboxRuntimeSecondsPerMonth ?? 0, use.hostedSandboxSeconds)
+      ? (['sandbox'] as const)
+      : []),
+  ];
+  let changed = await markOverCaps(db, payer, overCaps);
+  if (balance) {
+    const out = standing.credits!.out;
+    const low = balance.balanceMicros < (client?.lowMark ?? 0);
+    // Decision: Low and out are each sent once for each crossing. A balance that drops straight to zero sends only out.
+    if ((await markLow(db, payer, low)) && low && !out) {
+      await event('credits.low', { balanceMicros: balance.balanceMicros });
+    }
+    if (await markOut(db, payer, out)) {
+      const pausesAt = new Date(now.getTime() + graceDays * DAY_MS).toISOString();
+      await event(out ? 'credits.out' : 'credits.restored', {
+        balanceMicros: balance.balanceMicros,
+        ...(out ? { pausesAt } : {}),
+      });
+      changed = true;
+    }
+  }
+  if (changed) {
+    for (const id of await paidOwnerIds(db, clientId, person)) {
+      await env.USAGE_COUNTER.get(env.USAGE_COUNTER.idFromName(id))
+        .fetch(
+          new Request('https://do/reevaluate-limits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: id }),
+          }),
+        )
+        // Decision: The hourly pass restamps each project's AI pause, so a missed call heals by itself.
+        .catch((error: unknown) => {
+          console.error('[credits] AI pause update failed', { userId: id, error });
+        });
+    }
+  }
+  const out = Boolean(balance && standing.credits!.out);
+  const requestsPast = past(limits?.requestsPerMonth ?? 0, use.hostedRequests);
+  const changes = await setCreditsPause(
+    env,
+    db,
+    clientId,
+    person,
+    out
+      ? creditsReason(balance!.outSince ?? now.toISOString(), graceDays, now)
+      : requestsPast
+        ? REASON_CREDITS_PAUSED
+        : null,
+    now,
+  );
+  const paused = changes.filter((change) => change.to === REASON_CREDITS_PAUSED);
+  const resumed = changes.filter((change) => change.from === REASON_CREDITS_PAUSED && !change.to);
+  if (paused.length > 0) {
+    await event('apps.paused', { projects: paused.map((change) => change.projectId) });
+  }
+  if (resumed.length > 0) {
+    await event('apps.resumed', { projects: resumed.map((change) => change.projectId) });
+  }
+  return {
+    ...standing,
+    row,
+    paid,
+    defaultPlanId: defaultPlan.id,
+    wallet: balance?.wallet ?? false,
+  };
+}

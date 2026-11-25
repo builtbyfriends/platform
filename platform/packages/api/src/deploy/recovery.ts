@@ -1,4 +1,5 @@
 import { sql as drizzleSql } from 'drizzle-orm';
+import { billedPlanLimits } from '../app-payer.ts';
 import { hmacSignState } from '../auth/hmac.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler, syncCronScheduler } from '../cron-scheduler-client.ts';
@@ -17,11 +18,10 @@ import {
   setActiveDeployment,
   updateProjectType,
   TERMINAL_DEPLOYMENT_STATUSES,
-  type Db,
 } from '../db.ts';
+import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { getProjectQueueName } from '../naming.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { requireProjectCapability } from '../project-access.ts';
 import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
 import {
@@ -33,7 +33,7 @@ import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.
 import { requestRotationIfReplacingUntrustedCode } from '../proxy-token-rotation.ts';
 import { projectRouteKey } from '../routing.ts';
 import { buildRoutingJson, buildStaticRoutingJson, computeDispatchLimits } from '../routing.ts';
-import { type DeployManifest, type Deployment, type Project } from '../types.ts';
+import type { DeployManifest, Deployment, Project } from '../types.ts';
 import {
   resolveProjectZeroTrustRouting,
   resolveProjectZeroTrustRoutingForPublication,
@@ -254,7 +254,7 @@ export async function replayDeploymentCutover(
   if (!currentOwner) {
     throw new Error('project owner is unavailable during routing publication');
   }
-  const planLimits = await resolvePlanLimits(db, currentOwner.plan);
+  const planLimits = await billedPlanLimits(db, currentOwner, project);
   if (!deployment.manifest) {
     throw new Error(`deployment ${deployment.id} has no manifest for cutover recovery`);
   }

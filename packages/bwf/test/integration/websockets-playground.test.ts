@@ -1,7 +1,8 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { killChild, startServer } from '../../../../test/integration-helpers.ts';
 

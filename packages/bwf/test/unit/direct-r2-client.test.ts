@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import {
-  DEPLOY_POST_ATTEMPTS,
-  PlatformClient,
-  type ManifestOnlyDeployPayload,
-} from '../../src/cli/client.ts';
+import { DEPLOY_POST_ATTEMPTS, PlatformClient } from '../../src/cli/client.ts';
+import type { ManifestOnlyDeployPayload } from '../../src/cli/client.ts';
 import type { DeployManifest } from '../../src/cli/types.ts';
 import { withPlatformDiscovery } from '../helpers/platform-discovery.ts';
 
@@ -251,7 +248,7 @@ describe('PlatformClient.finalizeDeploy', () => {
       done,
     ]);
 
-    const [url, init] = finalizeCalls()[0]!;
+    const [url, init] = finalizeCalls()[0];
     expect(url).toBe(`${apiUrl}/rpc/deploy.finalize`);
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
@@ -390,7 +387,7 @@ describe('PlatformClient.finalizeDeploy', () => {
     for await (const event of makeClient().finalizeDeploy(projectId, payload)) {
       events.push(event);
     }
-    const body = JSON.parse(finalizeCalls()[0]![1].body as string).body;
+    const body = JSON.parse(finalizeCalls()[0][1].body as string).body;
     expect(body.workerFiles).toEqual({
       'index.mjs': Buffer.from('export default {};').toString('base64'),
     });

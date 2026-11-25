@@ -31,7 +31,7 @@ type EntriesMap = Record<string, Entry>;
 const STORAGE_KEY = 'controlled-entries-v1';
 const COMPLETIONS_KEY = 'controlled-completions-v1';
 const COMPLETION_RETENTION_MS = 24 * 60 * 60 * 1000;
-const MAX_COMPLETIONS = 4_096;
+const MAX_COMPLETIONS = 4096;
 const unavailable: SandboxControlResult = { ok: false, reason: 'unavailable' };
 
 /** Account-wide capacity and usage, callable only through the private SandboxControl entrypoint. */
@@ -243,7 +243,7 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
         return;
       }
       for (const id of matching) {
-        const entry = entries[id]!;
+        const entry = entries[id];
         if (entry.stoppedAt === undefined) {
           entries[id] = { ...entry, stoppedAt };
         }
@@ -257,7 +257,7 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
   }
 
   private async finishStopped(entries: EntriesMap, id: string): Promise<void> {
-    const entry = entries[id]!;
+    const entry = entries[id];
     await this.meterThrough(id, entry, entry.stoppedAt!);
     // Decision: Write the receipt before releasing capacity; a partial failure is then safe to retry.
     await this.recordCompletion(id, entry.generation);
@@ -270,7 +270,14 @@ export class SandboxConcurrencyCounter extends DurableObject<ApiEnv['Bindings']>
       const entries = await this.getEntries();
       for (const [id, entry] of Object.entries(entries)) {
         if (entry.stoppedAt !== undefined) {
-          await this.finishStopped(entries, id);
+          try {
+            await this.finishStopped(entries, id);
+          } catch (error) {
+            // Decision: A stopped sandbox holds its slot until this succeeds, so keep an alarm set. The platform's own
+            // alarm retries run out, and nothing else comes back for the entry.
+            console.error('[sandbox-concurrency] could not finish a stopped sandbox:', error);
+            await this.ctx.storage.setAlarm(Date.now() + RECONCILE_INTERVAL_MS);
+          }
         }
       }
       // Decision: Don't infer a stop from age or meter time that isn't verified. The controller's own alarm checks

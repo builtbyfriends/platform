@@ -1,14 +1,14 @@
 import { relative } from 'pathslash';
-import { parseSync, type Plugin } from 'vite';
+import { parseSync } from 'vite';
+import type { Plugin } from 'vite';
 import { bindingResolver } from './shared/ast-bindings.ts';
-import {
-  isIdentifier,
-  isMemberExpression,
-  type AstImportDeclaration,
-  type AstImportNamespaceSpecifier,
-  type AstImportSpecifier,
-  type AstMemberExpression,
-  type AstProgram,
+import { isIdentifier, isMemberExpression, isAstProgram } from './shared/ast.ts';
+import type {
+  AstImportDeclaration,
+  AstImportNamespaceSpecifier,
+  AstImportSpecifier,
+  AstMemberExpression,
+  AstProgram,
 } from './shared/ast.ts';
 import { isClientEnvKey } from './shared/env.ts';
 
@@ -47,7 +47,7 @@ export function isBwfEnvScriptCandidate(id: string, code: string): boolean {
     return false;
   }
   const langMatch = SCRIPT_LANG_RE.exec(id);
-  const isScriptQuery = langMatch !== null && /^(?:m?[jt]sx?|cjs)$/i.test(langMatch[1]!);
+  const isScriptQuery = langMatch !== null && /^(?:m?[jt]sx?|cjs)$/i.test(langMatch[1]);
   const isPlainScript = /\.(?:[mc]?[jt]sx?)(?:\?|$)/.test(id);
   if (!isScriptQuery && !isPlainScript) {
     return false;
@@ -118,13 +118,13 @@ function offsetToLineCol(index: OffsetIndex, offset: number): { line: number; co
   let upperBound = lineStarts.length - 1;
   while (lowerBound < upperBound) {
     const midpoint = (lowerBound + upperBound + 1) >>> 1;
-    if (lineStarts[midpoint]! <= offset) {
+    if (lineStarts[midpoint] <= offset) {
       lowerBound = midpoint;
     } else {
       upperBound = midpoint - 1;
     }
   }
-  return { line: lowerBound + 1, column: offset - lineStarts[lowerBound]! + 1 };
+  return { line: lowerBound + 1, column: offset - lineStarts[lowerBound] + 1 };
 }
 
 /**
@@ -257,7 +257,10 @@ export function envClientGuardPlugin(root: string): Plugin {
         return;
       }
 
-      const program = parsed.program as unknown as AstProgram;
+      if (!isAstProgram(parsed.program)) {
+        return;
+      }
+      const program: AstProgram = parsed.program;
       const bindings = extractEnvBindings(program);
       if (!bindings) {
         return;
@@ -269,7 +272,7 @@ export function envClientGuardPlugin(root: string): Plugin {
       }
 
       const offsets = buildOffsetIndex(code);
-      const relPath = relative(root, id.split('?')[0]!) || id;
+      const relPath = relative(root, id.split('?')[0]) || id;
 
       for (const hit of hits) {
         const { line, column } = offsetToLineCol(offsets, hit.start);

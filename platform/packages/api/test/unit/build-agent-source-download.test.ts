@@ -1,8 +1,10 @@
-import { type ChildProcess, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -870,7 +872,7 @@ describe('build-agent source download, real stream + tar', () => {
 
     await agent.downloadSource({
       stallTimeoutMs: 400,
-      phaseBudgetMs: 20000,
+      phaseBudgetMs: 20_000,
       maxAttempts: 2,
       backoffMs: [0],
       progressIntervalMs: 50,
@@ -889,7 +891,7 @@ describe('build-agent source download, real stream + tar', () => {
       expect.stringContaining('source download attempt 1 failed (source download aborted: no data'),
     );
     expect(lines).toContainEqual(expect.stringContaining('[build-agent] source extracted ('));
-  }, 30000);
+  }, 30_000);
 
   it("reaps the failed attempt's tar before resetting, leaving no mixed tree", async () => {
     // Decision: A mid-body reset makes `pipeline` reject while `tar` is still writing into WORK_DIR. If the
@@ -902,8 +904,8 @@ describe('build-agent source download, real stream + tar', () => {
     agent.clearBufferedLogLines();
 
     await agent.downloadSource({
-      stallTimeoutMs: 10000,
-      phaseBudgetMs: 20000,
+      stallTimeoutMs: 10_000,
+      phaseBudgetMs: 20_000,
       maxAttempts: 2,
       backoffMs: [0],
       progressIntervalMs: 50,
@@ -917,7 +919,7 @@ describe('build-agent source download, real stream + tar', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(readdirSync(WORK_DIR).sort()).toEqual(before);
     expect(readFileSync(join(WORK_DIR, 'big.bin'))).toHaveLength(2 * 1024 * 1024);
-  }, 30000);
+  }, 30_000);
 });
 
 // Decision: A real `tar` dies on SIGTERM too fast to tell "settles on the pipeline's rejection" from "settles
@@ -1023,7 +1025,7 @@ describe('build-agent extractTarball child lifecycle', () => {
     });
     const rejected = promise.then(
       () => null,
-      (err: Error) => err,
+      (error: Error) => error,
     );
 
     expect(await settled(promise)).toBe(null);
@@ -1041,7 +1043,7 @@ describe('build-agent extractTarball child lifecycle', () => {
     });
     const rejected = promise.then(
       () => null,
-      (err: Error) => err,
+      (error: Error) => error,
     );
 
     await new Promise((resolve) => setTimeout(resolve, 80));

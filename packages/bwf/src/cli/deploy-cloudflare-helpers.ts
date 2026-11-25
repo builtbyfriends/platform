@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs';
+import type { activateCloudflareVersion } from '@builtbyfriends/deploy-cloudflare';
 import {
-  activateCloudflareVersion,
   assertCloudflareBindingsPreserved,
   parseRootWranglerConfig,
   readExistingCloudflareWorker,
   readWranglerTopLevelString,
-  type CloudflareCommandRunner,
-  type ExistingCloudflareWorker,
+} from '@builtbyfriends/deploy-cloudflare';
+import type {
+  CloudflareCommandRunner,
+  ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
 import { join } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
@@ -25,19 +27,16 @@ import {
   assertCloudflareCandidateUnchanged,
   clearCloudflareCandidate,
   recordCloudflareCandidateUpload,
-  type CloudflareCandidateReceipt,
 } from './cloudflare-candidate.ts';
-import {
-  observeCfCommand,
-  observeCloudflareRunner,
-  type CloudflareChildReporter,
-} from './cloudflare-child-report.ts';
+import type { CloudflareCandidateReceipt } from './cloudflare-candidate.ts';
+import { observeCfCommand, observeCloudflareRunner } from './cloudflare-child-report.ts';
+import type { CloudflareChildReporter } from './cloudflare-child-report.ts';
 import {
   assertCloudflareLinkUnchanged,
   completeCloudflareLink,
   recordCloudflareCandidate,
-  type CloudflareLink,
 } from './cloudflare-link.ts';
+import type { CloudflareLink } from './cloudflare-link.ts';
 import {
   createCloudflareEmptyCronPublisher,
   createCloudflareEmptyDomainPublisher,
@@ -61,15 +60,16 @@ import {
 import { log } from './deploy-helpers.ts';
 import { deployChildEnv, resolveDeployTransport } from './deploy-transport.ts';
 import type { CloudflareDeployDeps, DeployWranglerRun } from './deploy-types.ts';
-import { type CliLogger } from './log-file.ts';
+import type { CliLogger } from './log-file.ts';
 import { createSpinner, getErrorMessage } from './output.ts';
-import { resolveWorkersDevComplianceRegion, type ComplianceRegion } from './provision.ts';
+import { resolveWorkersDevComplianceRegion } from './provision.ts';
+import type { ComplianceRegion } from './provision.ts';
 import {
   acknowledgeWranglerManagedQueueRemovals,
   readWranglerPublishedTrafficSnapshot,
   writeWranglerPublishedTrafficSnapshot,
-  type readWranglerManagedQueueCleanupCandidates,
 } from './wrangler.ts';
+import type { readWranglerManagedQueueCleanupCandidates } from './wrangler.ts';
 
 type CloudflareActivationOptions = Parameters<typeof activateCloudflareVersion>[0];
 type CloudflareActivationResult = Awaited<ReturnType<typeof activateCloudflareVersion>>;
@@ -88,6 +88,12 @@ export function discoverRootWranglerConfig(root: string): string {
   return materializeCloudflareConfig(root);
 }
 
+type CloudflareUploaderPins = {
+  usesCf: boolean;
+  cfUploaderIsPinned: () => boolean;
+  assertUploaderStillPinned: () => boolean;
+};
+
 /**
  * Pin both uploaders before the first authenticated command. Every later credentialed run
  * checks the same baseline, so project code can never swap the executable under the session.
@@ -96,11 +102,7 @@ export function discoverRootWranglerConfig(root: string): string {
 function createCloudflareUploaderPins(
   root: string,
   deps: CloudflareDeployDeps,
-): {
-  usesCf: boolean;
-  cfUploaderIsPinned: () => boolean;
-  assertUploaderStillPinned: () => boolean;
-} {
+): CloudflareUploaderPins {
   const usesCf = !deps.activateVersion && !deps.runWrangler;
   const hashUploader = deps.hashWranglerUploader ?? hashWranglerUploader;
   const wranglerUploaderHashBefore = hashUploader(root);
@@ -391,8 +393,12 @@ export function cloudflareCandidateActivationOptions(options: {
         }
       : undefined,
     recordVerifiedCandidate: existingWorker
-      ? (versionId) =>
-          recordCloudflareCandidate(root, pinnedHandoffLink!, existingWorker.versionId, versionId)
+      ? (versionId) => {
+          if (!pinnedHandoffLink) {
+            throw new Error('A Cloudflare handoff link is required to record a candidate.');
+          }
+          recordCloudflareCandidate(root, pinnedHandoffLink, existingWorker.versionId, versionId);
+        }
       : (versionId, parentVersionId) => {
           if (parentVersionId) {
             recordCloudflareCandidateUpload(
@@ -437,6 +443,11 @@ export function cloudflareCandidateActivationOptions(options: {
   };
 }
 
+type CloudflareEmptyTriggerPublishers = {
+  publishEmptyCustomDomains: ReturnType<typeof createCloudflareEmptyDomainPublisher>;
+  publishEmptyCrons: ReturnType<typeof createCloudflareEmptyCronPublisher>;
+};
+
 /** Activation callbacks that clear custom domains and crons when the config removes them. */
 function createCloudflareEmptyTriggerPublishers(options: {
   accountId: string;
@@ -444,10 +455,7 @@ function createCloudflareEmptyTriggerPublishers(options: {
   configPath: string;
   workerName: string;
   runWrangler: DeployWranglerRun;
-}): {
-  publishEmptyCustomDomains: ReturnType<typeof createCloudflareEmptyDomainPublisher>;
-  publishEmptyCrons: ReturnType<typeof createCloudflareEmptyCronPublisher>;
-} {
+}): CloudflareEmptyTriggerPublishers {
   return {
     publishEmptyCustomDomains: createCloudflareEmptyDomainPublisher(options),
     publishEmptyCrons: createCloudflareEmptyCronPublisher(options),
@@ -597,8 +605,11 @@ function formatCloudflareActivationFailure(
       if (result.versionId) {
         return `deploy: Worker version ${result.versionId} was uploaded but not activated because Cloudflare returned an unexpected version history. Inspect the Worker versions in Cloudflare before retrying. Production traffic is unchanged.`;
       }
+      if (result.diagnostic) {
+        return `deploy: the live Worker's secrets can't be carried over to the new version.${diagnostic}\n\nNo version was uploaded; production traffic is unchanged.`;
+      }
       return [
-        'deploy: the active Worker Version is not the latest upload, and its secrets could not be pinned safely.',
+        "deploy: the live Worker's secrets could not be pinned safely to the new version.",
         'Inspect the active and latest Worker versions in Cloudflare before retrying.',
         'No version was uploaded; production traffic is unchanged.',
       ].join('\n');
@@ -635,10 +646,10 @@ function formatCloudflareActivationFailure(
       ].join('\n');
     case 'readiness-staging-failed': {
       const hint =
-        result.cloudflareErrorCode === 10210 &&
+        result.cloudflareErrorCode === 10_210 &&
         (result.diagnostic ?? '').toLowerCase().includes('durable object migration')
           ? '\n\nReview the Durable Object migration, then run `bwf deploy --platform cloudflare --atomic`. For future deploys, set deploy.cloudflare.mode to "atomic" in bwf.config.ts.'
-          : result.cloudflareErrorCode === 100405
+          : result.cloudflareErrorCode === 100_405
             ? '\n\nThe new version declares different exports from the live version (for example a Durable Object or Workflow class), so Cloudflare cannot split traffic between them. Run `bwf deploy --platform cloudflare --atomic` once to publish it at 100% directly; it receives traffic before readiness is checked.'
             : '';
       return `deploy: Cloudflare could not stage the uploaded Worker Version at zero-percent traffic${status}; production traffic is unchanged.${cloudflareCode}${diagnostic}${hint}`;

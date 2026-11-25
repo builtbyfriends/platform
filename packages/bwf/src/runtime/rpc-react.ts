@@ -168,11 +168,11 @@ export function useCallPages<Input extends { cursor?: string | null; numItems: n
         setError(undefined);
         setLoading(false);
       },
-      (failure: unknown) => {
+      (error_: unknown) => {
         if (!current) {
           return;
         }
-        setError(asRpcError(failure));
+        setError(asRpcError(error_));
         setLoading(false);
       },
     );
@@ -181,7 +181,7 @@ export function useCallPages<Input extends { cursor?: string | null; numItems: n
     };
   }, [name, key, cursorKey, pageSize, enabled, attempt, signal]);
 
-  const last = pages[pages.length - 1];
+  const last = pages.at(-1);
   const canLoadMore =
     !loading && last !== undefined && !last.isDone && last.continueCursor !== null;
   const loadMore = useCallback(() => {

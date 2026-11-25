@@ -3,22 +3,12 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { dirname, join, resolve } from 'pathslash';
-import {
-  createRunnableDevEnvironment,
-  isRunnableDevEnvironment,
-  normalizePath,
-  type Plugin,
-  type ResolvedConfig,
-  type RunnableDevEnvironment,
-} from 'vite';
+import { createRunnableDevEnvironment, isRunnableDevEnvironment, normalizePath } from 'vite';
+import type { Plugin, ResolvedConfig, RunnableDevEnvironment } from 'vite';
 import type { ApplicationAnalysis } from './application-analysis.ts';
 import { completeApplicationAnalysis } from './application-routing.ts';
-import {
-  hasApiRoutes,
-  hasDocumentRoutes,
-  resolveAssetRoutingPolicy,
-  type AssetRoutingPolicy,
-} from './asset-routing.ts';
+import { hasApiRoutes, hasDocumentRoutes, resolveAssetRoutingPolicy } from './asset-routing.ts';
+import type { AssetRoutingPolicy } from './asset-routing.ts';
 import {
   isAssetBypassRule,
   isGeneratedAssetHeaders,
@@ -48,8 +38,8 @@ import {
   compileBrowserClient,
   compileWorkerEntry,
   compileWorkerClient,
-  type CompileOptions,
 } from './router/compile.ts';
+import type { CompileOptions } from './router/compile.ts';
 import type { RouteEnvironment } from './router/parse-filename.ts';
 import type { ScanResult } from './router/scan.ts';
 import type { BwfAuthRuntimeOptions } from './runtime/better-auth-shared.ts';
@@ -920,7 +910,6 @@ export function routingPlugin(
             await writeAuthDatabaseFiles();
             writeRouteTypes();
             writeQueueTypes();
-            writeProcedureTypes();
             writeProcedureTypes();
 
             writeWorkerEntry();

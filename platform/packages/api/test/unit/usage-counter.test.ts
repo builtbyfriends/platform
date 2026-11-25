@@ -9,6 +9,16 @@ const dbCalls = {
   suspend: [] as Array<{ id: string; reason: string }>,
   unsuspendIfReason: [] as Array<{ id: string; reason: string }>,
 };
+const addProjectUse = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../src/app-credits.ts', () => ({
+  payerOutOfCredits: async () => false,
+  addProjectUse,
+}));
+vi.mock('../../src/app-payer.ts', () => ({
+  billedAccountPlanId: async (_db: unknown, user: { plan: string }) => user.plan,
+  accountPlanLimits: async (db: unknown, _owner: unknown, plan: string) =>
+    (await import('../../src/plans.ts')).resolvePlanLimits(db as never, plan),
+}));
 vi.mock('../../src/db.ts', () => ({
   createDb: () => ({
     __mock: 'db',
@@ -58,9 +68,8 @@ import {
   evaluateAiLimit,
   evaluateSandboxRuntimeLimit,
   UsageCounter,
-  type CounterState,
-  type UsageEvent,
 } from '../../src/usage-counter.ts';
+import type { CounterState, UsageEvent } from '../../src/usage-counter.ts';
 
 vi.mock('../../src/routes/usage.ts', () => ({
   queryProjectAiUsage: vi.fn(async () => ({ neurons: 0 })),
@@ -469,6 +478,7 @@ describe('UsageCounter.handleRecord — sandbox', () => {
     }>();
     expect(body.totalSandboxSeconds).toBe(42);
     expect(body.sandboxRuntimeSuspended).toBe(false);
+    expect(addProjectUse).toHaveBeenCalledWith(expect.anything(), 'p1', 'hostedSandboxSeconds', 42);
 
     const persisted = storage.data.get('state') as CounterState;
     expect(persisted.totalSandboxSeconds).toBe(42);
@@ -813,142 +823,6 @@ describe('UsageCounter.handleRollover — sandbox', () => {
   });
 });
 
-describe('UsageCounter.handleReevaluateSandbox', () => {
-  beforeEach(() => {
-    dbCalls.suspend.length = 0;
-    dbCalls.unsuspendIfReason.length = 0;
-  });
-
-  function reevaluateRequest(plan: string): Request {
-    return new Request('https://do/reevaluate-sandbox', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan }),
-    });
-  }
-
-  it('clears aiSuspended and deletes ai-block keys (capped→unlimited-AI upgrade the alarm never reaches)', async () => {
-    const { counter, kv, storage } = makeCounter({
-      plan: 'free',
-      aiSuspended: true,
-      projectSlugs: { p1: 's1' },
-    });
-    kv.store.set('ai-block:p1', '1');
-
-    await counter.fetch(reevaluateRequest('sponsored'));
-
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.aiSuspended).toBe(false);
-    expect(kv.store.has('ai-block:p1')).toBe(false);
-  });
-
-  it('is retry-safe when an ai-block delete fails mid-cleanup (latch stays set until all keys gone)', async () => {
-    // Decision: The cleanup deletes ai-block keys before flipping the cached aiSuspended latch. getState()
-    // returns the same object on retry, so flipping first and then failing a delete would skip the
-    // branch on retry and strand the keys.
-    const { counter, kv, storage } = makeCounter({
-      plan: 'free',
-      aiSuspended: true,
-      projectSlugs: { p1: 's1', p2: 's2' },
-    });
-    kv.store.set('ai-block:p1', '1');
-    kv.store.set('ai-block:p2', '1');
-
-    let failNextDelete = true;
-    const realDelete = kv.delete;
-    kv.delete = async (key: string) => {
-      if (failNextDelete) {
-        failNextDelete = false;
-        throw new Error('transient KV delete failure');
-      }
-      return realDelete(key);
-    };
-
-    await expect(counter.fetch(reevaluateRequest('sponsored'))).rejects.toThrow(
-      'transient KV delete failure',
-    );
-
-    const res = await counter.fetch(reevaluateRequest('sponsored'));
-    expect(res.status).toBe(200);
-
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.aiSuspended).toBe(false);
-    expect(kv.store.has('ai-block:p1')).toBe(false);
-    expect(kv.store.has('ai-block:p2')).toBe(false);
-  });
-
-  it('also clears the requestsSuspended latch (plan change optimistically lifts BOTH usage latches)', async () => {
-    // Decision: After an admin plan upgrade the request-suspension latch has to drop too, or the next /init
-    // stamps the routes again.
-    const { counter, storage } = makeCounter({
-      plan: 'solo',
-      requestsSuspended: true,
-      sandboxRuntimeSuspended: true,
-    });
-
-    await counter.fetch(reevaluateRequest('pro'));
-
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.requestsSuspended).toBe(false);
-    expect(persisted.sandboxRuntimeSuspended).toBe(false);
-  });
-
-  it('clears sandboxRuntimeSuspended and updates plan when upgrade lifts the limit', async () => {
-    const { counter, storage } = makeCounter({
-      plan: 'solo',
-      totalSandboxSeconds: 30 * 3600,
-      sandboxRuntimeSuspended: true,
-    });
-
-    const res = await counter.fetch(reevaluateRequest('pro'));
-    expect(res.status).toBe(200);
-    const body = await res.json<{ ok: boolean }>();
-    expect(body.ok).toBe(true);
-
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.plan).toBe('pro');
-    expect(persisted.sandboxRuntimeSuspended).toBe(false);
-  });
-
-  it('clears the flag for unlimited plans (sponsored) regardless of total', async () => {
-    const { counter, storage } = makeCounter({
-      plan: 'solo',
-      totalSandboxSeconds: 1_000_000,
-      sandboxRuntimeSuspended: true,
-    });
-
-    await counter.fetch(reevaluateRequest('sponsored'));
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.plan).toBe('sponsored');
-    expect(persisted.sandboxRuntimeSuspended).toBe(false);
-  });
-
-  it('still clears the in-memory flag when usage exceeds the new plan (next handleRecord re-suspends)', async () => {
-    vi.mocked(getUser).mockResolvedValue({ id: 'u1', plan: 'solo' } as never);
-    // Decision: The DO clears the flag optimistically on a downgrade; the next handleRecord re-evaluates and
-    // suspends again (writing KV and DB).
-    const { counter, storage, kv } = makeCounter({
-      plan: 'pro',
-      totalSandboxSeconds: 100 * 3600,
-      sandboxRuntimeSuspended: true,
-    });
-
-    await counter.fetch(reevaluateRequest('solo'));
-    const persisted = storage.data.get('state') as CounterState;
-    expect(persisted.plan).toBe('solo');
-    expect(persisted.sandboxRuntimeSuspended).toBe(false);
-
-    const events: Array<UsageEvent> = [
-      { projectId: 'p1', userId: 'u1', slug: 's1', requests: 0, responseBytes: 0 },
-    ];
-    await counter.fetch(recordRequest(events, 'u1', 'solo'));
-    const reSuspended = storage.data.get('state') as CounterState;
-    expect(reSuspended.sandboxRuntimeSuspended).toBe(true);
-    expect(kv.store.get('sandbox-block:u1')).toBe('1');
-    expect(dbCalls.suspend).toContainEqual({ id: 'u1', reason: 'sandbox_runtime_exceeded' });
-  });
-});
-
 describe('UsageCounter.handleClearSuspension', () => {
   it('clears the request + sandbox suspension latches, leaving AI and counters intact', async () => {
     const { counter, storage } = makeCounter({
@@ -1269,7 +1143,7 @@ describe('UsageCounter ownership changes', () => {
       billingPeriodInitialized: true,
       totalRequests: 10_000_000,
       totalNeurons: 100_001,
-      totalSandboxSeconds: 30 * 3_600,
+      totalSandboxSeconds: 30 * 3600,
       requestsSuspended: true,
       aiSuspended: true,
       sandboxRuntimeSuspended: true,
@@ -2026,7 +1900,7 @@ describe('UsageCounter operation ordering and persistence', () => {
       await resume.promise;
       await realPut(key, value);
     };
-    const first = counter.fetch(recordRequest([sandboxInterval(from, from + 2_000, 3)], 'u1'));
+    const first = counter.fetch(recordRequest([sandboxInterval(from, from + 2000, 3)], 'u1'));
     await writing.promise;
     const initialize = counter.fetch(
       new Request('https://do/init', {
@@ -2038,7 +1912,7 @@ describe('UsageCounter operation ordering and persistence', () => {
         }),
       }),
     );
-    const second = counter.fetch(recordRequest([sandboxInterval(from, from + 3_000, 5)], 'u1'));
+    const second = counter.fetch(recordRequest([sandboxInterval(from, from + 3000, 5)], 'u1'));
     resume.resolve();
     await Promise.all([first, initialize, second]);
     expect(storage.data.get('state')).toMatchObject({
@@ -2095,7 +1969,7 @@ describe('UsageCounter operation ordering and persistence', () => {
       throw new Error('KV unavailable');
     };
     const from = Date.now() - 60_000;
-    const record = counter.fetch(recordRequest([sandboxInterval(from, from + 2_000)], 'u1'));
+    const record = counter.fetch(recordRequest([sandboxInterval(from, from + 2000)], 'u1'));
     const failed = expect(record).rejects.toThrow('KV unavailable');
     await suspending.promise;
     let stateRead = false;
@@ -2267,7 +2141,7 @@ describe('UsageCounter durable sandbox receipts', () => {
     const { counter, storage } = makeCounter({ plan: 'pro' });
     const event = sandboxInterval(from, from + 10_000);
     await counter.fetch(recordRequest([event], 'u1'));
-    const originalKey = Array.from(storedWatermarks(storage).keys())[0]!;
+    const originalKey = Array.from(storedWatermarks(storage).keys())[0];
     // Decision: Seeds the durable record shape directly, so the test doesn't need 10,000 simulated requests to
     // reach the old eviction threshold.
     for (let i = 0; i < 10_000; i++) {

@@ -2,8 +2,8 @@ import {
   ProjectAccessDeniedError,
   ProjectNotFoundError,
   requireProjectCapability,
-  type ProjectAccess,
 } from '../project-access.ts';
+import type { ProjectAccess } from '../project-access.ts';
 import type { ProjectCapability } from '../types.ts';
 import type { Caller } from './procedure.ts';
 

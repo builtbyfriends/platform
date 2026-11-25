@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/bwf",
-  "version": "1.9.4",
+  "version": "1.10.0",
   "description": "Full-stack framework and deployment CLI for Cloudflare Workers, powered by Vite.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {
@@ -56,6 +56,11 @@
       "require": "./dist/index.mjs"
     },
     "./schema.json": "./schema.json",
+    "./lint": {
+      "types": "./dist/lint.d.mts",
+      "import": "./dist/lint.mjs",
+      "require": "./dist/lint.mjs"
+    },
     "./config": {
       "types": "./dist/config-entry.d.mts",
       "import": "./dist/config-entry.mjs",
@@ -330,6 +335,8 @@
     "drizzle-valibot": "^0.4.2",
     "drizzle-zod": "^0.8.3",
     "email-validator": "^2.0.4",
+    "esbuild": "^0.28.2",
+    "get-tsconfig": "^4.14.3",
     "hono": "catalog:",
     "ignore": "catalog:",
     "jiti": "^2.7.0",
@@ -346,7 +353,9 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "catalog:",
     "@cloudflare/codemods": "catalog:",
+    "@cloudflare/oxlint-config": "catalog:",
     "@electric-sql/pglite": "catalog:",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "catalog:",
@@ -357,11 +366,13 @@
     "@voidzero-dev/vite-plus-prompts": "catalog:",
     "arktype": "catalog:",
     "ci-info": "catalog:",
+    "eslint-plugin-react-you-might-not-need-an-effect": "catalog:",
     "estree-walker": "^3.0.3",
     "fast-wrap-ansi": "^0.2.2",
     "happy-dom": "catalog:",
     "magic-string": "catalog:",
     "ofetch": "2.0.0-alpha.3",
+    "oxlint-plugin-react-doctor": "catalog:",
     "pathslash": "catalog:",
     "pglite-server": "0.1.5",
     "picocolors": "^1.1.1",
@@ -375,8 +386,12 @@
     "zod": "^4.6.7"
   },
   "peerDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "^0.1.1",
+    "@cloudflare/oxlint-config": "^0.1.0",
     "@sentry/cloudflare": ">=11.16.0",
     "arktype": ">=2.0.0",
+    "eslint-plugin-react-you-might-not-need-an-effect": "^1.3.1",
+    "oxlint-plugin-react-doctor": "^0.9.23",
     "react": ">=18.0.0",
     "typescript": ">=7.0.0",
     "valibot": ">=1.0.0-beta.7",
@@ -384,10 +399,22 @@
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@aranlucas/oxlint-plugin-anti-slop": {
+      "optional": true
+    },
+    "@cloudflare/oxlint-config": {
+      "optional": true
+    },
     "@sentry/cloudflare": {
       "optional": true
     },
     "arktype": {
+      "optional": true
+    },
+    "eslint-plugin-react-you-might-not-need-an-effect": {
+      "optional": true
+    },
+    "oxlint-plugin-react-doctor": {
       "optional": true
     },
     "react": {

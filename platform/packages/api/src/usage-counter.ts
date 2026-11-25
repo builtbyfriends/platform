@@ -1,15 +1,16 @@
 import { DurableObject } from 'cloudflare:workers';
+import { addProjectUse } from './app-credits.ts';
+import { accountPlanLimits, billedAccountPlanId } from './app-payer.ts';
 import {
   createDb,
-  getUser,
+  getUser as getAccount,
   getProjectOwnershipPeriodsByProjectIds,
   getProjectsByIds,
   suspendUser,
   unsuspendUserIfReason,
-  type Db,
 } from './db.ts';
+import type { Db } from './db.ts';
 import type { ApiEnv } from './env.ts';
-import { resolvePlanLimits } from './plans.ts';
 import { queryProjectAiUsage } from './routes/usage.ts';
 import {
   sandboxBlockKey,
@@ -18,13 +19,15 @@ import {
   verifyActiveProjectOwner,
 } from './routing.ts';
 import { REASON_REQUESTS_EXCEEDED, REASON_SANDBOX_RUNTIME_EXCEEDED } from './suspension.ts';
-import {
-  getCurrentBillingPeriodStart,
-  getPlanLimits,
-  isWithinLimit,
-  type PlanLimits,
-} from './tiers.ts';
+import { getCurrentBillingPeriodStart, getPlanLimits, isWithinLimit } from './tiers.ts';
+import type { PlanLimits } from './tiers.ts';
 import { SANDBOX_USAGE_RETENTION_MS } from './usage-auth.ts';
+
+/** The account with the plan that pays for its shared monthly meters. */
+async function getUser(db: Db, id: string) {
+  const user = await getAccount(db, id);
+  return user && { ...user, plan: await billedAccountPlanId(db, user) };
+}
 
 export type CounterState = {
   /** Account represented by this counter, learned from trusted API requests. */
@@ -272,9 +275,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (request.method === 'POST' && path === '/reevaluate-limits') {
       return this.handleReevaluateLimits(request);
     }
-    if (request.method === 'POST' && path === '/reevaluate-sandbox') {
-      return this.handleReevaluateSandbox(request);
-    }
     if (request.method === 'POST' && path === '/clear-suspension') {
       return this.handleClearSuspension();
     }
@@ -316,6 +316,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     const watermarkCutoff = Date.now() - SANDBOX_USAGE_RETENTION_MS;
     const watermarks = new Map<string, number>();
     let incomingSandboxSeconds = 0;
+    const sandboxSecondsByProject = new Map<string, number>();
     for (const event of body.events) {
       const leaseId = event.sandboxInstanceId;
       const from = event.sandboxMeteredFrom;
@@ -340,7 +341,12 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
         watermarkCutoff,
       );
       if (through! > billFrom) {
-        incomingSandboxSeconds += (through! - billFrom) / 1000;
+        const seconds = (through! - billFrom) / 1000;
+        incomingSandboxSeconds += seconds;
+        sandboxSecondsByProject.set(
+          event.projectId,
+          (sandboxSecondsByProject.get(event.projectId) ?? 0) + seconds,
+        );
       }
       watermarks.set(key, Math.max(previous, through!));
     }
@@ -385,7 +391,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     // PostgreSQL, not the producer hint.
     const owner = await getUser(getDb(), body.userId);
     state.plan = owner?.plan ?? state.plan;
-    const limits = await resolvePlanLimits(getDb(), state.plan);
+    const limits = await accountPlanLimits(getDb(), owner, state.plan);
 
     // Decision: Commit each suspension latch only after each enforcement write succeeds.
     const exceedsLimit = evaluateRequestLimit(state, 0, limits);
@@ -418,6 +424,15 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     await this.ensureAiAlarm();
 
     await this.saveState(state, { watermarks });
+    // Decision: After the save, so a retried batch can't count sandbox time twice. If this write fails the
+    // time is missing from the payer's daily numbers, which is better than charging it twice.
+    for (const [projectId, seconds] of sandboxSecondsByProject) {
+      await addProjectUse(getDb(), projectId, 'hostedSandboxSeconds', Math.round(seconds)).catch(
+        (error: unknown) => {
+          console.error('[usage] hosted sandbox time was not stored', { projectId, error });
+        },
+      );
+    }
 
     return Response.json({
       totalRequests: state.totalRequests,
@@ -667,7 +682,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     }
     state.ownerUserId = userId;
     state.plan = owner.plan;
-    const limits = await resolvePlanLimits(db, owner.plan);
+    const limits = await accountPlanLimits(db, owner, owner.plan);
     const requestsSuspended = evaluateRequestLimit(state, 0, limits);
     const sandboxRuntimeSuspended = evaluateSandboxRuntimeLimit(state, 0, limits);
     const aiSuspended = evaluateAiLimit(state, limits);
@@ -707,36 +722,6 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     await this.saveState(state);
     await this.ensureAiAlarm();
     return Response.json({ ok: true, requestsSuspended, sandboxRuntimeSuspended, aiSuspended });
-  }
-
-  /**
-   * Admin plan changes: optimistically clear ALL in-memory usage latches so the
-   * next handleRecord (and the AI alarm) re-evaluates against the new plan.
-   * Drops request + sandbox + AI — a plan change can lift any cap, and leaving
-   * `requestsSuspended` set would make the next `/init` re-stamp the routes the
-   * plan-change route just cleared. AI normally self-heals via the alarm, but
-   * the alarm returns early for unlimited-AI plans, so a capped→unlimited-AI
-   * upgrade needs the ai-block keys cleared here (projectId-keyed, owned by the
-   * DO). The plan-change route deletes the userId-keyed sandbox-block.
-   */
-  private async handleReevaluateSandbox(request: Request): Promise<Response> {
-    const body = (await request.json()) as { plan: string };
-    const state = await this.getState();
-    state.plan = body.plan;
-    state.requestsSuspended = false;
-    state.sandboxRuntimeSuspended = false;
-    if (state.aiSuspended) {
-      // Decision: Keep the durable latch set until each idempotent delete succeeds.
-      const db = createDb(this.env.HYPERDRIVE.connectionString);
-      if (state.ownerUserId) {
-        for (const projectId of Object.keys(state.projectSlugs)) {
-          await setProjectAiBlock(this.env.ROUTING, db, projectId, state.ownerUserId, false);
-        }
-      }
-      state.aiSuspended = false;
-    }
-    await this.saveState(state);
-    return Response.json({ ok: true });
   }
 
   /**
@@ -824,7 +809,7 @@ export class UsageCounter extends DurableObject<ApiEnv['Bindings']> {
     if (currentOwner) {
       state.plan = currentOwner.plan;
     }
-    const limits = await resolvePlanLimits(db, state.plan);
+    const limits = await accountPlanLimits(db, currentOwner, state.plan);
     const projectIds = [...ownedProjectIds];
     // Decision: Closed windows still need reconciliation on unlimited plans: detachment keeps their samples
     // without depending on the provider. Otherwise inactive accounts wake only while receipt pruning has

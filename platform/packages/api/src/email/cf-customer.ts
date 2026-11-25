@@ -397,11 +397,11 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
       let rule: unknown;
       try {
         rule = await call<unknown>(`/zones/${zoneId}/email/routing/rules/catch_all`);
-      } catch (err) {
-        if (err instanceof CloudflareApiError && err.status === 404) {
+      } catch (error) {
+        if (error instanceof CloudflareApiError && error.status === 404) {
           return null;
         }
-        throw err;
+        throw error;
       }
       // Decision: cfCustomerFetch already unwrapped the envelope's `result`.
       if (!rule || typeof rule !== 'object') {
@@ -503,11 +503,11 @@ export function createCfCustomerClient(credential: string): CfCustomerClient {
     deleteRelayScript: async (accountId, scriptName) => {
       try {
         await call(`/accounts/${accountId}/workers/scripts/${scriptName}`, { method: 'DELETE' });
-      } catch (err) {
-        if (err instanceof CloudflareApiError && err.status === 404) {
+      } catch (error) {
+        if (error instanceof CloudflareApiError && error.status === 404) {
           return;
         }
-        throw err;
+        throw error;
       }
     },
   };

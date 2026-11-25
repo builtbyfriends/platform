@@ -11,8 +11,8 @@ import {
   resolveAssetContentTypes,
   scanProjectAssetOrphanCandidates,
   uploadAssetBuckets,
-  type AssetEntry,
 } from '../../src/assets.ts';
+import type { AssetEntry } from '../../src/assets.ts';
 
 const enc = new TextEncoder();
 
@@ -22,7 +22,7 @@ describe('asset hash compatibility', () => {
     (size) => {
       const bytes = Uint8Array.from({ length: size }, (_, index) => index % 251);
       for (const path of ['/asset.js', '/nested/file.css', '/extensionless']) {
-        const input = Buffer.from(bytes).toString('base64') + extname(path).substring(1);
+        const input = Buffer.from(bytes).toString('base64') + extname(path).slice(1);
         const expected = Buffer.from(blake3hash(enc.encode(input)))
           .subarray(0, 16)
           .toString('hex');
@@ -41,7 +41,7 @@ describe('asset hash compatibility', () => {
           controller.close();
           return;
         }
-        const end = Math.min(bytes.length, offset + chunks[step++ % chunks.length]!);
+        const end = Math.min(bytes.length, offset + chunks[step++ % chunks.length]);
         controller.enqueue(bytes.slice(offset, end));
         offset = end;
       },
@@ -531,7 +531,6 @@ describe('uploadAssetBuckets', () => {
     );
 
     for (const call of fetchMock.mock.calls) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const options = (call as any)[1] as { headers: { Authorization: string } };
       expect(options.headers.Authorization).toBe('Bearer session-jwt');
     }

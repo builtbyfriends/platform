@@ -147,7 +147,7 @@ export const create = procedure('tokens.create')
           expires_at: expiresAt.toISOString(),
         })
         .returning();
-      return created!;
+      return created;
     });
     if (row === 'forbidden') {
       return fail('OWNER_ONLY');
@@ -225,7 +225,7 @@ export const renew = procedure('tokens.renew')
           expires_at: expiresAt.toISOString(),
         })
         .returning();
-      return replacement!;
+      return replacement;
     });
     if (result === 'project-not-found') {
       return fail('PROJECT_NOT_FOUND');

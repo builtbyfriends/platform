@@ -1,14 +1,16 @@
 import { join, toSlash } from 'pathslash';
 import { globSync } from 'tinyglobby';
 import { applyBindingOverrides } from './application-features.ts';
-import { inferBindingsFromSource, mergeBindings, type InferredBindings } from './inference/walk.ts';
-import { readProjectPaths, type ProjectPaths } from './project-paths.ts';
+import { inferBindingsFromSource, mergeBindings } from './inference/walk.ts';
+import type { InferredBindings } from './inference/walk.ts';
+import { readProjectPaths } from './project-paths.ts';
+import type { ProjectPaths } from './project-paths.ts';
 import {
   isRouteEnabledForEnvironment,
   parseRouteFilename,
   parseWebSocketFilename,
-  type RouteEnvironment,
 } from './router/parse-filename.ts';
+import type { RouteEnvironment } from './router/parse-filename.ts';
 import { isWebSocketPatternFile } from './router/websocket.ts';
 import { conventionFileGlobs, isRouteFile } from './shared/convention-files.ts';
 import { deriveFromSource } from './shared/source-analysis-cache.ts';

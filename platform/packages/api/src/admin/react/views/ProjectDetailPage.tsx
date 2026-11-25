@@ -11,11 +11,12 @@ import {
 } from '@astryxdesign/core/Table';
 import { useRequest, useView } from 'react-fate';
 import { ProjectDetailView, projectDetailRequest } from '../../fate/views.ts';
-import { type AdminPageProps } from '../page-utils.ts';
+import type { AdminPageProps } from '../page-utils.ts';
 import { Link } from '../spa.tsx';
 import { BuildTable } from './BuildTable.tsx';
 import { DeploymentTable } from './DeploymentTable.tsx';
 import { formatAiLoggingStatus, formatDateTime } from './format.ts';
+import { FormTextInput } from './FormControls.tsx';
 import { Layout } from './Layout.tsx';
 import { ProjectOwnerTransferSection } from './ProjectOwnerTransferSection.tsx';
 import { ProjectTeamSection } from './ProjectTeamSection.tsx';
@@ -90,6 +91,24 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
                 ) : (
                   project.user_id
                 )}
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableHeaderCell>Connected app</TableHeaderCell>
+              <TableCell>
+                {project.preview_client_id ??
+                  (owner?.provider.startsWith('app:') ? owner.provider.slice(4) : '—')}
+                {owner?.provider.startsWith('app:') ? ` (person ${owner.provider_id})` : ''}
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableHeaderCell>Status</TableHeaderCell>
+              <TableCell>
+                {project.suspended_reason
+                  ? `suspended: ${project.suspended_reason}${project.suspended_at ? ` since ${formatDateTime(project.suspended_at, tz)}` : ''}`
+                  : owner?.suspended_reason
+                    ? `owner suspended: ${owner.suspended_reason}`
+                    : 'active'}
               </TableCell>
             </TableRow>
             <TableRow>
@@ -187,6 +206,50 @@ export function ProjectDetailPage({ path, platformName, username }: AdminPagePro
       />
 
       <ProjectOwnerTransferSection projectId={project.id} />
+
+      <SectionStack>
+        <h2>Suspension</h2>
+        {project.suspended_reason ? (
+          <SectionStack
+            as="form"
+            maxWidth={320}
+            method="post"
+            action={`/admin/projects/${project.id}/restore`}
+            data-confirm={`Restore "${project.slug}"? Requests, cron jobs, queue delivery, AI calls, email and sandboxes resume unless the owner's account is suspended.`}
+          >
+            {project.suspended_note ? <p>Note for the owner: {project.suspended_note}</p> : null}
+            <FormTextInput
+              label="Private note (audit log only)"
+              name="operatorNote"
+              initialValue=""
+              maxLength={1000}
+            />
+            <Button type="submit" label="Restore Project" />
+          </SectionStack>
+        ) : (
+          <SectionStack
+            as="form"
+            maxWidth={320}
+            method="post"
+            action={`/admin/projects/${project.id}/suspend`}
+            data-confirm={`Take "${project.slug}" offline? Its address, custom domains and preview route show a 'not available' page. Cron jobs, queue delivery, AI calls, email and sandboxes stop. Data is kept. Queue messages are dropped when their retries run out, after about 3 hours by default. Restore does not bring them back.`}
+          >
+            <FormTextInput
+              label="Note for the owner"
+              name="note"
+              initialValue=""
+              maxLength={1000}
+            />
+            <FormTextInput
+              label="Private note (audit log only)"
+              name="operatorNote"
+              initialValue=""
+              maxLength={1000}
+            />
+            <Button type="submit" label="Suspend Project" variant="destructive" />
+          </SectionStack>
+        )}
+      </SectionStack>
 
       <SectionStack>
         <h2>Danger Zone</h2>

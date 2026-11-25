@@ -1,5 +1,5 @@
-import { type ApplicationAnalysis } from '../../application-analysis.ts';
-import { type BwfConfig } from '../../config.ts';
+import type { ApplicationAnalysis } from '../../application-analysis.ts';
+import type { BwfConfig } from '../../config.ts';
 import { assertNoRootSourceConventionConflicts } from '../../project-paths.ts';
 import { getErrorMessage } from '../output.ts';
 import { detectPreset, hasBackendFiles } from '../preset.ts';
@@ -24,9 +24,11 @@ export function classifyCloudflareDeployApp(
   options: CloudflareDeployAppOptions,
   application: ApplicationAnalysis,
 ): CloudflareDeployAppClassification {
-  const staticPreset = detectPreset(root, { dir: options.dir, spa: options.spa });
-  const configuredStatic =
-    bwfConfig.inference?.appType === 'static' || bwfConfig.inference?.appType === 'spa';
+  const configuredAppType = bwfConfig.inference?.appType;
+  const staticPreset = configuredAppType
+    ? null
+    : detectPreset(root, { dir: options.dir, spa: options.spa });
+  const configuredStatic = configuredAppType === 'static' || configuredAppType === 'spa';
   if (staticPreset || configuredStatic || options.dir || options.spa) {
     const appType = staticPreset?.appType ?? (options.spa ? 'spa' : 'static');
     return unsupported(

@@ -1,13 +1,34 @@
+export type AstValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | RegExp
+  | null
+  | undefined
+  | AstNode
+  | Array<AstValue>;
+
 export type AstNode = {
   type: string;
   start?: number;
   end?: number;
-  [key: string]: unknown;
+  [key: string]: AstValue;
 };
+
+export function isAstNode(value: unknown): value is AstNode {
+  return (
+    typeof value === 'object' && value !== null && 'type' in value && typeof value.type === 'string'
+  );
+}
 
 export type AstProgram = AstNode & {
   body?: Array<AstNode>;
 };
+
+export function isAstProgram(value: unknown): value is AstProgram {
+  return typeof value === 'object' && value !== null && 'type' in value && value.type === 'Program';
+}
 
 export type AstIdentifier = AstNode & {
   type: 'Identifier';
@@ -124,4 +145,38 @@ export function isCallExpression(node: AstNode | null | undefined): node is AstC
 
 export function isObjectExpression(node: AstNode | null | undefined): node is AstObjectExpression {
   return node?.type === 'ObjectExpression';
+}
+
+export function isExportAllDeclaration(node: AstNode): node is AstExportAllDeclaration {
+  return node.type === 'ExportAllDeclaration';
+}
+
+export function isExportNamedDeclaration(node: AstNode): node is AstExportNamedDeclaration {
+  return node.type === 'ExportNamedDeclaration';
+}
+
+export function isVariableDeclaration(node: AstNode): node is AstVariableDeclaration {
+  return node.type === 'VariableDeclaration';
+}
+
+export function astChild(node: AstNode, key: string): AstNode | undefined {
+  const value = node[key];
+  return isAstNode(value) ? value : undefined;
+}
+
+export function astChildren(node: AstNode, key: string): Array<AstNode> {
+  const value = node[key];
+  return Array.isArray(value) ? value.filter(isAstNode) : [];
+}
+
+export function isImportDeclaration(node: AstNode): node is AstImportDeclaration {
+  return node.type === 'ImportDeclaration';
+}
+
+export function isImportSpecifier(node: AstNode): node is AstImportSpecifier {
+  return node.type === 'ImportSpecifier';
+}
+
+export function isImportNamespaceSpecifier(node: AstNode): node is AstImportNamespaceSpecifier {
+  return node.type === 'ImportNamespaceSpecifier';
 }

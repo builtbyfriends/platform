@@ -10,9 +10,11 @@ import {
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { readConfigEntryString as readD1EntryString } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { dirname, join, resolve } from 'pathslash';
-import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
-import { type BwfConfig } from '../config.ts';
+import { analyzeApplicationSync } from '../application-analysis.ts';
+import type { ApplicationAnalysis } from '../application-analysis.ts';
+import type { BwfConfig } from '../config.ts';
 import {
   resolveSandboxConfig,
   sandboxContainerConfig,
@@ -20,7 +22,7 @@ import {
   hasSandboxSqliteMigration,
   isSandboxAttached,
 } from '../sandbox/config.ts';
-import { type BindingIdentitySnapshot } from './deploy-types.ts';
+import type { BindingIdentitySnapshot } from './deploy-types.ts';
 import { resolveCloudflareOperationArgv } from './preset.ts';
 import type { DesiredResourceSet, ProvisionDriftEntry } from './provision.ts';
 import {
@@ -234,11 +236,11 @@ export function reconstructExpectedContainers(
   root: string,
   rootConfig: Record<string, unknown>,
   needsSandbox: boolean,
-): Array<Record<string, unknown>> {
-  const rootContainers: Array<Record<string, unknown>> = Array.isArray(rootConfig.containers)
-    ? (rootConfig.containers as Array<Record<string, unknown>>)
+): Array<unknown> {
+  const rootContainers: Array<unknown> = Array.isArray(rootConfig.containers)
+    ? rootConfig.containers
     : [];
-  const expected: Array<Record<string, unknown>> = [...rootContainers];
+  const expected: Array<unknown> = [...rootContainers];
   if (needsSandbox) {
     const sandbox = resolveSandboxConfig(config, root);
     const index = expected.findIndex(
@@ -254,21 +256,17 @@ export function reconstructExpectedContainers(
 
 /** Normalize only the named-image path fields Vite relocates into its output config. */
 export function normalizeContainerImagePaths(container: unknown, base: string): unknown {
-  if (!container || typeof container !== 'object' || Array.isArray(container)) {
-    return container;
-  }
-  const value = container as Record<string, unknown>;
-  if (!value.images || typeof value.images !== 'object' || Array.isArray(value.images)) {
+  if (!isRecord(container) || !isRecord(container.images)) {
     return container;
   }
   return {
-    ...value,
+    ...container,
     images: Object.fromEntries(
-      Object.entries(value.images).map(([name, source]) => {
-        if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      Object.entries(container.images).map(([name, source]) => {
+        if (!isRecord(source)) {
           return [name, source];
         }
-        const image = { ...source } as Record<string, unknown>;
+        const image = { ...source };
         for (const key of ['dockerfile', 'build_context']) {
           if (typeof image[key] === 'string') {
             image[key] = resolve(base, image[key]);
@@ -280,16 +278,18 @@ export function normalizeContainerImagePaths(container: unknown, base: string): 
   };
 }
 
+export type ExpectedDurableObjectState = {
+  bindings: Array<Record<string, unknown>>;
+  migrations: Array<Record<string, unknown>>;
+};
+
 /** Reconstruct the Durable Object state emitted after the pre-build root config is synced. */
 export function reconstructExpectedDurableObjectState(
   config: BwfConfig,
   root: string,
   rootConfig: Record<string, unknown>,
   options: { needsSandbox: boolean; needsLive: boolean; analysis?: ApplicationAnalysis },
-): {
-  bindings: Array<Record<string, unknown>>;
-  migrations: Array<Record<string, unknown>>;
-} {
+): ExpectedDurableObjectState {
   // Decision: classifyCloudflareDeployApp syncs WebSocket and authored Durable Object modules into the root
   // config before this snapshot. The build starts with that same config, then may append its sandbox
   // and live bindings.
@@ -297,7 +297,7 @@ export function reconstructExpectedDurableObjectState(
     ({ entry }) => entry,
   );
   const migrations: Array<Record<string, unknown>> = Array.isArray(rootConfig.migrations)
-    ? [...(rootConfig.migrations as Array<Record<string, unknown>>)]
+    ? rootConfig.migrations.filter(isRecord)
     : [];
   const sandbox = options.needsSandbox ? resolveSandboxConfig(config, root) : undefined;
   if (sandbox && !isSandboxAttached(sandbox)) {
@@ -354,7 +354,7 @@ export function hashWranglerUploader(
   let entry: string | undefined;
   try {
     const argv = resolveArgv(root);
-    entry = argv[argv.length - 1];
+    entry = argv.at(-1);
   } catch {
     return undefined;
   }
@@ -432,7 +432,7 @@ function hashDirectoryContents(dir: string): string | undefined {
                 throw new Error(`Unsupported uploader symlink target: ${childRel}`);
               }
             } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+              if (!(isRecord(error) && error.code === 'ENOENT')) {
                 throw error;
               }
               hash.update('missing');
@@ -453,6 +453,8 @@ function hashDirectoryContents(dir: string): string | undefined {
   }
 }
 
+export type DeployConfigCheck = { ok: boolean; reason?: string };
+
 /**
  * Fail when the uploader hash changed across the build or could not be computed: a build that
  * rewrote the uploader would otherwise run with the Cloudflare credentials.
@@ -460,7 +462,7 @@ function hashDirectoryContents(dir: string): string | undefined {
 export function assertWranglerUploaderUnchanged(
   before: string | undefined,
   after: string | undefined,
-): { ok: boolean; reason?: string } {
+): DeployConfigCheck {
   if (before === undefined || after === undefined) {
     return {
       ok: false,
@@ -487,13 +489,13 @@ export function isEmptyPassthroughValue(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (typeof value === 'object') {
-    const keys = Object.keys(value as Record<string, unknown>);
+  if (isRecord(value)) {
+    const keys = Object.keys(value);
     if (keys.length === 0) {
       return true;
     }
     if (keys.length === 1 && keys[0] === 'bindings') {
-      const bindings = (value as Record<string, unknown>).bindings;
+      const bindings = value.bindings;
       return Array.isArray(bindings) && bindings.length === 0;
     }
   }
@@ -507,7 +509,7 @@ export function isEmptyPassthroughValue(value: unknown): boolean {
 export function verifyNoInjectedExternalDurableObject(
   emitted: unknown,
   root: unknown,
-): { ok: boolean; reason?: string } {
+): DeployConfigCheck {
   let emittedEntries: Array<{ name: string; entry: Record<string, unknown> }>;
   try {
     emittedEntries = bindingEntriesForField('durable_objects', emitted);
@@ -548,16 +550,16 @@ export function verifyNoInjectedExternalDurableObject(
 export function verifyNoInjectedDestructiveMigration(
   emitted: unknown,
   root: unknown,
-): { ok: boolean; reason?: string } {
+): DeployConfigCheck {
   if (!Array.isArray(emitted)) {
     return { ok: true };
   }
   const rootEntries = Array.isArray(root) ? root : [];
   for (const entry of emitted) {
-    if (entry === null || typeof entry !== 'object') {
+    if (!isRecord(entry)) {
       continue;
     }
-    const record = entry as Record<string, unknown>;
+    const record = entry;
     if (!DESTRUCTIVE_MIGRATION_KEYS.some((key) => record[key] !== undefined)) {
       continue;
     }
@@ -578,10 +580,10 @@ export function collectEmittedQueueGroupNames(
   group: 'producers' | 'consumers',
 ): Set<string> {
   const names = new Set<string>();
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return names;
   }
-  const list = (value as Record<string, unknown>)[group];
+  const list = value[group];
   if (!Array.isArray(list)) {
     return names;
   }

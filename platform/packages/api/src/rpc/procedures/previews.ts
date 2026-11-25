@@ -7,7 +7,8 @@ import {
   requestPreviewDeployment,
   requirePreviewPermission,
 } from '../../routes/previews.ts';
-import { appProcedure, connectedApp, type AppCaller } from '../app-procedure.ts';
+import { appProcedure, connectedApp } from '../app-procedure.ts';
+import type { AppCaller } from '../app-procedure.ts';
 
 const PREVIEW_ERRORS = {
   ACCESS_DENIED: { status: 403, message: 'preview access denied' },
@@ -49,7 +50,7 @@ async function permitted(caller: AppCaller): Promise<AppCaller> {
 export const create = appProcedure('previews.create')
   .use(connectedApp)
   .noAuthz({ reason: 'The grant must hold preview:deploy, checked in the handler' })
-  .input(type({ workspace: 'string' }))
+  .input(type({ workspace: 'string', 'payer?': 'string' }))
   .output(type({ project_id: 'string', url: 'string', deployment_id: 'string | null' }))
   .errors(PREVIEW_ERRORS)
   .noMcp({ reason: 'Connected applications call this over /app-rpc with their grant' })
@@ -80,6 +81,7 @@ export const deploy = appProcedure('previews.deploy')
     try {
       return await requestPreviewDeployment(
         await permitted(ctx),
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the callee validates the artifact at runtime
         input as Parameters<typeof requestPreviewDeployment>[1],
       );
     } catch (error) {

@@ -2,7 +2,8 @@ import { PLATFORM_DISABLED_KEY, PLATFORM_DISABLED_VALUE } from '@builtbyfriends/
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import app from '../../src/index.ts';
 import { adminHtml } from '../helpers/admin-html.tsx';
-import { setupEnv, teardownEnv, type TestEnv } from './helpers.ts';
+import { setupEnv, teardownEnv } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 beforeAll(async () => {

@@ -23,8 +23,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let owner: Awaited<ReturnType<typeof createTestUser>>;
@@ -117,7 +117,7 @@ function streamingR2(contentType: string | undefined = 'text/html; charset=utf-8
           return;
         }
         const chunks = strict ? [1, 2, 5] : [64 * 1024];
-        const end = Math.min(offset + chunks[nextSize++ % chunks.length]!, bytes.byteLength);
+        const end = Math.min(offset + chunks[nextSize++ % chunks.length], bytes.byteLength);
         controller.enqueue(bytes.subarray(offset, end));
         offset = end;
       },
@@ -134,7 +134,7 @@ function streamingR2(contentType: string | undefined = 'text/html; charset=utf-8
           headers.set('Content-Type', type);
         }
       },
-    } as R2ObjectBody;
+    };
   });
   return { get, arrayBuffer };
 }
@@ -556,7 +556,7 @@ describe('operator deployment asset migration', () => {
       if (state === 'partial') {
         await env.ROUTING.put(
           `manifest:${deployment.id}`,
-          JSON.stringify({ [entries[0]!.path]: entries[0]!.hash }),
+          JSON.stringify({ [entries[0].path]: entries[0].hash }),
         );
       }
       for (const entry of entries) {
@@ -767,7 +767,7 @@ describe('operator deployment asset migration', () => {
       asset('/second.html', 'Missing second asset', 'kv'),
     ].sort((a, b) => a.hash.localeCompare(b.hash));
     const { project, deployment } = await fixture(entries);
-    await env.STATIC_ASSETS.put(`assets/${entries[0]!.hash}`, entries[0]!.bytes);
+    await env.STATIC_ASSETS.put(`assets/${entries[0].hash}`, entries[0].bytes);
     const oldServing = await env.ROUTING.get(`manifest:${deployment.id}`);
     const oldMetadata = (await getDeployment(env.db, deployment.id))!.asset_hashes;
     const response = await apply(deployment.id);
@@ -777,10 +777,10 @@ describe('operator deployment asset migration', () => {
     ).toHaveLength(1);
     expect((await getDeployment(env.db, deployment.id))!.asset_hashes).toBe(oldMetadata);
     expect(await env.ROUTING.get(`manifest:${deployment.id}`)).toBe(oldServing);
-    expect(await env.STATIC_ASSETS.get(`assets/${entries[0]!.hash}`, 'arrayBuffer')).toEqual(
-      entries[0]!.bytes,
+    expect(await env.STATIC_ASSETS.get(`assets/${entries[0].hash}`, 'arrayBuffer')).toEqual(
+      entries[0].bytes,
     );
-    await env.STATIC_ASSETS.put(`assets/${entries[1]!.hash}`, entries[1]!.bytes);
+    await env.STATIC_ASSETS.put(`assets/${entries[1].hash}`, entries[1].bytes);
     const retry = await apply(deployment.id);
     expect(retry.status, await retry.clone().text()).toBe(200);
     await assertMigrated(deployment.id, project.id, entries);

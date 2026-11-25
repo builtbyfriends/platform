@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vite-plus/test';
 import { getProject, getProjectResources } from '../../src/db.ts';
 import type { ApiEnv } from '../../src/env.ts';
+import { FAST_MAINTENANCE_KEY } from '../../src/fast-maintenance.ts';
 import { app } from '../../src/index.ts';
 import { getProjectQueueName } from '../../src/naming.ts';
 import { settleDeploymentForSandboxDrain } from '../../src/routes/deploy.ts';
@@ -14,9 +15,9 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   rpcRequest,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;
@@ -85,7 +86,7 @@ test('previews without writing, records the older serving rollback target, audit
   });
   expect((await req(project.id, { expected: repeatBody.changes })).status).toBe(200);
   expect(await env.ROUTING.get(project.slug)).toBe(route);
-  expect(put).not.toHaveBeenCalled();
+  expect(put.mock.calls.map(([key]) => key)).toEqual([FAST_MAINTENANCE_KEY]);
   expect(del).not.toHaveBeenCalled();
   expect(await env.db.select().from(operatorEvents)).toEqual(
     expect.arrayContaining([

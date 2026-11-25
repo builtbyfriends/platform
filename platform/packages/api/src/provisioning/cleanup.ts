@@ -12,13 +12,12 @@ import {
   notInArray,
 } from 'drizzle-orm';
 import { Context } from 'hono';
-import { aiLoggingKey } from '../ai-logging-policy.ts';
+import { aiLoggingClearedKey, aiLoggingKey } from '../ai-logging-policy.ts';
 import { deleteProjectAssets, deleteWorkerBundle } from '../assets.ts';
 import { DEFAULT_DISPATCH_NAMESPACE } from '../constants.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
 import {
   TERMINAL_DEPLOYMENT_STATUSES,
-  type Db,
   deleteProjectCascade,
   cleanupJobsForResource,
   enqueueProjectCleanupJobs,
@@ -31,8 +30,8 @@ import {
   getProjectResources,
   getUser,
   terminateBuildsForProject,
-  type ProjectCleanupJobInput,
 } from '../db.ts';
+import type { Db, ProjectCleanupJobInput } from '../db.ts';
 import { drainProjectEmailAdmissions } from '../email/admission.ts';
 import { emailDomainRoutes, emailZoneConnections } from '../email/connection-schema.ts';
 import { requestEmailDomainRemove, runEmailOperation } from '../email/connection-service.ts';
@@ -50,6 +49,7 @@ import {
   projectOwnershipPeriods,
   projects as projectsTable,
 } from '../schema.ts';
+import { projectSuspensionKey } from '../suspension.ts';
 import { getCurrentBillingPeriodStart } from '../tiers.ts';
 import type { Build, DeployManifest, Project, ProjectOwnershipPeriod, Resource } from '../types.ts';
 import { cleanupProjectZeroTrust } from '../zero-trust/project.ts';
@@ -217,7 +217,7 @@ async function runCleanupBatch(
   await Promise.all(
     Array.from({ length: Math.min(5, jobs.length) }, async () => {
       while (next < jobs.length) {
-        const job = jobs[next++]!;
+        const job = jobs[next++];
         try {
           await executeCleanupJob(env, job);
         } catch (error) {
@@ -433,14 +433,11 @@ async function cleanupBestEffortResources(
   // Decision: Clear the cron scheduler DO unconditionally; /clear is idempotent (deleteAll + deleteAlarm). KV
   // `hasCrons` is omitted when false and missing on older entries, and the PG manifest is the
   // authority, so an unconditional clear avoids a stale-KV gate.
-  cleanup.push(cleanupJob(projectId, 'cron', projectId, { projectId }));
-
   cleanup.push(
+    cleanupJob(projectId, 'cron', projectId, { projectId }),
     cleanupJob(projectId, 'routing-key', projectRouteKey(project), {
       key: projectRouteKey(project),
     }),
-  );
-  cleanup.push(
     cleanupJob(projectId, 'routing-key', `ai-block:${projectId}`, { key: `ai-block:${projectId}` }),
   );
 
@@ -660,8 +657,8 @@ async function lockAndMarkDeleting(
     return {
       ownerUserId: lockedProject.user_id,
       ownerBillingCycleStart: owner.billing_cycle_start,
-      ownershipStartedAt: ownership!.starts_at,
-      ownershipEndedAt: ownership!.ends_at!,
+      ownershipStartedAt: ownership.starts_at,
+      ownershipEndedAt: ownership.ends_at!,
       cancelledBuilds: await terminateBuildsForProject(tx, projectId, {
         reason: 'project deleted',
       }),
@@ -771,7 +768,7 @@ export async function reconcileProjectCleanupJobs(db: Db, env: ApiEnv['Bindings'
   await Promise.all(
     Array.from({ length: Math.min(5, due.length) }, async () => {
       while (next < due.length) {
-        const job = due[next++]!;
+        const job = due[next++];
         // Decision: A later invocation can see the same due snapshot. Claim without holding a database transaction
         // open across provider I/O.
         const claimed = await db
@@ -912,6 +909,12 @@ export async function teardownProject(
   // that the hourly sweep removes.
   const aiLogging = await runCleanupBatch(context.env, [
     cleanupJob(projectId, 'routing-key', aiLoggingKey(projectId), { key: aiLoggingKey(projectId) }),
+    cleanupJob(projectId, 'routing-key', aiLoggingClearedKey(projectId), {
+      key: aiLoggingClearedKey(projectId),
+    }),
+    cleanupJob(projectId, 'routing-key', projectSuspensionKey(projectId), {
+      key: projectSuspensionKey(projectId),
+    }),
   ]);
   return { warnings: [...bestEffortWarnings, ...orphanWarnings, ...aiLogging.warnings] };
 }
@@ -927,6 +930,7 @@ export async function reapExpiredPreviews(db: Db, env: ApiEnv['Bindings']): Prom
         lte(projectsTable.preview_expires_at, drizzleSql`now()`),
       ),
     )
+    .orderBy(asc(projectsTable.preview_expires_at))
     .limit(3);
   for (const project of candidates) {
     const claimed = await db

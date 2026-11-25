@@ -560,7 +560,10 @@ export function compileRouteTable(
       lines.push(
         `        const mod = await import(${JSON.stringify(`${queuesDir}/${q.filePath}`)});`,
       );
-      lines.push("        if (typeof mod.default === 'function') await mod.default(batch, env);");
+      lines.push(
+        `        if (typeof mod.default !== 'function') throw new Error(${JSON.stringify(`Queue file ${q.filePath} has no default export.`)});`,
+      );
+      lines.push('        await mod.default(batch, env);');
       lines.push('        break;');
       lines.push('      }');
     }
@@ -912,7 +915,7 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
       ? (sandbox.runtimePath ?? '@builtbyfriends/bwf/sandbox')
       : '@builtbyfriends/bwf/sandbox';
   const sandboxImport = hasSandbox
-    ? `import { BwfPlatformSandbox as __PlatformSandbox, __setSandboxBindingName } from ${JSON.stringify(sandboxRuntimePath)};\n`
+    ? `import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, DirectoryBackupGateway, __setSandboxBindingName } from ${JSON.stringify(sandboxRuntimePath)};\nexport { SandboxOutboundHandler, DirectoryBackupGateway };\n`
     : '';
   const sandboxInstanceType = typeof sandbox === 'object' ? sandbox.instanceType : undefined;
   const sandboxExport = hasSandbox

@@ -10,6 +10,7 @@ import {
   vi,
 } from 'vite-plus/test';
 import type { ApiEnv } from '../../src/env.ts';
+import { FAST_MAINTENANCE_KEY } from '../../src/fast-maintenance.ts';
 import { FAST_CRON, scheduled } from '../../src/index.ts';
 import {
   domains,
@@ -17,10 +18,8 @@ import {
   projects as projectTable,
   projectZeroTrust,
 } from '../../src/schema.ts';
-import {
-  readZeroTrustConfigurationStrict,
-  type ZeroTrustConfigureInput,
-} from '../../src/zero-trust/configuration.ts';
+import { readZeroTrustConfigurationStrict } from '../../src/zero-trust/configuration.ts';
+import type { ZeroTrustConfigureInput } from '../../src/zero-trust/configuration.ts';
 import {
   configurePlatformZeroTrust,
   disablePlatformZeroTrust,
@@ -40,8 +39,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 
@@ -132,23 +131,23 @@ function accessApi(options?: {
     if (policyMatch) {
       return Response.json({
         success: true,
-        result: applications.get(policyMatch[1]!)?.policies ?? [],
+        result: applications.get(policyMatch[1])?.policies ?? [],
       });
     }
     const match = path.match(/^apps\/([^/]+)$/);
     if (match && init?.method === 'PUT') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      const previous = applications.get(match[1]!);
+      const previous = applications.get(match[1]);
       const application = { ...body, id: match[1], aud: previous?.aud ?? `aud-${match[1]}` };
-      applications.set(match[1]!, application);
+      applications.set(match[1], application);
       return Response.json({ success: true, result: application });
     }
     if (match && init?.method === 'DELETE') {
-      applications.delete(match[1]!);
+      applications.delete(match[1]);
       return Response.json({ success: true, result: { id: match[1] } });
     }
     if (match) {
-      const application = applications.get(match[1]!);
+      const application = applications.get(match[1]);
       return application
         ? Response.json({ success: true, result: application })
         : Response.json(
@@ -543,9 +542,10 @@ describe('project Zero Trust reconciliation', () => {
       .limit(1);
     expect(unseeded).toBeDefined();
     await expect(
-      initializeNewProjectZeroTrust(bindings, env.db, unseeded!.id),
+      initializeNewProjectZeroTrust(bindings, env.db, unseeded.id),
     ).resolves.toMatchObject({ desired_protected: false, status: 'reconciling' });
 
+    await env.ROUTING.put(FAST_MAINTENANCE_KEY, 'armed');
     const controller = {
       cron: FAST_CRON,
       scheduledTime: Date.now(),
@@ -653,6 +653,56 @@ describe('project Zero Trust reconciliation', () => {
         String(application.domain).startsWith('*.'),
       )?.policies,
     ).toEqual([{ id: 'policy-2', precedence: 1 }]);
+  });
+
+  it('limits a project to the email domains it names, at its platform address', async () => {
+    const owner = await createTestUser(env.db, 'zero-trust-email-owner');
+    const project = await createTestProject(env.db, owner.id, 'company-app');
+    const cloudflare = accessApi();
+    vi.stubGlobal('fetch', cloudflare.fetcher);
+    const bindings = platformBindings();
+    await configurePlatformZeroTrust(bindings, env.db, PROTECTED_CONFIGURATION);
+    await env.db
+      .update(projectZeroTrust)
+      .set({ access_email_domains: ['example.com'] })
+      .where(eq(projectZeroTrust.project_id, project.id));
+
+    const state = await setProjectZeroTrustProtection(bindings, env.db, project.id, true);
+    expect(state).toMatchObject({ effective_protected: true, status: 'ready' });
+    const application = cloudflare.applications.get(state.protected_application_id!)!;
+    expect(application.policies).toEqual([
+      expect.objectContaining({
+        decision: 'allow',
+        include: [{ email_domain: { domain: 'example.com' } }],
+      }),
+    ]);
+    const hosts = state.protected_application_platform_hosts!;
+    expect(hosts).toContain('company-app.apps.example.com');
+    const covered = [
+      application.domain,
+      ...((application.self_hosted_domains as Array<string>) ?? []),
+    ];
+    expect(covered).toEqual(expect.arrayContaining([...hosts]));
+    const routing = await resolveProjectZeroTrustRouting(env.db, project.id);
+    expect(routing!.audiences).toEqual(
+      expect.arrayContaining([
+        { hostname: 'company-app.apps.example.com', audience: application.aud },
+      ]),
+    );
+
+    await env.db
+      .update(projectZeroTrust)
+      .set({ access_email_domains: null })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    const plain = await setProjectZeroTrustProtection(bindings, env.db, project.id, true);
+    expect(plain.protected_application_platform_hosts).toBeNull();
+    expect(plain.protected_application_id).toBeNull();
+    expect(cloudflare.applications.has(state.protected_application_id!)).toBe(false);
+    expect(await resolveProjectZeroTrustRouting(env.db, project.id)).not.toMatchObject({
+      audiences: expect.arrayContaining([
+        { hostname: 'company-app.apps.example.com', audience: application.aud },
+      ]),
+    });
   });
 
   it('serializes a newer protected intent behind an in-flight public transition', async () => {

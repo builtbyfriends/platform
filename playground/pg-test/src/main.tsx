@@ -1,5 +1,6 @@
 import { fetch } from '@builtbyfriends/bwf/client';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 const loadUsers = () => fetch('/api/users');

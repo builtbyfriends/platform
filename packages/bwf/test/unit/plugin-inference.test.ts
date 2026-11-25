@@ -369,7 +369,7 @@ describe('inferProjectBindings', () => {
       ) => import('vite').UserConfig | void;
 
       expect(externalPlugin).toBeTruthy();
-      const result = config.call({} as never, {}, { command: 'build', mode: 'production' });
+      const result = config.call({}, {}, { command: 'build', mode: 'production' });
       const rootExternal = result?.build?.rollupOptions?.external as Array<unknown>;
       expect(rootExternal).toBeTruthy();
       expect(
@@ -494,7 +494,7 @@ describe('detectFramework', () => {
 
     try {
       bwfPlugin();
-      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf-8');
+      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
       expect(entry).toContain('PlatformLiveStreamDurableObject');
       expect(entry).toContain('export { PlatformLiveStreamDurableObject };');
       expect(entry).toContain('__setLiveBindingName("BWF_LIVE");');
@@ -516,7 +516,7 @@ describe('detectFramework', () => {
 
     try {
       bwfPlugin();
-      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf-8');
+      const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
       expect(entry).toContain('import __platformDurableObject0 from');
       expect(entry).toContain('/durable-objects/shopping-cart.ts');
       expect(entry).toContain('__platformDurableObject0.__bind("SHOPPING_CART")');

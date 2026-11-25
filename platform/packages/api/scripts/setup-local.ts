@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as p from '@voidzero-dev/vite-plus-prompts';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = import.meta.dirname;
 const platformDir = resolve(__dirname, '..');
 const seedSql = resolve(__dirname, 'seed.sql');
 const drizzleDir = resolve(__dirname, '../drizzle');

@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { isRecord } from '@builtbyfriends/deploy-core';
 import type { PlatformDiscoveryDocument } from '@builtbyfriends/platform';
 import { log, confirm, isCancel, cancel, select, text } from '@voidzero-dev/vite-plus-prompts';
-import { parse, type ParseError } from 'jsonc-parser';
+import { applyEdits, modify, parse, type FormattingOptions, type ParseError } from 'jsonc-parser';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathslash';
 import { materializeCloudflareConfig } from '../cloudflare-config.ts';
 import { createProjectTsconfig, ensureProjectTsconfig } from '../codegen/project-tsconfig.ts';
@@ -40,6 +40,7 @@ import { migrateLegacyBwfConfig } from './migrate.ts';
 import { formatUrl, note, printSuccess } from './output.ts';
 import { discoverPlatform, saveDiscoveredPlatform } from './platform-cmd.ts';
 import { formatProjectCommand } from './preset.ts';
+import { validateProjectSlug } from './project-slug.ts';
 import {
   readDeploymentPlatform,
   readProjectConfig,
@@ -60,6 +61,12 @@ import {
   type ScaffoldToolchain,
 } from './template.ts';
 import { patchViteConfigWithBwfPlugin } from './vite-config-patch.ts';
+import {
+  findWorkspaceMemberRoot,
+  findWorkspaceRoot,
+  parsePackageManagerField,
+  stripYamlLineComment,
+} from './workspace.ts';
 import { LATEST_KNOWN_COMPAT_DATE, writeProvisionedWranglerConfig } from './wrangler.ts';
 import {
   buildDrizzleKitSpawnEnv,
@@ -205,6 +212,12 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
   'vite',
   'vite-plus',
   'typescript',
+  'oxlint',
+  'tsrs',
+  '@aranlucas/oxlint-plugin-anti-slop',
+  '@cloudflare/oxlint-config',
+  'eslint-plugin-react-you-might-not-need-an-effect',
+  'oxlint-plugin-react-doctor',
   '@rolldown/plugin-babel',
   '@vitejs/plugin-react',
   'babel-plugin-react-compiler',
@@ -222,6 +235,7 @@ const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
   dev: new Set(['vite', 'vp dev']),
   build: new Set(['vite build', 'vp build']),
   preview: new Set(['vite preview', 'vp preview']),
+  lint: new Set(['oxlint']),
   postinstall: new Set(['bwf prepare']),
 };
 const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
@@ -658,22 +672,6 @@ type ProjectState = {
   typescriptWanted: boolean;
 };
 
-function parsePackageManagerField(pkg: unknown): ProjectState['packageManager'] | undefined {
-  if (!pkg || typeof pkg !== 'object') {
-    return undefined;
-  }
-  const raw = (pkg as { packageManager?: unknown }).packageManager;
-  if (typeof raw !== 'string') {
-    return undefined;
-  }
-  // Decision: Corepack spec: "name@version[+sha.<hash>]".
-  const name = raw.split('@', 1)[0]?.trim();
-  if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') {
-    return name;
-  }
-  return undefined;
-}
-
 /**
  * Whether pnpm manages `root`. pnpm keeps the lockfile and Corepack pin at the
  * workspace root, so a member without local markers inherits them, but a local
@@ -706,11 +704,8 @@ function isPnpmProject(root: string, pkg: JsonObject): boolean {
  * A scratch app outside the workspace globs is a separate project.
  */
 function hasAncestorPnpmMarkers(start: string): boolean {
-  const workspaceRoot = findWorkspaceRoot(start);
+  const workspaceRoot = findWorkspaceMemberRoot(start);
   if (workspaceRoot === undefined) {
-    return false;
-  }
-  if (!isWorkspaceSubpackage(workspaceRoot, start)) {
     return false;
   }
   if (existsSync(join(workspaceRoot, 'pnpm-workspace.yaml'))) {
@@ -765,284 +760,9 @@ export function isBwfResolvableFrom(start: string): boolean {
   return false;
 }
 
-/**
- * Nearest ancestor of `start` (excluding `start`) with a `pnpm-workspace.yaml`
- * or a `package.json#workspaces` field.
- */
-function findWorkspaceRoot(start: string): string | undefined {
-  let dir = dirname(start);
-  while (true) {
-    const pkgPath = join(dir, 'package.json');
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
-        if (pkg && typeof pkg === 'object' && 'workspaces' in pkg) {
-          return dir;
-        }
-      } catch {}
-    }
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      return undefined;
-    }
-    dir = parent;
-  }
-}
-
-/**
- * Member globs from `pnpm-workspace.yaml#packages` or `package.json#workspaces`
- * (an array or `{ packages }`). Empty when none can be read.
- */
-function readWorkspacePatterns(workspaceRoot: string): Array<string> {
-  const pnpmWorkspacePath = join(workspaceRoot, 'pnpm-workspace.yaml');
-  if (existsSync(pnpmWorkspacePath)) {
-    try {
-      const yaml = readFileSync(pnpmWorkspacePath, 'utf-8');
-      return extractPnpmWorkspacePackages(yaml);
-    } catch {
-      return [];
-    }
-  }
-  const pkgPath = join(workspaceRoot, 'package.json');
-  if (existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
-      const workspaces = (pkg as { workspaces?: unknown }).workspaces;
-      if (Array.isArray(workspaces)) {
-        return workspaces.filter((x): x is string => typeof x === 'string');
-      }
-      if (workspaces && typeof workspaces === 'object') {
-        const packages = (workspaces as { packages?: unknown }).packages;
-        if (Array.isArray(packages)) {
-          return packages.filter((x): x is string => typeof x === 'string');
-        }
-      }
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-/** Strip a trailing YAML comment, keeping `#` inside quotes (`- "path #hash/*"`). */
-function stripYamlLineComment(line: string): string {
-  let inSingle = false;
-  let inDouble = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inSingle) {
-      if (ch === "'") {
-        inSingle = false;
-      }
-      continue;
-    }
-    if (inDouble) {
-      if (ch === '"') {
-        inDouble = false;
-      }
-      continue;
-    }
-    if (ch === "'") {
-      inSingle = true;
-      continue;
-    }
-    if (ch === '"') {
-      inDouble = true;
-      continue;
-    }
-    if (ch === '#' && i > 0 && /\s/.test(line[i - 1])) {
-      return line.slice(0, i).replace(/\s+$/, '');
-    }
-  }
-  return line;
-}
-
-/**
- * Read the `packages:` list of a `pnpm-workspace.yaml` in block (`- 'apps/*'`)
- * or flow (`packages: ['apps/*']`) form.
- */
-export function extractPnpmWorkspacePackages(yaml: string): Array<string> {
-  const lines = yaml.split(/\r?\n/);
-  const patterns: Array<string> = [];
-  let inPackages = false;
-  for (const rawLine of lines) {
-    const line = stripYamlLineComment(rawLine);
-
-    const inlineMatch = line.match(/^\s*packages\s*:\s*\[(.*)\]\s*$/);
-    if (inlineMatch) {
-      const inner = inlineMatch[1];
-      const items = inner.match(/(['"])(?:(?!\1).)*\1|[^,\s]+/g) ?? [];
-      for (const raw of items) {
-        const unquoted = raw.trim().replace(/^(['"])(.*)\1$/, '$2');
-        if (unquoted) {
-          patterns.push(unquoted);
-        }
-      }
-      inPackages = false;
-      continue;
-    }
-
-    if (/^\s*packages\s*:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (!inPackages) {
-      continue;
-    }
-    // Decision: Any other top-level key ends the `packages:` block.
-    if (/^[A-Za-z_][\w-]*\s*:\s*(?:\S.*)?$/.test(line) && !/^\s/.test(line)) {
-      inPackages = false;
-      continue;
-    }
-    const m = line.match(/^\s*-\s*(['"]?)([^'"\s][^'"]*?)\1\s*$/);
-    if (m) {
-      patterns.push(m[2]);
-    }
-  }
-  return patterns;
-}
-
-/** Expand `{a,b}` brace groups, including several groups in one pattern. */
-function expandBraces(pattern: string): Array<string> {
-  const match = pattern.match(/^([^{}]*)\{([^{}]*)\}(.*)$/);
-  if (!match) {
-    return [pattern];
-  }
-  const [, before, group, after] = match;
-  const options = group
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (options.length === 0) {
-    return [pattern];
-  }
-  const results: Array<string> = [];
-  for (const opt of options) {
-    for (const sub of expandBraces(before + opt + after)) {
-      results.push(sub);
-    }
-  }
-  return results;
-}
-
-// Decision: Supports *, **, ./ and {a,b} braces; ?, [...] and extglobs are matched literally.
-function matchesWorkspacePattern(relPath: string, pattern: string): boolean {
-  const expansions = expandBraces(pattern);
-  return expansions.some((p) => matchesSingleWorkspacePattern(relPath, p));
-}
-
-function matchesSingleWorkspacePattern(relPath: string, pattern: string): boolean {
-  const normalizedPattern = pattern.replace(/^\.\/+/, '');
-  const pathSegs = relPath
-    .replace(/^\/+|\/+$/g, '')
-    .split('/')
-    .filter(Boolean);
-  const patSegs = normalizedPattern
-    .replace(/^\/+|\/+$/g, '')
-    .split('/')
-    .filter(Boolean);
-  const compiled = patSegs.map(compilePatternSegment);
-  return matchSegments(pathSegs, 0, compiled, 0);
-}
-
-type CompiledSegment =
-  | { kind: 'literal'; value: string }
-  | { kind: 'regex'; re: RegExp }
-  | { kind: 'globstar' };
-
-function compilePatternSegment(seg: string): CompiledSegment {
-  if (seg === '**') {
-    return { kind: 'globstar' };
-  }
-  if (!seg.includes('*')) {
-    return { kind: 'literal', value: seg };
-  }
-  // Decision: Each `*` matches any characters except `/`.
-  const re = new RegExp(
-    '^' +
-      seg
-        .split('*')
-        .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-        .join('[^/]*') +
-      '$',
-  );
-  return { kind: 'regex', re };
-}
-
-function matchSegments(
-  path: Array<string>,
-  pi: number,
-  pat: Array<CompiledSegment>,
-  qi: number,
-): boolean {
-  while (qi < pat.length) {
-    const seg = pat[qi];
-    if (seg.kind === 'globstar') {
-      // Decision: A trailing `**` matches any remaining path, including none.
-      if (qi === pat.length - 1) {
-        return true;
-      }
-      for (let k = pi; k <= path.length; k++) {
-        if (matchSegments(path, k, pat, qi + 1)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    if (pi >= path.length) {
-      return false;
-    }
-    if (seg.kind === 'literal') {
-      if (seg.value !== path[pi]) {
-        return false;
-      }
-    } else if (!seg.re.test(path[pi])) {
-      return false;
-    }
-    pi++;
-    qi++;
-  }
-  return pi === path.length;
-}
-
-/**
- * Whether `root` matches a workspace glob and no `!` glob. A nested app outside
- * the globs is a separate project.
- */
-function isWorkspaceSubpackage(workspaceRoot: string, root: string): boolean {
-  const relPath = relative(workspaceRoot, root);
-  if (relPath === '' || relPath.startsWith('..')) {
-    return false;
-  }
-  const normalized = relPath.split(/[\\/]/).join('/');
-  const patterns = readWorkspacePatterns(workspaceRoot);
-  if (patterns.length === 0) {
-    return false;
-  }
-  let matched = false;
-  for (const raw of patterns) {
-    const isNegation = raw.startsWith('!');
-    const pattern = isNegation ? raw.slice(1) : raw;
-    if (matchesWorkspacePattern(normalized, pattern)) {
-      if (isNegation) {
-        return false;
-      }
-      matched = true;
-    }
-  }
-  return matched;
-}
-
 /** Workspace membership, even when the member manages its own install. */
 function isInsideWorkspaceSubpackage(root: string): boolean {
-  const workspaceRoot = findWorkspaceRoot(root);
-  if (workspaceRoot === undefined) {
-    return false;
-  }
-  return isWorkspaceSubpackage(workspaceRoot, root);
+  return findWorkspaceMemberRoot(root) !== undefined;
 }
 
 /**
@@ -1053,11 +773,8 @@ function resolveWorkspaceDeferral(
   root: string,
   pkg: JsonObject | null,
 ): { workspaceRoot: string } | undefined {
-  const workspaceRoot = findWorkspaceRoot(root);
+  const workspaceRoot = findWorkspaceMemberRoot(root);
   if (workspaceRoot === undefined) {
-    return undefined;
-  }
-  if (!isWorkspaceSubpackage(workspaceRoot, root)) {
     return undefined;
   }
   if (hasLocalLockfile(root)) {
@@ -1164,6 +881,8 @@ function defaultPackageName(root: string): string {
   );
 }
 
+const TSCONFIG_FORMATTING: FormattingOptions = { tabSize: 2, insertSpaces: true, eol: '\n' };
+
 function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFramework): void {
   const tsconfigPath = join(root, 'tsconfig.json');
 
@@ -1210,6 +929,8 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
 
     const compilerOptions = asRecord(tsconfig.compilerOptions) ?? {};
     tsconfig.compilerOptions = compilerOptions;
+    const originalFiles = tsconfig.files;
+    const originalPaths = compilerOptions.paths;
     const types = Array.isArray(compilerOptions.types)
       ? compilerOptions.types.filter((value): value is string => typeof value === 'string')
       : [];
@@ -1251,10 +972,25 @@ function setupTsconfig(root: string, state: ProjectState, framework?: ScaffoldFr
     }
 
     if (updated) {
-      // Decision: Rebuild with extends first so it appears at the top of the file.
-      const { extends: ext, ...rest } = tsconfig;
-      const ordered = { extends: ext, ...rest };
-      writeFileSync(tsconfigPath, JSON.stringify(ordered, null, 2) + '\n');
+      const options = { formattingOptions: TSCONFIG_FORMATTING };
+      let text = readFileSync(tsconfigPath, 'utf-8');
+      const set = (path: Array<string>, value: unknown, extra: object = {}): void => {
+        text = applyEdits(text, modify(text, path, value, { ...options, ...extra }));
+      };
+      // Decision: A newly added extends goes first in the file; an existing one keeps its place.
+      set(
+        ['extends'],
+        tsconfig.extends,
+        extendsValue === undefined ? { getInsertionIndex: () => 0 } : {},
+      );
+      set(['compilerOptions', 'types'], compilerOptions.types);
+      if (tsconfig.files !== originalFiles) {
+        set(['files'], tsconfig.files);
+      }
+      if (compilerOptions.paths !== originalPaths) {
+        set(['compilerOptions', 'paths'], compilerOptions.paths);
+      }
+      writeFileSync(tsconfigPath, text.endsWith('\n') ? text : text + '\n');
     } else {
       log.step('tsconfig.json looks good');
     }
@@ -1776,9 +1512,10 @@ ${install}
   // Decision: When the slug is unknown, fall back to a repository variable and prefix the `BWF_PROJECT` line
   // with a comment (each comment line indented 2 spaces so it stays inside the `env:` mapping and the
   // YAML stays valid).
-  const projectLine = slug
-    ? `BWF_PROJECT: ${slug}`
-    : `# Set a BWF_PROJECT repository variable to your project slug
+  const projectLine =
+    slug && validateProjectSlug(slug) === undefined
+      ? `BWF_PROJECT: ${slug}`
+      : `# Set a BWF_PROJECT repository variable to your project slug
   # (Settings → Secrets and variables → Actions → Variables).
   BWF_PROJECT: \${{ vars.BWF_PROJECT }}`;
   return `name: Deploy to bwf
@@ -1871,6 +1608,9 @@ function setupGithubActions(
  * linked after the workflow was written. Returns false when there is none.
  */
 function patchWorkflowProjectSlug(root: string, slug: string): boolean {
+  if (validateProjectSlug(slug) !== undefined) {
+    return false;
+  }
   const workflowPath = join(root, '.github', 'workflows', 'bwf-deploy.yml');
   if (!existsSync(workflowPath)) {
     return false;

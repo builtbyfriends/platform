@@ -27,11 +27,16 @@
     "upstream:sync": "node scripts/upstream-sync.ts"
   },
   "devDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "catalog:",
+    "@cloudflare/oxlint-config": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "cross-spawn": "^7.0.6",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-you-might-not-need-an-effect": "catalog:",
+    "oxlint-plugin-react-doctor": "catalog:",
     "playwright": "catalog:",
     "rolldown": "catalog:",
+    "tsrs": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:"

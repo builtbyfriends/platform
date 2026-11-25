@@ -1,8 +1,6 @@
 import { stripVTControlCharacters } from 'node:util';
-import {
-  isPlatformAccessEmailDomain,
-  type PlatformInstallationManifest,
-} from '@builtbyfriends/platform';
+import { isPlatformAccessEmailDomain } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { confirm, log, multiselect, password, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { note, pc } from './output.ts';
@@ -13,8 +11,10 @@ import {
   platformAccessNonce,
   provisionPlatformAccess,
   verifySelectedAccessPolicies,
-  type PlatformAccessCheckpoint,
-  type PlatformAccessProvisionResult,
+} from './platform-access-provision.ts';
+import type {
+  PlatformAccessCheckpoint,
+  PlatformAccessProvisionResult,
 } from './platform-access-provision.ts';
 import { PlatformCloudflareApiError, PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
@@ -349,9 +349,7 @@ export function parsePlatformAccessSetupSpec(input: unknown): PlatformAccessSetu
       !fields.id ||
       fields.id.length > 256 ||
       ['clientIdEnv', 'clientSecretEnv'].some(
-        (key) =>
-          typeof fields[key] !== 'string' ||
-          !/^[A-Za-z_][A-Za-z0-9_]*$/.test(fields[key] as string),
+        (key) => typeof fields[key] !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(fields[key]),
       )
     ) {
       throw new Error('platform: Invalid Access service token environment references.');
@@ -364,7 +362,7 @@ function secretReference(name: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !process.env[name]) {
     throw new Error('platform: Supply the referenced Access credential in the environment.');
   }
-  return process.env[name]!;
+  return process.env[name];
 }
 
 /** Only scoped credentials for the reviewed platform origins enter the process environment. */

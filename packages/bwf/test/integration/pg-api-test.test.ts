@@ -1,4 +1,5 @@
-import { execSync, type ChildProcess } from 'node:child_process';
+import { execSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -10,8 +11,8 @@ import {
   killChild,
   spawnPlaygroundServer,
   startServer,
-  type StartedServer,
 } from '../../../../test/integration-helpers.ts';
+import type { StartedServer } from '../../../../test/integration-helpers.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const PLAYGROUND = join(ROOT, 'playground/pg-api-test');

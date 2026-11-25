@@ -1,12 +1,9 @@
 import { cfAccessHeaders } from '../shared/cf-access.ts';
-import {
-  PROVIDER_KEY_MAP,
-  type AiProvider,
-  type AiProviderFetchInit,
-  type AiProviderOptions,
-} from './ai-types.ts';
+import { PROVIDER_KEY_MAP } from './ai-types.ts';
+import type { AiProvider, AiProviderFetchInit, AiProviderOptions } from './ai-types.ts';
 import { bytesToBase64 } from './base64.ts';
-import { getRawRuntimeEnv, type RuntimeEnv } from './env-raw.ts';
+import { getRawRuntimeEnv } from './env-raw.ts';
+import type { RuntimeEnv } from './env-raw.ts';
 import { UsageLimit, limitFromResponse } from './limits.ts';
 
 const PLATFORM_FILE_MARKER = '__platformFile';
@@ -101,7 +98,7 @@ function copyBinaryView(value: ArrayBufferView): ArrayBuffer {
   const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
-  return copy.buffer as ArrayBuffer;
+  return copy.buffer;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -520,15 +517,15 @@ function makeDirectBackend(
       let providerKey: string;
       try {
         providerKey = resolveProviderKey(provider, runtimeEnv, options);
-      } catch (e) {
-        return Response.json({ error: (e as Error).message }, { status: 400 });
+      } catch (error) {
+        return Response.json({ error: (error as Error).message }, { status: 400 });
       }
       let baseUrl: string;
       try {
         baseUrl = await directAi.gateway(gatewayId).getUrl(provider);
-      } catch (e) {
+      } catch (error) {
         return Response.json(
-          { error: `ai: gateway '${gatewayId}': ${(e as Error).message}` },
+          { error: `ai: gateway '${gatewayId}': ${(error as Error).message}` },
           { status: 502 },
         );
       }

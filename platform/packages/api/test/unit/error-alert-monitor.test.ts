@@ -25,6 +25,7 @@ vi.mock('../../src/db.ts', () => ({
   getProject: vi.fn(async () => ({ slug: 'recappi' })),
 }));
 
+import { sendErrorAlertEmail } from '../../src/email.ts';
 import { ErrorAlertMonitor } from '../../src/error-alert-monitor.ts';
 
 type State = {
@@ -35,6 +36,7 @@ type State = {
   lastAlertAt: number | null;
   firstErrorAt?: number | null;
   lastErrorAt?: number | null;
+  failedSends?: number;
 };
 
 function makeFakeStorage() {
@@ -244,5 +246,32 @@ describe('ErrorAlertMonitor window stamping', () => {
 
     expect(emailCalls).toHaveLength(1);
     expect(emailCalls[0].window).toBeNull();
+  });
+
+  it('drops the window after repeated send failures and stops re-arming', async () => {
+    vi.setSystemTime(new Date('2026-07-21T10:00:00Z'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(sendErrorAlertEmail).mockRejectedValue(new Error('rejected'));
+    const { mon, storage } = makeMonitor({
+      count: 100,
+      projectId: 'p1',
+      userId: 'u1',
+      slug: 'recappi',
+      lastAlertAt: null,
+    });
+
+    await mon.alarm();
+    expect(await storage.getAlarm()).not.toBeNull();
+    expect((storage.data.get('state') as State).failedSends).toBe(1);
+    for (let i = 0; i < 4; i++) {
+      await mon.alarm();
+    }
+
+    const state = storage.data.get('state') as State;
+    expect(state.count).toBe(0);
+    expect(state.failedSends).toBe(0);
+    expect(state.lastAlertAt).toBeNull();
+    expect(await storage.getAlarm()).toBeNull();
+    vi.mocked(sendErrorAlertEmail).mockReset();
   });
 });

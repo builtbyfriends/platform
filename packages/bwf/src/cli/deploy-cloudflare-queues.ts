@@ -1,16 +1,10 @@
 import { isRecord } from '@builtbyfriends/deploy-core';
-import {
-  chooseCloudflareQueueName,
-  otherQueueConsumers,
-  type CloudflareQueueState,
-} from '../queues/cloudflare-names.ts';
+import { chooseCloudflareQueueName, otherQueueConsumers } from '../queues/cloudflare-names.ts';
+import type { CloudflareQueueState } from '../queues/cloudflare-names.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
-import { type CloudflareDeployDeps } from './deploy-types.ts';
-import {
-  assertValidResourceName,
-  isQueueConfirmedAbsent,
-  type DesiredResourceSet,
-} from './provision.ts';
+import type { CloudflareDeployDeps } from './deploy-types.ts';
+import { assertValidResourceName, isQueueConfirmedAbsent } from './provision.ts';
+import type { DesiredResourceSet } from './provision.ts';
 
 function isValidQueueName(name: string): boolean {
   try {
@@ -55,7 +49,11 @@ export async function chooseCloudflareQueueNames(input: {
         `deploy: could not read Cloudflare queue ${name} and its consumers. Retry \`bwf deploy --platform cloudflare\`.`,
       );
     }
-    return { consumers: data.consumers as Array<string | null> };
+    return {
+      consumers: data.consumers.map((consumer: unknown) =>
+        typeof consumer === 'string' ? consumer : null,
+      ),
+    };
   };
 
   // Decision: Names come from unsanitized file paths. Report all invalid ones before any lookup.
@@ -82,7 +80,7 @@ export async function chooseCloudflareQueueNames(input: {
   // `app-jobs`, and nothing says which one an existing `app-jobs` belongs to.
   const queueNames = desired.queueNames;
   const clashes = Object.keys(queueNames)
-    .filter((queueName) => Object.hasOwn(queueNames, queueNames[queueName]!))
+    .filter((queueName) => Object.hasOwn(queueNames, queueNames[queueName]))
     .map(
       (queueName) =>
         `  • ${queueName} uses the Cloudflare queue ${queueNames[queueName]}, which is also a queue in queues/`,
@@ -105,7 +103,7 @@ export async function chooseCloudflareQueueNames(input: {
   const tooLong: Array<string> = [];
   const taken: Array<string> = [];
   for (const queueName of Object.keys(desired.queueNames)) {
-    const scopedName = desired.queueNames[queueName]!;
+    const scopedName = desired.queueNames[queueName];
     const scoped = isValidQueueName(scopedName) ? await lookup(scopedName) : null;
     // Decision: A queue this Worker consumed before queues were named after the Worker keeps its name.
     const plain = scoped?.consumers.includes(workerName) ? undefined : await lookup(queueName);
@@ -115,7 +113,7 @@ export async function chooseCloudflareQueueNames(input: {
       tooLong.push(`  • ${choice.name} (${choice.name.length} characters)`);
       continue;
     }
-    const state = choice.kept ? plain! : scoped;
+    const state = (choice.kept ? plain : scoped) ?? null;
     if (state === null) {
       absent.push(choice.name);
     }

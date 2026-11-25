@@ -1,5 +1,6 @@
 import { expect, vi } from 'vite-plus/test';
-import { aiLoggingKey, type PublishedAiLoggingMode } from '../../src/ai-logging-policy.ts';
+import { aiLoggingKey } from '../../src/ai-logging-policy.ts';
+import type { PublishedAiLoggingMode } from '../../src/ai-logging-policy.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import { app } from '../../src/index.ts';
 import type { TestEnv } from './helpers.ts';
@@ -62,7 +63,7 @@ export function putAiLoggingKey(
 // Decision: Hosted Hyperdrive may answer a plain SELECT from a copy up to a minute old, so AI logging inputs
 // have to be read through write statements. Returns each statement's verb.
 export function expectNoCacheableReads(queries: ReadonlyArray<string>): Array<string> {
-  const verbs = queries.map((query) => query.trim().split(' ')[0]!.toLowerCase());
+  const verbs = queries.map((query) => query.trim().split(' ')[0].toLowerCase());
   expect(verbs).not.toContain('select');
   return verbs;
 }

@@ -15,9 +15,8 @@ import {
   SelfHostFirstDeployError,
   SelfHostSchemaError,
   SelfHostSecretListError,
-  type SecretListRunResult,
-  type SelfHostSchemaFacts,
 } from '../../src/cli/env-validation.ts';
+import type { SecretListRunResult, SelfHostSchemaFacts } from '../../src/cli/env-validation.ts';
 import { number, string } from '../../src/runtime/env-helpers.ts';
 import { defineEnv } from '../../src/runtime/env-public.ts';
 import { _resetUnmaskCacheForTests } from '../../src/shared/env-mask.ts';
@@ -159,7 +158,7 @@ describe('deriveSelfHostSchemaFacts — env-insensitive schema facts', () => {
     try {
       const error = await deriveSelfHostSchemaFacts(root).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
 
       expect(error).toBeInstanceOf(SelfHostSchemaError);
@@ -182,7 +181,7 @@ describe('deriveSelfHostSchemaFacts — env-insensitive schema facts', () => {
     try {
       const error = await deriveSelfHostSchemaFacts(root).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
 
       expect(error).toBeInstanceOf(SelfHostSchemaError);
@@ -337,7 +336,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       runWrangler: run,
     }).then(
       () => null,
-      (e: unknown) => e,
+      (error_: unknown) => error_,
     );
 
     expect(error).toBeInstanceOf(SelfHostEnvValidationError);
@@ -379,7 +378,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       runWrangler: run,
     }).then(
       () => null,
-      (e: unknown) => e,
+      (error_: unknown) => error_,
     );
 
     expect(error).toBeInstanceOf(SelfHostEnvValidationError);
@@ -421,7 +420,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         runWrangler: run,
       }).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
 
       expect(error).toBeInstanceOf(SelfHostSecretListError);
@@ -448,7 +447,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         runWrangler: run,
       }).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
 
       expect(error).toBeInstanceOf(SelfHostSecretListError);
@@ -498,7 +497,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       expect(error.message).toContain('reason: nonzero-exit');
     });
 
-    it.each([{ errorCode: 10007 }, { errorCode: 10090 }, { failure: 'not-found' as const }])(
+    it.each([{ errorCode: 10_007 }, { errorCode: 10_090 }, { failure: 'not-found' as const }])(
       'classifies structured missing-Worker results: %j',
       async (result) => {
         const root = createTempProject({ withEnvTs: false });
@@ -514,7 +513,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
       },
     );
 
-    it.each([null, NaN, Infinity, -1])(
+    it.each([null, Number.NaN, Infinity, -1])(
       'does not infer a first deploy from invalid exit status %s',
       async (status) => {
         const root = createTempProject({ withEnvTs: false });
@@ -523,7 +522,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
           stdout: '',
           stderr: '',
           status: status as number,
-          errorCode: 10007,
+          errorCode: 10_007,
         });
         const error = await dischargeSelfHostEnvContext(ctx, {
           root,
@@ -549,7 +548,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         runWrangler: run,
       }).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
       expect(error).toBeInstanceOf(SelfHostSecretListError);
       expect(error).not.toBeInstanceOf(SelfHostEnvValidationError);
@@ -572,7 +571,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         stderr: '',
         status: 0,
         signal: 'SIGKILL',
-        errorCode: 10007,
+        errorCode: 10_007,
         failure: 'not-found',
       });
       expect(error.message).toContain('reason: signal');
@@ -585,7 +584,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         stderr: '',
         status: 0,
         error: 'spawn ENOENT',
-        errorCode: 10007,
+        errorCode: 10_007,
         failure: 'not-found',
       });
       expect(error.message).toContain('reason: spawn-error');
@@ -623,7 +622,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         runWrangler: () => Promise.reject(new Error('boom')),
       }).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       );
       expect(error).toBeInstanceOf(SelfHostSecretListError);
       expect((error as Error).message).toContain('reason: spawn-error');
@@ -691,7 +690,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
             runWrangler: run,
           }).then(
             () => null,
-            (e: unknown) => e,
+            (error_: unknown) => error_,
           )) as SelfHostSecretListError;
 
           expect(error).toBeInstanceOf(SelfHostSecretListError);
@@ -722,7 +721,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
           'If this is a new Worker, run `wrangler deploy` first to create it.\n' +
           "Otherwise, check that the Worker name is correct and you're logged into the right account.",
         status: 1,
-        errorCode: 10007,
+        errorCode: 10_007,
       });
 
       const error = (await dischargeSelfHostEnvContext(ctx, {
@@ -731,7 +730,7 @@ describe('dischargeSelfHostEnvContext — ground-truth secret gate', () => {
         runWrangler: run,
       }).then(
         () => null,
-        (e: unknown) => e,
+        (error_: unknown) => error_,
       )) as SelfHostFirstDeployError;
 
       expect(error).toBeInstanceOf(SelfHostFirstDeployError);
@@ -808,7 +807,7 @@ describe('createDefaultSecretListRunner — async spawn with fail-closed provena
     const root = createTempProject({ withEnvTs: false });
     const run = createDefaultSecretListRunner(root, {
       launcher: [join(root, 'does-not-exist-binary')],
-      timeoutMs: 5_000,
+      timeoutMs: 5000,
     });
 
     const result = await run({ type: 'secret.list' });

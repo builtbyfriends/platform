@@ -21,7 +21,7 @@ Inject the following values from protected CI secrets. Do not commit them in a w
 | `PLATFORM_HYPERDRIVE_ORIGIN_USER`       | Runtime database user of that Hyperdrive; set with its ID and host (or service ID)          |
 | `PLATFORM_HYPERDRIVE_ORIGIN_SERVICE_ID` | For a Workers VPC origin, set the service ID in place of the origin host                    |
 | `PLATFORM_R2_ACCESS_KEY_ID`             | R2 Access Key ID                                                                            |
-| `PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 Secret Access Key                                                                        |
+| `PLATFORM_R2_SECRET_ACCESS_KEY`         | R2 Secret Access Key (not the token value)                                                  |
 | `PLATFORM_JWT_SECRET`                   | Original JWT signing secret                                                                 |
 | `PLATFORM_EMAIL_SIGNING_SECRET`         | Dedicated email signing secret when email is enabled                                        |
 | `PLATFORM_PROJECT_SECRET_KEY`           | Original base64-encoded project-encryption key                                              |

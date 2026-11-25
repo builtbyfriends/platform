@@ -1,9 +1,9 @@
 import { and, eq, or } from 'drizzle-orm';
 import { Hono, type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
 import { constantTimeEqual, hmacVerifyState } from '../auth/hmac.ts';
 import type { ApiEnv } from '../env.ts';
 import { getProjectDeploymentWorkerName } from '../naming.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { computeDispatchLimits } from '../routing.ts';
 import { deployments, projects, users } from '../schema.ts';
 import type { DeployManifest } from '../types.ts';
@@ -254,8 +254,10 @@ app.post('/resolve-ingress', async (context) => {
     await db
       .select({
         projectStatus: projects.status,
+        projectSuspendedReason: projects.suspended_reason,
         suspendedReason: users.suspended_reason,
-        plan: users.plan,
+        owner: users,
+        payer_person_id: projects.payer_person_id,
         emailSuspendedAt: emailProjectControls.suspended_at,
         activeDeploymentId: projects.active_deployment_id,
       })
@@ -268,6 +270,7 @@ app.post('/resolve-ingress', async (context) => {
   if (
     !authority ||
     authority.projectStatus !== 'active' ||
+    authority.projectSuspendedReason ||
     authority.suspendedReason ||
     authority.emailSuspendedAt
   ) {
@@ -297,7 +300,7 @@ app.post('/resolve-ingress', async (context) => {
     );
   }
   const limits = computeDispatchLimits(
-    await resolvePlanLimits(db, authority.plan),
+    await billedPlanLimits(db, authority.owner, authority),
     manifest.limits,
   );
   return context.json({

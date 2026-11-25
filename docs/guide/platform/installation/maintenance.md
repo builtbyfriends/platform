@@ -116,7 +116,9 @@ An upgrade validates the runtime, applies supported pending migrations, deploys 
 
 Install, upgrade, and repair also publish the saved [AI Gateway logging](/reference/cli/platform-users#ai-gateway-logging) settings (**Publishing AI logging settings**). For about 2 minutes afterward, `bwf platform project show` reports projects with a setting other than `inherit` as `pending`, as well as projects it switched back to `inherit`.
 
-Before starting, bwf checks access to the installation's Cloudflare account, Workers, and existing R2 buckets. If credentials are rejected, set `CLOUDFLARE_API_TOKEN` to a management token scoped to that account and retry. This overrides the installation's saved management token.
+Before starting, bwf checks access to the installation's Cloudflare account, Workers, and existing R2 buckets. It lists every missing permission at once and names the credential Cloudflare rejected. If the management credential is rejected, set `CLOUDFLARE_API_TOKEN` to a management token scoped to that account and retry. This overrides the installation's saved management token.
+
+With browser login, bwf uses the runtime token for AI Gateway: `PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN`, or the one saved on this machine. If an error names the runtime token, set `PLATFORM_RUNTIME_CLOUDFLARE_API_TOKEN` to a valid runtime token, or set `CLOUDFLARE_API_TOKEN` to a management token with **Account → AI Gateway → Edit**. bwf then uses that token instead of browser login.
 
 Some upgrades pause application traffic until the new version passes health checks. If a command fails while traffic is paused:
 
@@ -127,11 +129,15 @@ Some upgrades pause application traffic until the new version passes health chec
 ::: details Migration safety, credential rotation, and rollback
 
 To update the runtime Cloudflare token, GitHub OAuth credentials when GitHub login is enabled, or R2 credentials,
-provide their `PLATFORM_*` environment variables when running the upgrade.
+provide their `PLATFORM_*` environment variables when running `upgrade` or `repair`.
 Only the supplied values replace live credentials. Recovery data from an older
 workstation does not overwrite them, and upgrades preserve the live signing keys
 and complete project-encryption keyring. Keep current credentials in your secret
 manager so they can also restore a missing Worker during repair.
+
+Set `PLATFORM_R2_ACCESS_KEY_ID` and `PLATFORM_R2_SECRET_ACCESS_KEY` together, even if
+only the secret changed. bwf checks the R2 pair against the assets bucket before it changes the
+platform.
 
 Database migrations only move forward. bwf checks compatibility before upgrading and tells you if an intermediate release is needed. If deployment fails, it attempts to restore the previous Workers against the compatible database schema. Retrying does not repeat completed migrations.
 
@@ -234,6 +240,67 @@ Keep a coordinated recovery set for each installation:
 Capture and label these items as one recovery point so PostgreSQL, provider data, identity, and encryption keys match. Backup and retention capabilities vary by provider and resource; choose and test the supported recovery process for each resource you use.
 
 During a restore, keep platform and application traffic disabled before changing resources. Restore the matching PostgreSQL and provider data with their supported recovery tools, supply the original identity and keyring, and use the preserved runtime artifact. Then run `discover`, preview `repair` with `--plan`, and review every ownership decision and proposed resource change before applying it. Enable traffic only after the restored data and platform health have been verified. Discovery and repair are not substitutes for those backups and do not provide a recovery bypass when required secrets or data are unavailable.
+
+### Back up and restore {#back-up-and-restore}
+
+A recovery plan you haven't tried tends to fail on the day you need it. Set up scheduled backups, then restore one into a test installation and time it.
+
+#### Scheduled backups
+
+- **PostgreSQL.** Turn on your database provider's scheduled backups or point-in-time restore, and set how long it keeps them. Also take a nightly `pg_dump --format=custom` to storage in a different account or provider, so a problem with the database provider doesn't take the backups with it. The [workflow below](#nightly-database-backup) does this from GitHub Actions.
+- **Identity and keys.** Keep the JWT signing secret, the email signing secret and the project-encryption keyring in your secret manager. They change only when you rotate them, so save them again after each rotation.
+- **Runtime.** Keep the runtime files for each version you install. `bwf platform list --health` shows which version each installation runs.
+- **App data.** Each app's D1 databases have Cloudflare's Time Travel, which can restore to any minute in the last 30 days on Workers Paid. For longer, export them on a schedule with `wrangler d1 export`. R2 buckets and KV namespaces have no built-in backups; copy what you can't rebuild.
+
+Keep backups as long as your contracts say. 35 days of nightly backups is a common starting point. An R2 lifecycle rule can delete older ones for you.
+
+#### Nightly database backup {#nightly-database-backup}
+
+This GitHub Actions workflow dumps the database each night and uploads it to an R2 bucket. Create the bucket in a different Cloudflare account from the installation, with an R2 API token that can only write to it. Add a lifecycle rule to the bucket to delete objects after your retention period.
+
+```yaml
+name: Platform database backup
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: backup
+    steps:
+      - name: Dump and upload
+        env:
+          DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://${{ vars.BACKUP_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.BACKUP_R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          name="platform-$(date -u +%Y-%m-%dT%H%M%SZ).dump"
+          docker run --rm -e DATABASE_URL -v "$PWD:/out" postgres:17 \
+            sh -c 'pg_dump --format=custom --no-owner --file="/out/$0" "$DATABASE_URL"' "$name"
+          aws s3 cp "$name" "s3://$BUCKET/$name" --endpoint-url "$ENDPOINT"
+```
+
+Give the workflow a read-only database role, since a dump only reads. Use a `postgres` image whose major version is the same as or newer than your database server's.
+
+#### Restore drill
+
+Run the drill on a test installation, not the one your apps use. Keep a test installation that matches the main one's version and settings, with a small app deployed on it. Write down the time at each step.
+
+1. **Back up.** Take a backup of the test installation the same way you back up the main one, or use last night's.
+2. **Stop traffic.** Run `bwf platform disable <test>`.
+3. **Restore the database in place.** An installation stays tied to its database address, so restore into the same database: `pg_restore --clean --if-exists --no-owner --dbname "$DATABASE_URL" <file>.dump`, or your provider's point-in-time restore to that address.
+4. **Restore app data.** Restore the test app's D1 database with `wrangler d1 time-travel restore`, or import its export.
+5. **Rebuild the machine side.** On a machine without the installation's records, run `bwf platform discover`, then `bwf platform repair <test> --plan` and `bwf platform repair <test>` with the `PLATFORM_*` values from your secret manager. Use the same runtime version.
+6. **Turn it on and check it.** Run `bwf platform enable <test>`, then `bwf platform list --health` and `bwf platform system health`. Open the test app and check that its data is back. Sign in to the dashboard.
+7. **Write it down.** Note the date, the backup used, how long each step took, the total time, and anything that didn't go as written. Fix this page where it was wrong.
+
+Repeat the drill every three months, and after a release that changes how data is stored. The total time is the least you can promise for recovery.
 
 ### Where local state lives
 

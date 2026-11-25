@@ -1,6 +1,6 @@
 import { eq, sql as drizzleSql } from 'drizzle-orm';
-import { type Context } from 'hono';
-import { type AssetManifestEntry } from '../assets.ts';
+import type { Context } from 'hono';
+import type { AssetManifestEntry } from '../assets.ts';
 import { deleteDispatchScript } from '../cf-api.ts';
 import { clearCronScheduler } from '../cron-scheduler-client.ts';
 import {
@@ -10,11 +10,11 @@ import {
   markDeploymentRetained,
   getRetainedDeploymentsExcluding,
   getProjectResources,
-  type Db,
 } from '../db.ts';
+import type { Db } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { getProjectQueueName } from '../naming.ts';
-import { type DeployLogger } from '../observability/logger.ts';
+import type { DeployLogger } from '../observability/logger.ts';
 import { removeQueueConsumer } from '../provisioning/cloudflare-api.ts';
 import { reconcileManagedDurableObjects } from '../provisioning/durable-objects.ts';
 import { projectRouteKey } from '../routing.ts';
@@ -22,22 +22,18 @@ import { buildStaticRoutingJson } from '../routing.ts';
 import { deployments } from '../schema.ts';
 import { REASON_REQUESTS_EXCEEDED } from '../suspension.ts';
 import { STATIC_RETENTION_LIMIT } from '../tiers.ts';
-import {
-  type DeployManifest,
-  type DeployEvent,
-  type Deployment,
-  type Project,
-  type DeploymentStatus,
+import type {
+  DeployManifest,
+  DeployEvent,
+  Deployment,
+  Project,
+  DeploymentStatus,
 } from '../types.ts';
 import { resolveProjectZeroTrustRouting } from '../zero-trust/routing.ts';
 import { assertDeploymentCanProceed } from './guards.ts';
-import {
-  commitCutoverLive,
-  requireActiveDeployAccess,
-  cutoverIntentKey,
-  cutoverReadyKey,
-  type CutoverMarker,
-} from './recovery.ts';
+import type { requireActiveDeployAccess } from './recovery.ts';
+import { commitCutoverLive, cutoverIntentKey, cutoverReadyKey } from './recovery.ts';
+import type { CutoverMarker } from './recovery.ts';
 import { attachServingStoreMetadata } from './serving-assets.ts';
 import { projectPublicUrls } from './shared.ts';
 
@@ -59,6 +55,7 @@ export async function publishStaticDeployment(input: {
     mutate: (
       txDb: Db,
       currentOwner: Awaited<ReturnType<typeof requireActiveDeployAccess>>['owner'],
+      lockedProject: Project,
     ) => Promise<T>,
   ) => Promise<T>;
   readonly previousManifest: DeployManifest | null;
@@ -151,7 +148,7 @@ export async function publishStaticDeployment(input: {
 
   input.currentStep = 'cutover_intent';
   const cutoverMarker: CutoverMarker = {
-    projectId: projectId,
+    projectId,
     ownerId: cutoverOwnerId,
     buildId: deployBuild ?? null,
   };
@@ -186,18 +183,19 @@ export async function publishStaticDeployment(input: {
   await snapshotCronState();
   await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
   markPhase('routing_switch');
-  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner) => {
+  await withProjectCutoverFence(deployment.id, async (txDb, currentOwner, lockedProject) => {
     const existingRouting = await context.env.ROUTING.get(projectRouteKey(project));
     const existingEntry = existingRouting ? JSON.parse(existingRouting) : null;
     const zeroTrust = await resolveProjectZeroTrustRouting(txDb, projectId);
     const routingJson = buildStaticRoutingJson({
       privatePreview: Boolean(project.preview_client_id),
-      projectId: projectId,
+      projectId,
       userId: project.user_id,
       deploymentId: deployment.id,
       assetConfig,
-      manifest: manifest,
+      manifest,
       suspended:
+        lockedProject.suspended_reason ??
         existingEntry?.suspended ??
         (currentOwner.suspended_reason === REASON_REQUESTS_EXCEEDED
           ? REASON_REQUESTS_EXCEEDED
@@ -273,10 +271,10 @@ export async function publishStaticDeployment(input: {
           for (const entry of Object.values(keptManifest)) {
             retainedHashes.add(entry.hash);
           }
-        } catch (e) {
+        } catch (error) {
           input.logger.warn('retention_cleanup', 'retained_asset_hashes_parse_failed', {
             retainedDeploymentId: kept.id,
-            err: e instanceof Error ? e.message : String(e),
+            err: error instanceof Error ? error.message : String(error),
           });
         }
       }
@@ -315,11 +313,11 @@ export async function publishStaticDeployment(input: {
           for (const entry of Object.values(activeManifest)) {
             retainedHashes.add(entry.hash);
           }
-        } catch (e) {
+        } catch (error) {
           assetCleanupSafe = false;
           input.logger.warn('retention_cleanup', 'active_asset_hashes_parse_failed', {
             retainedDeploymentId: activeToKeep.id,
-            err: e instanceof Error ? e.message : String(e),
+            err: error instanceof Error ? error.message : String(error),
           });
         }
       }
@@ -341,8 +339,8 @@ export async function publishStaticDeployment(input: {
       if (old.bundle_stored) {
         try {
           await evictStoredWorkerBundle(old.id);
-        } catch (e) {
-          input.logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', e, {
+        } catch (error) {
+          input.logger.error('retention_cleanup', 'evicted_worker_bundle_delete_failed', error, {
             evictedDeploymentId: old.id,
           });
         }
@@ -358,9 +356,9 @@ export async function publishStaticDeployment(input: {
           if (orphans > 0) {
             input.logger.info('retention_cleanup', 'r2_orphans_swept', { count: orphans });
           }
-        } catch (e) {
+        } catch (error) {
           input.logger.warn('retention_cleanup', 'r2_orphan_sweep_failed', {
-            err: e instanceof Error ? e.message : String(e),
+            err: error instanceof Error ? error.message : String(error),
           });
         }
       };
@@ -371,7 +369,7 @@ export async function publishStaticDeployment(input: {
   emit({
     event: 'done',
     deployment: deployment.id,
-    url: urls[0]!,
+    url: urls[0],
     urls,
     assets: assetCount,
     workers: 0,

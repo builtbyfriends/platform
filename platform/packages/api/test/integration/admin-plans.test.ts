@@ -25,8 +25,8 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 import { nativeFormSubmission } from './native-form-browser.ts';
 
 let env: TestEnv;
@@ -351,7 +351,7 @@ describe('administrator plan dashboard', () => {
     expect((await apply(await preview('archive', 'new', { archived: 'true' }))).status).toBe(303);
     expect((await apply(await preview('archive', 'new', { archived: 'false' }))).status).toBe(303);
     const account = await createTestUser(env.db, 'assigned', 'github', undefined, 'new');
-    const original = (await env.db.select().from(users).where(eq(users.id, account.id)))[0]!;
+    const original = (await env.db.select().from(users).where(eq(users.id, account.id)))[0];
     expect(
       (
         await request(`${home}/preview`, {

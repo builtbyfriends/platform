@@ -57,7 +57,7 @@ function applicationFixture() {
   return {
     applications,
     fetcher,
-    client: new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch),
+    client: new ZeroTrustCloudflareClient('account-1', 'secret', fetcher),
   };
 }
 
@@ -215,7 +215,7 @@ describe('ZeroTrustCloudflareClient', () => {
       }
       throw new Error(`unexpected request: ${input}`);
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
 
     await expect(
       client.validateSelection({ identityProviderIds: ['idp-1'], policyIds: ['policy-1'] }),
@@ -234,7 +234,7 @@ describe('ZeroTrustCloudflareClient', () => {
       }
       return envelope({ decision: 'allow', include: [{ everyone: {} }] });
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
 
     await expect(
       client.validateSelection({ identityProviderIds: ['idp-1'], policyIds: ['unsafe'] }),
@@ -255,7 +255,7 @@ describe('ZeroTrustCloudflareClient', () => {
         include: [{ email_domain: { domain: 'example.com' } }, { country: { country_code: 'US' } }],
       });
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
 
     await expect(
       client.validateSelection({ identityProviderIds: ['idp-1'], policyIds: ['mixed'] }),
@@ -279,20 +279,20 @@ describe('ZeroTrustCloudflareClient', () => {
       if (appMatch && init?.method === 'PUT') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         const app = { ...body, id: appMatch[1], aud: 'aud-1' };
-        applications.set(appMatch[1]!, app);
+        applications.set(appMatch[1], app);
         return envelope(app);
       }
       if (appMatch && init?.method === 'DELETE') {
-        applications.delete(appMatch[1]!);
+        applications.delete(appMatch[1]);
         return envelope({ id: appMatch[1] });
       }
       if (appMatch) {
-        const app = applications.get(appMatch[1]!);
+        const app = applications.get(appMatch[1]);
         return app ? envelope(app) : envelope(null, 404);
       }
       throw new Error(`unexpected request: ${input}`);
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
     const spec = {
       name: 'platform-installation-project-zero-trust',
       destinations: ['*.apps.example.com'],
@@ -372,7 +372,7 @@ describe('ZeroTrustCloudflareClient', () => {
       }
       throw new Error(`unexpected request: ${init?.method ?? 'GET'} ${path}`);
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
     const recovered = await client.ensureApplication(
       {
         name: application.name,
@@ -403,7 +403,7 @@ describe('ZeroTrustCloudflareClient', () => {
       }
       throw new Error(`unexpected request: ${init?.method ?? 'GET'} ${path}`);
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
 
     await expect(
       client.ensureApplication({
@@ -430,7 +430,7 @@ describe('ZeroTrustCloudflareClient', () => {
       }
       throw new Error(`unexpected mutation: ${init?.method ?? 'GET'} ${path}`);
     });
-    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher as typeof fetch);
+    const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
 
     await expect(
       client.ensureApplication({
@@ -492,7 +492,7 @@ describe('ZeroTrustCloudflareClient', () => {
           expect(applications.has('checkpoint-app')).toBe(false);
         }
         expect(fetcher).toHaveBeenCalledTimes(2);
-        expect(new URL(fetcher.mock.calls[0]![0].toString()).pathname).toMatch(/\/apps$/);
+        expect(new URL(fetcher.mock.calls[0][0].toString()).pathname).toMatch(/\/apps$/);
         expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
       });
 
@@ -567,7 +567,7 @@ describe('ZeroTrustCloudflareClient', () => {
             : client.deleteApplication(created.id, spec.name);
         await expect(result).rejects.toThrow('no longer has its Platform-owned name');
         expect(fetcher).toHaveBeenCalledTimes(1);
-        expect(fetcher.mock.calls[0]![1]?.method).toBeUndefined();
+        expect(fetcher.mock.calls[0][1]?.method).toBeUndefined();
       });
 
       it("recovers the replacement holding a missing recorded ID's name", async () => {
@@ -638,11 +638,7 @@ describe('ZeroTrustCloudflareClient', () => {
         'preserves provider failure HTTP %s instead of treating the ID as absent',
         async (status) => {
           const fetcher = vi.fn<typeof fetch>(async () => envelope(null, status));
-          const client = new ZeroTrustCloudflareClient(
-            'account-1',
-            'secret',
-            fetcher as typeof fetch,
-          );
+          const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
           const spec = applicationSpec('platform-project');
           const result =
             operation === 'ensure'
@@ -651,7 +647,7 @@ describe('ZeroTrustCloudflareClient', () => {
 
           await expect(result).rejects.toThrow(`HTTP ${status}`);
           expect(fetcher).toHaveBeenCalledTimes(1);
-          expect(new URL(fetcher.mock.calls[0]![0].toString()).pathname).toMatch(
+          expect(new URL(fetcher.mock.calls[0][0].toString()).pathname).toMatch(
             /\/apps\/recorded-app$/,
           );
         },
@@ -660,11 +656,7 @@ describe('ZeroTrustCloudflareClient', () => {
       it('rejects a read response for a different application ID', async () => {
         const spec = applicationSpec('platform-project');
         const fetcher = vi.fn(async () => envelope({ id: 'different-app', name: spec.name }));
-        const client = new ZeroTrustCloudflareClient(
-          'account-1',
-          'secret',
-          fetcher as typeof fetch,
-        );
+        const client = new ZeroTrustCloudflareClient('account-1', 'secret', fetcher);
         const result =
           operation === 'ensure'
             ? client.ensureApplication(spec, { id: 'recorded-app', name: spec.name })

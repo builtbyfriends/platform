@@ -2,9 +2,12 @@ import { readFileSync } from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'pathslash';
-import { type Plugin } from 'vite';
-import { ensureWranglerCompat, type WranglerCompat } from './cli/wrangler.ts';
-import { readConfig, type DatabaseDialect } from './config.ts';
+import { convertPathToPattern } from 'tinyglobby';
+import type { Plugin } from 'vite';
+import { ensureWranglerCompat } from './cli/wrangler.ts';
+import type { WranglerCompat } from './cli/wrangler.ts';
+import type { readConfig } from './config.ts';
+import type { DatabaseDialect } from './config.ts';
 
 const CLOUDFLARE_BUILTIN_IMPORT = /^cloudflare:/;
 
@@ -176,11 +179,29 @@ async function readWorkerdNodeBuiltins(compat: WranglerCompat): Promise<Set<stri
 export function createServerRuntimeOptimizerPlugin(
   dialect: DatabaseDialect,
   readCompat: () => WranglerCompat,
+  nativeWorker?: { root: string; scan: () => Promise<Array<string>> },
 ): Plugin {
   let workerdNodeBuiltins: Promise<Set<string>> | undefined;
+  let scanNativeWorker = false;
+  let hasExplicitWorkerEntries = false;
   const serverRuntimeOptimizerPlugin: Plugin = {
     name: 'platform:server-runtime-optimizer',
-    configEnvironment(name, environment) {
+    config: {
+      order: 'pre',
+      handler(config, { command, isPreview }) {
+        scanNativeWorker = nativeWorker !== undefined && command === 'serve' && !isPreview;
+        if (!scanNativeWorker) {
+          return;
+        }
+        const optimizer = config.environments?.[DEFAULT_WORKER_ENVIRONMENT_NAME]?.optimizeDeps;
+        hasExplicitWorkerEntries = optimizer?.entries !== undefined;
+        // Decision: Cloudflare's scalar default would replace another scalar in the config merge.
+        if (typeof optimizer?.entries === 'string') {
+          optimizer.entries = [optimizer.entries];
+        }
+      },
+    },
+    async configEnvironment(name, environment) {
       if (name === 'client') {
         return;
       }
@@ -190,6 +211,18 @@ export function createServerRuntimeOptimizerPlugin(
       // prebundling nobody asked for.
       if (!environment.resolve?.conditions?.includes('workerd')) {
         return { optimizeDeps: { exclude: ['@builtbyfriends/bwf'] } };
+      }
+      const entries: Array<string> = [];
+      if (name === DEFAULT_WORKER_ENVIRONMENT_NAME && scanNativeWorker && nativeWorker) {
+        const optimizer = (environment.optimizeDeps ??= {});
+        const generatedEntry = join(nativeWorker.root, '.bwf/entry.ts');
+        const configured = optimizer.entries ?? generatedEntry;
+        optimizer.entries = (Array.isArray(configured) ? configured : [configured]).map((entry) =>
+          entry === generatedEntry ? convertPathToPattern(entry) : entry,
+        );
+        if (!hasExplicitWorkerEntries) {
+          entries.push(...(await nativeWorker.scan()));
+        }
       }
       return {
         optimizeDeps: {
@@ -203,6 +236,10 @@ export function createServerRuntimeOptimizerPlugin(
           //
           // bwf's routing runtime imports Hono for itself and for the generated routes. Naming
           // it here prebundles it before the Worker starts, not on its first request.
+          // Decision: The Worker reaches routes, procedures and other app files through generated
+          // modules, which the dependency scan cannot follow. Unscanned, their dependencies are found
+          // during the first request, and the Worker reloads once they are prebundled.
+          ...(entries.length > 0 ? { entries: entries.map(convertPathToPattern) } : {}),
           include: [
             '@builtbyfriends/bwf > email-validator',
             '@builtbyfriends/bwf > hono',
@@ -240,7 +277,6 @@ export function createServerRuntimeOptimizerPlugin(
       },
     },
     load: {
-      // oxlint-disable-next-line no-control-regex -- \0 prefix is Vite's virtual module convention
       filter: { id: /^\0platform:node-require:/ },
       handler(id) {
         // Decision: A built-in's default export is its CommonJS exports, and `require` returns an ES

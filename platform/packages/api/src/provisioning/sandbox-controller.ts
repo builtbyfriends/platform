@@ -1,5 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db.ts';
+import { parseManifest } from '../deploy/serving-assets.ts';
 import type { ApiEnv } from '../env.ts';
 import type { SandboxConcurrencyCounter } from '../sandbox-concurrency-counter.ts';
 import { getSandboxControllerSource } from '../sandbox-controller-source.ts';
@@ -120,7 +121,7 @@ function controllerTextBindings(
   digest: string,
   image: string,
   instance: string,
-): Record<string, string> {
+) {
   return {
     __PLATFORM_SANDBOX_SOURCE: digest,
     __PLATFORM_USER_ID: identity.userId,
@@ -161,8 +162,9 @@ export async function provisionSandboxController(input: {
   apiService: string;
   identity: SandboxControllerIdentity;
   sandbox: NonNullable<DeployManifest['sandbox']>;
+  backupBucket?: string;
 }): Promise<void> {
-  const { accountId, apiToken, apiService, identity, sandbox } = input;
+  const { accountId, apiToken, apiService, identity, sandbox, backupBucket } = input;
   const workerName = sandboxControllerWorkerName(identity.projectId, identity.deploymentId);
   const source = getSandboxControllerSource();
   const digest = Array.from(
@@ -204,6 +206,10 @@ export async function provisionSandboxController(input: {
           entrypoint: 'SandboxControl',
           props: identity,
         },
+        // Decision: Backups share the static assets bucket under `sandbox-backups/`, so the installer needs no new bucket.
+        ...(backupBucket
+          ? [{ type: 'r2_bucket', name: '__PLATFORM_SANDBOX_BACKUPS', bucket_name: backupBucket }]
+          : []),
         ...Object.entries({
           [OWNER_BINDING]: JSON.stringify({
             protocol: 1,
@@ -341,12 +347,27 @@ export async function deleteSandboxController(
   if (!response.ok && response.status !== 404) {
     const detail = await response
       .json()
-      .then((value) => {
-        const body = value as { errors?: Array<{ message?: string }> };
-        return body.errors
-          ?.map((error) => error.message)
-          .filter(Boolean)
-          .join(', ');
+      .then((value: unknown) => {
+        if (typeof value !== 'object' || value === null || !('errors' in value)) {
+          return undefined;
+        }
+        if (!Array.isArray(value.errors)) {
+          return undefined;
+        }
+        const errors: unknown[] = value.errors;
+        const messages: string[] = [];
+        for (const error of errors) {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'message' in error &&
+            typeof error.message === 'string' &&
+            error.message
+          ) {
+            messages.push(error.message);
+          }
+        }
+        return messages.join(', ');
       })
       .catch(() => undefined);
     throw new Error(
@@ -422,14 +443,17 @@ export async function retrySandboxControllerCleanup(
     .orderBy(asc(deployments.updated_at), asc(deployments.id))
     .limit(16);
   for (const row of rows) {
-    const manifest = JSON.parse(row.manifest!) as DeployManifest;
+    const manifest = parseManifest(row.manifest);
+    if (!manifest?.sandbox) {
+      continue;
+    }
     try {
       await deleteSandboxController(
         env.CF_ACCOUNT_ID,
         env.CF_API_TOKEN,
         row.projectId,
         row.id,
-        manifest.sandbox!,
+        manifest.sandbox,
         env.SANDBOX_CONCURRENCY_COUNTER,
         db,
       );

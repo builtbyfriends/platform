@@ -7,6 +7,7 @@ import {
   readFileSync,
   statSync,
   writeSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'pathslash';
 import type { Plugin, PluginOption, ViteDevServer } from 'vite';
@@ -102,7 +103,7 @@ export function getOrCreateDevTriggerToken(root: string): string {
   const tokenPath = join(root, '.bwf', 'dev-trigger-token');
   const readExisting = (): string | undefined => {
     try {
-      const existing = readFileSync(tokenPath, 'utf-8').trim();
+      const existing = readFileSync(tokenPath, 'utf8').trim();
       return existing.length > 0 ? existing : undefined;
     } catch {
       return undefined;
@@ -141,17 +142,18 @@ export function getOrCreateDevTriggerToken(root: string): string {
       closeSync(fd);
     }
     return fresh;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw err;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
     }
     const winner = readExisting();
     if (winner) {
       return winner;
     }
-    // Decision: EEXIST but file is empty — extreme edge case (interrupted writer).
-    // Fall through and accept the fresh UUID; subsequent reads will win.
-    return fresh;
+    // Decision: EEXIST but the file is empty (an interrupted writer). Fill it in, so later starts and the child
+    // process read one token and don't each make their own.
+    writeFileSync(tokenPath, fresh, { mode: DEV_TRIGGER_TOKEN_FILE_MODE });
+    return readExisting() ?? fresh;
   }
 }
 
@@ -230,7 +232,7 @@ export function warnIfPackageJsonIsNotEsm(root: string): void {
   }
   let pkg: { type?: unknown };
   try {
-    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   } catch {
     return;
   }

@@ -1,11 +1,11 @@
-import {
-  SandboxContainer,
-  validateSandboxOptions,
-  type SandboxOptions,
-  type SandboxInstance,
-} from '@builtbyfriends/bwf/_sandbox-container';
+import { SandboxContainer, validateSandboxOptions } from '@builtbyfriends/bwf/_sandbox-container';
+import type { SandboxOptions, SandboxInstance } from '@builtbyfriends/bwf/_sandbox-container';
+import type { DirectoryBackupStorage } from '@cloudflare/sandbox';
 import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 import { getSandboxShim } from './sandbox-shim.ts';
+
+export { SandboxOutboundHandler } from '@builtbyfriends/bwf/_sandbox-container';
+export { DirectoryBackupGateway } from '@cloudflare/sandbox';
 
 type Admission = { ok: true } | { ok: false; reason: string };
 type Control = {
@@ -19,13 +19,15 @@ type ControllerEnv = {
   __PLATFORM_SANDBOX_CONTROL: Control;
   __PLATFORM_SANDBOX_IMAGE?: string;
   __PLATFORM_SANDBOX_INSTANCE?: SandboxInstance;
+  __PLATFORM_SANDBOX_BACKUPS?: R2Bucket;
+  __PROJECT_ID?: string;
 };
 type Lease = { generation: string; phase: 'pending' | 'running' | 'stopped' };
 const LEASE_KEY = '__voidSandboxLease';
 const ACTIVITY_KEY = '__voidSandboxActivity';
 type Activity = { lastActivity: number; idleDeadline: number };
 const HEARTBEAT_MS = 30_000;
-const CONTROL_TIMEOUT_MS = 5_000;
+const CONTROL_TIMEOUT_MS = 5000;
 
 function denied(reason: string): Error {
   return new Error(
@@ -54,7 +56,18 @@ class SandboxCapability extends RpcTarget {
   }
   async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
     // Decision: Allowlist on purpose: no raw stub, control binding, configuration, alarm or startup authority.
-    if (!['exec', 'files', 'fetch', 'running', 'destroy'].includes(operation)) {
+    if (
+      ![
+        'exec',
+        'files',
+        'fetch',
+        'running',
+        'destroy',
+        'backup',
+        'restore',
+        'deleteBackup',
+      ].includes(operation)
+    ) {
       throw new TypeError(`Unsupported Sandbox operation: ${operation}`);
     }
     return this.#sandbox.invoke(operation, args);
@@ -211,7 +224,7 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
     });
   }
   override async invoke(operation: string, args: Array<unknown>): Promise<unknown> {
-    if (!['exec', 'files', 'fetch'].includes(operation)) {
+    if (!['exec', 'files', 'fetch', 'backup', 'restore'].includes(operation)) {
       return super.invoke(operation, args);
     }
     const finish = await this.#active();
@@ -248,12 +261,20 @@ export class SandboxController extends SandboxContainer<ControllerEnv> {
   protected override get image(): string {
     return this.env.__PLATFORM_SANDBOX_IMAGE === 'cloudflare/debian-trixie'
       ? 'cloudflare/debian-trixie'
-      : this.container.images.default!;
+      : this.container.images.default;
   }
   protected override get entrypoint(): Array<string> | undefined {
     return this.image === 'cloudflare/debian-trixie' ? ['sleep', 'infinity'] : undefined;
   }
   protected override instanceType: SandboxInstance = 'lite';
+  // Decision: Backups are keyed by project, not deployment, so a later deployment can restore them. Project
+  // deletion removes the prefix.
+  protected override backupStorage(): DirectoryBackupStorage | undefined {
+    const project = this.env.__PROJECT_ID;
+    return this.env.__PLATFORM_SANDBOX_BACKUPS && project
+      ? { binding: '__PLATFORM_SANDBOX_BACKUPS', prefix: `sandbox-backups/${project}/` }
+      : undefined;
+  }
 
   async #arm(): Promise<void> {
     await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);

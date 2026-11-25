@@ -17,8 +17,8 @@ import {
   liftPlatformProjectZeroTrustFenceConnection,
   lockPlatformProjectZeroTrustConnection,
   readPlatformProjectZeroTrustStateConnection,
-  type QueryConnection,
 } from '../../../../../packages/bwf/src/cli/platform-zero-trust-uninstall.ts';
+import type { QueryConnection } from '../../../../../packages/bwf/src/cli/platform-zero-trust-uninstall.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
 import { readZeroTrustConfigurationStrict } from '../../src/zero-trust/configuration.ts';
@@ -39,8 +39,8 @@ import {
   setupEnv,
   skipOrphanSweepDelay,
   teardownEnv,
-  type TestEnv,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 // Decision: The CLI's platform uninstall check reads and locks this database directly, so these tests run it
 // against the API's real schema and writers.
@@ -117,7 +117,7 @@ function accessApi() {
     }
     const match = path.match(/^apps\/([^/]+)$/);
     if (match) {
-      const id = match[1]!;
+      const id = match[1];
       const previous = applications.get(id);
       if (!previous) {
         return Response.json(
@@ -207,8 +207,8 @@ describe('platform uninstall check against the API database', () => {
       );
     const refusal = (await check().catch((error: unknown) => error)) as Error;
     expect(refusal).toBeInstanceOf(Error);
-    expect(refusal!.message).toContain('Deletion of project stopped-deletion stopped');
-    expect(refusal!.message).toContain('`bwf project delete <name>`');
+    expect(refusal.message).toContain('Deletion of project stopped-deletion stopped');
+    expect(refusal.message).toContain('`bwf project delete <name>`');
 
     cloudflare.applications.delete(bypass.bypass_application_id!);
     expect((await deleteProject()).status).toBe(200);

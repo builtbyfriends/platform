@@ -18,8 +18,8 @@ import {
   dispatchToSinks,
   hasActiveSink,
   serializeCapturedMessage,
-  type CapturedMessage,
 } from './email/dev-inbox.ts';
+import type { CapturedMessage } from './email/dev-inbox.ts';
 import {
   bytesToReadableStream,
   readEnvString,
@@ -165,11 +165,11 @@ async function sendViaBinding(
   let EmailMessage: (typeof import('cloudflare:email'))['EmailMessage'];
   try {
     ({ EmailMessage } = await import('cloudflare:email'));
-  } catch (e) {
+  } catch (error) {
     return err(
       'UPSTREAM_ERROR',
-      `email: SEND_EMAIL is bound but cloudflare:email could not be loaded: ${e instanceof Error ? e.message : String(e)}`,
-      e,
+      `email: SEND_EMAIL is bound but cloudflare:email could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      error,
     );
   }
   const deliveries: Array<SendEmailRecipientResult> = [];
@@ -199,15 +199,15 @@ async function sendViaBinding(
       );
       const mid = typeof result?.messageId === 'string' ? result.messageId : '';
       deliveries.push({ recipient, ok: true, messageId: mid || fallbackId });
-    } catch (e) {
+    } catch (error_) {
       const error =
-        e instanceof EmailBindingTimeoutError
+        error_ instanceof EmailBindingTimeoutError
           ? makeError(
               'OUTCOME_UNKNOWN',
               'email: binding submission timed out; inspect provider logs before retrying',
-              e,
+              error_,
             )
-          : classifyBindingError(e);
+          : classifyBindingError(error_);
       deliveries.push({
         recipient,
         ok: false,
@@ -280,6 +280,17 @@ function resolveDefaultFrom(opts: SendEmailOptions): SendEmailOptions {
 
 function err(code: SendEmailErrorCode, message: string, cause?: unknown): SendEmailResult {
   return { ok: false, error: makeError(code, message, cause) };
+}
+
+function missingEmailBinding(): SendEmailResult {
+  return err(
+    'BINDING_MISSING',
+    'email: neither SEND_EMAIL nor __PLATFORM_PROXY is available, so nothing was sent. Deploy via bwf to bind the platform proxy, ' +
+      'or set `email.from` in bwf.config.ts, run `bwf email setup --platform cloudflare`, and redeploy. ' +
+      'Under `bwf dev` messages are captured by the local inbox at /__platform/inbox instead — reaching this error there means ' +
+      'that path was bypassed by the deprecated `sendInDev: true` (it never delivers) or unavailable ' +
+      '(the worker has no assets binding to reach the dev server through).',
+  );
 }
 
 interface ProxySendBody {
@@ -638,7 +649,7 @@ async function postToDevInbox(
       }),
     ).then(
       (res) => ({ kind: 'response' as const, res }),
-      (cause: unknown) => ({ kind: 'error' as const, cause }),
+      (error: unknown) => ({ kind: 'error' as const, cause: error }),
     );
     const settled = await Promise.race([
       attempt,
@@ -667,8 +678,8 @@ async function postToDevInbox(
       return { ok: false, reason: 'response did not come from the dev inbox' };
     }
     return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -695,15 +706,26 @@ function capturedResult(normalized: NormalizedEmail, captureId: string): SendEma
 export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
   if (
     opts.idempotencyKey !== undefined &&
-    (typeof opts.idempotencyKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(opts.idempotencyKey))
+    (typeof opts.idempotencyKey !== 'string' ||
+      !/^[\u0021-\u007e]{1,128}$/.test(opts.idempotencyKey))
   ) {
     return err(
       'MIME_ERROR',
       'email: idempotencyKey must contain 1–128 printable non-space ASCII characters.',
     );
   }
+  const rawEnv = tryGetRawRuntimeEnv();
+  const {
+    __PLATFORM_PROXY: proxy,
+    __PROJECT_ID: projectId,
+    __PLATFORM_PROXY_TOKEN: proxyToken,
+  } = (rawEnv as ProxyEnv | undefined) ?? {};
   const resolvedOpts = resolveDefaultFrom(opts);
   if (resolvedOpts.from === undefined) {
+    const capturable = !opts.sendInDev && (hasActiveSink() || resolveDevInbox(rawEnv));
+    if (!capturable && !resolveSendEmailBinding(rawEnv) && (!proxy || !projectId || !proxyToken)) {
+      return missingEmailBinding();
+    }
     return err(
       'INVALID_FROM',
       "email: 'from' is required. Set it explicitly or deploy via bwf so the platform-injected __PLATFORM_PROJECT_SLUG and __PLATFORM_EMAIL_DOMAIN can default it to <slug>+noreply@<domain>.",
@@ -722,14 +744,12 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
   try {
     normalized = await normalizeEmail(optsWithFrom);
     ({ raw, messageId } = buildMime(normalized));
-  } catch (e) {
-    if (e instanceof MimeError) {
-      return err(e.code, e.message, e);
+  } catch (error) {
+    if (error instanceof MimeError) {
+      return err(error.code, error.message, error);
     }
-    return err('MIME_ERROR', e instanceof Error ? e.message : String(e), e);
+    return err('MIME_ERROR', error instanceof Error ? error.message : String(error), error);
   }
-
-  const rawEnv = tryGetRawRuntimeEnv();
 
   // Decision: A sink in this isolate (`createEmailTestHarness`) owns the capture; do
   // not also post it to the dev inbox.
@@ -768,19 +788,8 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
     return sendViaBinding(sendBinding, normalized.from.email, recipients, raw, messageId);
   }
 
-  const env = rawEnv as ProxyEnv | undefined;
-  const proxy = env?.__PLATFORM_PROXY;
-  const projectId = env?.__PROJECT_ID;
-  const proxyToken = env?.__PLATFORM_PROXY_TOKEN;
   if (!proxy || !projectId || !proxyToken) {
-    return err(
-      'BINDING_MISSING',
-      'email: neither SEND_EMAIL nor __PLATFORM_PROXY is available, so nothing was sent. Deploy via bwf to bind the platform proxy, ' +
-        'or set `email.from` in bwf.config.ts so `bwf deploy --platform cloudflare` provisions the SEND_EMAIL binding. ' +
-        'Under `bwf dev` messages are captured by the local inbox at /__platform/inbox instead — reaching this error there means ' +
-        'that path was bypassed by the deprecated `sendInDev: true` (it never delivers) or unavailable ' +
-        '(the worker has no assets binding to reach the dev server through).',
-    );
+    return missingEmailBinding();
   }
 
   const body: ProxySendBody = {
@@ -811,11 +820,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
         signal: controller.signal,
       }),
     );
-  } catch (e) {
+  } catch (error) {
     return err(
       'OUTCOME_UNKNOWN',
-      `email: send outcome is unknown: ${e instanceof Error ? e.message : String(e)}. Check email logs or repeat the same idempotency key; do not create a new send.`,
-      e,
+      `email: send outcome is unknown: ${error instanceof Error ? error.message : String(error)}. Check email logs or repeat the same idempotency key; do not create a new send.`,
+      error,
     );
   }
   return readResponseAsResult(res, recipients, messageId, beforeDeadline);

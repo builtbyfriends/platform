@@ -1,4 +1,10 @@
-import type { Files } from '@cloudflare/sandbox';
+import type {
+  DirectoryBackupOptions,
+  DirectoryBackupRecord,
+  DirectoryBackupStorage,
+  DirectoryRestoreOptions,
+  Files,
+} from '@cloudflare/sandbox';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { requireRuntimeBinding } from './env.ts';
 import { UsageLimit } from './limits.ts';
@@ -6,16 +12,22 @@ import {
   SandboxContainer,
   SANDBOX_PORT_HEADER,
   validateSandboxOptions,
-  type SandboxCapability,
-  type SandboxOptions,
-  type SandboxExecOptions,
-  type SandboxProcessWire,
+} from './sandbox-container.ts';
+import type {
+  SandboxCapability,
+  SandboxOutbound,
+  SandboxSecret,
+  SandboxOptions,
+  SandboxExecOptions,
+  SandboxProcessWire,
 } from './sandbox-container.ts';
 
 export * from '@cloudflare/sandbox';
-export type { SandboxOptions, SandboxExecOptions };
+export type { SandboxOptions, SandboxExecOptions, SandboxOutbound, SandboxSecret };
+export { SandboxOutboundHandler } from './sandbox-container.ts';
 export const DEFAULT_SANDBOX_ID = 'default';
 export const DEFAULT_SANDBOX_BINDING = 'SANDBOX';
+export const SANDBOX_BACKUPS_BINDING = 'SANDBOX_BACKUPS';
 export const SANDBOX_SERVICE_BINDING = '__PLATFORM_SANDBOX';
 export type BwfSandboxOptions = SandboxOptions & { binding?: string; normalizeId?: boolean };
 export type SandboxProcess = {
@@ -41,6 +53,11 @@ export type SandboxClient = {
   fetch(port: number, request: Request): Promise<Response>;
   running(): Promise<boolean>;
   destroy(): Promise<void>;
+  /** Saves a directory to R2 and returns its record. Keep the record to restore or delete the backup later. */
+  backup(options: DirectoryBackupOptions): Promise<DirectoryBackupRecord>;
+  /** Replaces the record's directory, or `options.dir`, with the backup's files. */
+  restore(backup: DirectoryBackupRecord, options?: DirectoryRestoreOptions): Promise<void>;
+  deleteBackup(backup: DirectoryBackupRecord): Promise<void>;
 };
 
 export class SandboxLimitError extends UsageLimit {
@@ -199,7 +216,7 @@ function client(
       if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
         return (await call('fetch', [port, request])) as Response;
       }
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
         throw new TypeError('Invalid Sandbox TCP port.');
       }
       if (!nativeFetch) {
@@ -215,6 +232,14 @@ function client(
     destroy: async () => {
       await call('destroy', []);
     },
+    backup: async (options) =>
+      (await callWithOptions('backup', [options], 0)) as DirectoryBackupRecord,
+    restore: async (backup, options) => {
+      await callWithOptions('restore', [backup, options], 1);
+    },
+    deleteBackup: async (backup) => {
+      await call('deleteBackup', [backup]);
+    },
   };
 }
 
@@ -227,6 +252,11 @@ export class BwfPlatformSandbox<Env = unknown> extends SandboxContainer<Env> {
         'Managed Sandboxes require the platform Sandbox controller. Redeploy this application.',
       );
     }
+  }
+  protected override backupStorage(): DirectoryBackupStorage | undefined {
+    return (this.env as Record<string, unknown>)[SANDBOX_BACKUPS_BINDING]
+      ? { binding: SANDBOX_BACKUPS_BINDING, prefix: 'sandbox-backups/' }
+      : undefined;
   }
 }
 

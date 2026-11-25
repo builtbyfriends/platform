@@ -40,8 +40,8 @@ import {
   REASON_SANDBOX_RUNTIME_EXCEEDED,
 } from '../suspension.ts';
 import type { Deployment, Invitation, PlatformEvent, Project, User } from '../types.ts';
-import { type TerminatedBuild } from './builds.ts';
-import { type Db } from './client.ts';
+import type { TerminatedBuild } from './builds.ts';
+import type { Db } from './client.ts';
 import { invalidateGitHubConnectionAuthorizedBy } from './github.ts';
 import { getUser } from './users.ts';
 
@@ -432,6 +432,8 @@ export async function getUsersWithProjectsBatch(db: Db, limit: number, offset: n
     .select({
       id: users.id,
       plan: users.plan,
+      provider: users.provider,
+      provider_id: users.provider_id,
       billing_cycle_start: users.billing_cycle_start,
       suspended_reason: users.suspended_reason,
     })

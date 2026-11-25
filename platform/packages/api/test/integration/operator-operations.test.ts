@@ -18,8 +18,8 @@ import {
   advanceProxyTokenRotation,
   reconcileProxyTokenRotations,
   requestProxyTokenRotation,
-  type ProxyTokenRotationEnv,
 } from '../../src/proxy-token-rotation.ts';
+import type { ProxyTokenRotationEnv } from '../../src/proxy-token-rotation.ts';
 import { deriveProxyToken } from '../../src/proxy-token.ts';
 import { databaseTimestampMs } from '../../src/routes/deploy.ts';
 import { readSandboxDrainCheckpoint } from '../../src/sandbox-drain.ts';
@@ -46,9 +46,8 @@ import {
   mockCfApi,
   setupEnv,
   teardownEnv,
-  type MockCfApiHandle,
-  type TestEnv,
 } from './helpers.ts';
+import type { MockCfApiHandle, TestEnv } from './helpers.ts';
 
 let env: TestEnv;
 let token: string;
@@ -1328,7 +1327,7 @@ describe('operator installation-aware system and worker operations', () => {
       containerName: 'platform-sandbox',
       identityOversized: false,
     });
-    expect(Object.keys(rows[0]!)).toEqual([
+    expect(Object.keys(rows[0])).toEqual([
       'deploymentId',
       'projectId',
       'projectSlug',
@@ -1346,7 +1345,7 @@ describe('operator installation-aware system and worker operations', () => {
       'createdAt',
     ]);
     const returnedProjection = JSON.stringify(rows);
-    expect(returnedProjection.length).toBeLessThan(2_000);
+    expect(returnedProjection.length).toBeLessThan(2000);
     expect(returnedProjection).not.toContain('manifest-payload-');
   });
   test('blocks oversized Sandbox identity metadata before any Container API call', async () => {
@@ -1517,7 +1516,7 @@ describe('proxy token rotation', () => {
         const script = cf.state.hostScripts.get(name);
         return script
           ? cfSuccess(script.bindings)
-          : cfError('workers.api.error.script_not_found', 404, 10007);
+          : cfError('workers.api.error.script_not_found', 404, 10_007);
       },
     });
     return cf;
@@ -1574,7 +1573,7 @@ describe('proxy token rotation', () => {
       .select({ gen: projects.proxy_token_gen })
       .from(projects)
       .where(eq(projects.id, projectId));
-    return row!.gen;
+    return row.gen;
   }
 
   const scriptToken = (cf: MockCfApiHandle, script: string) =>
@@ -1594,7 +1593,7 @@ describe('proxy token rotation', () => {
 
   async function runRotations() {
     await endWaits();
-    await reconcileProxyTokenRotations(env.db, env as unknown as ProxyTokenRotationEnv);
+    await reconcileProxyTokenRotations(env.db, env);
   }
 
   async function finishRotations() {
@@ -1740,21 +1739,19 @@ describe('proxy token rotation', () => {
       const project = await rotationProject(cf, `rotate-again-${phase}`, { workers: true });
       if (phase === 'patch') {
         await requestProxyTokenRotation(env.db, project.id, 'operator', 'operator');
-        await advanceProxyTokenRotation(
-          env.db,
-          env as unknown as ProxyTokenRotationEnv,
-          project.id,
-          { cfCallsRemaining: 0, deadline: Date.now() + 60_000 },
-        );
+        await advanceProxyTokenRotation(env.db, env, project.id, {
+          cfCallsRemaining: 0,
+          deadline: Date.now() + 60_000,
+        });
       } else {
         await req('/system/rotate-proxy-tokens', { project: project.id });
       }
-      while ((await rotationJob(project.id))!.payload.phase !== phase) {
+      while ((await rotationJob(project.id)).payload.phase !== phase) {
         await runRotations();
       }
 
       await req('/system/rotate-proxy-tokens', { project: project.id });
-      expect((await rotationJob(project.id))!.payload.again).toBe('1');
+      expect((await rotationJob(project.id)).payload.again).toBe('1');
 
       await finishRotations();
       expect(await issued(project.id)).toBe(2);
@@ -1777,8 +1774,8 @@ describe('proxy token rotation', () => {
 
     await req('/system/rotate-proxy-tokens', { project: project.id });
     const job = await rotationJob(project.id);
-    expect(job!.payload).toMatchObject({ phase: 'revoke', reason: 'member-removed' });
-    expect(job!.payload.again).toBeUndefined();
+    expect(job.payload).toMatchObject({ phase: 'revoke', reason: 'member-removed' });
+    expect(job.payload.again).toBeUndefined();
 
     await finishRotations();
     expect(await issued(project.id)).toBe(1);
@@ -1788,17 +1785,17 @@ describe('proxy token rotation', () => {
     const cf = cloudflare();
     const project = await rotationProject(cf, 'rotate-flag', { workers: true });
     await req('/system/rotate-proxy-tokens', { project: project.id });
-    expect((await rotationJob(project.id))!.payload.again).toBeUndefined();
+    expect((await rotationJob(project.id)).payload.again).toBeUndefined();
 
     const all = await req('/system/rotate-proxy-tokens', { all: true });
     expect(await all.json()).toMatchObject({ queued: 1 });
-    expect((await rotationJob(project.id))!.payload.again).toBe('1');
+    expect((await rotationJob(project.id)).payload.again).toBe('1');
   });
 
   test('reports a rotation that keeps failing', async () => {
     const cf = cloudflare();
     const project = await rotationProject(cf, 'rotate-failing', { workers: true });
-    cf.state.hostScripts.delete(project.workers[1]!);
+    cf.state.hostScripts.delete(project.workers[1]);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const failed = await req('/system/rotate-proxy-tokens', { project: project.id });

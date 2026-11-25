@@ -17,9 +17,9 @@ import {
   createTestProject,
   createTestProjectSecret,
   mockCfApi,
-  type TestEnv,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 

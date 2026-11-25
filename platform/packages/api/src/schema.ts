@@ -6,6 +6,7 @@ import type {
 } from '@builtbyfriends/platform';
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   check,
   index,
@@ -77,6 +78,29 @@ export const oauthClients = pgTable('oauth_clients', {
   scopes: jsonb('scopes').notNull().$type<Array<OAuthScope>>(),
   secret_hash: text('secret_hash').notNull(),
   enabled: boolean('enabled').notNull().default(true),
+  /** The plans this application's people can buy: each one's Stripe price and monthly credits. */
+  plans: jsonb('plans').$type<
+    Record<
+      string,
+      {
+        stripePriceId: string;
+        creditMicros: number;
+        perSeat?: boolean;
+        customDomains?: boolean;
+        protection?: boolean;
+      }
+    >
+  >(),
+  /** The one-time credit each person can be given once, set by an operator. Null gives none. */
+  starter_credit_micros: bigint('starter_credit_micros', { mode: 'number' }),
+  /** How people buy credits once: the smallest amount, the step above it, and how many days bought credits last. Null sells none. */
+  credit_purchase: jsonb('credit_purchase').$type<CreditPurchase>(),
+  /** Where Platform sends this application's billing events. Null sends none. */
+  events_url: text('events_url'),
+  /** Signs each billing event. Kept as is, unlike the client secret, so Platform can sign with it. */
+  events_secret: text('events_secret'),
+  /** A payer's balance under this many micros is low. 0 sends no low-balance event. */
+  low_balance_micros: bigint('low_balance_micros', { mode: 'number' }).notNull().default(2_000_000),
   created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -94,12 +118,33 @@ export const appPeople = pgTable(
     plan: text('plan').$type<PlanId>().notNull(),
     stripe_customer_id: text('stripe_customer_id'),
     stripe_subscription_id: text('stripe_subscription_id'),
+    /** Whether the plan and Stripe ids came from a live-mode payment. A live installation ignores test rows. */
+    livemode: boolean('livemode').notNull().default(false),
+    /** The stored subscription's Stripe status, such as active or past_due, as last read from Stripe. */
+    subscription_status: text('subscription_status'),
+    current_period_end: timestamp('current_period_end', { mode: 'string', withTimezone: true }),
+    cancel_at_period_end: boolean('cancel_at_period_end').notNull().default(false),
+    /** For a plan sold by the seat: how many seats the subscription holds, and one seat's price in cents. */
+    seats: integer('seats'),
+    seat_price_cents: integer('seat_price_cents'),
+    /** No longer read: app_payers.out_since took its place. Kept for the previous Worker during a rollout. */
+    out_of_credits_period: text('out_of_credits_period'),
     updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.person_id] })],
 );
+
+/** Stripe events already handled, so a resent event changes nothing. */
+export const stripeEvents = pgTable('stripe_events', {
+  event_id: text('event_id').primaryKey(),
+  type: text('type').notNull(),
+  livemode: boolean('livemode').notNull(),
+  created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 /** What one person of a connected application used in one calendar month (UTC), as the application reports it. */
 export const appUsage = pgTable(
@@ -117,6 +162,54 @@ export const appUsage = pgTable(
   (table) => [primaryKey({ columns: [table.client_id, table.person_id, table.period] })],
 );
 
+/** The same month's use split by model and by where the application says it came from. */
+export const appUsageSources = pgTable(
+  'app_usage_sources',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    person_id: text('person_id').notNull(),
+    period: text('period').notNull(),
+    model: text('model').notNull().default(''),
+    source: text('source').notNull().default(''),
+    ai_neurons: integer('ai_neurons').notNull().default(0),
+    sandbox_seconds: integer('sandbox_seconds').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.client_id, table.person_id, table.period, table.model, table.source],
+    }),
+  ],
+);
+
+/**
+ * Use by day, meter and project for the person who pays for it. An empty project is use the
+ * application reported; the rest is what Platform read for a hosted project.
+ */
+export const appUsageDaily = pgTable(
+  'app_usage_daily',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    person_id: text('person_id').notNull(),
+    project_id: text('project_id').notNull().default(''),
+    /** `YYYY-MM-DD` in UTC. */
+    day: text('day').notNull(),
+    meter: text('meter').notNull(),
+    quantity: bigint('quantity', { mode: 'number' }).notNull().default(0),
+    /** What this row was charged to the payer's credits, at the prices of the moment. */
+    cost_micros: bigint('cost_micros', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.client_id, table.person_id, table.project_id, table.day, table.meter],
+    }),
+    index('idx_app_usage_daily_project').on(table.project_id, table.day),
+  ],
+);
+
 /** Reports already counted, so an application can send one again after a timeout. */
 export const appUsageEvents = pgTable(
   'app_usage_events',
@@ -130,6 +223,202 @@ export const appUsageEvents = pgTable(
       .defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.client_id, table.event_id] })],
+);
+
+/** What each person spent this month from a wallet they don't own, priced when it was reported. */
+export const appWalletUse = pgTable(
+  'app_wallet_use',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    payer_id: text('payer_id').notNull(),
+    person_id: text('person_id').notNull(),
+    period: text('period').notNull(),
+    cost_micros: bigint('cost_micros', { mode: 'number' }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.client_id, table.payer_id, table.period, table.person_id] }),
+  ],
+);
+
+/**
+ * How an application sells credits. `buyForOthers` lets a person buy for, or top up, a payer other than
+ * themselves, such as a shared wallet. It's off unless the operator turns it on. The daily caps limit
+ * what one buyer pays for and what one payer takes in, purchases and moves, in a UTC day.
+ */
+export type CreditPurchase = {
+  minMicros: number;
+  stepMicros: number;
+  lifeDays: number;
+  buyForOthers?: boolean;
+  buyerDailyMicros?: number;
+  walletDailyMicros?: number;
+};
+
+/** The payer's auto top-up: who pays for it, the balance that starts a charge, its size, and the most it charges in a calendar month. */
+export type AutoTopUp = {
+  buyer: string;
+  thresholdMicros: number;
+  amountMicros: number;
+  monthlyLimitMicros: number;
+};
+
+export type CreditSource = 'plan' | 'bought' | 'given' | 'starter' | 'moved' | 'invoice';
+
+/**
+ * One grant of credits to a payer of a connected application. The balance is what's left on
+ * grants that haven't ended, less what the payer owes.
+ */
+export const appCreditGrants = pgTable(
+  'app_credit_grants',
+  {
+    id: text('id').primaryKey(),
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    /** The application's own id for whoever pays, in the same space as person ids. */
+    payer_id: text('payer_id').notNull(),
+    source: text('source').$type<CreditSource>().notNull(),
+    amount_micros: bigint('amount_micros', { mode: 'number' }).notNull(),
+    remaining_micros: bigint('remaining_micros', { mode: 'number' }).notNull(),
+    /** What refunds took back so far. */
+    taken_micros: bigint('taken_micros', { mode: 'number' }).notNull().default(0),
+    /** What a dispute took from what was left, and what it added to the owed amount, so a won dispute gives both back. */
+    voided_remaining_micros: bigint('voided_remaining_micros', { mode: 'number' })
+      .notNull()
+      .default(0),
+    voided_owed_micros: bigint('voided_owed_micros', { mode: 'number' }).notNull().default(0),
+    /** What was moved out of this grant into a wallet. */
+    moved_out_micros: bigint('moved_out_micros', { mode: 'number' }).notNull().default(0),
+    /** For moved credits: the grant they came from, and the application's id for the move. */
+    moved_from: text('moved_from'),
+    move_id: text('move_id'),
+    giver_id: text('giver_id'),
+    /** Where the buyer's billing address was, from Checkout, so sales tax can be worked out later. */
+    billing_country: text('billing_country'),
+    billing_state: text('billing_state'),
+    /** Why an operator gave the grant. */
+    note: text('note'),
+    stripe_invoice_id: text('stripe_invoice_id'),
+    /** An invoice grant given before its invoice was paid. A voided invoice takes it back. */
+    unpaid: boolean('unpaid').notNull().default(false),
+    stripe_payment_intent_id: text('stripe_payment_intent_id'),
+    /** Which month of a longer paid period, such as a year, the grant is. 0 for a grant that isn't one. */
+    month_index: integer('month_index').notNull().default(0),
+    livemode: boolean('livemode').notNull().default(false),
+    starts_at: timestamp('starts_at', { mode: 'string', withTimezone: true }).notNull(),
+    expires_at: timestamp('expires_at', { mode: 'string', withTimezone: true }),
+    voided_at: timestamp('voided_at', { mode: 'string', withTimezone: true }),
+    void_reason: text('void_reason'),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('idx_app_credit_grants_payer').on(table.client_id, table.payer_id),
+    uniqueIndex('idx_app_credit_grants_invoice')
+      .on(table.client_id, table.stripe_invoice_id, table.month_index)
+      .where(sql`${table.stripe_invoice_id} IS NOT NULL`),
+    uniqueIndex('idx_app_credit_grants_starter')
+      .on(table.client_id, table.payer_id, table.livemode)
+      .where(sql`${table.source} = 'starter'`),
+    uniqueIndex('idx_app_credit_grants_payment')
+      .on(table.client_id, table.stripe_payment_intent_id, table.month_index)
+      .where(sql`${table.stripe_payment_intent_id} IS NOT NULL AND ${table.moved_from} IS NULL`),
+    uniqueIndex('idx_app_credit_grants_move')
+      .on(table.client_id, table.move_id, table.moved_from)
+      .where(sql`${table.move_id} IS NOT NULL`),
+  ],
+);
+
+/** What a payer owes past their grants, and since when their balance has been at or below zero. */
+export type PayerCap = 'ai' | 'sandbox';
+
+export const appPayers = pgTable(
+  'app_payers',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    payer_id: text('payer_id').notNull(),
+    /** Set by the application for a payer that is a wallet, not a person. A wallet has no plan, caps or starter credit: only its balance. */
+    wallet: boolean('wallet').notNull().default(false),
+    /** Set when the application closed the wallet. A closed wallet takes no more grants or moves. */
+    closed_at: timestamp('closed_at', { mode: 'string', withTimezone: true }),
+    owed_micros: bigint('owed_micros', { mode: 'number' }).notNull().default(0),
+    out_since: timestamp('out_since', { mode: 'string', withTimezone: true }),
+    /** Since when the balance has been under the application's low mark, so the low event is sent once a crossing. */
+    low_since: timestamp('low_since', { mode: 'string', withTimezone: true }),
+    /** Set by a card dispute. A blocked payer can't buy until an operator clears it. */
+    blocked_at: timestamp('blocked_at', { mode: 'string', withTimezone: true }),
+    blocked_reason: text('blocked_reason'),
+    top_up: jsonb('top_up').$type<AutoTopUp>(),
+    top_up_enabled: boolean('top_up_enabled').notNull().default(false),
+    /** Why auto top-up turned itself off, such as a declined card or the monthly limit. */
+    top_up_off_reason: text('top_up_off_reason'),
+    /** Counts charges, so each one has its own Stripe idempotency key and a retry reuses it. */
+    top_up_count: integer('top_up_count').notNull().default(0),
+    /** Set while a charge is out with Stripe, so a second debit doesn't start another. */
+    top_up_started_at: timestamp('top_up_started_at', { mode: 'string', withTimezone: true }),
+    /** The calendar month, `YYYY-MM`, that top_up_month_micros counts. */
+    top_up_month: text('top_up_month'),
+    top_up_month_micros: bigint('top_up_month_micros', { mode: 'number' }).notNull().default(0),
+    /** The monthly caps of a payer's plan that their hosted apps passed: 'ai' and 'sandbox'. Only for a payer with no grants. */
+    over_caps: text('over_caps')
+      .array()
+      .$type<Array<PayerCap>>()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+  },
+  (table) => [primaryKey({ columns: [table.client_id, table.payer_id] })],
+);
+
+/** Billing events waiting to reach an application, or sent. A failed delivery is tried again later. */
+export const appBillingEvents = pgTable(
+  'app_billing_events',
+  {
+    id: text('id').primaryKey(),
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    type: text('type').notNull(),
+    /** The event as it's sent, so each attempt sends the same bytes. */
+    body: text('body').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    next_attempt_at: timestamp('next_attempt_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sent_at: timestamp('sent_at', { mode: 'string', withTimezone: true }),
+    gave_up_at: timestamp('gave_up_at', { mode: 'string', withTimezone: true }),
+    created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('idx_app_billing_events_due')
+      .on(table.next_attempt_at)
+      .where(sql`${table.sent_at} IS NULL AND ${table.gave_up_at} IS NULL`),
+  ],
+);
+
+/** The Stripe customer and saved card of a person who buys credits, apart from whoever the credits are for. */
+export const appBuyers = pgTable(
+  'app_buyers',
+  {
+    client_id: text('client_id')
+      .notNull()
+      .references(() => oauthClients.id),
+    buyer_id: text('buyer_id').notNull(),
+    livemode: boolean('livemode').notNull(),
+    stripe_customer_id: text('stripe_customer_id').notNull(),
+    /** The card saved for charges with nobody present, such as auto top-up. */
+    stripe_payment_method_id: text('stripe_payment_method_id'),
+    updated_at: timestamp('updated_at', { mode: 'string', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.client_id, table.buyer_id, table.livemode] })],
 );
 
 export const oauthGrants = pgTable(
@@ -212,7 +501,7 @@ export const platformAuthSettings = pgTable(
     revision: integer('revision').notNull().default(1),
     admission: jsonb('admission').notNull().$type<PlatformAdmissionPolicy>(),
     protection: jsonb('protection').$type<PlatformAccessProtection>(),
-    session_seconds: integer('session_seconds').notNull().default(2592000),
+    session_seconds: integer('session_seconds').notNull().default(2_592_000),
     sessions_required: boolean('sessions_required').notNull().default(false),
     created_at: timestamp('created_at', { mode: 'string', withTimezone: true })
       .notNull()
@@ -432,6 +721,9 @@ export const projects = pgTable(
     preview_client_id: text('preview_client_id').references(() => oauthClients.id),
     preview_workspace_id: text('preview_workspace_id'),
     preview_expires_at: timestamp('preview_expires_at', { mode: 'string', withTimezone: true }),
+    // Decision: The connected application's person who pays for this project, when the application named one.
+    // Empty means the person it was built for pays (see app-payer.ts).
+    payer_person_id: text('payer_person_id'),
     type: text('mode').notNull().default('platform').$type<'platform' | 'spa' | 'static'>(),
     active_deployment_id: text('active_deployment_id'),
     websocket_version: integer('websocket_version').notNull().default(0),
@@ -441,6 +733,11 @@ export const projects = pgTable(
     // Decision: A second mailbox name on the shared mail domain, set once by the owner. It shares one namespace
     // with slugs; a database trigger keeps them apart.
     email_alias: text('email_alias'),
+    // Decision: Set by an operator to take one app offline, or by a billing pause. Reconcile, deploy and
+    // sandbox control read it, so it outlives a new deploy, an owner change and the owner's own restore.
+    suspended_reason: text('suspended_reason'),
+    suspended_at: timestamp('suspended_at', { mode: 'string', withTimezone: true }),
+    suspended_note: text('suspended_note'),
     created_at: timestamp('created_at', { mode: 'string' }).notNull().defaultNow(),
   },
   (table) => [
@@ -655,6 +952,11 @@ export const projectZeroTrust = pgTable(
     protected_application_id: text('protected_application_id'),
     protected_application_name: text('protected_application_name'),
     protected_application_audience: text('protected_application_audience'),
+    /** Set by a connected application: only people signed in with these email domains get in, at the project's
+     * own address and its custom domains. Null uses the installation's policies. */
+    access_email_domains: text('access_email_domains').array(),
+    /** The project's platform hostnames that its protected application covers, when it covers them. */
+    protected_application_platform_hosts: text('protected_application_platform_hosts').array(),
     // Decision: Last custom hostname whose routing protection was cleared. Public projects can have more domains
     // than fit in one reconciliation run.
     routing_cursor: text('routing_cursor'),

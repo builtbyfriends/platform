@@ -1,4 +1,4 @@
 # Last upstream Void commit this fork has reviewed. scripts/upstream-sync.ts reads it.
 upstream https://github.com/voidzero-dev/void main
-commit 92a01567b5f9e435249433e2e00da3e89d6744aa
-subject test: record the HTTP errors toast opening before it dismisses
+commit 710736aa03d03dd46b4137dc537ce599a246af74
+subject fix(pages): hydrate islands added while the dev server runs (#870)

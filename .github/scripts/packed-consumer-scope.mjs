@@ -8,11 +8,19 @@ const fullSuitePaths = [
   /^packages\/(?:create-bwf|react|vue|svelte|solid|md)\/(?:src|bin)\//,
   /^packages\/bwf\/src\/cli\/(?:init|template|package|agents)(?:[-./])/,
   /^\.github\/scripts\/(?:packed-|release-policy)/,
-  /^\.github\/workflows\/(?:packed-consumers|prepublish-test|publish)\.yml$/,
+  /^\.github\/workflows\/(?:prepublish-test|publish)\.yml$/,
+];
+
+const shippedContentPaths = [
+  /^packages\/bwf\/(?:AGENTS_TEMPLATE\.md|README\.md|skills\/)/,
+  /^docs\/guide\//,
 ];
 
 export function selectPackedSuite(paths) {
   if (paths === null) {
+    return 'full';
+  }
+  if (paths.some((path) => shippedContentPaths.some((pattern) => pattern.test(path)))) {
     return 'full';
   }
   const code = paths.filter(
@@ -95,7 +103,7 @@ export async function resolvePackedSuite({ eventName, event, requested = 'auto',
   return 'full';
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const suite = await resolvePackedSuite({
     eventName: process.env.GITHUB_EVENT_NAME,
     event: JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')),
@@ -107,7 +115,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2022-11-28',
         },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(15_000),
       });
       if (!response.ok) {
         throw new Error('Could not read changed files');

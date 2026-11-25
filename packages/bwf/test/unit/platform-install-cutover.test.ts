@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,14 +10,14 @@ import {
   createPlatformDeploymentManifest,
   PLATFORM_DISABLED_KEY,
   PLATFORM_REMOTE_INSTALLATION_MANIFEST_KEY,
-  type PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { hyperdriveOriginFromConnectionString } from '../../src/cli/platform-cloudflare.ts';
 import { verifyPlatformWorkerCutoverVersions } from '../../src/cli/platform-installer-cutover.ts';
-import {
-  type PlatformInstallerDependencies,
-  type PlatformInstallationSecrets,
+import type {
+  PlatformInstallerDependencies,
+  PlatformInstallationSecrets,
 } from '../../src/cli/platform-installer-types.ts';
 import {
   createPlatformInstallationSecrets,
@@ -234,7 +235,7 @@ async function createFakeCloudflare() {
   const plainTextBindings = async (_account: string, name: string) => {
     const entry = workers.get(name);
     const active = entry?.deployments[0]?.versions[0]?.version_id;
-    const version = active ? entry!.versions.get(active) : undefined;
+    const version = active ? entry.versions.get(active) : undefined;
     return Object.fromEntries(
       (version?.resources.bindings ?? []).map((binding) => [binding.name, binding.text]),
     );
@@ -263,6 +264,7 @@ async function createFakeCloudflare() {
       kv.delete(`${namespace}/${key}`);
     },
     disableHyperdriveCaching: async () => {},
+    setHyperdriveOriginConnectionLimit: async () => {},
     getHyperdriveConfig: async (_account: string, id: string) => ({
       cachingDisabled: true,
       id,
@@ -338,13 +340,13 @@ async function createFakeCloudflare() {
     secretUploads,
     replaceActiveVersion: (name: string) => {
       const worker = workers.get(name)!;
-      const active = worker.versions.get(worker.deployments[0]!.versions[0]!.version_id)!;
+      const active = worker.versions.get(worker.deployments[0].versions[0].version_id)!;
       const replacement = { ...structuredClone(active), id: randomUUID() };
       worker.versions.set(replacement.id, replacement);
       activate(name, replacement.id);
     },
     restorePreviousVersion: (name: string) => {
-      activate(name, workers.get(name)!.deployments[1]!.versions[0]!.version_id);
+      activate(name, workers.get(name)!.deployments[1].versions[0].version_id);
     },
   };
 }
@@ -430,7 +432,7 @@ async function runInstall(
 }
 
 function currentManifest(): PlatformInstallationManifest {
-  return listInstallationManifests(process.env.PLATFORM_REGISTRY_DIR!)[0]!;
+  return listInstallationManifests(process.env.PLATFORM_REGISTRY_DIR)[0];
 }
 
 function workerStepKeys(manifest: PlatformInstallationManifest) {

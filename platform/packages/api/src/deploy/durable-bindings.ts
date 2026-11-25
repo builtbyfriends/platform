@@ -1,9 +1,5 @@
 import { planWebSocketMigrations } from '@builtbyfriends/deploy-core';
-import {
-  type DeployManifest,
-  type LiveMigrationMeta,
-  type WebSocketMigrationMeta,
-} from '../types.ts';
+import type { DeployManifest, LiveMigrationMeta, WebSocketMigrationMeta } from '../types.ts';
 import { sortUnique } from './serving-assets.ts';
 
 export function buildDurableObjectUploadMigrations(
@@ -49,14 +45,14 @@ export function buildDurableObjectUploadMigrations(
     });
   }
 
-  if (steps.length === 0) {
+  const sortedSteps = [...steps].sort(compareDurableObjectMigrationSteps);
+  const lastStep = sortedSteps.at(-1);
+  if (lastStep === undefined) {
     return undefined;
   }
 
-  const sortedSteps = [...steps].sort(compareDurableObjectMigrationSteps);
-
   return {
-    new_tag: sortedSteps[sortedSteps.length - 1].tag,
+    new_tag: lastStep.tag,
     steps: sortedSteps.map(({ tag: _tag, index: _index, ...step }) => step),
   };
 }

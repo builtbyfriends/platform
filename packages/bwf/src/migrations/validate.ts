@@ -1,12 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { hasStandalonePragma } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
-import {
-  readJournal,
-  stripSqlExt,
-  type DrizzleJournal,
-  type DrizzleJournalEntry,
-} from './collect.ts';
+import { readJournal, stripSqlExt } from './collect.ts';
 import { DESTRUCTIVE_PRAGMA, getExecutableSql } from './plan.ts';
 
 export type MigrationFile = {
@@ -28,6 +23,7 @@ const DESTRUCTIVE_PATTERNS = [
   /\bALTER\s+TABLE\b[\s\S]*\bRENAME\b[\s\S]*\bTO\b/i,
   /\bTRUNCATE\b/i,
   /\bINSERT\s+OR\s+REPLACE\b/i,
+  /\bREPLACE\s+INTO\b/i,
 ];
 
 function splitExecutableStatements(sql: string): Array<string> {
@@ -79,7 +75,7 @@ function hasUnboundedWrite(statement: string): boolean {
 }
 
 export function isDestructive(sql: string): boolean {
-  const executable = getExecutableSql(sql.replace(/\r\n?/g, '\n'));
+  const executable = getExecutableSql(sql.replaceAll(/\r\n?/g, '\n'));
   return splitExecutableStatements(executable).some((statement) => {
     return (
       DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(statement)) ||
@@ -194,9 +190,9 @@ export function assertJournalCoherence(
     journal === null ||
     typeof journal !== 'object' ||
     Array.isArray(journal) ||
-    typeof (journal as DrizzleJournal).version !== 'string' ||
-    typeof (journal as DrizzleJournal).dialect !== 'string' ||
-    !Array.isArray((journal as DrizzleJournal).entries)
+    typeof journal.version !== 'string' ||
+    typeof journal.dialect !== 'string' ||
+    !Array.isArray(journal.entries)
   ) {
     throw new Error(
       `${dir}/meta/_journal.json is malformed: expected an object with string \`version\`, string \`dialect\`, and an \`entries\` array. Restore the file from version control, or delete it if you intended to revert to hand-written migrations.`,
@@ -211,10 +207,10 @@ export function assertJournalCoherence(
     if (
       entry === null ||
       typeof entry !== 'object' ||
-      typeof (entry as DrizzleJournalEntry).idx !== 'number' ||
-      typeof (entry as DrizzleJournalEntry).version !== 'string' ||
-      typeof (entry as DrizzleJournalEntry).tag !== 'string' ||
-      typeof (entry as DrizzleJournalEntry).breakpoints !== 'boolean'
+      typeof entry.idx !== 'number' ||
+      typeof entry.version !== 'string' ||
+      typeof entry.tag !== 'string' ||
+      typeof entry.breakpoints !== 'boolean'
     ) {
       throw new Error(
         `${dir}/meta/_journal.json is malformed: entry at index ${i} is missing required fields (\`idx\`, \`version\`, \`tag\`, \`breakpoints\`). Restore the file from version control, or delete it if you intended to revert to hand-written migrations.`,

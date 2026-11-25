@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import type { SQLOutputValue } from 'node:sqlite';
 import {
   cloudflareCommandDiagnostic,
   readBindingFieldPresence,
@@ -6,7 +7,7 @@ import {
 import { Minimatch } from 'minimatch';
 import { dirname, join, normalize, resolve } from 'pathslash';
 import type { BwfAuthMigrationSchema } from '../auth/drizzle.ts';
-import { type DatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { openMigrationValidationDatabase } from '../migrations/sqlite-validation.ts';
 import { assertJournalCoherence, validateMigrations } from '../migrations/validate.ts';
 import { readProjectPaths } from '../project-paths.ts';
@@ -14,15 +15,29 @@ import { isCleanCloudflareExit } from './cloudflare-process.ts';
 import { hasDeploySchemaDrift, getDeploySchemaDriftMessage } from './deploy-drift.ts';
 import { log } from './deploy-helpers.ts';
 import { CLOUDFLARE_RESOURCE_LABELS } from './deploy-resources.ts';
-import {
-  type RequiredAuthTable,
-  type TableInfoRow,
-  type DeployWranglerRun,
-  type DeployWranglerRunResult,
+import type {
+  RequiredAuthTable,
+  TableInfoRow,
+  DeployWranglerRun,
+  DeployWranglerRunResult,
 } from './deploy-types.ts';
+import { isJsonArray, isJsonObject } from './json-value.ts';
 import { formatCount, getErrorMessage } from './output.ts';
 import type { ProvisionDriftEntry } from './provision.ts';
 import { sanitizeTerminalLogText } from './terminal-log-text.ts';
+
+const quote = (identifier: string): string => `"${identifier.replaceAll('"', '""')}"`;
+// Decision: SQLite matches identifiers case-insensitively, but PRAGMAs echo the declared casing.
+const foldIdentifier = (identifier: string): string => identifier.toLowerCase();
+const sameIdentifier = (a: string, b: string): boolean => foldIdentifier(a) === foldIdentifier(b);
+
+function sqliteString(value: SQLOutputValue | undefined): string {
+  return typeof value === 'string' ? value : String(value ?? '');
+}
+
+function sqliteNullableString(value: SQLOutputValue | undefined): string | null {
+  return value === null || value === undefined ? null : sqliteString(value);
+}
 
 /**
  * Apply the checked-in migrations to an in-memory SQLite database and assert the resulting
@@ -39,10 +54,6 @@ export async function assertMigrationsProduceAuthSchema(
   required: Array<RequiredAuthTable>,
 ): Promise<void> {
   const db = await openMigrationValidationDatabase(migrations);
-  const quote = (identifier: string): string => `"${identifier.replace(/"/g, '""')}"`;
-  // Decision: SQLite matches identifiers case-insensitively, but PRAGMAs echo the declared casing.
-  const foldIdentifier = (identifier: string): string => identifier.toLowerCase();
-  const sameIdentifier = (a: string, b: string): boolean => foldIdentifier(a) === foldIdentifier(b);
   // Decision: Foreign keys need the parent table's info too. A table no migration created yields `[]`.
   const tableInfoCache = new Map<string, Array<TableInfoRow>>();
   const tableInfoFor = (table: string): Array<TableInfoRow> => {
@@ -51,7 +62,15 @@ export async function assertMigrationsProduceAuthSchema(
     if (cached !== undefined) {
       return cached;
     }
-    const rows = db.prepare(`PRAGMA table_info(${quote(table)})`).all() as Array<TableInfoRow>;
+    const rows = db
+      .prepare(`PRAGMA table_info(${quote(table)})`)
+      .all()
+      .map((row): TableInfoRow => ({
+        name: sqliteString(row.name),
+        type: sqliteNullableString(row.type),
+        notnull: Number(row.notnull),
+        pk: Number(row.pk),
+      }));
     tableInfoCache.set(key, rows);
     return rows;
   };
@@ -62,11 +81,10 @@ export async function assertMigrationsProduceAuthSchema(
   };
   try {
     const tables = new Set(
-      (
-        db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
-          name: string;
-        }>
-      ).map((row) => foldIdentifier(row.name)),
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+        .all()
+        .map((row) => foldIdentifier(sqliteString(row.name))),
     );
     const problems: Array<string> = [];
     for (const req of required) {
@@ -90,20 +108,21 @@ export async function assertMigrationsProduceAuthSchema(
       if (primaryKey.length === 1 && primaryKey[0]) {
         uniqueColumns.add(foldIdentifier(primaryKey[0].name));
       }
-      const indexes = db.prepare(`PRAGMA index_list(${quote(req.table)})`).all() as Array<{
-        name: string;
-        unique: number;
-        origin?: string | null;
-        partial?: number;
-      }>;
+      const indexes = db
+        .prepare(`PRAGMA index_list(${quote(req.table)})`)
+        .all()
+        .map((row) => ({
+          name: sqliteString(row.name),
+          unique: Number(row.unique),
+          origin: sqliteNullableString(row.origin),
+          partial: row.partial === undefined ? undefined : Number(row.partial),
+        }));
       for (const index of indexes) {
         // Decision: A partial unique index constrains only the rows matching its WHERE clause.
         if (Number(index.unique) !== 1 || Number(index.partial ?? 0) !== 0) {
           continue;
         }
-        const indexColumns = db.prepare(`PRAGMA index_info(${quote(index.name)})`).all() as Array<{
-          name: string | null;
-        }>;
+        const indexColumns = db.prepare(`PRAGMA index_info(${quote(index.name)})`).all();
         // Decision: A composite unique index constrains the tuple, not this column alone.
         if (indexColumns.length !== 1) {
           continue;
@@ -205,12 +224,13 @@ export async function assertMigrationsProduceAuthSchema(
       // Decision: `PRAGMA foreign_key_list` returns one row per column; rows of one constraint share `id`.
       const foreignKeys = db
         .prepare(`PRAGMA foreign_key_list(${quote(req.table)})`)
-        .all() as Array<{
-        id: number;
-        table: string;
-        from: string;
-        to: string | null;
-      }>;
+        .all()
+        .map((row) => ({
+          id: Number(row.id),
+          table: sqliteString(row.table),
+          from: sqliteString(row.from),
+          to: sqliteNullableString(row.to),
+        }));
       const foreignKeyConstraints = new Map<number, Array<(typeof foreignKeys)[number]>>();
       for (const fk of foreignKeys) {
         const group = foreignKeyConstraints.get(Number(fk.id));
@@ -243,7 +263,7 @@ export async function assertMigrationsProduceAuthSchema(
         // accepts the parent key. A null `to` (`REFERENCES "user"`) means the parent's single-column
         // PRIMARY KEY.
         const satisfied = matching.some((fk) => {
-          if (fk.to != null) {
+          if (fk.to !== null) {
             return sameIdentifier(String(fk.to), reference.column);
           }
           const parentPrimaryKey = singleColumnPrimaryKey(fk.table);
@@ -258,7 +278,7 @@ export async function assertMigrationsProduceAuthSchema(
                   `child columns is NULL, so a row naming a "${reference.table}" that does not ` +
                   `exist is still accepted. This reference needs its own single-column foreign ` +
                   `key on "${required.column}"`
-              : matching.some((fk) => fk.to == null)
+              : matching.some((fk) => fk.to === null)
                 ? `table "${req.table}" column "${required.column}" references "${reference.table}" ` +
                   `without naming a target column, but "${reference.table}"."${reference.column}" ` +
                   `is not that table's single-column PRIMARY KEY — SQLite resolves an omitted ` +
@@ -285,13 +305,13 @@ export async function assertMigrationsProduceAuthSchema(
               `(PRAGMA foreign_key_check)`,
           );
         }
-      } catch (err) {
-        const message = getErrorMessage(err);
+      } catch (error) {
+        const message = getErrorMessage(error);
         const mismatch = /foreign key mismatch\s*-\s*"(.+?)"\s+referencing\s+"(.+?)"/i.exec(
           message,
         );
         if (!mismatch) {
-          throw err;
+          throw error;
         }
         problems.push(
           `table "${mismatch[1]}" has a foreign key referencing "${mismatch[2]}" whose parent ` +
@@ -323,7 +343,7 @@ function readEmittedAuthMigrationSchema(root: string): Array<RequiredAuthTable> 
       `the build did not emit ${schemaPath}, so the generated auth schema could not be read from the build output.`,
     );
   }
-  const content = readFileSync(schemaPath, 'utf-8');
+  const content = readFileSync(schemaPath, 'utf8');
   const marker = 'export const migrationSchema = ';
   const start = content.indexOf(marker);
   if (start === -1) {
@@ -340,6 +360,7 @@ function readEmittedAuthMigrationSchema(root: string): Array<RequiredAuthTable> 
   }
   let migrationSchema: BwfAuthMigrationSchema;
   try {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- emitted schema literal is generated by bwf and read back as its own type
     migrationSchema = JSON.parse(content.slice(jsonStart, end + 2)) as BwfAuthMigrationSchema;
   } catch {
     throw new Error(
@@ -413,7 +434,7 @@ export function assertRemoteMigrationsDeployable(
  */
 function leadingWranglerMigrationNumber(relativePath: string): number {
   const firstSegment = relativePath.split('/')[0] ?? '';
-  return parseInt(firstSegment.split('_')[0] ?? '', 10);
+  return Number.parseInt(firstSegment.split('_')[0] ?? '', 10);
 }
 
 function compareWranglerMigrationSegments(a: string, b: string): number {
@@ -444,7 +465,7 @@ export function compareWranglerMigrationPaths(a: string, b: string): number {
   const bSegments = b.split('/');
   const shared = Math.min(aSegments.length, bSegments.length);
   for (let i = 0; i < shared; i++) {
-    const cmp = compareWranglerMigrationSegments(aSegments[i] as string, bSegments[i] as string);
+    const cmp = compareWranglerMigrationSegments(aSegments[i], bSegments[i]);
     if (cmp !== 0) {
       return cmp;
     }
@@ -453,12 +474,13 @@ export function compareWranglerMigrationPaths(a: string, b: string): number {
 }
 
 export function resolveWranglerMigrationPattern(
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- wrangler config shape is shared across deploy steps
   config: Record<string, unknown>,
   binding: string,
   migrationsDirRaw: string,
 ): { ok: true; pattern: string } | { ok: false; reason: string } {
   const field = readBindingFieldPresence(config, 'd1_databases', binding, 'migrations_pattern');
-  const migrationsDir = normalize(migrationsDirRaw.replace(/\\/g, '/')).replace(/\/$/, '');
+  const migrationsDir = normalize(migrationsDirRaw.replaceAll('\\', '/')).replace(/\/$/, '');
   if (!field.present) {
     return { ok: true, pattern: '*.sql' };
   }
@@ -482,7 +504,7 @@ export function resolveWranglerMigrationPattern(
       reason: `deploy: migrations_pattern for D1 binding ${binding} must be a non-empty string.`,
     };
   }
-  const normalized = normalize(field.value.replace(/\\/g, '/')).replace(/\/$/, '');
+  const normalized = normalize(field.value.replaceAll('\\', '/')).replace(/\/$/, '');
   const prefix = migrationsDir === '.' ? '' : `${migrationsDir}/`;
   if (prefix && !normalized.startsWith(prefix)) {
     return {
@@ -530,6 +552,7 @@ function listWranglerMigrationFiles(directory: string, pattern: string): Array<s
  */
 export async function checkWranglerMigrationApplySet(
   configPath: string,
+  // oxlint-disable-next-line quality/no-unsafe-dictionary-type -- wrangler config shape is shared across deploy steps
   config: Record<string, unknown>,
   binding: string,
   migrationsDirRaw: string,
@@ -552,10 +575,10 @@ export async function checkWranglerMigrationApplySet(
   }
   const wranglerNames = listWranglerMigrationFiles(absDir, resolvedPattern.pattern);
   const wranglerContent = new Map(
-    wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf-8')]),
+    wranglerNames.map((name) => [name, readFileSync(join(absDir, name), 'utf8')]),
   );
-  const gatedNames = gated.map((m) => m.name.replace(/\\/g, '/'));
-  const gatedContent = new Map(gatedNames.map((name, i) => [name, gated[i]!.sql]));
+  const gatedNames = gated.map((m) => m.name.replaceAll('\\', '/'));
+  const gatedContent = new Map(gatedNames.map((name, i) => [name, gated[i].sql]));
 
   const wranglerSet = new Set(wranglerNames);
   const extra = wranglerNames.filter((k) => !gatedContent.has(k));
@@ -642,15 +665,15 @@ export async function applyAndVerifyRemoteD1Migrations(
     }
     // Decision: A Worker rollback doesn't undo a migration. Time Travel does, and a bookmark taken right before
     // the apply restores exactly the state the migrations started from.
-    const readPending = async (): Promise<Array<unknown> | undefined> => {
+    const readPending = async (): Promise<ReadonlyArray<unknown> | undefined> => {
       const listed = await Promise.resolve(
         runWrangler(
           { type: 'd1.migrations.list', database: d1MigrateToken, configPath },
           { capture: true },
         ),
       );
-      const pending = (listed.data as { pending?: unknown } | undefined)?.pending;
-      if (isCleanCloudflareExit(listed) && Array.isArray(pending)) {
+      const pending = isJsonObject(listed.data) ? listed.data.pending : undefined;
+      if (isCleanCloudflareExit(listed) && isJsonArray(pending)) {
         return pending;
       }
       log.error(
@@ -675,7 +698,7 @@ export async function applyAndVerifyRemoteD1Migrations(
           { capture: true },
         ),
       );
-      const bookmark = (restorePoint.data as { bookmark?: unknown } | undefined)?.bookmark;
+      const bookmark = isJsonObject(restorePoint.data) ? restorePoint.data.bookmark : undefined;
       if (!isCleanCloudflareExit(restorePoint) || typeof bookmark !== 'string') {
         log.error(
           `deploy: could not save a D1 restore point for "${d1MigrateToken}" before applying ` +
@@ -742,7 +765,7 @@ export async function applyAndVerifyRemoteD1Migrations(
       );
       return false;
     }
-    const migrationState = migrateList.data as { pending?: unknown } | undefined;
+    const migrationState = isJsonObject(migrateList.data) ? migrateList.data : undefined;
     if (Array.isArray(migrationState?.pending) && migrationState.pending.length > 0) {
       log.error(
         [

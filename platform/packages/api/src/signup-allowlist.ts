@@ -1,8 +1,8 @@
 import {
   isPlatformSignupAllowed,
   parsePlatformSignupAllowlistEntry,
-  type PlatformSignupAllowlistEntry,
 } from '@builtbyfriends/platform';
+import type { PlatformSignupAllowlistEntry } from '@builtbyfriends/platform';
 
 export type AllowlistEntry = PlatformSignupAllowlistEntry;
 

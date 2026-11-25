@@ -6,7 +6,11 @@ vi.mock('@cloudflare/sandbox', () => ({
   S3Mount: class {},
   S3Gateway: class {},
 }));
-vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, RpcTarget: class {} }));
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {},
+  RpcTarget: class {},
+  WorkerEntrypoint: class {},
+}));
 import { envContext } from '../../src/runtime/env-raw.ts';
 import { UsageLimit } from '../../src/runtime/limits.ts';
 import {
@@ -91,11 +95,11 @@ describe('Sandbox runtime', () => {
         });
         expect(await client.fetch(5173, request)).toBe(response);
         expect(invoke).not.toHaveBeenCalled();
-        const forwarded = fetch.mock.calls[0]![0] as Request;
+        const forwarded = fetch.mock.calls[0][0] as Request;
         expect(forwarded.url).toBe(request.url);
         expect(forwarded.headers.get('x-platform-sandbox-port')).toBe('5173');
         expect(request.headers.has('x-platform-sandbox-port')).toBe(false);
-        await expect(client.fetch(65536, request)).rejects.toThrow('Invalid Sandbox TCP port');
+        await expect(client.fetch(65_536, request)).rejects.toThrow('Invalid Sandbox TCP port');
         expect(fetch).toHaveBeenCalledOnce();
       },
     );
@@ -139,13 +143,35 @@ describe('Sandbox runtime', () => {
       undefined,
     ]);
   });
+  it('sends backup, restore and deleteBackup to the capability', async () => {
+    const record = {
+      id: 'b1',
+      dir: '/workspace',
+      size: 1,
+      sha256: 'x',
+      format: 'tar+zstd/1' as const,
+    };
+    const invoke = vi.fn().mockResolvedValue(record);
+    await envContext.run(
+      { __PLATFORM_SANDBOX: { getSandbox: async () => ({ invoke }) } },
+      async () => {
+        const client = await getSandbox();
+        expect(await client.backup({ dir: '/workspace', gitignore: true })).toEqual(record);
+        await client.restore(record);
+        await client.deleteBackup(record);
+      },
+    );
+    expect(invoke).toHaveBeenNthCalledWith(1, 'backup', [{ dir: '/workspace', gitignore: true }]);
+    expect(invoke).toHaveBeenNthCalledWith(2, 'restore', [record, undefined]);
+    expect(invoke).toHaveBeenNthCalledWith(3, 'deleteBackup', [record]);
+  });
   it('encodes aborts as cancellable RPC streams and rejects an already aborted signal', async () => {
     const c = capability();
     const controller = new AbortController();
     await envContext.run({ __PLATFORM_SANDBOX: { getSandbox: async () => c } }, async () => {
       const client = await getSandbox();
       await client.exec(['sleep', '10'], { signal: controller.signal });
-      const encoded = c.invoke.mock.calls[0]![1][1] as { abort: ReadableStream; signal?: unknown };
+      const encoded = c.invoke.mock.calls[0][1][1] as { abort: ReadableStream; signal?: unknown };
       expect(encoded.signal).toBeUndefined();
       const reader = encoded.abort.getReader();
       controller.abort();
@@ -170,8 +196,8 @@ describe('Sandbox runtime', () => {
               : client.files.readFile('/file', { signal: controller.signal }),
           ).rejects.toThrow('admission failed');
           expect(add).toHaveBeenCalledOnce();
-          expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]![1]);
-          const args = invoke.mock.calls[0]![1];
+          expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0][1]);
+          const args = invoke.mock.calls[0][1];
           const encoded = args[operation === 'exec' ? 1 : 2] as { abort: ReadableStream };
           expect(await encoded.abort.getReader().read()).toEqual({ done: true, value: undefined });
         },

@@ -21,8 +21,8 @@ export async function openMigrationValidationDatabase(
     for (const migration of migrations) {
       try {
         db.exec(migration.sql);
-      } catch (cause) {
-        throw new SqliteMigrationError(migration.name, cause);
+      } catch (error) {
+        throw new SqliteMigrationError(migration.name, error);
       }
     }
     return db;

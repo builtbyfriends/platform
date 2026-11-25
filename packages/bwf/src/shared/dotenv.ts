@@ -89,10 +89,10 @@ export function expandDotenv(
   const warned = new Set<string>();
 
   function resolveKey(key: string): string {
-    if (!(key in input)) {
+    if (!Object.hasOwn(input, key)) {
       return '';
     }
-    if (key in out) {
+    if (Object.hasOwn(out, key)) {
       return out[key]!;
     }
     if (resolving.has(key)) {

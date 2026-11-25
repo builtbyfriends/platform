@@ -3,7 +3,8 @@
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { Heading } from '@astryxdesign/core/Text';
 import { AdminUiProviders } from './AdminProviders.tsx';
-import { matchAdminRoute, type AdminPageId } from './pages.ts';
+import { matchAdminRoute } from './pages.ts';
+import type { AdminPageId } from './pages.ts';
 import { useNavigation } from './spa.tsx';
 import type { PageObject } from './spa.tsx';
 import { Layout } from './views/Layout.tsx';

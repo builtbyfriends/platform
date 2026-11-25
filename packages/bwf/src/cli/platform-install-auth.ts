@@ -7,10 +7,12 @@ import {
   parsePlatformAuthenticationSetup,
   parsePlatformLoginConfiguration,
   platformDashboardUrl,
-  type PlatformAppAccess,
-  type PlatformAuthenticationSetup,
-  type PlatformDeploymentManifest,
-  type PlatformLoginKind,
+} from '@builtbyfriends/platform';
+import type {
+  PlatformAppAccess,
+  PlatformAuthenticationSetup,
+  PlatformDeploymentManifest,
+  PlatformLoginKind,
 } from '@builtbyfriends/platform';
 import { confirm, multiselect, password, select, text } from '@voidzero-dev/vite-plus-prompts';
 import { formatUrl } from './output.ts';
@@ -18,8 +20,8 @@ import {
   activatePlatformAccessCredentials,
   parsePlatformAccessSetupSpec,
   preparePlatformAccessSetup,
-  type PlatformAccessSetupSpec,
 } from './platform-access-setup.ts';
+import type { PlatformAccessSetupSpec } from './platform-access-setup.ts';
 import type { PlatformManagementAccess } from './platform-auth.ts';
 import type { PlatformCloudflareClient } from './platform-cloudflare.ts';
 import type { PlatformInstallPlan } from './platform-plan.ts';
@@ -331,7 +333,7 @@ export async function collectInstallationAuthentication(
   const administratorConnectionId =
     selection.file?.administratorConnectionId ??
     (connections.length === 1
-      ? connections[0]!.configuration.id
+      ? connections[0].configuration.id
       : process.stdin.isTTY
         ? platformPromptAnswer(
             await select({
@@ -342,7 +344,7 @@ export async function collectInstallationAuthentication(
               })),
             }),
           )
-        : connections[0]!.configuration.id);
+        : connections[0].configuration.id);
   let protection = prepared?.protection ?? selection.file?.protection ?? null;
   if (selection.authentication.accessProtection && !protection) {
     const teamDomain = await prompt('Access team origin (https://team.cloudflareaccess.com):');

@@ -6,7 +6,25 @@
  *   2. User JWT (`CF_ACCESS_TOKEN`) — dev path, typically populated via `cloudflared access token`
  *   3. No headers — prod, or unprotected hostnames
  */
-function accessHeaders(env: Record<string, unknown>): Record<string, string> {
+type AccessEnv = {
+  CF_ACCESS_CLIENT_ID?: unknown;
+  CF_ACCESS_CLIENT_SECRET?: unknown;
+  CF_ACCESS_TOKEN?: unknown;
+  PLATFORM_ACCESS_CREDENTIALS?: unknown;
+  __PLATFORM_ACCESS_CREDENTIALS?: unknown;
+  PLATFORM_ACCESS_ORIGIN?: unknown;
+};
+
+type AccessHeaders =
+  | { 'CF-Access-Client-Id': string; 'CF-Access-Client-Secret': string }
+  | { 'cf-access-token': string }
+  | Record<string, never>;
+
+function isAccessEnv(value: unknown): value is AccessEnv {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function accessHeaders(env: AccessEnv): AccessHeaders {
   const id = env.CF_ACCESS_CLIENT_ID;
   const secret = env.CF_ACCESS_CLIENT_SECRET;
   if (typeof id === 'string' && typeof secret === 'string' && id.length > 0 && secret.length > 0) {
@@ -23,10 +41,7 @@ function accessHeaders(env: Record<string, unknown>): Record<string, string> {
 }
 
 /** Attach Access credentials only to their explicitly scoped origin. */
-export function cfAccessHeaders(
-  env: Record<string, unknown>,
-  targetUrl: string,
-): Record<string, string> {
+export function cfAccessHeaders(env: AccessEnv, targetUrl: string): Record<string, string> {
   let origin: string;
   try {
     const target = new URL(targetUrl);
@@ -40,15 +55,13 @@ export function cfAccessHeaders(
   const encoded = env.PLATFORM_ACCESS_CREDENTIALS ?? env.__PLATFORM_ACCESS_CREDENTIALS;
   if (typeof encoded === 'string' && encoded) {
     try {
-      const records = JSON.parse(encoded) as Record<string, unknown>;
-      if (!records || typeof records !== 'object' || Array.isArray(records)) {
+      const records: unknown = JSON.parse(encoded);
+      if (!isAccessEnv(records)) {
         return {};
       }
       if (Object.hasOwn(records, origin)) {
-        const entry = records[origin];
-        return entry && typeof entry === 'object' && !Array.isArray(entry)
-          ? accessHeaders(entry as Record<string, unknown>)
-          : {};
+        const entry: unknown = Object.getOwnPropertyDescriptor(records, origin)?.value;
+        return isAccessEnv(entry) ? accessHeaders(entry) : {};
       }
     } catch {
       // Decision: Invalid explicit configuration never falls back to credentials for another recipient.
@@ -79,17 +92,12 @@ export function cfAccessHeaders(
  * is resolved and constrained by the direct-deploy adapter rather than a
  * user-connected bwf platform URL.
  */
-export function trustedCloudflareWorkerAccessHeaders(
-  env: Record<string, unknown>,
-): Record<string, string> {
+export function trustedCloudflareWorkerAccessHeaders(env: AccessEnv): Record<string, string> {
   return accessHeaders(env);
 }
 
 /** Keep only this recipient's credentials when crossing into a local Worker runtime. */
-export function scopedAccessCredentials(
-  env: Record<string, unknown>,
-  targetUrl: string,
-): string | undefined {
+export function scopedAccessCredentials(env: AccessEnv, targetUrl: string): string | undefined {
   const headers = cfAccessHeaders(env, targetUrl);
   if (Object.keys(headers).length === 0) {
     return undefined;

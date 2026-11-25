@@ -213,10 +213,13 @@ export async function withDelayedHedge<T>(
     return peerResult.outcome.value;
   }
   finish();
-  if (winner.outcome.ok || peerResult.outcome.ok) {
-    return null;
+  if (!winner.outcome.ok) {
+    throw winner.outcome.error;
   }
-  throw winner.outcome.error;
+  if (!peerResult.outcome.ok) {
+    throw peerResult.outcome.error;
+  }
+  return null;
 }
 
 /**
@@ -230,6 +233,6 @@ export async function withDelayedHedge<T>(
  *   `DISPATCH_TIMEOUT_MS='0'` WITHOUT a redeploy. A blanket `|| fallback` would defeat
  *   this by collapsing every disabling value back to the default.
  */
-export function resolveTimeoutMs(raw: string | undefined, fallback = 10000): number {
+export function resolveTimeoutMs(raw: string | undefined, fallback = 10_000): number {
   return raw === undefined ? fallback : Number(raw);
 }

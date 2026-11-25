@@ -1,16 +1,8 @@
 import type { RewriteDestination } from '@builtbyfriends/bwf/routes';
-import {
-  isRecord,
-  isR2LocationHint,
-  R2_LOCATION_HINTS,
-  type AssetConfig,
-  type StorageConfig,
-} from '@builtbyfriends/deploy-core';
-import {
-  PLATFORM_AUTH_PROVIDERS,
-  isBwfAuthProvider,
-  type BwfAuthProvider,
-} from './auth/providers.ts';
+import { isRecord, isR2LocationHint, R2_LOCATION_HINTS } from '@builtbyfriends/deploy-core';
+import type { AssetConfig, StorageConfig } from '@builtbyfriends/deploy-core';
+import { PLATFORM_AUTH_PROVIDERS, isBwfAuthProvider } from './auth/providers.ts';
+import type { BwfAuthProvider } from './auth/providers.ts';
 import type { DevRedirectRule, HeaderRule } from './cli/types.ts';
 import { loadBwfConfig } from './config-loader.ts';
 import { validateSourceDir } from './project-paths.ts';
@@ -223,7 +215,7 @@ const VALID_DATABASE_VALUES = new Set(['pg', 'mysql']);
 const VALID_DATABASE_DIALECTS = new Set(['sqlite', 'pg', 'mysql']);
 const VALID_DATABASE_CASINGS = new Set(['snake_case', 'camelCase']);
 /** Cloudflare's hard maximum for Workers CPU time per request (5 minutes). */
-const MAX_WORKER_CPU_MS = 300000;
+const MAX_WORKER_CPU_MS = 300_000;
 const VALID_SANDBOX_INSTANCE_TYPES = new Set<SandboxInstanceType>([
   'lite',
   'basic',
@@ -248,7 +240,7 @@ const SANDBOX_KEYS = [...SANDBOX_STRING_KEYS, 'instanceType'];
  * `compilePattern` (`@builtbyfriends/edge`) gives `:name*` its own group, so it never clashes with a splat.
  */
 export function countSplats(source: string): number {
-  return source.replace(/:[A-Za-z0-9_]+\*/g, '').match(/\*/g)?.length ?? 0;
+  return source.replaceAll(/:[A-Za-z0-9_]+\*/g, '').match(/\*/g)?.length ?? 0;
 }
 
 /**
@@ -278,7 +270,7 @@ function assertUniqueCaptureNames(source: string, kind: string): void {
   const captureNameRe = /:([A-Za-z0-9_]+)\*?/g;
   let captureMatch: RegExpExecArray | null;
   while ((captureMatch = captureNameRe.exec(source)) !== null) {
-    const name = captureMatch[1]!;
+    const name = captureMatch[1];
     if (seen.has(name)) {
       dups.add(name);
     }
@@ -430,6 +422,7 @@ export function validateConfig(config: unknown, source: string = CONFIG_FILE): B
   } catch (error) {
     if (source !== CONFIG_FILE && error instanceof Error) {
       // Decision: No `cause`: Node would print its message too, which names the placeholder.
+      // oxlint-disable-next-line preserve-caught-error -- see the decision above
       throw new Error(error.message.replaceAll(CONFIG_FILE, source));
     }
     throw error;
@@ -657,7 +650,7 @@ function validateConfigObject(obj: unknown): BwfConfig {
           `config: "inference.scanDirs" in ${CONFIG_FILE} must be an array of strings.`,
         );
       }
-      for (const d of inf.scanDirs as Array<string>) {
+      for (const d of inf.scanDirs) {
         if (d.startsWith('/') || d.startsWith('..')) {
           throw new Error(
             `config: "inference.scanDirs" path '${d}' in ${CONFIG_FILE} must be a relative directory.`,
@@ -909,9 +902,9 @@ function validateConfigObject(obj: unknown): BwfConfig {
   if ('$schema' in obj) {
     const resolved = { ...obj };
     delete resolved.$schema;
-    return resolved as BwfConfig;
+    return resolved;
   }
-  return obj as BwfConfig;
+  return obj;
 }
 
 /**
@@ -930,6 +923,7 @@ function parseEmailFrom(value: unknown): void {
     const detail = error instanceof MimeError ? ` ${error.message}` : '';
     throw new Error(
       `config: "email.from" in ${CONFIG_FILE} must be a single email address, optionally with a display name (e.g. "Acme <noreply@mail.acme.com>").${detail}`,
+      { cause: error },
     );
   }
 }

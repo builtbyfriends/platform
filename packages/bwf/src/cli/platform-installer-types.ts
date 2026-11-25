@@ -1,10 +1,10 @@
-import { type CloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
-import {
-  createPlatformDeploymentManifest,
-  type PlatformInstallationManifest,
-  type PlatformLifecycleOperation,
-  type PlatformAccessProtection,
-  type PlatformLoginKind,
+import type { CloudflareTriggerConfig } from '@builtbyfriends/deploy-cloudflare';
+import { createPlatformDeploymentManifest } from '@builtbyfriends/platform';
+import type {
+  PlatformInstallationManifest,
+  PlatformLifecycleOperation,
+  PlatformAccessProtection,
+  PlatformLoginKind,
 } from '@builtbyfriends/platform';
 import type {
   PlatformRuntime,
@@ -19,9 +19,9 @@ import type {
 } from './platform-ai-logging-projection.ts';
 import type { initializeInstalledAppAccess } from './platform-app-access.ts';
 import type { initializeInstalledPlatformAuthentication } from './platform-auth-bootstrap.ts';
-import {
-  type CloudflareWorkerCustomDomainOrigin,
-  type PlatformCloudflareClient,
+import type {
+  CloudflareWorkerCustomDomainOrigin,
+  PlatformCloudflareClient,
 } from './platform-cloudflare.ts';
 import type {
   bootstrapPlatformSharedEmail,
@@ -29,8 +29,8 @@ import type {
   verifyPlatformDeploymentExecutionDrain,
 } from './platform-installer-health.ts';
 import type { runPlatformWrangler } from './platform-installer-workers.ts';
-import { type PlatformInstallPlan, type PlatformInstallPlanAction } from './platform-plan.ts';
-import { type PlatformProjectZeroTrustState } from './platform-zero-trust-uninstall.ts';
+import type { PlatformInstallPlan, PlatformInstallPlanAction } from './platform-plan.ts';
+import type { PlatformProjectZeroTrustState } from './platform-zero-trust-uninstall.ts';
 
 export type PlatformInstallationSecrets = Readonly<{
   appAccessSetupJson?: string;
@@ -103,6 +103,8 @@ export const PLATFORM_BILLING_SECRET_NAMES = [
   'STRIPE_PRICE_SOLO',
   'STRIPE_PRICE_PRO',
   'STRIPE_LIVE_ENABLED',
+  'STRIPE_AUTOMATIC_TAX',
+  'STRIPE_PROMOTION_CODES',
 ] as const;
 
 export type PlatformBillingSecretName = (typeof PLATFORM_BILLING_SECRET_NAMES)[number];
@@ -164,6 +166,12 @@ export type PlatformDatabaseLifecycleLock = (() => Promise<void>) & {
     kv: AiLoggingProjectionKv,
     onProgress?: (message: string) => void,
   ) => Promise<AiLoggingProjectionResult>;
+  /**
+   * Connections the database accepts from roles without SUPERUSER:
+   * max_connections minus the reserved slots. Missing on test locks, which then skip
+   * fitting the Hyperdrive origin connection limit to the database.
+   */
+  readConnectionSlots?: () => Promise<number>;
   /** Project slugs, which --purge-resources requires to be empty. */
   readProjects?: () => Promise<ReadonlyArray<string>>;
   /** Block Zero Trust writers in the API until the returned release runs. */
@@ -231,6 +239,7 @@ export type InstallerClient = Pick<
   | 'createHyperdrive'
   | 'getHyperdriveConfig'
   | 'disableHyperdriveCaching'
+  | 'setHyperdriveOriginConnectionLimit'
   | 'createKvNamespace'
   | 'createQueue'
   | 'createR2Bucket'

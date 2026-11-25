@@ -1,0 +1,1 @@
+ALTER TABLE "app_payers" ADD COLUMN "wallet" boolean DEFAULT false NOT NULL;

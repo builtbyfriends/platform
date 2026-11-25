@@ -28,7 +28,7 @@ function base64urlEncode(data: Uint8Array): string {
   for (const byte of data) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 async function signHmac(data: string, secret: string): Promise<string> {
@@ -220,7 +220,7 @@ describe('POST /email/send — custom sender domain', () => {
     const stringify = JSON.stringify;
     const stringifySpy = vi.spyOn(JSON, 'stringify').mockImplementation((value: unknown) => {
       if (typeof value === 'object' && value !== null && 'mime_message' in value) {
-        vi.setSystemTime(5_001);
+        vi.setSystemTime(5001);
       }
       return stringify(value);
     });
@@ -234,7 +234,7 @@ describe('POST /email/send — custom sender domain', () => {
           recipients: ['dev@example.com'],
           mimeMessage: 'mime',
         },
-        5_000,
+        5000,
       ),
     ).rejects.toThrow('email sending request timed out');
     stringifySpy.mockRestore();
@@ -257,7 +257,7 @@ describe('POST /email/send — custom sender domain', () => {
     ).toHaveLength(1);
     const [leaseUrl, leaseInit] = apiFetch.mock.calls.find(([url]) =>
       String(url).endsWith('/domain-credential'),
-    )! as [string, RequestInit];
+    )!;
     expect(leaseUrl).toBe('https://api/internal/email/domain-credential');
     expect(leaseInit.method).toBe('POST');
     expect(JSON.parse(leaseInit.body as string)).toEqual({
@@ -358,14 +358,14 @@ describe('POST /email/send — custom sender domain', () => {
       const pending = postSend(env, await sendBody());
       await leaseStarted;
       await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(5000);
       const response = await pending;
 
       expect(response.status).toBe(502);
       expect([...actions.values()][0]?.recipients[0]?.state).toBe('cancelled');
       const finish = apiFetch.mock.calls.find(([url]) => String(url).endsWith('/finish'));
       expect(finish).toBeDefined();
-      expect(JSON.parse(String((finish![1] as RequestInit).body))).toMatchObject({
+      expect(JSON.parse(String(finish![1].body))).toMatchObject({
         state: 'cancelled',
       });
       expect(providerCalls).toEqual([]);

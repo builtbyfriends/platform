@@ -1,23 +1,23 @@
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  type PlatformInstallationManifest,
-  parsePlatformAuthenticationSetup,
-} from '@builtbyfriends/platform';
+import { parsePlatformAuthenticationSetup } from '@builtbyfriends/platform';
+import type { PlatformInstallationManifest } from '@builtbyfriends/platform';
 import {
   checkpointPlatformAccessResources,
   isPlatformAuthenticationPreparationKey,
 } from './platform-access-setup.ts';
 import {
   PLATFORM_BILLING_SECRET_NAMES,
-  type PlatformBillingSecretName,
-  type PlatformInstallationSecrets,
-  type PlatformWorkerKey,
-  type PlatformWorkerSecretUpdateIntent,
-  type PlatformWorkerSecretUpdateName,
   PLATFORM_API_WORKER_SECRET_UPDATE_NAMES,
-  type PlatformWorkerSecretUpdates,
 } from './platform-installer-types.ts';
-import { type PlatformInstallPlan } from './platform-plan.ts';
+import type {
+  PlatformBillingSecretName,
+  PlatformInstallationSecrets,
+  PlatformWorkerKey,
+  PlatformWorkerSecretUpdateIntent,
+  PlatformWorkerSecretUpdateName,
+  PlatformWorkerSecretUpdates,
+} from './platform-installer-types.ts';
+import type { PlatformInstallPlan } from './platform-plan.ts';
 
 export function createPlatformInstallationSecrets(input: {
   configurableAuthentication?: boolean;
@@ -47,6 +47,16 @@ export function createPlatformInstallationSecrets(input: {
   checkpoint?: Record<string, string> | null;
 }): PlatformInstallationSecrets {
   const checkpoint = input.checkpoint ?? {};
+  if (!input.r2AccessKeyId !== !input.r2SecretAccessKey) {
+    const [given, missing] = input.r2AccessKeyId
+      ? ['PLATFORM_R2_ACCESS_KEY_ID', 'PLATFORM_R2_SECRET_ACCESS_KEY']
+      : ['PLATFORM_R2_SECRET_ACCESS_KEY', 'PLATFORM_R2_ACCESS_KEY_ID'];
+    throw new Error(
+      `platform: ${given} is set but ${missing} is not. ` +
+        'Set PLATFORM_R2_ACCESS_KEY_ID and PLATFORM_R2_SECRET_ACCESS_KEY together, ' +
+        'even if only the secret changed.',
+    );
+  }
   const required = (value: string, name: string): string => {
     if (!value) {
       throw new Error(`platform: ${name} is required to install the platform.`);
@@ -780,7 +790,7 @@ export function readPlatformBillingInput(
         `platform: ${match[1]} is not a billing value. Use ${PLATFORM_BILLING_SECRET_NAMES.join(', ')}.`,
       );
     }
-    const value = match[2]!.replace(/^(['"])(.*)\1$/, '$2');
+    const value = match[2].replace(/^(['"])(.*)\1$/, '$2');
     if (value) {
       billing[name] = value;
     }
@@ -796,8 +806,14 @@ export function readPlatformBillingInput(
       throw new Error(`platform: ${name} must be a Stripe price ID (price_...).`);
     }
   }
-  if (billing.STRIPE_LIVE_ENABLED && !['true', 'false'].includes(billing.STRIPE_LIVE_ENABLED)) {
-    throw new Error('platform: STRIPE_LIVE_ENABLED must be true or false.');
+  for (const name of [
+    'STRIPE_LIVE_ENABLED',
+    'STRIPE_AUTOMATIC_TAX',
+    'STRIPE_PROMOTION_CODES',
+  ] as const) {
+    if (billing[name] && !['true', 'false'].includes(billing[name])) {
+      throw new Error(`platform: ${name} must be true or false.`);
+    }
   }
   return billing;
 }

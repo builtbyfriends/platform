@@ -4,11 +4,8 @@ import { getOwnedGitHubInstallation } from '../db.ts';
 import type { ApiEnv } from '../env.ts';
 import { SCOPE_PATTERN } from '../github/app-installations.ts';
 import { githubAppOp } from '../github/app-ops.ts';
-import {
-  getInstallationToken,
-  GITHUB_API_BASE,
-  GITHUB_API_VERSION,
-} from '../github/installation-token.ts';
+import { getInstallationToken, GITHUB_API_VERSION } from '../github/installation-token.ts';
+import { githubRepoApiTarget } from '../github/repo-path.ts';
 import { appPersonClients } from './oauth-app-person.ts';
 
 const METHODS = new Set(['GET', 'POST', 'PATCH', 'PUT', 'DELETE']);
@@ -63,16 +60,8 @@ export const appGitHubRoutes = new Hono<ApiEnv & { Variables: { clientId: string
     if (typeof scope !== 'string' || !SCOPE_PATTERN.test(scope)) {
       return context.json({ error: 'scope must be 1 to 128 letters, digits or _:.-' }, 400);
     }
-    // Decision: The same path rule as the proxy's `/github/request`: repository paths only, and nothing that
-    // could move the request to another host or path.
-    if (
-      typeof path !== 'string' ||
-      !/^\/repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:[/?]|$)/.test(path) ||
-      path.includes('..') ||
-      path.includes('\\') ||
-      path.includes('//') ||
-      /[\s#]/.test(path)
-    ) {
+    const target = githubRepoApiTarget(path);
+    if (!target) {
       return context.json({ error: 'path must be a /repos/owner/name/... GitHub API path' }, 400);
     }
     const installation = await getOwnedGitHubInstallation(
@@ -88,7 +77,7 @@ export const appGitHubRoutes = new Hono<ApiEnv & { Variables: { clientId: string
       body?.body !== null && typeof body?.body === 'object' && method !== 'GET'
         ? JSON.stringify(body.body)
         : undefined;
-    const upstream = await fetch(`${GITHUB_API_BASE}${path}`, {
+    const upstream = await fetch(target.url, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,

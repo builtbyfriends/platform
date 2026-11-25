@@ -1,9 +1,7 @@
-import {
-  createDeployIntent,
-  isR2LocationHint,
-  type R2LocationHint,
-} from '@builtbyfriends/deploy-core';
-import { getProjectResources, createResource, type Db } from '../db.ts';
+import { createDeployIntent, isR2LocationHint } from '@builtbyfriends/deploy-core';
+import type { R2LocationHint } from '@builtbyfriends/deploy-core';
+import { getProjectResources, createResource } from '../db.ts';
+import type { Db } from '../db.ts';
 import { getProjectQueueName } from '../naming.ts';
 import type { DeployManifest, Resource } from '../types.ts';
 import {
@@ -166,18 +164,16 @@ export async function provisionBindings(
 
   // Decision: Always inject the proxy bindings: AI, revalidation, email and other platform features use them. The
   // AI usage limit check stays in the proxy (/ai/* middleware).
-  bindings.push({ type: 'service', name: '__PLATFORM_PROXY', service: aiProxyService });
-  bindings.push({ type: 'plain_text', name: '__PROJECT_ID', text: projectId });
-  bindings.push({ type: 'plain_text', name: '__PLATFORM_PROXY_TOKEN', text: platform.proxyToken });
-  // Decision: The single producer of `__PLATFORM_PROJECT_SLUG`. `@builtbyfriends/bwf/email` needs it on each
-  // worker to default an outbound `from` to `<slug>+noreply@<domain>`, and the sandbox runtime reads
-  // the same name. It's emitted after the user's vars in the upload array, so it can't be shadowed;
-  // see `reserved-bindings.ts`.
-  bindings.push({
-    type: 'plain_text',
-    name: '__PLATFORM_PROJECT_SLUG',
-    text: platform.projectSlug,
-  });
+  bindings.push(
+    { type: 'service', name: '__PLATFORM_PROXY', service: aiProxyService },
+    { type: 'plain_text', name: '__PROJECT_ID', text: projectId },
+    { type: 'plain_text', name: '__PLATFORM_PROXY_TOKEN', text: platform.proxyToken },
+    // Decision: The single producer of `__PLATFORM_PROJECT_SLUG`. `@builtbyfriends/bwf/email` needs it on each
+    // worker to default an outbound `from` to `<slug>+noreply@<domain>`, and the sandbox runtime reads
+    // the same name. It's emitted after the user's vars in the upload array, so it can't be shadowed;
+    // see `reserved-bindings.ts`.
+    { type: 'plain_text', name: '__PLATFORM_PROJECT_SLUG', text: platform.projectSlug },
+  );
   if (manifest.emailProtocolVersion === 1) {
     if (!platform.deploymentId) {
       throw new Error('email delivery requires a deployment identity');
@@ -227,20 +223,20 @@ async function ensureResource(
   try {
     cfId = await createCfResource(type, accountId, apiToken, resourceName, options);
     createdByUs = true;
-  } catch (err) {
-    if (isAlreadyExistsError(err)) {
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
       cfId = await lookupCfResource(type, accountId, apiToken, resourceName);
       if (type === 'd1' && options.readReplication !== undefined) {
         await setD1ReadReplication(accountId, apiToken, cfId, options.readReplication);
       }
     } else {
-      throw err;
+      throw error;
     }
   }
 
   try {
     return await createResource(db, projectId, type, cfId, bindingName);
-  } catch (err) {
+  } catch (error) {
     // Decision: The CF object exists but its `resources` row didn't persist, usually an FK violation because
     // teardown deleted the project concurrently (deleteProjectCascade's project FOR UPDATE serializes
     // with this INSERT's FK FOR KEY SHARE). Without the row there's no durable handle and teardown's
@@ -249,7 +245,7 @@ async function ensureResource(
     if (createdByUs) {
       await deleteCfResource(type, accountId, apiToken, cfId).catch(() => {});
     }
-    throw err;
+    throw error;
   }
 }
 

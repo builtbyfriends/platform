@@ -65,7 +65,7 @@ html[data-theme="dark"] { color-scheme: dark; }
 `;
 
 export function escapeBrowserHtml(value: string): string {
-  return value.replace(
+  return value.replaceAll(
     /[&<>"']/g,
     (character) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
@@ -86,7 +86,7 @@ export function browserPageIdentity(identity: {
     ]
       .map(
         ([label, value]) =>
-          '<div><dt>' + label + '</dt><dd>' + escapeBrowserHtml(value!) + '</dd></div>',
+          '<div><dt>' + label + '</dt><dd>' + escapeBrowserHtml(value) + '</dd></div>',
       )
       .join('') +
     '</dl>'

@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { defaultSandboxCode as defaultCode, sampleRequests } from '../lib/sandbox-demo.ts';
 
 const preStyle = {
@@ -54,8 +55,8 @@ export default function SandboxPage() {
       setStderr(body.stderr ?? '');
       setExitCode(body.exitCode ?? null);
       setDuration(body.duration ?? null);
-    } catch (err) {
-      setError(String(err));
+    } catch (error_) {
+      setError(String(error_));
     } finally {
       setLoading(false);
     }

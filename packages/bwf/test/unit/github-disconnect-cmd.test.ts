@@ -1,6 +1,7 @@
 import { confirm, log } from '@voidzero-dev/vite-plus-prompts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { PlatformApiError, type PlatformClient } from '../../src/cli/client.ts';
+import { PlatformApiError } from '../../src/cli/client.ts';
+import type { PlatformClient } from '../../src/cli/client.ts';
 import { runGithubDisconnect } from '../../src/cli/github-cmd.ts';
 import * as output from '../../src/cli/output.ts';
 import { makeConnection, makeProject, projectId, slug } from '../helpers/github-cli.ts';
@@ -175,7 +176,7 @@ describe('runGithubDisconnect', () => {
 
   it('prompts to confirm in a TTY and aborts when declined', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    vi.mocked(confirm).mockResolvedValue(false as never);
+    vi.mocked(confirm).mockResolvedValue(false);
     const { client, deleteGithubConnection } = makeClient();
 
     await runGithubDisconnect('/project', client, {
@@ -190,7 +191,7 @@ describe('runGithubDisconnect', () => {
 
   it('prompts to confirm in a TTY and disconnects when accepted', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
-    vi.mocked(confirm).mockResolvedValue(true as never);
+    vi.mocked(confirm).mockResolvedValue(true);
     const { client, deleteGithubConnection } = makeClient();
 
     await runGithubDisconnect('/project', client, {

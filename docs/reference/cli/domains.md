@@ -21,7 +21,7 @@ Add a custom domain to the saved target. Hosted bwf projects print the DNS recor
 bwf domain delete <hostname> [--project <name>]
 ```
 
-Direct Cloudflare projects apply the change immediately. Deleting the final custom domain uses your browser session from `bwf cloudflare login` or an API token with Workers Scripts: Edit permission. If Cloudflare rejects the change, bwf attempts to restore the previous domain configuration and reports whether recovery succeeded.
+Direct Cloudflare projects apply the change immediately. Deleting the final custom domain uses your browser session from `bwf cloudflare login` or an API token with **Workers Editor** and **Workers Routes Write** for the affected zone. If Cloudflare rejects the change, bwf attempts to restore the previous domain configuration and reports whether recovery succeeded.
 
 ## `bwf domain list` {#platform-domain-list}
 

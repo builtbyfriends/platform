@@ -5,6 +5,7 @@ import {
 } from '@builtbyfriends/deploy-core';
 import { and, eq, sql as drizzleSql } from 'drizzle-orm';
 import { type Context } from 'hono';
+import { billedPlanLimits } from '../app-payer.ts';
 import { paginatedR2Delete, type AssetManifestEntry } from '../assets.ts';
 import { verifyOAuthDeployment, OAuthError } from '../auth/oauth.ts';
 import { getPlatformCapabilities } from '../capabilities.ts';
@@ -42,7 +43,6 @@ import {
 import type { ApiEnv } from '../env.ts';
 import { checkCliVersionOrRespond } from '../middleware/cli-version.ts';
 import { createDeployLogger, type DeployLogger } from '../observability/logger.ts';
-import { resolvePlanLimits } from '../plans.ts';
 import { ProjectAccessDeniedError, projectAccessErrorBody } from '../project-access.ts';
 import { ProjectRequiresNormalizationError, requireNormalizedProject } from '../project-state.ts';
 import { assertManagedSandboxEntitlement } from '../provisioning/sandbox-controller.ts';
@@ -735,7 +735,8 @@ export async function handleManifestOnlyDeploy(context: Context<ApiEnv>): Promis
       }
       const lockedAccess = await requireActiveDeployAccess(tx, projectId, actor.id);
       const requestedCpuMs = incomingManifest.limits?.cpuMs;
-      const maxCpuMs = (await resolvePlanLimits(tx, lockedAccess.owner.plan)).maxCpuMsPerRequest;
+      const maxCpuMs = (await billedPlanLimits(tx, lockedAccess.owner, lockedProject))
+        .maxCpuMsPerRequest;
       if (requestedCpuMs !== undefined && maxCpuMs > 0 && requestedCpuMs > maxCpuMs) {
         return { cpuLimit: { requested: requestedCpuMs, maximum: maxCpuMs } } as const;
       }

@@ -37,8 +37,8 @@ import type {
   Project,
   User,
 } from '../types.ts';
-import { type TerminatedBuild } from './builds.ts';
-import { type Db } from './client.ts';
+import type { TerminatedBuild } from './builds.ts';
+import type { Db } from './client.ts';
 import { invalidateGitHubConnectionAuthorizedBy } from './github.ts';
 
 export async function createProject(db: Db, userId: string, slug: string): Promise<Project> {
@@ -208,6 +208,26 @@ export class ProjectTeamMutationError extends Error {
           ? 404
           : 409;
   }
+}
+
+// Decision: An invitation carries the authority of the member who sent it, so it ends when that member stops
+// being an admin. Otherwise a removed admin's pending invitation could still add another admin.
+async function revokePendingInvitationsFrom(
+  tx: Db,
+  projectId: string,
+  inviterUserId: string,
+  actorUserId: string,
+): Promise<void> {
+  await tx
+    .update(projectInvitations)
+    .set({ status: 'revoked', revoked_at: sql`now()`, revoked_by_user_id: actorUserId })
+    .where(
+      and(
+        eq(projectInvitations.project_id, projectId),
+        eq(projectInvitations.invited_by_user_id, inviterUserId),
+        eq(projectInvitations.status, 'pending'),
+      ),
+    );
 }
 
 async function lockProject(db: Db, projectId: string): Promise<Project> {
@@ -401,6 +421,9 @@ export async function setProjectMemberRole(
     if (roleLosesDeployCapability(current.role, args.role)) {
       await requestProxyTokenRotation(tx, args.projectId, 'member-role-changed', 'member');
     }
+    if (args.role !== 'admin') {
+      await revokePendingInvitationsFrom(tx, args.projectId, args.subjectUserId, args.actorUserId);
+    }
     const cancelledBuilds =
       args.role === 'admin'
         ? []
@@ -455,6 +478,7 @@ export async function removeProjectMember(
     if (roleLosesDeployCapability(member.role, null)) {
       await requestProxyTokenRotation(tx, args.projectId, 'member-removed', 'member');
     }
+    await revokePendingInvitationsFrom(tx, args.projectId, args.subjectUserId, args.actorUserId);
     const cancelledBuilds = await invalidateGitHubConnectionAuthorizedBy(
       tx,
       args.projectId,
@@ -568,7 +592,7 @@ export async function createOrRefreshProjectInvitation(
   if (targets.length !== 1) {
     throw new ProjectTeamMutationError('target-user-not-found');
   }
-  const target = targets[0]!;
+  const target = targets[0];
   const expiresAt = new Date(Date.now() + PROJECT_INVITATION_TTL_MS).toISOString();
 
   return db.transaction(async (tx) => {

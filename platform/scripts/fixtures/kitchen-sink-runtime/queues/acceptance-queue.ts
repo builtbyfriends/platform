@@ -1,10 +1,6 @@
 import { defineQueue } from '@builtbyfriends/bwf';
-import {
-  queueCases,
-  queueResultKey,
-  validQueueRun,
-  type AcceptanceMessage,
-} from '../lib/queue-acceptance.ts';
+import { queueCases, queueResultKey, validQueueRun } from '../lib/queue-acceptance.ts';
+import type { AcceptanceMessage } from '../lib/queue-acceptance.ts';
 
 // Decision: A single-message batch keeps thrown retries independent of the other cases.
 export const maxBatchSize = 1;

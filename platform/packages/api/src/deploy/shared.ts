@@ -49,11 +49,13 @@ export const WORKER_UPLOAD_MAX_AGE_MS = 12 * 60 * 60 * 1000;
  * `raw + decoded ≈ 86 + 32 = 118 MiB`, which fits under the 128 MiB
  * isolate cap with margin.
  */
-export function decodeBase64ToBytes(raw: string): Uint8Array {
-  const fromBase64 = (Uint8Array as unknown as { fromBase64?: (s: string) => Uint8Array })
-    .fromBase64;
+export function decodeBase64ToBytes(raw: string): Uint8Array<ArrayBuffer> {
+  const fromBase64: unknown = Reflect.get(Uint8Array, 'fromBase64');
   if (typeof fromBase64 === 'function') {
-    return fromBase64(raw);
+    const decoded: unknown = Reflect.apply(fromBase64, Uint8Array, [raw]);
+    if (isArrayBufferBytes(decoded)) {
+      return decoded;
+    }
   }
   const bin = atob(raw);
   const out = new Uint8Array(bin.length);
@@ -286,4 +288,8 @@ export function moduleContentType(filename: string): string {
     return 'text/plain';
   }
   return 'application/javascript+module';
+}
+
+function isArrayBufferBytes(value: unknown): value is Uint8Array<ArrayBuffer> {
+  return value instanceof Uint8Array && value.buffer instanceof ArrayBuffer;
 }

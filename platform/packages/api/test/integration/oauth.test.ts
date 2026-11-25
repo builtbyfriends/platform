@@ -47,10 +47,10 @@ import {
   createMockExecutionContext,
   mockCfApi,
   readAllEvents,
-  type TestEnv,
   rpcData,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 
@@ -641,14 +641,14 @@ describe('registered OAuth applications', () => {
     const { urls } = rpcData(await upload.json()) as {
       urls: Record<string, { url: string; headers: Record<string, string> }>;
     };
-    expect(urls[hash]!.headers).toMatchObject({
+    expect(urls[hash].headers).toMatchObject({
       'If-None-Match': '*',
       'Content-Length': String(bytes.length),
     });
-    expect(new URL(urls[hash]!.url).searchParams.get('X-Amz-SignedHeaders')).toContain(
+    expect(new URL(urls[hash].url).searchParams.get('X-Amz-SignedHeaders')).toContain(
       'if-none-match',
     );
-    expect(new URL(urls[hash]!.url).searchParams.get('X-Amz-SignedHeaders')).toContain(
+    expect(new URL(urls[hash].url).searchParams.get('X-Amz-SignedHeaders')).toContain(
       'content-length',
     );
     const undeclared = await request('/projects/' + project.id + '/deploy/upload-urls', {
@@ -831,9 +831,22 @@ describe('registered OAuth applications', () => {
     };
     const { clientId, clientSecret } = page.props.credentials;
     const [stored] = await env.db.select().from(oauthClients).where(eq(oauthClients.id, clientId));
-    expect(stored!.secret_hash).not.toBe(clientSecret);
+    expect(stored.secret_hash).not.toBe(clientSecret);
     const listed = await request('/admin/connected-apps', { headers });
     expect(await adminHtml(listed)).not.toContain(clientSecret);
+    const plans = (starterCreditMicros: string) =>
+      request('/admin/connected-apps/' + clientId + '/plans', {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({ plans: '', starterCreditMicros }),
+      });
+    expect((await plans('-1')).status).toBe(400);
+    expect((await plans('2000000')).status).toBe(302);
+    const [withStarter] = await env.db
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId));
+    expect(withStarter!.starter_credit_micros).toBe(2_000_000);
     expect(
       (await request('/admin/connected-apps/' + clientId + '/disable', { method: 'POST', headers }))
         .status,
@@ -842,7 +855,7 @@ describe('registered OAuth applications', () => {
       .select()
       .from(operatorEvents)
       .where(eq(operatorEvents.user_id, admin.id));
-    expect(events.map((event) => event.status)).toEqual(['success', 'success']);
+    expect(events.map((event) => event.status)).toEqual(['success', 'success', 'success']);
     expect(JSON.stringify(events)).not.toContain(clientSecret);
   });
   it('keeps the account-token login bridge on Platform’s own domain', async () => {
@@ -857,7 +870,7 @@ describe('registered OAuth applications', () => {
     });
     const started = await request('/oauth/authorize?' + params);
     const html = await adminHtml(started);
-    const requestId = html.match(/\/oauth\/login\?request=([^&"]+)/)![1]!;
+    const requestId = html.match(/\/oauth\/login\?request=([^&"]+)/)![1];
     const proof = cookies(started);
     const bridge = await request('/oauth/login?request=' + requestId + '&provider=github', {
       headers: { Cookie: proof },
@@ -880,7 +893,7 @@ describe('registered OAuth applications', () => {
           return Response.json([{ email: 'alice@example.com', primary: true, verified: true }]);
         }
         if (url.endsWith('/user')) {
-          return Response.json({ id: 12345, login: 'alice', email: null });
+          return Response.json({ id: 12_345, login: 'alice', email: null });
         }
         throw new Error('Unexpected provider URL');
       }),
@@ -1062,7 +1075,7 @@ describe('registered OAuth applications', () => {
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
     const [grant] = await env.db.select().from(oauthGrants);
-    expect(grant!.revoked_at).not.toBeNull();
+    expect(grant.revoked_at).not.toBeNull();
   });
   it.runIf(Boolean(process.env.BWF_TEST_DATABASE_URL))(
     'lets exactly one of many concurrent PostgreSQL redemptions rotate the token',
@@ -1085,7 +1098,7 @@ describe('registered OAuth applications', () => {
     const { token } = await connect();
     const [first] = await env.db.select().from(oauthRefreshTokens);
     const [grant] = await env.db.select().from(oauthGrants);
-    expect(Date.parse(first!.expires_at)).toBeLessThanOrEqual(grant!.session.exp * 1000);
+    expect(Date.parse(first.expires_at)).toBeLessThanOrEqual(grant.session.exp * 1000);
     const rotated = (await (await refresh(token.refresh_token)).json()) as {
       refresh_token: string;
     };
@@ -1093,12 +1106,12 @@ describe('registered OAuth applications', () => {
       .select()
       .from(oauthRefreshTokens)
       .where(isNull(oauthRefreshTokens.used_at));
-    expect(next!.id).not.toBe(first!.id);
-    expect(next!.expires_at).toBe(first!.expires_at);
+    expect(next.id).not.toBe(first.id);
+    expect(next.expires_at).toBe(first.expires_at);
     await env.db
       .update(oauthRefreshTokens)
       .set({ expires_at: new Date(Date.now() - 1000).toISOString() })
-      .where(eq(oauthRefreshTokens.id, next!.id));
+      .where(eq(oauthRefreshTokens.id, next.id));
     expect((await refresh(rotated.refresh_token)).status).toBe(400);
   });
   it('refreshes after the access token has expired', async () => {
@@ -1133,7 +1146,7 @@ describe('registered OAuth applications', () => {
         })
       ).text();
     const [grant] = await env.db.select().from(oauthGrants);
-    expect(await connections()).toContain(grant!.id);
+    expect(await connections()).toContain(grant.id);
     await purgeExpiredOAuthRequests(env.db);
     expect(await env.db.select().from(oauthGrants)).toHaveLength(1);
     const refreshed = (await (await refresh(token.refresh_token)).json()) as {
@@ -1142,7 +1155,7 @@ describe('registered OAuth applications', () => {
 
     await env.db.update(oauthGrants).set({ expires_at: longAgo });
     await env.db.update(oauthRefreshTokens).set({ expires_at: longAgo });
-    expect(await connections()).not.toContain(grant!.id);
+    expect(await connections()).not.toContain(grant.id);
     await purgeExpiredOAuthRequests(env.db);
     expect(await env.db.select().from(oauthGrants)).toHaveLength(0);
     expect(await env.db.select().from(oauthRefreshTokens)).toHaveLength(0);
@@ -1167,7 +1180,7 @@ describe('registered OAuth applications', () => {
     });
     expect(widenAttempt.status).toBe(400);
     const [grant] = await env.db.select().from(oauthGrants);
-    expect(grant!.scopes).toEqual(['profile']);
+    expect(grant.scopes).toEqual(['profile']);
   });
   it('rejects a refresh token presented to a different client without spending it', async () => {
     const { token } = await connect();

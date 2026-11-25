@@ -7,13 +7,13 @@ test('skips documentation-only changes and keeps ordinary runtime changes small'
     selectPackedSuite([
       'README.md',
       'AGENTS.md',
-      'docs/guide/queues.md',
+      'docs/reference/api.md',
       'platform/meta/operations.md',
     ]),
     'skip',
   );
   assert.equal(
-    selectPackedSuite(['docs/guide/env-vars.md', 'packages/bwf/src/runtime/env-public.ts']),
+    selectPackedSuite(['docs/reference/env-vars.md', 'packages/bwf/src/runtime/env-public.ts']),
     'smoke',
   );
   assert.equal(selectPackedSuite(['platform/packages/api/src/routes/projects.ts']), 'smoke');
@@ -32,7 +32,10 @@ test('runs the full matrix for dependencies, adapters, scaffolding, and packagin
     'packages/create-bwf/src/pm.ts',
     'packages/bwf/src/cli/init.ts',
     '.github/scripts/packed-init.mjs',
-    '.github/workflows/packed-consumers.yml',
+    'packages/bwf/AGENTS_TEMPLATE.md',
+    'packages/bwf/README.md',
+    'packages/bwf/skills/bwf/SKILL.md',
+    'docs/guide/quickstart.md',
     '.github/workflows/prepublish-test.yml',
     '.github/workflows/publish.yml',
   ]) {

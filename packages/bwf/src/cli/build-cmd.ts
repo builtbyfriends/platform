@@ -2,7 +2,8 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { log, outro } from '@voidzero-dev/vite-plus-prompts';
 import { getToken } from './auth.ts';
 import type { BuildArgs } from './build-args.ts';
-import { PlatformApiError, PlatformClient, type BuildLogsResponse } from './client.ts';
+import { PlatformApiError, PlatformClient } from './client.ts';
+import type { BuildLogsResponse } from './client.ts';
 import { dim, pc, printSuccess } from './output.ts';
 import { readProjectConfig } from './project.ts';
 import { getRequestedProjectSlug, resolveProjectBySlug } from './resolve-project.ts';
@@ -24,7 +25,9 @@ function isBuildLogComplete(page: BuildLogsResponse): boolean {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**
@@ -65,7 +68,7 @@ export async function followBuildLogs(opts: {
   onRetry?: (err: unknown) => void;
 }): Promise<{ status: string; terminal: boolean }> {
   let cursor = opts.since;
-  let status = opts.status;
+  let status: string;
   let terminalSince: number | null = null;
   const pollMs = opts.pollMs ?? POLL_MS;
   for (;;) {
@@ -73,11 +76,11 @@ export async function followBuildLogs(opts: {
     let pageResult: BuildLogsResponse;
     try {
       pageResult = await opts.fetchPage(cursor);
-    } catch (err) {
-      if (opts.isFatal?.(err)) {
-        throw err;
+    } catch (error) {
+      if (opts.isFatal?.(error)) {
+        throw error;
       }
-      opts.onRetry?.(err);
+      opts.onRetry?.(error);
       continue;
     }
     for (const l of pageResult.lines) {
@@ -106,6 +109,12 @@ export async function runBuildCommand(root: string, args: BuildArgs): Promise<vo
   if (args.subcommand === 'logs') {
     return runBuildLogsCommand(root, args);
   }
+}
+
+function onBuildLogsRetry(err: unknown): void {
+  log.warn(
+    `build: transient error while following (${err instanceof Error ? err.message : String(err)}); retrying…`,
+  );
 }
 
 async function runBuildLogsCommand(
@@ -150,17 +159,13 @@ async function runBuildLogsCommand(
       outro('No builds found. Push to your connected branch to trigger one.');
       return;
     }
-    buildId = builds[0]!.id;
+    buildId = builds[0].id;
   }
 
-  const write = args.output
-    ? (line: string): void => appendFileSync(args.output!, `${line}\n`)
+  const outputPath = args.output;
+  const write = outputPath
+    ? (line: string): void => appendFileSync(outputPath, `${line}\n`)
     : (line: string): void => console.log(line);
-
-  const onRetry = (err: unknown): void =>
-    log.warn(
-      `build: transient error while following (${err instanceof Error ? err.message : String(err)}); retrying…`,
-    );
 
   // Decision: A transient failure on the first poll mustn't kill `--follow` either. On a fatal error we exit
   // with a friendly message. On a non-fatal error we exit at once only for the one-shot command;
@@ -170,20 +175,20 @@ async function runBuildLogsCommand(
     try {
       first = await client.getBuildLogs(projectId, buildId, 0);
       break;
-    } catch (err) {
-      if (isFatalFollowError(err)) {
-        if (err instanceof PlatformApiError && err.status === 404) {
+    } catch (error) {
+      if (isFatalFollowError(error)) {
+        if (error instanceof PlatformApiError && error.status === 404) {
           log.error(`build: Build '${buildId}' not found for this project.`);
         } else {
-          log.error(err instanceof Error ? err.message : String(err));
+          log.error(error instanceof Error ? error.message : String(error));
         }
         process.exit(1);
       }
       if (!args.follow) {
-        log.error(err instanceof Error ? err.message : String(err));
+        log.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-      onRetry(err);
+      onBuildLogsRetry(error);
       await sleep(POLL_MS);
     }
   }
@@ -210,13 +215,13 @@ async function runBuildLogsCommand(
 
   if (args.follow && !isBuildLogComplete(first)) {
     ({ status, terminal } = await followBuildLogs({
-      fetchPage: (since) => client.getBuildLogs(projectId, buildId!, since),
+      fetchPage: (since) => client.getBuildLogs(projectId, buildId, since),
       write,
       sleep,
       since: first.lastSeq,
       status,
       isFatal: isFatalFollowError,
-      onRetry,
+      onRetry: onBuildLogsRetry,
     }));
   }
 

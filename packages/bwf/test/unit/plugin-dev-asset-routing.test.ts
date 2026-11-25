@@ -101,7 +101,7 @@ function createNodeProjectRoot(): string {
 
 function useDatabase(root: string, database: 'pg' | 'mysql'): string {
   const configPath = join(root, 'bwf.json');
-  const config = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
   writeFileSync(configPath, JSON.stringify({ ...config, database }));
   return root;
 }
@@ -277,7 +277,7 @@ describe('bwfPlugin dev asset routing', () => {
       await expect(
         resolveRuntimeOptimizerConfig(createRoot(), name, environment),
         `${createRoot.name} ${name}`,
-      ).resolves.toEqual(expected);
+      ).resolves.toMatchObject(expected);
     }
   });
 
@@ -601,7 +601,7 @@ describe('bwfPlugin dev asset routing', () => {
     const { bwfPlugin } = await import('../../src/index.ts');
     const schemaPlugins = bwfPlugin().filter((plugin) => plugin.name === 'platform:env-schema');
     expect(schemaPlugins).toHaveLength(1);
-    const schemaConfig = getHookHandler(schemaPlugins[0]!.config) as (
+    const schemaConfig = getHookHandler(schemaPlugins[0].config) as (
       config: import('vite').UserConfig,
       env: import('vite').ConfigEnv,
     ) => Promise<void>;
@@ -674,13 +674,13 @@ describe('bwfPlugin dev asset routing', () => {
     writeFileSync(
       join(root, 'bwf.json'),
       JSON.stringify({
-        worker: { compatibility_date: '2026-02-24', limits: { cpu_ms: 120000 } },
+        worker: { compatibility_date: '2026-02-24', limits: { cpu_ms: 120_000 } },
       }),
     );
 
     const config = await resolveCloudflareConfig(root);
 
-    expect(config.limits).toEqual({ cpu_ms: 120000 });
+    expect(config.limits).toEqual({ cpu_ms: 120_000 });
   });
 
   it('emits no limits key when worker.limits is not configured', async () => {

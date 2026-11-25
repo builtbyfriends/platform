@@ -9,7 +9,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { dirname, join, relative } from 'pathslash';
-import { type DatabaseDialect } from '../config.ts';
+import type { DatabaseDialect } from '../config.ts';
 import { PLACEHOLDER_DB_URL, writeDrizzleConfig } from '../drizzle/config.ts';
 import { discoverSchema } from '../drizzle/discover.ts';
 import { collectMigrations } from '../migrations/collect.ts';
@@ -83,7 +83,7 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
 
     return !snapshotsEqual;
   } catch (error) {
-    throw new Error(formatDeploySchemaDriftCheckError(error));
+    throw new Error(formatDeploySchemaDriftCheckError(error), { cause: error });
   } finally {
     rmSync(driftRoot, { recursive: true, force: true });
     cleanupDeployDriftCheckRoot(root);
@@ -93,7 +93,7 @@ export function hasDeploySchemaDrift(root: string, dialect: DatabaseDialect): bo
 function runDrizzleKitGenerate(root: string, configPath: string): string {
   const result = spawnSync(process.execPath, [drizzleKitBin, 'generate', '--config', configPath], {
     cwd: root,
-    encoding: 'utf-8',
+    encoding: 'utf8',
     // Decision: drizzle-kit runs project code, so it gets no credentials.
     env: buildEnv(),
   });
@@ -161,13 +161,16 @@ function createDeployDriftProject(root: string, driftProjectRoot: string): void 
   }
 
   // Decision: The build-generated Better Auth schema takes part in `bwf db generate`, so it has to take part in
-  // the isolated drift check too. Copy only this known generated input; the rest of `.bwf` stays
-  // excluded.
-  const authSchemaPath = join(root, '.bwf', 'better-auth-schema.ts');
-  if (existsSync(authSchemaPath)) {
-    const target = join(driftProjectRoot, '.bwf', 'better-auth-schema.ts');
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(authSchemaPath, target);
+  // the isolated drift check too. The generated tsconfig maps `@auth-schema` and the app's tsconfig may extend
+  // it, so schema imports resolve only with it present. Copy only these known generated inputs; the rest of
+  // `.bwf` stays excluded.
+  for (const file of ['better-auth-schema.ts', 'tsconfig.json']) {
+    const source = join(root, '.bwf', file);
+    if (existsSync(source)) {
+      const target = join(driftProjectRoot, '.bwf', file);
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(source, target);
+    }
   }
 }
 
@@ -210,7 +213,7 @@ function collectSnapshotFiles(
       collectSnapshotFiles(fullPath, root, snapshot);
       continue;
     }
-    snapshot[relative(root, fullPath)] = readFileSync(fullPath, 'utf-8');
+    snapshot[relative(root, fullPath)] = readFileSync(fullPath, 'utf8');
   }
 }
 

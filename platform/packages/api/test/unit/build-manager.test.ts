@@ -116,7 +116,7 @@ type StatusWrite = {
     instanceType?: string | null;
   };
 };
-const ACTIVE_BUILD_STATUSES = ['starting', 'building', 'deploying'];
+const ACTIVE_BUILD_STATUSES = new Set(['starting', 'building', 'deploying']);
 const dbState = {
   writes: [] as Array<StatusWrite>,
   // Decision: Authoritative per-build DB status, so the CAS helpers model the real `UPDATE ... WHERE status = ?`
@@ -139,14 +139,14 @@ vi.mock('../../src/db.ts', () => ({
         return false;
       }
       dbState.status.set(id, 'building');
-      dbState.writes.push({ id, status: 'building', opts: opts as StatusWrite['opts'] });
+      dbState.writes.push({ id, status: 'building', opts });
       return true;
     },
   ),
   markBuildTerminalIfActive: vi.fn(
     async (_db: unknown, id: string, status: string, opts?: unknown) => {
       const current = dbState.status.get(id);
-      if (current === undefined || !ACTIVE_BUILD_STATUSES.includes(current)) {
+      if (current === undefined || !ACTIVE_BUILD_STATUSES.has(current)) {
         return false;
       }
       dbState.status.set(id, status);
@@ -158,7 +158,7 @@ vi.mock('../../src/db.ts', () => ({
   // against a row a concurrent terminalizer already finished is a no-op (no write, returns false).
   markBuildProgressIfActive: vi.fn(async (_db: unknown, id: string, status: string) => {
     const current = dbState.status.get(id);
-    if (current === undefined || !ACTIVE_BUILD_STATUSES.includes(current)) {
+    if (current === undefined || !ACTIVE_BUILD_STATUSES.has(current)) {
       return false;
     }
     dbState.status.set(id, status);
@@ -238,7 +238,6 @@ vi.mock('../../src/github/check-run.ts', async (importOriginal) => ({
   completeCheckRun: vi.fn(async () => false),
 }));
 
-// eslint-disable-next-line import/no-relative-packages -- intentional cross-package contract reference
 import bwfPackageJson from '../../../../../packages/bwf/package.json' with { type: 'json' };
 // Decision: Importing the .mjs only pulls in its exported helpers: the entrypoint guard keeps `main()` from
 // starting the control server on import. Types come from the sibling build-agent.d.mts.
@@ -551,7 +550,7 @@ beforeEach(() => {
     construct(target, args) {
       const init = args[1] as { status?: number } | undefined;
       if (init?.status === 101) {
-        return new FakeUpgradeResponse(args[0], init as { webSocket?: unknown });
+        return new FakeUpgradeResponse(args[0], init);
       }
       return Reflect.construct(target, args, target);
     },
@@ -772,7 +771,7 @@ describe('BuildManager.startBuild', () => {
     // DO's grace and the agent's barrier deadline are separate literals. Use `>=`, not `===`: the grace
     // also covers the final closeControlServer after the barrier.
     expect(LOG_DRAIN_GRACE_SECONDS * 1000).toBeGreaterThanOrEqual(
-      LOG_DRAIN_ABSOLUTE_TIMEOUT_MS + 5_000,
+      LOG_DRAIN_ABSOLUTE_TIMEOUT_MS + 5000,
     );
   });
 
@@ -780,11 +779,11 @@ describe('BuildManager.startBuild', () => {
     // Decision: Worst case starts just after a poll: one second to the next callback, up to LOG_DRAIN_BUDGET_MS
     // inside it, then one second until a follow-up request can acknowledge the cursor. Equality leaves
     // no slack and lets the agent close on the boundary.
-    expect(LOG_DRAIN_IDLE_TIMEOUT_MS).toBeGreaterThan(LOG_DRAIN_BUDGET_MS + 2_000);
+    expect(LOG_DRAIN_IDLE_TIMEOUT_MS).toBeGreaterThan(LOG_DRAIN_BUDGET_MS + 2000);
     expect(LOG_DRAIN_ABSOLUTE_TIMEOUT_MS).toBeGreaterThan(
-      MAX_LOG_PULL_PAGES * (LOG_PULL_TIMEOUT_MS + 1_000),
+      MAX_LOG_PULL_PAGES * (LOG_PULL_TIMEOUT_MS + 1000),
     );
-    expect(LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS + 1_000).toBeLessThanOrEqual(
+    expect(LOG_TERMINAL_DRAIN_RETRY_WINDOW_MS + 1000).toBeLessThanOrEqual(
       LOG_DRAIN_IDLE_TIMEOUT_MS,
     );
   });
@@ -3140,7 +3139,7 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
       return new RealResponse(
         JSON.stringify({
           lines: page,
-          lastSeq: page[page.length - 1]?.seq ?? 0,
+          lastSeq: page.at(-1)?.seq ?? 0,
           hasMore: more,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
@@ -3157,10 +3156,10 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
         stopped: containerCalls.stopped,
         destroyed: containerCalls.destroyed,
       });
-      return new RealResponse(
-        JSON.stringify({ lines, lastSeq: lines[lines.length - 1]?.seq ?? 0 }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+      return new RealResponse(JSON.stringify({ lines, lastSeq: lines.at(-1)?.seq ?? 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     });
     (m as unknown as { _portFetch: typeof fetchFn })._portFetch = fetchFn;
     return { fetchFn, teardownAtPull };
@@ -3438,7 +3437,7 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     const fetchFn = vi.fn(async (url: string, _port?: number, _init?: RequestInit) => {
       const since = Number(new URL(url).searchParams.get('since') ?? '0');
       const lines = buffer.filter((entry) => entry.seq > since);
-      const lastSeq = buffer[buffer.length - 1]?.seq ?? since;
+      const lastSeq = buffer.at(-1)?.seq ?? since;
       calls += 1;
       if (calls === 1) {
         markEntered();
@@ -3574,7 +3573,7 @@ describe('BuildManager.pollLogs (DO log pull-loop)', () => {
     const fetchFn = vi.fn(async (url: string, _port?: number, _init?: RequestInit) => {
       const since = Number(new URL(url).searchParams.get('since') ?? '0');
       const lines = buffer.filter((entry) => entry.seq > since);
-      const lastSeq = buffer[buffer.length - 1]?.seq ?? since;
+      const lastSeq = buffer.at(-1)?.seq ?? since;
       stoppedAtPull.push(containerCalls.stopped);
       calls += 1;
       if (calls === 1) {
@@ -4546,7 +4545,7 @@ describe('BuildManager.ingestLines (the pull-loop sink)', () => {
   it('upgrades a legacy log table once without fabricating a final delimiter', async () => {
     const ctx = makeStubCtx({
       legacyLogSchema: true,
-      initialLogs: [{ seq: 1, line: '\x1b[?1049hERR', stream: 'stdout', ts: 1 }],
+      initialLogs: [{ seq: 1, line: '\u001b[?1049hERR', stream: 'stdout', ts: 1 }],
     });
     const m = makeManager(ctx, makeEnv());
     const readTail = () =>
@@ -4597,13 +4596,13 @@ const utf8 = new TextEncoder();
 function hasLoneSurrogate(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code >= 0xd800 && code <= 0xdbff) {
+    if (code >= 0xd8_00 && code <= 0xdb_ff) {
       const next = text.charCodeAt(i + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+      if (!(next >= 0xdc_00 && next <= 0xdf_ff)) {
         return true;
       }
       i++; /* Decision: A complete pair: skip its low half. */
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
+    } else if (code >= 0xdc_00 && code <= 0xdf_ff) {
       return true;
     }
   }
@@ -4621,7 +4620,7 @@ function parseFence(out: string): { fenceLen: number; content: Array<string> } {
   const openIdx = rendered.findIndex((line) => /^`+text$/.test(line));
   expect(openIdx).toBeGreaterThan(-1);
   const fenceLen = rendered[openIdx].length - 'text'.length;
-  expect(rendered[rendered.length - 1]).toBe('`'.repeat(fenceLen));
+  expect(rendered.at(-1)).toBe('`'.repeat(fenceLen));
   return { fenceLen, content: rendered.slice(openIdx + 1, rendered.length - 1) };
 }
 
@@ -4654,7 +4653,7 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     expect(out).toContain(lines[99]);
     expect(out).toContain(lines[41]);
     expect(out).not.toContain(lines[40]);
-    expect((out as string).length).toBeLessThan(65535);
+    expect((out as string).length).toBeLessThan(65_535);
   });
 
   it('keeps the LAST 60000 chars of a single over-cap line', async () => {
@@ -4688,7 +4687,7 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
   });
 
   it('holds the WHOLE string under GitHub’s 65535 cap for a pathological all-backtick line', async () => {
-    const out = (await formatLogTailMarkdown(['`'.repeat(61000)], 1)) as string;
+    const out = (await formatLogTailMarkdown(['`'.repeat(61_000)], 1)) as string;
     expect(out.length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     expect(out.split('\n')[0]).toBe('**Last 1 log lines:**');
     const { fenceLen, content } = parseFence(out);
@@ -4715,20 +4714,20 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
   });
 
   it('tail-truncates a lone CJK line to its LAST ~60000 UTF-8 bytes (under 65535 total)', async () => {
-    const out = (await formatLogTailMarkdown(['好'.repeat(30000)], 1)) as string;
+    const out = (await formatLogTailMarkdown(['好'.repeat(30_000)], 1)) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     const { content } = parseFence(out);
     expect(content).toHaveLength(1);
     expect(/^好+$/.test(content[0])).toBe(true);
     const contentBytes = utf8.encode(content[0]).length;
-    expect(contentBytes).toBeLessThanOrEqual(60000);
-    expect(contentBytes).toBeGreaterThanOrEqual(59990);
+    expect(contentBytes).toBeLessThanOrEqual(60_000);
+    expect(contentBytes).toBeGreaterThanOrEqual(59_990);
   });
 
   it('never leaves a split surrogate pair at a truncation cut (emoji at the boundary)', async () => {
     // Decision: '🚀' is 2 UTF-16 units and 4 UTF-8 bytes, so the byte cap cuts inside the emoji run. A cut
     // mid-pair would leave a lone surrogate (re-encoded as a 3-byte U+FFFD).
-    const out = (await formatLogTailMarkdown(['🚀'.repeat(20000)], 1)) as string;
+    const out = (await formatLogTailMarkdown(['🚀'.repeat(20_000)], 1)) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     expect(hasLoneSurrogate(out)).toBe(false);
   });
@@ -4737,7 +4736,10 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
     // Decision: 13500 emoji (54000 bytes) plus a 6000-backtick run is exactly 60000 bytes, so it passes the content
     // cap. The 6001-backtick fence then pushes the byte length past 65535 while the UTF-16 length stays
     // far under, so the loop has to cut the line by bytes without splitting an emoji pair.
-    const out = (await formatLogTailMarkdown(['🚀'.repeat(13500) + '`'.repeat(6000)], 1)) as string;
+    const out = (await formatLogTailMarkdown(
+      ['🚀'.repeat(13_500) + '`'.repeat(6000)],
+      1,
+    )) as string;
     expect(utf8.encode(out).length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_MAX_BYTES);
     expect(hasLoneSurrogate(out)).toBe(false);
     const { fenceLen, content } = parseFence(out);
@@ -4750,7 +4752,7 @@ describe('formatLogTailMarkdown (pure check-run output.text renderer)', () => {
 // as literal `^[[32m` / `^[[1G` noise, with erased spinner frames glued onto one line (the agent
 // splits on CR/LF, and a clack spinner separates frames with `ESC[1G ESC[J` and no newline).
 describe('renderCapturedLog (terminal-visible text for the check run)', () => {
-  const ESC = '\x1b';
+  const ESC = '\u001b';
 
   it('leaves a plain line untouched', async () => {
     expect(await renderCapturedLog('[build-agent] source extracted')).toBe(
@@ -4789,7 +4791,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
   });
 
   it('strips OSC sequences (window title / hyperlink) under both BEL and ST terminators', async () => {
-    expect(await renderCapturedLog(`${ESC}]0;building\x07done`)).toBe('done');
+    expect(await renderCapturedLog(`${ESC}]0;building\u0007done`)).toBe('done');
     expect(await renderCapturedLog(`${ESC}]8;;https://buildwf.dev${ESC}\\link`)).toBe('link');
   });
 
@@ -4822,13 +4824,13 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
     // SOS_PM_APC_STRING and each DCS state, so the payload after an embedded BEL stays invisible. BEL is
     // also an ordinary data byte inside sixel, so real payloads reach this.
     for (const intro of ['P', 'X', '^', '_']) {
-      expect(await renderCapturedLog(`before${ESC}${intro}hidden\x07still${ESC}\\after`)).toBe(
+      expect(await renderCapturedLog(`before${ESC}${intro}hidden\u0007still${ESC}\\after`)).toBe(
         'beforeafter',
       );
     }
-    expect(await renderCapturedLog(`${ESC}Pabc\x07def`)).toBe('');
+    expect(await renderCapturedLog(`${ESC}Pabc\u0007def`)).toBe('');
     // Decision: OSC keeps BEL as a terminator (the legacy xterm convention).
-    expect(await renderCapturedLog(`${ESC}]0;title\x07visible`)).toBe('visible');
+    expect(await renderCapturedLog(`${ESC}]0;title\u0007visible`)).toBe('visible');
   });
 
   it('aborts a string control on an embedded ESC, as a VT parser does', async () => {
@@ -4845,8 +4847,8 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
   });
 
   it('does not mistake ordinary text for an escape sequence', async () => {
-    expect(await renderCapturedLog('cost [32m] and \\x1b are literal')).toBe(
-      'cost [32m] and \\x1b are literal',
+    expect(await renderCapturedLog(String.raw`cost [32m] and \x1b are literal`)).toBe(
+      String.raw`cost [32m] and \x1b are literal`,
     );
   });
 
@@ -4910,7 +4912,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
 
   it('bounds repeated DEC selective erases that scan protection metadata', async () => {
     for (const final of ['J', 'K']) {
-      const selectiveEraseFlood = `x${`${ESC}[?2${final}`.repeat(2_700)}ERR`;
+      const selectiveEraseFlood = `x${`${ESC}[?2${final}`.repeat(2700)}ERR`;
       expect(selectiveEraseFlood.length).toBeLessThanOrEqual(TERMINAL_RENDER_MAX_INPUT_CODE_UNITS);
       await expect(renderCapturedLog(selectiveEraseFlood)).resolves.toBe('');
     }
@@ -4918,7 +4920,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
 
   it('bounds REP allocation by preceding-grapheme length as well as Ps', async () => {
     const combining = `a${'\u0301'.repeat(131)}`;
-    expect(combining.length * 8_000).toBeGreaterThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
+    expect(combining.length * 8000).toBeGreaterThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
     expect(await renderCapturedLog(`${combining}${ESC}[8000b`)).toBe('');
   });
 
@@ -4940,7 +4942,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
 
   it('does not charge a whole ordinary ASCII run as REP source', async () => {
     const text = 'a'.repeat(132);
-    expect(await renderCapturedLog(`${text}${ESC}[8000b`)).toBe(`${text}${'a'.repeat(8_000)}`);
+    expect(await renderCapturedLog(`${text}${ESC}[8000b`)).toBe(`${text}${'a'.repeat(8000)}`);
   });
 
   it('does not charge unsupported private REP identities', async () => {
@@ -4949,7 +4951,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
   });
 
   it('bounds cumulative REP expansion from distinct printable graphemes', async () => {
-    const grapheme = `a${'\u0301'.repeat(2_000)}`;
+    const grapheme = `a${'\u0301'.repeat(2000)}`;
     const allocation = grapheme.length * 200;
     expect(allocation).toBeLessThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
     expect(allocation * 3).toBeGreaterThan(TERMINAL_RENDER_MAX_REPEAT_CODE_UNITS);
@@ -5054,7 +5056,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
   it('bounds the cumulative cost of repeated erases on a long row', async () => {
     // Decision: EL, ED and ECH rewrite cells too, so they share the budget. This input is under the 128KiB capture
     // ceiling but asks ECH to rewrite most of a 100,000-cell row 3,000 times.
-    const hostile = `SECRET${'a'.repeat(99_994)}${ESC}[7G${`${ESC}[999999X`.repeat(3_000)}`;
+    const hostile = `SECRET${'a'.repeat(99_994)}${ESC}[7G${`${ESC}[999999X`.repeat(3000)}`;
     const out = await renderCapturedLog(hostile);
     // Decision: Once the budget is spent, fail closed by dropping the modeled row. Ignoring an over-budget erase
     // could bring back text a real terminal hid.
@@ -5091,7 +5093,7 @@ describe('renderCapturedLog (terminal-visible text for the check run)', () => {
 });
 
 describe('formatLogTailMarkdown sanitizes before measuring', () => {
-  const ESC = '\x1b';
+  const ESC = '\u001b';
 
   it('renders the visible frame, not the erased ones', async () => {
     const spinner = `◒  Uploading${ESC}[1G${ESC}[J◐  Uploading (59/59)${ESC}[1G${ESC}[J◆  Deployed!`;
@@ -5131,7 +5133,8 @@ describe('formatLogTailMarkdown sanitizes before measuring', () => {
     // Decision: One spinner line whose raw form is about 1.4MB of erased frames but whose visible text is 12 chars.
     // Counting bytes before sanitizing would blow the content cap and shift out each line before it.
     const flood =
-      Array.from({ length: 20000 }, (_, i) => `frame ${i}${ESC}[1G${ESC}[J`).join('') + 'Deployed!';
+      Array.from({ length: 20_000 }, (_, i) => `frame ${i}${ESC}[1G${ESC}[J`).join('') +
+      'Deployed!';
     expect(flood.length).toBeGreaterThan(CHECK_RUN_LOG_TAIL_MAX_BYTES);
     const out = await formatLogTailMarkdown(['first real line', flood, 'last real line'], 3);
     // Decision: The unsafe stateful group makes the later terminal state unknowable. Even rendering only the newer
@@ -5142,7 +5145,7 @@ describe('formatLogTailMarkdown sanitizes before measuring', () => {
   it('a terminal-only string-control payload must not evict real diagnostics either', async () => {
     // Decision: One 120KB Kitty graphics blob, under pipeStream's 128KB per-line cap, so it arrives intact. Its
     // visible width is zero, but left as text it alone exceeds the tail budget.
-    const blob = `${ESC}_Ga=T,f=100;${'QUJDRA'.repeat(20000)}${ESC}\\`;
+    const blob = `${ESC}_Ga=T,f=100;${'QUJDRA'.repeat(20_000)}${ESC}\\`;
     expect(blob.length).toBeGreaterThan(CHECK_RUN_LOG_TAIL_MAX_BYTES);
     const lines = [...Array.from({ length: 9 }, (_, i) => `[vite] error detail ${i}`), blob];
     const out = await formatLogTailMarkdown(lines, lines.length);
@@ -5245,7 +5248,7 @@ describe('formatLogTailMarkdown sanitizes before measuring', () => {
   });
 
   it('does not invent a REP source across a captured LF inside CSI', async () => {
-    const grapheme = `a${'\u0301'.repeat(8_200)}`;
+    const grapheme = `a${'\u0301'.repeat(8200)}`;
     const out = (await formatLogTailMarkdown(
       [
         { line: `${grapheme}${ESC}[`, lineEnding: 'lf' },
@@ -5339,7 +5342,7 @@ describe('formatLogTailMarkdown sanitizes before measuring', () => {
   it('spends the controlled-input budget on newest whole parser groups first', async () => {
     const olderControlled = Array.from(
       { length: 6 },
-      (_, index) => `${ESC}[0mold-${index}-${'x'.repeat(7_000)}`,
+      (_, index) => `${ESC}[0mold-${index}-${'x'.repeat(7000)}`,
     );
     const out = await formatLogTailMarkdown(
       [...olderControlled, `before${ESC}_GSECRET`, `MORE${ESC}\\latest failure`],
@@ -6360,13 +6363,13 @@ describe('build-agent exit-time log drain barrier', () => {
 
   it('resets the idle deadline while acknowledged progress continues across slow callbacks', async () => {
     let clock = 0;
-    const acknowledgedAt = [7_000, 14_000, 21_000];
+    const acknowledgedAt = [7000, 14_000, 21_000];
     const served = (): number => acknowledgedAt.filter((at) => at <= clock).length;
 
     const drained = await waitForLogDrain({
       timeoutMs: 30_000,
-      idleTimeoutMs: 8_000,
-      pollMs: 1_000,
+      idleTimeoutMs: 8000,
+      pollMs: 1000,
       served,
       recorded: () => acknowledgedAt.length,
       now: () => clock,
@@ -6384,7 +6387,7 @@ describe('build-agent exit-time log drain barrier', () => {
     const drained = await waitForLogDrain({
       timeoutMs: LOG_DRAIN_ABSOLUTE_TIMEOUT_MS,
       idleTimeoutMs: LOG_DRAIN_IDLE_TIMEOUT_MS,
-      pollMs: 1_000,
+      pollMs: 1000,
       served: () => 0,
       recorded: () => 1,
       now: () => clock,
@@ -6400,11 +6403,11 @@ describe('build-agent exit-time log drain barrier', () => {
   it('enforces the non-resettable absolute cap despite continual partial progress', async () => {
     let clock = 0;
     let acknowledged = 0;
-    let nextProgress = 7_000;
+    let nextProgress = 7000;
     const drained = await waitForLogDrain({
       timeoutMs: 20_000,
-      idleTimeoutMs: 8_000,
-      pollMs: 1_000,
+      idleTimeoutMs: 8000,
+      pollMs: 1000,
       served: () => acknowledged,
       recorded: () => 100,
       now: () => clock,
@@ -6412,7 +6415,7 @@ describe('build-agent exit-time log drain barrier', () => {
         clock += ms;
         if (clock >= nextProgress) {
           acknowledged += 1;
-          nextProgress += 7_000;
+          nextProgress += 7000;
         }
       },
     });
@@ -6465,7 +6468,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // advances its cursor only after a successful parse, so a body too large to read inside
     // LOG_PULL_TIMEOUT_MS is a livelock, not a slow transfer.
     const before = getBufferedLogLines();
-    const since = before.length > 0 ? before[before.length - 1].seq : 0;
+    const since = before.at(-1)?.seq ?? 0;
 
     // Decision: Each NUL serializes as `\\u0000` (six bytes), so these 2000 x 1048-char lines make a body of
     // about 12.6 MB, though their code units fit one page.
@@ -6501,14 +6504,14 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // successful parse, so an oversized body is a livelock: each retry asks for the same backlog until
     // the drain barrier expires and the tail is lost.
     const before = getBufferedLogLines();
-    let since = before.length > 0 ? before[before.length - 1].seq : 0;
+    let since = before.at(-1)?.seq ?? 0;
     const start = since;
 
     const big = 'x'.repeat(128 * 1024);
     for (let i = 0; i < 40; i++) {
       record(big, 'stdout');
     }
-    const finalSeq = getBufferedLogLines().slice(-1)[0].seq;
+    const finalSeq = getBufferedLogLines().at(-1)?.seq ?? 0;
 
     server = await startControlServer(0);
     const address = server.address();
@@ -6526,7 +6529,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     const first = await pull(since);
     expect(JSON.stringify(first.lines).length).toBeLessThanOrEqual(MAX_LOG_RESPONSE_BYTES * 1.1);
     expect(first.lastSeq).toBeLessThan(finalSeq);
-    expect(first.lastSeq).toBe(first.lines[first.lines.length - 1].seq);
+    expect(first.lastSeq).toBe(first.lines.at(-1)?.seq);
 
     let rounds = 0;
     since = first.lastSeq;
@@ -6544,7 +6547,7 @@ describe('build-agent GET /logs serves post-child-close lines', () => {
     // Decision: The module-level ring is shared across this file's suites, so poll from the current high-water
     // mark instead of 0.
     const before = getBufferedLogLines();
-    const since = before.length > 0 ? before[before.length - 1].seq : 0;
+    const since = before.at(-1)?.seq ?? 0;
 
     // Decision: Ephemeral port: the container's fixed 4000 could collide in CI.
     server = await startControlServer(0);
@@ -7092,10 +7095,10 @@ describe('build-agent pipeStream line splitting + tail cap', () => {
         '+ vue 3.5.44',
         '+ void 1.1.11',
         '[build-agent] $ bwf deploy --project example',
-        '\x1b[32m✓ built in 119ms\x1b[0m',
+        '\u001b[32m✓ built in 119ms\u001b[0m',
         'dist/client/index.html  0.57 kB',
         '  at build (build.ts:10:2)',
-        'Uploading 1/2\r\x1b[2K✓ Uploaded 2/2',
+        'Uploading 1/2\r\u001b[2K✓ Uploaded 2/2',
         '╭─ https://example.buildwf.dev ─╮',
         '│  2 static assets          │',
         '╰───────────────────────────╯',
@@ -7117,7 +7120,7 @@ describe('build-agent pipeStream line splitting + tail cap', () => {
         ...lines.slice(8),
       ]);
       expect(rows[0].lineEnding).toBe(ending === '\n' ? 'lf' : 'crlf');
-      expect(rows.some((row) => row.line.includes('\x1b[32m'))).toBe(true);
+      expect(rows.some((row) => row.line.includes('\u001b[32m'))).toBe(true);
     },
   );
 

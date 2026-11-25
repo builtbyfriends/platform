@@ -22,9 +22,9 @@ import {
   createTestUser,
   setupEnv,
   teardownEnv,
-  type TestEnv,
   withLegacyDeploy,
 } from './helpers.ts';
+import type { TestEnv } from './helpers.ts';
 
 const app = withLegacyDeploy(rawApp);
 

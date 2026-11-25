@@ -17,8 +17,8 @@ export async function publishCloudflareWorkerSettings(options: {
     throw new Error('The Cloudflare Worker Logpush setting was not readable.');
   }
   const settings = {
-    ...(options.observability === undefined ? {} : { observability: options.observability }),
-    ...(options.logpush === undefined ? {} : { logpush: options.logpush }),
+    ...(options.observability !== undefined && { observability: options.observability }),
+    ...(options.logpush !== undefined && { logpush: options.logpush }),
   };
   if (Object.keys(settings).length === 0) {
     return;

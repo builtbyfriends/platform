@@ -6,8 +6,8 @@ import {
   formatSseText,
   getLastEventId,
   SseStreamClosedError,
-  type SseStream,
 } from '../../src/runtime/sse.ts';
+import type { SseStream } from '../../src/runtime/sse.ts';
 import { MockEventSource } from '../helpers/mock-event-source.ts';
 
 const decoder = new TextDecoder();
@@ -192,7 +192,7 @@ describe('connectEventStream', () => {
     const stream = connectEventStream<{ ready: { ok: boolean } }>('/events', {
       withCredentials: true,
     });
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
     const handler = vi.fn();
     const off = stream.on('ready', handler);
 
@@ -214,7 +214,7 @@ describe('connectEventStream', () => {
 
   it('supports text parsing, error listeners, and close', () => {
     const stream = connectEventStream('/events', { parse: 'text' });
-    const source = MockEventSource.instances[0]!;
+    const source = MockEventSource.instances[0];
     const messageHandler = vi.fn();
     const errorHandler = vi.fn();
 

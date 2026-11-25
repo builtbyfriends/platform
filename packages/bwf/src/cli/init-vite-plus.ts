@@ -9,7 +9,8 @@ export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: {
   readonly 'vite-plus': string;
 } = {
   vite: vitePlusManifest.dependencies.vite,
-  'vite-plus': `^${vitePlusManifest.version}`,
+  // Decision: Pin the Vite+ release beside its exact core so a later release cannot drift.
+  'vite-plus': vitePlusManifest.version,
 };
 
 type JsonObject = Record<string, unknown>;

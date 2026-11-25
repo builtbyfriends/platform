@@ -1,32 +1,20 @@
 import type { BuiltinPlanId, PlatformPlanCatalog } from '@builtbyfriends/platform/plans';
-import {
-  and,
-  asc,
-  count,
-  eq,
-  gt,
-  inArray,
-  isNull,
-  notInArray,
-  or,
-  sql,
-  type SQL,
-} from 'drizzle-orm';
-import {
-  PLAN_AI_LOGGING_SETTING,
-  planAiLogging,
-  type AiLoggingMode,
-  type PlanAiLoggingPublish,
-  type PlanAiLoggingSettings,
-  type PublishedAiLoggingMode,
+import { and, asc, count, eq, gt, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import { PLAN_AI_LOGGING_SETTING, planAiLogging } from './ai-logging-policy.ts';
+import type {
+  AiLoggingMode,
+  PlanAiLoggingPublish,
+  PlanAiLoggingSettings,
+  PublishedAiLoggingMode,
 } from './ai-logging-policy.ts';
 import {
   AI_LOGGING_SETTLE_MS,
   publishProjectAiLogging,
   savedPlanAiLogging,
   userAiLoggingPublishKey as userPublishKey,
-  type AiLoggingTrigger,
 } from './ai-logging.ts';
+import type { AiLoggingTrigger } from './ai-logging.ts';
 import type { Db, DbOrTx } from './db.ts';
 import {
   lockPlanCatalog,
@@ -112,7 +100,7 @@ export function planAiLoggingChanges(
       const previous = modeFor(modesBefore, before, id);
       const next = modeFor(modesAfter, after, id);
       return (
-        previous !== next || (moved && modeFor(modesBefore, before, input.moved!.from) !== next)
+        previous !== next || (moved && modeFor(modesBefore, before, input.moved.from) !== next)
       );
     });
   return {
@@ -570,5 +558,5 @@ export async function runUserAiLoggingPublishPage(
 
 /** A plan's saved default for display; `inherit` when it has none. */
 export function planAiLoggingMode(settings: PlanAiLoggingSettings, planId: string): AiLoggingMode {
-  return Object.hasOwn(settings.modes, planId) ? settings.modes[planId]! : 'inherit';
+  return Object.hasOwn(settings.modes, planId) ? settings.modes[planId] : 'inherit';
 }

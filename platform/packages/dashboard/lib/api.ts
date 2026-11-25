@@ -23,7 +23,7 @@ export function getPublicApiUrl(context: Context): string {
 function getApiFetch(context: Context): typeof fetch {
   const binding = (context.env as { API?: Fetcher }).API;
   if (binding && !isLocalDashboardHost(context.req.header('host') ?? '')) {
-    return ((input: RequestInfo | URL, init?: RequestInit) => {
+    return (input: RequestInfo | URL, init?: RequestInit) => {
       // Decision: The service binding is internal. The browser's real protected origin is kept so the API checks
       // the dashboard application's audience, not the API's. No forwarded-host header takes part.
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -33,7 +33,7 @@ function getApiFetch(context: Context): typeof fetch {
         url.protocol = source.protocol;
       }
       return binding.fetch(input instanceof Request ? new Request(url, input) : url, init);
-    }) as typeof fetch;
+    };
   }
   return globalThis.fetch;
 }
@@ -58,8 +58,8 @@ function withTimeout(init: RequestInit | undefined, timeoutMs: number): RequestI
 function getTimedApiFetch(context: Context): typeof fetch {
   const apiFetch = getApiFetch(context);
   const timeoutMs = getApiTimeoutMs(context);
-  return ((input: RequestInfo | URL, init?: RequestInit) =>
-    apiFetch(input, withTimeout({ ...init, redirect: 'manual' }, timeoutMs))) as typeof fetch;
+  return (input: RequestInfo | URL, init?: RequestInit) =>
+    apiFetch(input, withTimeout({ ...init, redirect: 'manual' }, timeoutMs));
 }
 
 function getCfAccessHeaders(context: Context): Record<string, string> {
@@ -189,7 +189,7 @@ export async function readApiJson<T>(res: ApiResponse): Promise<T | null> {
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) {
     const body = await res.text();
-    const preview = body.trim().replace(/\s+/g, ' ').slice(0, 160);
+    const preview = body.trim().replaceAll(/\s+/g, ' ').slice(0, 160);
     console.warn(
       `[dashboard] expected JSON from API, got ${contentType || 'unknown content type'}${preview ? `: ${preview}` : ''}`,
     );

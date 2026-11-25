@@ -1,7 +1,7 @@
-import {
-  parsePlatformAccessProtection,
-  type PlatformAccessProtection,
-  type PlatformInstallationManifest,
+import { parsePlatformAccessProtection } from '@builtbyfriends/platform';
+import type {
+  PlatformAccessProtection,
+  PlatformInstallationManifest,
 } from '@builtbyfriends/platform';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import {
@@ -11,8 +11,8 @@ import {
   platformAccessOverlapsOrigins,
   platformAccessPublicDestinations,
   verifyPlatformAccessApplication,
-  type PlatformAccessCheckpoint,
 } from './platform-access-provision.ts';
+import type { PlatformAccessCheckpoint } from './platform-access-provision.ts';
 import {
   parsePlatformAccessSetupSpec,
   platformAccessResourceInventory,
