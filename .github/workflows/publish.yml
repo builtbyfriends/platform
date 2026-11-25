@@ -20,6 +20,7 @@ jobs:
     permissions:
       contents: read
       deployments: read
+      packages: read
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       production: ${{ steps.production.outputs.found }}
@@ -28,15 +29,22 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # Decision: the tag job can't tag a release commit that changes a workflow, since the workflow's token
+      # may not touch workflow files. So a version already on GitHub Packages counts as released, tagged or not.
       - id: tag
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           tag="v$(node -p "require('./packages/bwf/package.json').version")"
+          echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" > "$RUNNER_TEMP/.npmrc"
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "$tag is already tagged, so there's nothing to release."
+          elif NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/.npmrc" npm view "@builtbyfriends/bwf@${tag#v}" version --registry https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "${tag#v} is already on GitHub Packages, so there's nothing to release."
           else
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
