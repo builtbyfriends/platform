@@ -17,7 +17,16 @@ You don't need all of the SDK. You can start with a plain React app and add API 
 
 ## Get started
 
-You need Node.js 24.22 or newer. In an empty folder, run:
+You need Node.js 24.22 or newer.
+
+The packages live on GitHub Packages, which asks for a sign-in even to install. Make a classic GitHub token with `read:packages`, export it as `NODE_AUTH_TOKEN`, and add these two lines to `~/.npmrc` once:
+
+```ini
+@builtbyfriends:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+Then, in an empty folder, run:
 
 ```sh
 npm install -D @builtbyfriends/bwf

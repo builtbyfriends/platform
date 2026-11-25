@@ -4,10 +4,19 @@ Create a full-stack Vite app with bwf, ready for local development and deploymen
 
 ## Getting Started
 
-Use Node.js 24.22+ or 26.12+:
+Use Node.js 24.22+ or 26.12+.
+
+The packages live on GitHub Packages, which asks for a sign-in even to install. Make a classic GitHub token with `read:packages`, export it as `NODE_AUTH_TOKEN`, and add these two lines to `~/.npmrc` once:
+
+```ini
+@builtbyfriends:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+Then run:
 
 ```sh
-npm create platform@latest my-app
+npm create @builtbyfriends/bwf@latest my-app
 cd my-app
 npm run dev
 ```

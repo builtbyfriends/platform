@@ -46,7 +46,7 @@ Pass your choices as flags to scaffold from a script or coding agent:
 
 ```sh
 bwf init --toolchain vite-plus --starter sqlite --deploy none
-npm create platform@latest my-app -- --toolchain vite-plus --starter sqlite --deploy none
+npm create @builtbyfriends/bwf@latest my-app -- --toolchain vite-plus --starter sqlite --deploy none
 ```
 
 For non-interactive scaffolding, choose `--deploy none` and run `bwf connect` later to sign in.

@@ -261,9 +261,10 @@ bwf github connect platform-docs \
 ```
 
 Release publishing uses `.github/workflows/publish.yml` in the `Release`
-GitHub environment with OIDC (`id-token: write`). Configure an
-[npm trusted publisher](https://docs.npmjs.com/trusted-publishers/) for each public
-package: organization `voidzero-dev`, repository `platform`, workflow `publish.yml`,
-and environment `Release`. This workflow does not require an `NPM_TOKEN` secret.
+GitHub environment. It publishes to GitHub Packages with the workflow's own token
+(`packages: write`), so there is no registry secret to store. Installing from GitHub
+Packages needs a classic token with `read:packages` in `NODE_AUTH_TOKEN` and the
+`@builtbyfriends` scope pointed at `https://npm.pkg.github.com`. Versions that were
+only on npm can be copied over with the manual `copy-npm-versions.yml` workflow.
 
 CI (`ci.yml`) runs on PRs to `main` and requires no secrets.

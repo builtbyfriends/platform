@@ -9,7 +9,14 @@ Create a bwf app, run it locally, and deploy it. You can also [add bwf to an exi
 
 ## Create an app
 
-In an empty directory, install bwf and run setup:
+The packages live on GitHub Packages, which asks for a sign-in even to install. Make a classic GitHub token with `read:packages`, export it as `NODE_AUTH_TOKEN`, and add these two lines to `~/.npmrc` once:
+
+```ini
+@builtbyfriends:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
+Then, in an empty directory, install bwf and run setup:
 
 ::: code-group
 
@@ -45,7 +52,7 @@ Choose your UI framework, a starter, and a deployment target. Vite+ is the defau
 
 You do not need to install Vite+ globally. Setup preserves your existing package-manager versions and lockfiles.
 
-With pnpm, `pnpm create bwf my-app` also creates the project directory and configures native build permissions for you.
+With pnpm, `pnpm create @builtbyfriends/bwf my-app` also creates the project directory and configures native build permissions for you.
 
 ## Run locally
 
