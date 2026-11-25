@@ -134,6 +134,8 @@ HMAC. See [Platform Development](../../../docs/guide/platform/development/runtim
 
 ### Service-to-service API
 
+Connected applications can discover schema-backed operations for an owned resource with `POST /app-billing/projects.resourceOperations`, then call `POST /app-billing/resources.invoke`. Both use the application's client credentials and require `{project, owner, resourceId}`; the invocation also includes the discovered operation ID/version, expected effect and validated input. Read sources cannot invoke writes. Writes require the application's reviewed-action path and `confirmation: "reviewed"`. File text reads and conditional saves are registered first; unsupported resources return an unavailable reason. These routes do not turn the Cloudflare discovery catalog into a provider API proxy. See the [operation contract](../../meta/operation-catalog-candidate-2026-11-25.md).
+
 - `POST /internal/github-webhook` — optional ingress only; requires the dedicated
   time-bounded ingress HMAC and the original valid GitHub signature
 - `POST /internal/revalidate/:projectId`

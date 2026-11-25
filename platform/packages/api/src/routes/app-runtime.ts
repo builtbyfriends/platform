@@ -16,6 +16,7 @@ import { databaseInspect, validDatabaseFilter, validDatabaseSort } from './app-r
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { appRuntimeFileRoutes, fileOwnerActive } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
+import { appRuntimeOperationRoutes } from './app-runtime-operations.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
@@ -177,7 +178,8 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
   };
   const app = new Hono<ApiEnv>()
     .route('/', appRuntimeFileRoutes(resolveProject))
-    .route('/', appRuntimeCatalogRoutes(resolveProject));
+    .route('/', appRuntimeCatalogRoutes(resolveProject))
+    .route('/', appRuntimeOperationRoutes(resolveProject));
   const boundedBody = bodyLimit({ maxSize: 8192 });
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
