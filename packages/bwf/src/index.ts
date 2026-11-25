@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'pathslash';
 import pc from 'picocolors';
 import type { Plugin } from 'vite';
-import { analyzeApplicationSync } from './application-analysis.ts';
+import { analyzeApplicationSync, getNativeWorkerSourceFiles } from './application-analysis.ts';
 import type { ApplicationAnalysis } from './application-analysis.ts';
 import { applyBindingOverrides } from './application-features.ts';
 import {
@@ -174,8 +174,10 @@ export function bwfPlugin(options?: {
   // Prebundling a bare `platform` runtime subpath creates another package module
   // graph and therefore another envContext, so request bindings disappear for
   // the prebundled copy.
-  const serverRuntimeOptimizerPlugin = createServerRuntimeOptimizerPlugin(dialect, () =>
-    readWranglerCompat(root, config),
+  const serverRuntimeOptimizerPlugin = createServerRuntimeOptimizerPlugin(
+    dialect,
+    () => readWranglerCompat(root, config),
+    { root, scan: () => Promise.resolve(getNativeWorkerSourceFiles(application)) },
   );
   const queues = application.queues;
   // Decision: Deliberately scanned with NO environment: this list is the superset used to

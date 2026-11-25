@@ -50,6 +50,7 @@ const textRenames: Array<[RegExp, string]> = [
   [/\bVOID_PLATFORM_/g, 'PLATFORM_'],
   [/\bVOID_ACCESS_/g, 'PLATFORM_ACCESS_'],
   [/\bVOID_/g, 'BWF_'],
+  [/\bvoid_worker\b/g, 'platform_worker'],
   [/\bx-void-/g, 'x-platform-'],
   [/\bX-Void-Platform-/g, 'X-Platform-'],
   [/\bX-Void-/g, 'X-Platform-'],

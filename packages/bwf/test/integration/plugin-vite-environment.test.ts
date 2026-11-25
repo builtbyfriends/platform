@@ -10,15 +10,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getWorkerBundleDir } from '@cloudflare/build-output-utils';
-import { createServer, resolveConfig } from 'vite';
+import { createServer, normalizePath, resolveConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { bwfPlugin } from '../../src/index.ts';
 import { getHookHandler } from '../helpers/vite-hooks.ts';
 
 const roots: Array<string> = [];
 
-function createProjectRoot(): string {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'platform-vite-env-')));
+function createProjectRoot(prefix = 'platform-vite-env-'): string {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   writeFileSync(
     join(root, 'package.json'),
@@ -121,6 +121,116 @@ describe('bwfPlugin Vite environments', () => {
       emptyOutDir: false,
       outDir: getWorkerBundleDir(realpathSync.native(root)),
     });
+  });
+
+  it('scans native route and Durable Object dependencies before starting the Worker', async () => {
+    vi.stubEnv('BWF_INSPECTOR_PORT', 'false');
+    const root = createProjectRoot('platform-vite env (test)-');
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    rmSync(join(root, 'bwf.json'));
+    writeFileSync(join(root, 'bwf.config.ts'), "export default { sourceDir: 'src' };");
+    mkdirSync(join(root, 'src/routes'), { recursive: true });
+    mkdirSync(join(root, 'durable-objects'));
+    for (const dependency of ['route-dependency', 'durable-dependency', 'production-dependency']) {
+      const pkg = join(root, 'node_modules', dependency);
+      mkdirSync(pkg, { recursive: true });
+      writeFileSync(
+        join(pkg, 'package.json'),
+        JSON.stringify({ name: dependency, main: 'index.js' }),
+      );
+      writeFileSync(join(pkg, 'index.js'), 'module.exports = 42;');
+    }
+    writeFileSync(
+      join(root, 'src/routes/[id].ts'),
+      "import value from 'route-dependency'; export const GET = () => Response.json(value);",
+    );
+    writeFileSync(
+      join(root, 'src/routes/only.prod.ts'),
+      "import value from 'production-dependency'; export const GET = () => Response.json(value);",
+    );
+    const durableRuntime = join(import.meta.dirname, '../../src/runtime/durable.ts');
+    writeFileSync(
+      join(root, 'durable-objects/counter.ts'),
+      `import { defineDurableState } from ${JSON.stringify(normalizePath(durableRuntime))};
+import count from 'durable-dependency';
+export default defineDurableState({ initialState: { count }, methods: { get(c) { return c.state.count; } } });`,
+    );
+
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [bwfPlugin()],
+      server: { middlewareMode: true, ws: false, watch: null, preTransformRequests: false },
+    });
+    try {
+      const optimizer = server.environments.platform_worker.depsOptimizer;
+      expect(optimizer).toBeDefined();
+      await optimizer?.scanProcessing;
+      const scanned = {
+        ...optimizer?.metadata.optimized,
+        ...optimizer?.metadata.discovered,
+      };
+      expect(Object.keys(scanned)).toEqual(
+        expect.arrayContaining(['route-dependency', 'durable-dependency']),
+      );
+      expect(scanned).not.toHaveProperty('production-dependency');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('adds native routes, procedures and auth to the Worker optimizer', async () => {
+    const root = createProjectRoot();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    mkdirSync(join(root, 'routes'));
+    mkdirSync(join(root, 'procedures'));
+    writeFileSync(join(root, 'routes/api.ts'), 'export const GET = () => new Response();');
+    writeFileSync(join(root, 'routes/only.prod.ts'), 'export const GET = () => new Response();');
+    writeFileSync(join(root, 'procedures/notes.ts'), 'export const list = () => [];');
+    writeFileSync(
+      join(root, 'auth.ts'),
+      "import { defineAuth } from '@builtbyfriends/bwf/auth'; export default defineAuth({});",
+    );
+    const config = await resolveConfig(
+      { root, configFile: false, plugins: [bwfPlugin()] },
+      'serve',
+      'development',
+    );
+
+    expect(config.environments.platform_worker.optimizeDeps.entries).toEqual(
+      expect.arrayContaining([
+        normalizePath(join(root, '.bwf/entry.ts')),
+        normalizePath(join(root, 'routes/api.ts')),
+        normalizePath(join(root, 'procedures/notes.ts')),
+        normalizePath(join(root, 'auth.ts')),
+      ]),
+    );
+    expect(config.environments.platform_worker.optimizeDeps.entries).not.toContain(
+      normalizePath(join(root, 'routes/only.prod.ts')),
+    );
+  });
+
+  it('preserves an explicitly configured scalar Worker optimizer entry', async () => {
+    const root = createProjectRoot();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    mkdirSync(join(root, 'routes'));
+    writeFileSync(join(root, 'routes/api.ts'), 'export const GET = () => new Response();');
+    const config = await resolveConfig(
+      {
+        root,
+        configFile: false,
+        plugins: [bwfPlugin()],
+        environments: { platform_worker: { optimizeDeps: { entries: 'custom.ts' } } },
+      },
+      'serve',
+      'development',
+    );
+
+    expect(config.environments.platform_worker.optimizeDeps.entries).toContain('custom.ts');
+    expect(config.environments.platform_worker.optimizeDeps.entries).not.toContain(
+      normalizePath(join(root, 'routes/api.ts')),
+    );
   });
 
   it('prebundles void CommonJS dependencies only in the worker environment', async () => {
