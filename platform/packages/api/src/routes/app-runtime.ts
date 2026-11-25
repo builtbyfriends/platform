@@ -9,15 +9,12 @@ import type { ApiEnv } from '../env.ts';
 import { OperatorError } from '../operator/common.ts';
 import { deploymentLogs } from '../operator/deployment-operations.ts';
 import type { Project, Resource } from '../types.ts';
-import { actionInput, executeResourceAction, resourceActions } from './app-runtime-actions.ts';
-import {
-  databaseBrowseCapabilities,
-  databaseInspect,
-  validDatabaseFilter,
-  validDatabaseSort,
-} from './app-runtime-database.ts';
+import { actionInput, executeResourceAction } from './app-runtime-actions.ts';
+import { resourceCapabilities } from './app-runtime-capabilities.ts';
+import { appRuntimeCatalogRoutes } from './app-runtime-catalog.ts';
+import { databaseInspect, validDatabaseFilter, validDatabaseSort } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
-import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
+import { appRuntimeFileRoutes, fileOwnerActive } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
@@ -178,7 +175,9 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     }
     return project;
   };
-  const app = new Hono<ApiEnv>().route('/', appRuntimeFileRoutes(resolveProject));
+  const app = new Hono<ApiEnv>()
+    .route('/', appRuntimeFileRoutes(resolveProject))
+    .route('/', appRuntimeCatalogRoutes(resolveProject));
   const boundedBody = bodyLimit({ maxSize: 8192 });
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
@@ -201,46 +200,9 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         checkedAt: Date.now(),
         appId: project.id,
         available: true,
-        resources: resources.map((resource) => ({
-          id: resource.id,
-          name: resource.binding_name,
-          kind:
-            resource.type === 'r2'
-              ? 'files'
-              : resource.type === 'd1'
-                ? 'database'
-                : resource.type === 'kv'
-                  ? 'key-value'
-                  : resource.type === 'queue'
-                    ? 'queue'
-                    : 'other',
-          browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
-          fileTransfers: fileTransfers(context.env, project, resource, filesActive),
-          actions: (
-            resource.type === 'queue'
-              ? !!context.env.CF_ACCOUNT_ID &&
-                !!context.env.CF_API_TOKEN &&
-                !project.preview_client_id &&
-                !!project.active_deployment_id
-              : !!context.env.PLATFORM_PROXY ||
-                (filesActive && keyEditorAvailable(context.env, current, resource))
-          )
-            ? resourceActions(
-                resource,
-                filesActive && keyEditorAvailable(context.env, current, resource),
-              ).filter(
-                (action) =>
-                  resource.type !== 'kv' ||
-                  !!context.env.PLATFORM_PROXY ||
-                  action.id === 'keys.inspect' ||
-                  action.id === 'keys.save',
-              )
-            : [],
-          browseCapabilities:
-            resource.type === 'd1' && context.env.PLATFORM_PROXY
-              ? databaseBrowseCapabilities
-              : undefined,
-        })),
+        resources: resources.map((resource) =>
+          resourceCapabilities(context, project, resource, filesActive, current),
+        ),
       },
     });
   });
