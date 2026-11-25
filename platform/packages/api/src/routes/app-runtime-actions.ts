@@ -3,7 +3,7 @@ import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { databaseSchema } from './app-runtime-database.ts';
-import { queueStatus } from './app-runtime-queue.ts';
+import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
 
 const maxText = 65_536;
 const secretKey =
@@ -42,6 +42,21 @@ const actions: ActionCatalog = {
       fields: [],
       result: 'queue-status',
     },
+    ...(['pause', 'resume'] as const).map((operation): Action => ({
+      id: `queue.${operation}`,
+      label: operation === 'pause' ? 'Pause delivery' : 'Resume delivery',
+      effect: 'write',
+      fields: [
+        {
+          name: 'expectedDelivery',
+          label: 'Current delivery state',
+          type: 'text',
+          required: true,
+          maxLength: 7,
+        },
+      ],
+      result: 'queue-status',
+    })),
   ],
   d1: [
     {
@@ -103,6 +118,7 @@ export function resourceActions(resource: Resource): Array<Action> {
           : [];
 }
 export type RuntimeActionInput = {
+  expectedDelivery?: 'running' | 'paused';
   table?: string;
   key?: string;
   text?: string;
@@ -147,7 +163,17 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   ) {
     return null;
   }
+  if (
+    (action === 'queue.pause' && input.expectedDelivery !== 'running') ||
+    (action === 'queue.resume' && input.expectedDelivery !== 'paused')
+  ) {
+    return null;
+  }
   return {
+    expectedDelivery:
+      input.expectedDelivery === 'running' || input.expectedDelivery === 'paused'
+        ? input.expectedDelivery
+        : undefined,
     table: typeof input.table === 'string' ? input.table : undefined,
     key: typeof input.key === 'string' ? input.key : undefined,
     text: typeof input.text === 'string' ? input.text : undefined,
@@ -294,6 +320,22 @@ export async function executeResourceAction(
   }
   if (action === 'queue.status') {
     return { ...identity, ...(await queueStatus(env, project, resource)) };
+  }
+  if (action === 'queue.pause' || action === 'queue.resume') {
+    if (!input.expectedDelivery) {
+      return unavailable('Refresh queue status before changing delivery.');
+    }
+    return {
+      ...identity,
+      ...(await changeQueueDelivery(
+        env,
+        project,
+        resource,
+        action,
+        input.expectedDelivery,
+        stillAuthorized,
+      )),
+    };
   }
   if (!env.PLATFORM_PROXY) {
     return unavailable('This action is not available for this resource.');

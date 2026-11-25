@@ -337,6 +337,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         currentResource?.binding_name === resource.binding_name,
       );
     };
+    const queueWrite = body.action === 'queue.pause' || body.action === 'queue.resume';
     try {
       const data = await executeResourceAction(
         context.env,
@@ -346,15 +347,23 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         input,
         stillAuthorized,
       );
+      if (
+        queueWrite &&
+        (data.kind === 'unavailable' || data.kind === 'conflict' || data.kind === 'unknown')
+      ) {
+        return context.json({ data });
+      }
       if (!(await stillAuthorized())) {
-        if (body.action === 'files.saveText') {
+        if (body.action === 'files.saveText' || queueWrite) {
           return context.json({
             data: {
               appId: project.id,
               resourceId: resource.id,
               action: body.action,
               kind: 'unknown',
-              reason: 'This resource changed during the save. Open it again to check the result.',
+              reason: queueWrite
+                ? 'The app connection changed while updating delivery. Refresh queue status before making another change.'
+                : 'This resource changed during the save. Open it again to check the result.',
             },
           });
         }
@@ -367,9 +376,10 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           appId: project.id,
           resourceId: resource.id,
           action: body.action,
-          kind: body.action === 'files.saveText' ? 'unknown' : 'unavailable',
-          reason:
-            body.action === 'files.saveText'
+          kind: body.action === 'files.saveText' || queueWrite ? 'unknown' : 'unavailable',
+          reason: queueWrite
+            ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
+            : body.action === 'files.saveText'
               ? 'The save could not be confirmed. Open the file again to check the result.'
               : body.action === 'queue.status'
                 ? 'Could not verify queue status. Refresh and try again.'
