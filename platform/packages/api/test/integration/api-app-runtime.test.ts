@@ -1323,6 +1323,44 @@ describe('database structure and server queries', () => {
       body: 'body',
     });
   });
+  it('avoids protected catalog tables while retaining incoming relationship guards', async () => {
+    sqlite.exec(
+      'CREATE TABLE _cf_METADATA (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE counters (id INTEGER PRIMARY KEY AUTOINCREMENT)',
+    );
+    const inspected: Array<string> = [];
+    sqlite.function('require_customer_table', (name) => {
+      if (typeof name !== 'string' || /^(?:_cf_|sqlite_)/.test(name)) {
+        throw Error('not authorized: SQLITE_AUTH');
+      }
+      inspected.push(name);
+      return name;
+    });
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const sql = body.sql.replaceAll(
+        'pragma_foreign_key_list(s.name)',
+        'pragma_foreign_key_list(require_customer_table(s.name))',
+      );
+      return Response.json({ results: sqlite.prepare(sql).all(...body.params) });
+    });
+    const token = rowReference(await readRows());
+    expect(await payload(readCell(token))).toMatchObject({ data: { editable: true } });
+    expect(await payload(saveCell(token, 'Item 1', 'Edited'))).toMatchObject({
+      data: { kind: 'cell-saved', text: 'Edited' },
+    });
+    sqlite.exec('CREATE TABLE links (item_name TEXT REFERENCES items(name))');
+    expect(await payload(readCell(token))).toMatchObject({
+      data: {
+        editable: false,
+        reason: 'Other records depend on this field. Edit it through your app.',
+      },
+    });
+    expect(await payload(saveCell(token, 'Edited', 'Blocked'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    expect(inspected).toContain('links');
+    expect(sqlite.prepare('SELECT name FROM items WHERE id=1').get()).toEqual({ name: 'Edited' });
+  });
   it('fences a trigger or schema installed after eligibility and an intervening value update atomically', async () => {
     const token = rowReference(await readRows());
     for (const race of [

@@ -695,6 +695,7 @@ async function cellWriteSafety(query: Query, table: string, column: Column, sche
   ) {
     return readonlyCell('This field can convert text into numbers. Edit it through your app.');
   }
+  // Decision: Materialize the customer catalog before FK inspection; production D1 denies metadata access to its internal tables.
   const snapshot = await query(
     `SELECT
       ${schemaRevision} AS revision,
@@ -703,7 +704,8 @@ async function cellWriteSafety(query: Query, table: string, column: Column, sche
       (SELECT json_group_array(json_object('name', name, 'type', type, 'notNull', "notnull", 'pk', pk, 'hidden', hidden)) FROM pragma_table_xinfo(?1)) AS columns,
       (SELECT json_group_array(json_object('partial', l.partial, 'keys', json((SELECT json_group_array(json_object('name', name, 'cid', cid)) FROM (SELECT name, cid FROM pragma_index_xinfo(l.name) WHERE key = 1 LIMIT 101))))) FROM (SELECT name, partial FROM pragma_index_list(?1) WHERE "unique" = 1 LIMIT 101) AS l) AS indexes,
       (SELECT json_group_array(json_object('from', f."from")) FROM (SELECT "from" FROM pragma_foreign_key_list(?1) LIMIT 101) AS f) AS outgoing,
-      (SELECT json_group_array(json_object('to', f."to")) FROM (SELECT fk."to" FROM sqlite_schema AS s JOIN pragma_foreign_key_list(s.name) AS fk WHERE s.type = 'table' AND fk."table" = ?1 COLLATE NOCASE LIMIT 101) AS f) AS incoming`,
+      (WITH app_tables AS MATERIALIZED (SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB '_cf_*' AND name NOT GLOB 'sqlite_*' LIMIT 257)
+       SELECT json_group_array(json_object('to', f."to")) FROM (SELECT fk."to" FROM app_tables AS s JOIN pragma_foreign_key_list(s.name) AS fk WHERE fk."table" = ?1 COLLATE NOCASE LIMIT 101) AS f) AS incoming`,
     [table],
   );
   if (
