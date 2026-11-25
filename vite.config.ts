@@ -226,6 +226,10 @@ export default defineConfig({
         name: 'anti-slop',
         specifier: '@aranlucas/oxlint-plugin-anti-slop',
       },
+      {
+        name: 'react-doctor',
+        specifier: 'oxlint-plugin-react-doctor',
+      },
     ],
     plugins: [...new Set([...(cloudflare.plugins ?? []), 'node', 'jsdoc'] as const)],
     ignorePatterns: [
@@ -352,6 +356,8 @@ export default defineConfig({
           '**/*.test-d.*',
         ],
         rules: {
+          // Decision: A describe block holds a whole file's tests, so the function size limit doesn't fit there.
+          'max-lines-per-function': 'off',
           'no-promise-executor-return': 'off',
           'quality/no-chained-type-assertions': 'off',
           'quality/no-known-value-widening': 'off',
@@ -402,6 +408,15 @@ export default defineConfig({
       'anti-slop/no-unknown-parameters': 'warn',
       'anti-slop/require-readable-spacing': 'warn',
       'anti-slop/require-safety-comment-for-type-assertion': ['warn', { markers: ['Decision'] }],
+      // Decision: Limits that point at functions and components to split. Oxlint's complexity counts the paths through
+      // any function; React Doctor scores only components and hooks, and flags components over 300 lines or defined
+      // inside another. The size limits warn, so the list shows what to split first.
+      complexity: ['warn', { max: 15 }],
+      'max-depth': ['warn', 4],
+      'max-lines-per-function': ['warn', { max: 150, skipBlankLines: true, skipComments: true }],
+      'react-doctor/no-high-complexity-react-function': 'warn',
+      'react-doctor/no-giant-component': 'warn',
+      'react-doctor/no-nested-component-definition': 'error',
       '@typescript-eslint/array-type': [
         'error',
         {
