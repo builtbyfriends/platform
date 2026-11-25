@@ -20,3 +20,17 @@ export function runtimeLogsField(env: { PLATFORM_RUNTIME_LOGS?: string }): {
 } {
   return env.PLATFORM_RUNTIME_LOGS === 'minimal' ? { runtimeLogs: 'minimal' } : {};
 }
+
+const internalOrigins = ['https://worker', 'https://internal', 'http://worker', 'http://internal'];
+const exactPath = (url: string) =>
+  `(blob4 = '${url}' OR startsWith(blob4, '${url}?') OR startsWith(blob4, '${url}#'))`;
+
+// Decision: Filter known emitted internal URLs before pagination; the caller retains URL-parser filtering for unusual forms without dropping public-host paths.
+export const CUSTOMER_ACTIVITY_WHERE = `NOT (${internalOrigins
+  .map((origin) => {
+    const root = origin + '/__platform';
+    const control = `(${exactPath(root)} OR startsWith(blob4, '${root}/'))`;
+    const relay = `(${exactPath(root + '/queue')} OR ${exactPath(root + '/scheduled')})`;
+    return `(${control} AND NOT ${relay})`;
+  })
+  .join(' OR ')})`;
