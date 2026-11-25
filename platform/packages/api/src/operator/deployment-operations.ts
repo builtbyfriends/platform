@@ -3,7 +3,11 @@ import { cancelDeployment, getDeployment, getProject } from '../db.ts';
 import type { Db } from '../db.ts';
 import { isDevBypass } from '../env.ts';
 import type { ApiEnv } from '../env.ts';
-import { CUSTOMER_ACTIVITY_WHERE, LOG_ROW_GROUP_BY, runtimeLogsField } from '../observability/log-rows.ts';
+import {
+  CUSTOMER_ACTIVITY_WHERE,
+  LOG_ROW_GROUP_BY,
+  runtimeLogsField,
+} from '../observability/log-rows.ts';
 import { deployments, projects } from '../schema.ts';
 import { OperatorError } from './common.ts';
 

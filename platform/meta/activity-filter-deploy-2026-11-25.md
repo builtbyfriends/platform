@@ -2,16 +2,16 @@
 
 The API-only maintenance patch is live. Customer Activity now excludes known internal control requests before pagination, so those requests no longer fill otherwise empty pages. Exact queue and scheduled-task relays remain visible, as do customer URLs on public hosts. Operator logs are unchanged. Customer cursors carry a filter scope; older or mismatched cursors are rejected instead of reusing their offsets against a different result set.
 
-| Evidence | Value |
-| --- | --- |
-| Source | `360d23a1c6272b702c3a98bc136d89725158d820` |
-| Worker | `platform-main-api` |
-| Version | `209e5f5d-57af-4ee0-ae3a-e64e55a67388` |
-| Deployment | `62efcfc3-5db5-4f06-90c0-dfee15574387` |
-| Verified | 2026-11-25T14:42:30.305Z |
-| Artifact SHA-256 | `a8cb0db9d51fd5b1a78e8b493d8d969030cf0badf89e034d0c82dcc249fbba93` |
-| Previous version | `ea914984-f326-4678-98cc-af0a631554be` |
-| Previous deployment | `0e8fe7f3-cd4f-455e-8b98-81a173a0a742` |
+| Evidence            | Value                                                              |
+| ------------------- | ------------------------------------------------------------------ |
+| Source              | `360d23a1c6272b702c3a98bc136d89725158d820`                         |
+| Worker              | `platform-main-api`                                                |
+| Version             | `209e5f5d-57af-4ee0-ae3a-e64e55a67388`                             |
+| Deployment          | `62efcfc3-5db5-4f06-90c0-dfee15574387`                             |
+| Verified            | 2026-11-25T14:42:30.305Z                                           |
+| Artifact SHA-256    | `a8cb0db9d51fd5b1a78e8b493d8d969030cf0badf89e034d0c82dcc249fbba93` |
+| Previous version    | `ea914984-f326-4678-98cc-af0a631554be`                             |
+| Previous deployment | `0e8fe7f3-cd4f-455e-8b98-81a173a0a742`                             |
 
 The live code matches the reviewed artifact. Health passed; the existing 63 bindings and Worker settings are unchanged. Unauthenticated inventory, inspection, action, activity, file download and file upload requests each returned 401. No customer data was changed.
 

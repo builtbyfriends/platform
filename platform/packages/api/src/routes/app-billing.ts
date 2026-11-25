@@ -88,8 +88,8 @@ import {
 } from '../schema.ts';
 import { ZeroTrustUnavailableError } from '../zero-trust/errors.ts';
 import { setProjectZeroTrustProtection } from '../zero-trust/project.ts';
-import { appPersonUser, GROUP } from './oauth-app-person.ts';
 import { appRuntimeRoutes } from './app-runtime.ts';
+import { appPersonUser, GROUP } from './oauth-app-person.ts';
 
 const isPersonId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 200;
