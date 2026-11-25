@@ -2302,7 +2302,7 @@ export default config;
         const instructions = readFileSync(join(root, 'AGENTS.md'), 'utf-8');
         expect(instructions).toContain('## bwf');
         expect(instructions).toContain('node_modules/@builtbyfriends/bwf/docs/');
-        expect(instructions.match(/^- /gm)).toHaveLength(2);
+        expect(instructions.match(/^- /gm)).toHaveLength(3);
         expect(existsSync(join(root, 'CLAUDE.md'))).toBe(false);
         expect(mockSelect).not.toHaveBeenCalled();
         expect(mockConfirm).not.toHaveBeenCalled();

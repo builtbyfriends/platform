@@ -33,7 +33,7 @@ bwf init [--tsconfig] [--github] [--git | --no-git]
           [--toolchain <name>] [--framework <name>] [--starter <name>] [--deploy <target>]
 ```
 
-Set up a new or existing bwf project. In an empty directory, choose Vite+ or Vite and a D1, PostgreSQL, MySQL, or SPA-only React starter. The new app's `bwf.config.ts` turns on [`routing.typedRoutes`](../config.md#routing-typedroutes).
+Set up a new or existing bwf project. In an empty directory, choose Vite+ or Vite and a D1, PostgreSQL, MySQL, or SPA-only React starter. The new app's `bwf.config.ts` turns on [`routing.typedRoutes`](../config.md#routing-typedroutes), and its `oxlint.config.ts` uses the shared bwf lint preset (`@builtbyfriends/bwf/lint`), so `npm run lint` runs the same checks as the bwf repositories.
 
 Pass your choices as flags to scaffold from a script or coding agent:
 

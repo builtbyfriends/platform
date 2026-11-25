@@ -180,8 +180,9 @@ try {
           work,
         );
         const agentInstructions = readFileSync(join(fixture, 'AGENTS.md'), 'utf8');
-        assert.equal(agentInstructions.match(/^- /gm)?.length, 2);
+        assert.equal(agentInstructions.match(/^- /gm)?.length, 3);
         assert(agentInstructions.includes('node_modules/@builtbyfriends/bwf/docs/'));
+        assert(agentInstructions.includes('@builtbyfriends/bwf/lint'));
         assert(
           existsSync(join(fixture, 'node_modules/@builtbyfriends/bwf/docs/guide/quickstart.md')),
         );
