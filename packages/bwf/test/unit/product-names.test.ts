@@ -15,6 +15,27 @@ const allowed: Array<{ file: string; reason: string }> = [
     file: 'AGENTS.md',
     reason: 'Explains the product and our own setup to agents, and names the app.',
   },
+  // Decision: Preserve the exact local rollback paths recorded in these deployment receipts.
+  {
+    file: 'platform/meta/database-indexes-deploy-2026-11-25.md',
+    reason: 'Historical deployment evidence includes the local rollback path.',
+  },
+  {
+    file: 'platform/meta/database-inspection-deploy-2026-11-25.md',
+    reason: 'Historical deployment evidence includes the local rollback path.',
+  },
+  {
+    file: 'platform/meta/job-activity-deploy-2026-11-25.md',
+    reason: 'Historical deployment evidence includes the local rollback path.',
+  },
+  {
+    file: 'platform/meta/queue-delivery-deploy-2026-11-25.md',
+    reason: 'Historical deployment evidence includes the local rollback path.',
+  },
+  {
+    file: 'platform/meta/queue-status-deploy-2026-11-25.md',
+    reason: 'Historical deployment evidence includes the local rollback path.',
+  },
 ];
 
 function filesThatNameTheApp(): Array<string> {

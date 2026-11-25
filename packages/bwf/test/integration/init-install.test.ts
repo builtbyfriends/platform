@@ -1,9 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { installProjectDependencies } from '../../src/cli/init.ts';
-import { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from '../../src/cli/template.ts';
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from '../../src/cli/init-vite-plus.ts';
 
 let root: string;
 let bin: string;
@@ -47,21 +47,41 @@ beforeEach(() => {
       devDependencies: { 'vite-plus': '^1.3.0' },
     }),
   );
-  // Decision: The host's tools must not mask a missing vp or supply a newer pnpm.
-  vi.stubEnv('PATH', bin);
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
 });
+
+function install(): void {
+  const source = new URL('../../src/cli/init-install.ts', import.meta.url).href;
+  // Decision: pnpm's runner adds its own Vite+ to NODE_PATH; only the fixture's packages and PATH may choose the installer.
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `import { installProjectDependencies } from ${JSON.stringify(source)}; installProjectDependencies(process.argv[1], process.argv[2]);`,
+      root,
+      'pnpm',
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: bin, NODE_OPTIONS: '', NODE_PATH: '' },
+      timeout: 10_000,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.error?.message || 'Installer process did not finish.');
+  }
+}
 
 describe('init dependency installation (real subprocesses)', () => {
   it('uses Vite+ instead of delegating a pnpm 12 pin to an older global pnpm', () => {
     executable('vp');
     executable('pnpm', 1);
 
-    installProjectDependencies(root, 'pnpm');
+    install();
 
     expect(calls()).toEqual([
       { command: 'vp', args: ['--version'], cwd: root },
@@ -76,7 +96,7 @@ describe('init dependency installation (real subprocesses)', () => {
     executable('npx');
     executable('pnpm', 1);
 
-    installProjectDependencies(root, 'pnpm');
+    install();
 
     // Decision: Assert the received argv: Windows cmd.exe must preserve the semver caret.
     expect(calls()).toEqual([
@@ -99,9 +119,7 @@ describe('init dependency installation (real subprocesses)', () => {
     executable('npx');
     executable('pnpm', 1);
 
-    expect(() => installProjectDependencies(root, 'pnpm')).toThrow(
-      'vp install failed with exit code 7',
-    );
+    expect(() => install()).toThrow('vp install failed with exit code 7');
     expect(calls()).toEqual([
       { command: 'vp', args: ['--version'], cwd: root },
       { command: 'vp', args: ['install', '--no-frozen-lockfile'], cwd: root },
@@ -115,7 +133,7 @@ describe('init dependency installation (real subprocesses)', () => {
     executable('local-vp');
     writeFileSync(join(vitePlus, 'bin', 'vp'), readFileSync(join(bin, 'local-vp.cjs'), 'utf8'));
 
-    installProjectDependencies(root, 'pnpm');
+    install();
 
     expect(calls()).toEqual([
       { command: 'local-vp', args: ['install', '--no-frozen-lockfile'], cwd: root },
@@ -127,7 +145,7 @@ describe('init dependency installation (real subprocesses)', () => {
     executable('vp', 1);
     executable('pnpm');
 
-    installProjectDependencies(root, 'pnpm');
+    install();
 
     expect(calls()).toEqual([
       { command: 'pnpm', args: ['install', '--no-frozen-lockfile'], cwd: root },

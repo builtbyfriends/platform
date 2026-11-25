@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'pathslash';
-// Decision: Only the manifest is bundled, so a new app pins the Vite+ release bwf builds with.
-import vitePlusManifest from 'vite-plus/package.json' with { type: 'json' };
 import { renderBwfConfig } from '../config-write.ts';
 import { getPackageDir } from './agents.ts';
+import { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from './init-vite-plus.ts';
 import starterStyles from './starter-ui.css?raw';
+
+export { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from './init-vite-plus.ts';
 
 export const SCAFFOLD_GITIGNORE_LINES = [
   'node_modules',
@@ -31,19 +32,6 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   vite: '^8.0.10',
   typescript: '^7.0.2',
 } as const;
-
-/**
- * Vite+ and the Vite+ core it accepts. Both come from the vite-plus release in
- * the repository catalog, so they can't drift apart: vite-plus pins its own
- * core (`npm:@voidzero-dev/vite-plus-core@<version>`) and refuses another one.
- */
-export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: {
-  readonly vite: string;
-  readonly 'vite-plus': string;
-} = {
-  vite: vitePlusManifest.dependencies.vite,
-  'vite-plus': `^${vitePlusManifest.version}`,
-};
 
 export const SCAFFOLD_TOOLCHAIN_OPTIONS = [
   {
