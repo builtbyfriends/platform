@@ -105,16 +105,20 @@ jobs:
       contents: read
       pull-requests: read
 
+  # Decision: Zack moved our packages from npm to GitHub Packages on 2026-11-25. Each package's
+  # publishConfig names the registry, and the workflow's own token publishes, so nothing is stored.
   publish:
     needs: [release-tag, ci, platform-ci, prepublish-test]
     runs-on: ubuntu-latest
     environment: Release
     permissions:
       contents: read
-      id-token: write
+      packages: write
     env:
       PLATFORM_SOURCE_REVISION: ${{ github.sha }}
       RELEASE_TAG: ${{ needs.release-tag.outputs.tag }}
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NPM_CONFIG_USERCONFIG: /tmp/github-packages.npmrc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,17 +127,18 @@ jobs:
         with:
           node-version-file: .node-version
           cache: true
-          registry-url: https://registry.npmjs.org
       - name: Validate release versions and channel
         id: release
         run: node .github/scripts/release-policy.ts
       - run: vp run build
 
       - run: npm install -g npm@11
-      - name: Publish public packages
+      - name: Sign in to GitHub Packages
+        run: echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
+      - name: Publish packages
         env:
           RELEASE_NPM_TAG: ${{ steps.release.outputs.npm-tag }}
-        run: vp pm publish -r --access public --tag "$RELEASE_NPM_TAG" --no-git-checks
+        run: vp pm publish -r --tag "$RELEASE_NPM_TAG" --no-git-checks
 
   tag-release:
     name: Tag the release

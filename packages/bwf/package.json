@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/bwf",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "description": "Full-stack framework and deployment CLI for Cloudflare Workers, powered by Vite.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {
@@ -300,6 +300,9 @@
       "types": "./dist/deploy.d.mts",
       "import": "./dist/deploy.mjs"
     }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "node scripts/sync-docs.mjs && vp pack",

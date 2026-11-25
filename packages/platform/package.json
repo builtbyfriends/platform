@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/platform",
-  "version": "1.10.1",
+  "version": "1.10.2",
   "description": "Packaged runtime and installation contracts for self-hosted bwf platforms.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {
@@ -43,7 +43,7 @@
     }
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "vp pack && node scripts/build-runtime.mjs && vp run build:stamp",

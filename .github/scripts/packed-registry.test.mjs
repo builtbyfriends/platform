@@ -68,6 +68,7 @@ test("keeps this repository's release names inside the packed cohort", () => {
     'bwf',
     'bwf/package.json',
     'create-bwf',
+    '@builtbyfriends/create-bwf',
     '@builtbyfriends/bwf',
     '@builtbyfriends/deploy-core',
     '@builtbyfriends/edge/package.json',

@@ -6,7 +6,7 @@ React single-page apps with an optional backend on Cloudflare Workers, powered b
 
 - Documentation source lives in `docs/`.
   - Docs is a Vitepress project using our custom theme. When asked to "link the theme", temporarily edit `docs/package.json` so that `@voidzero-dev/vitepress-theme` point to `link:../../../theme`. Rerun `vp install` to link it. Revert these when asked to "unlink the theme".
-- Packages publish to npm as `bwf` and `@builtbyfriends/*`. Consumer-facing code, docs examples, playground source, and package manifests should use only those public package names.
+- Packages publish to GitHub Packages as `@builtbyfriends/*` (the CLI bin is `bwf`, the scaffolder is `@builtbyfriends/create-bwf`). Consumer-facing code, docs examples, playground source, and package manifests should use only those public package names.
 - Published external runtime dependencies use compatible semver ranges. Preserve `workspace:*` for dependencies and peers between bwf packages. The lockfile fixes the versions tested in this repository. Keep Miniflare's dated alpha coordinated with the Cloudflare toolchain: a caret does not accept the next date's alpha. Keep the Sandbox SDK version aligned with its packaged Docker helper and verified platform helper layer.
 
 ## Important Note for Release Workflows

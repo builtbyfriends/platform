@@ -134,12 +134,12 @@ export async function initializePackedProject(
           'npm',
           'exec',
           '--yes',
-          `--package=create-bwf@${version}`,
+          `--package=@builtbyfriends/create-bwf@${version}`,
           '--',
           'create-bwf',
           basename(root),
         ]
-      : ['pnpm', 'dlx', `create-bwf@${version}`, basename(root)];
+      : ['pnpm', 'dlx', `@builtbyfriends/create-bwf@${version}`, basename(root)];
   await runPty(argv, {
     cwd: dirname(root),
     env,

@@ -1,6 +1,6 @@
 {
-  "name": "create-bwf",
-  "version": "1.10.1",
+  "name": "@builtbyfriends/create-bwf",
+  "version": "1.10.2",
   "description": "Create a full-stack bwf app for Cloudflare Workers.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {
@@ -20,7 +20,7 @@
   ],
   "type": "module",
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "vp pack",
