@@ -481,6 +481,39 @@ describe('connected app runtime reads', () => {
     },
   );
 
+  it('timestamps successful activity after an awaited read crosses a second boundary', async () => {
+    await createTestDeployment(env.db, project.id);
+    let clock = Date.now(),
+      readCompletedAt = 0;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => {
+      clock += 1100;
+      return clock;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await Promise.resolve();
+        clock += 2000;
+        readCompletedAt = clock;
+        return Response.json({ data: [] });
+      }),
+    );
+    try {
+      const result = await activityData({ project: project.id });
+      if (
+        !isRecord(result.window) ||
+        typeof result.window.to !== 'number' ||
+        typeof result.checkedAt !== 'number'
+      ) {
+        throw Error('Invalid observed activity time');
+      }
+      expect(result.checkedAt).toBeGreaterThanOrEqual(result.window.to);
+      expect(result.checkedAt).toBeGreaterThanOrEqual(readCompletedAt);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('keeps both directions on the same captured window and defaults to one hour', async () => {
     await createTestDeployment(env.db, project.id);
     const row = {

@@ -561,6 +561,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       return context.json({
         data: {
           ...base,
+          checkedAt: Date.now(),
           window: result.window ?? null,
           previousCursor: result.previousCursor,
           available: true,
