@@ -137,6 +137,69 @@ describe('connected app runtime reads', () => {
     expect(JSON.stringify(result)).not.toMatch(/private-|never-return|cf_id|proxy_token/);
   });
 
+  it('inspects active owned previews but refuses expired, inactive and foreign-client previews', async () => {
+    await env.db
+      .update(projects)
+      .set({
+        preview_client_id: registration.client.id,
+        preview_workspace_id: 'runtime-test',
+        slug: 'preview-runtime-test',
+        preview_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      })
+      .where(eq(projects.id, project.id));
+    proxy.mockResolvedValue(Response.json({ objects: [], truncated: false }));
+    expect((await call('projects.resources', { project: project.id })).status).toBe(200);
+    expect(
+      (await call('resources.inspect', { project: project.id, resourceId: 'res_files' })).status,
+    ).toBe(200);
+    expect((await call('projects.activity', { project: project.id })).status).toBe(200);
+    const foreignClient = await registerOAuthClient(env.db, {
+      name: 'Other app',
+      operator: 'Test',
+      redirectUris: ['https://other.test/callback'],
+      scopes: ['profile'],
+    });
+    for (const change of [
+      { preview_expires_at: new Date(Date.now() - 1).toISOString() },
+      {
+        preview_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        status: 'deleting' as const,
+      },
+      { status: 'active' as const, preview_client_id: foreignClient.client.id },
+    ]) {
+      await env.db.update(projects).set(change).where(eq(projects.id, project.id));
+      for (const [route, extra] of [
+        ['projects.resources', {}],
+        ['resources.inspect', { resourceId: 'res_files' }],
+        ['projects.activity', {}],
+      ] as const) {
+        expect((await call(route, { project: project.id, ...extra })).status).toBe(404);
+      }
+    }
+  });
+
+  it('discards a preview read that expires while storage is being read', async () => {
+    await env.db
+      .update(projects)
+      .set({
+        preview_client_id: registration.client.id,
+        preview_workspace_id: 'runtime-test',
+        slug: 'preview-runtime-test',
+        preview_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      })
+      .where(eq(projects.id, project.id));
+    proxy.mockImplementation(async () => {
+      await env.db
+        .update(projects)
+        .set({ preview_expires_at: new Date(Date.now() - 1).toISOString() })
+        .where(eq(projects.id, project.id));
+      return Response.json({ objects: [], truncated: false });
+    });
+    expect(
+      (await call('resources.inspect', { project: project.id, resourceId: 'res_files' })).status,
+    ).toBe(409);
+  });
+
   it('lists only the selected resource and forwards bounded paging without exposing its credential', async () => {
     proxy.mockResolvedValue(
       Response.json({
