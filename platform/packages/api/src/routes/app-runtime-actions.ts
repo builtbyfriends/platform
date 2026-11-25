@@ -2,7 +2,13 @@ import { isRecord } from '@builtbyfriends/deploy-core';
 import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
-import { databaseCell, databaseIndexes, databaseSchema } from './app-runtime-database.ts';
+import {
+  databaseCell,
+  databaseCellSave,
+  databaseIndexes,
+  databaseSchema,
+  validCellText,
+} from './app-runtime-database.ts';
 import { executeKeyAction, keyEditorAvailable, validKey, validKeySave } from './app-runtime-kv.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
 import { vectorQuery, vectorizeRecords } from './app-runtime-vectorize.ts';
@@ -30,6 +36,7 @@ type Action = {
   view?: { scope: 'table' | 'resource'; label: string };
   result:
     | 'cell'
+    | 'cell-saved'
     | 'file-text'
     | 'file-saved'
     | 'keys'
@@ -110,6 +117,25 @@ const actions: ActionCatalog = {
     })),
   ],
   d1: [
+    {
+      id: 'database.cell.save',
+      label: 'Save value',
+      effect: 'write',
+      fields: [
+        { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
+        { name: 'column', label: 'Column', type: 'text', required: true, maxLength: 200 },
+        { name: 'rowToken', label: 'Row reference', type: 'text', required: true, maxLength: 8192 },
+        {
+          name: 'expectedText',
+          label: 'Opened value',
+          type: 'textarea',
+          required: true,
+          maxLength: maxText,
+        },
+        { name: 'text', label: 'Value', type: 'textarea', required: true, maxLength: maxText },
+      ],
+      result: 'cell-saved',
+    },
     {
       id: 'database.cell',
       label: 'Read value',
@@ -228,6 +254,7 @@ export function resourceActions(resource: Resource, keyEditing = false): Array<A
 export type RuntimeActionInput = {
   vector?: string;
   topK?: string;
+  expectedText?: string;
   column?: string;
   rowToken?: string;
   mode?: 'create' | 'replace';
@@ -260,6 +287,8 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     return null;
   }
   if (
+    (action === 'database.cell.save' &&
+      (!validCellText(input.expectedText) || !validCellText(input.text))) ||
     (action === 'keys.save' && !validKeySave(input)) ||
     (action === 'keys.inspect' && (typeof input.key !== 'string' || !validKey(input.key)))
   ) {
@@ -301,6 +330,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   return {
     vector: typeof input.vector === 'string' ? input.vector : undefined,
     topK: typeof input.topK === 'string' ? input.topK : undefined,
+    expectedText: typeof input.expectedText === 'string' ? input.expectedText : undefined,
     mode: input.mode === 'create' || input.mode === 'replace' ? input.mode : undefined,
     expectedFingerprint:
       typeof input.expectedFingerprint === 'string' ? input.expectedFingerprint : undefined,
@@ -500,6 +530,33 @@ export async function executeResourceAction(
   }
   if (!env.PLATFORM_PROXY) {
     return unavailable('This action is not available for this resource.');
+  }
+  if (action === 'database.cell.save') {
+    if (
+      !input.table ||
+      !input.column ||
+      !input.rowToken ||
+      !validCellText(input.expectedText) ||
+      !validCellText(input.text)
+    ) {
+      return unavailable('Choose a text value from this database.');
+    }
+    return {
+      ...identity,
+      ...(await databaseCellSave(
+        env,
+        project,
+        resource,
+        {
+          table: input.table,
+          column: input.column,
+          rowToken: input.rowToken,
+          expectedText: input.expectedText,
+          text: input.text,
+        },
+        stillAuthorized,
+      )),
+    };
   }
   if (action === 'database.cell') {
     if (!input.table || !input.column || !input.rowToken) {

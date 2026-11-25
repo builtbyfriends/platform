@@ -1194,6 +1194,352 @@ describe('database structure and server queries', () => {
       action: 'database.cell',
       input: { table, column, rowToken },
     });
+  const saveCell = (
+    rowToken: string,
+    expectedText: string,
+    text: string,
+    column = 'name',
+    table = 'items',
+  ) =>
+    call('resources.execute', {
+      project: project.id,
+      resourceId: 'res_database',
+      action: 'database.cell.save',
+      input: { table, column, rowToken, expectedText, text },
+    });
+  it('executes catalog guards and UPDATE RETURNING on real Workerd D1', async () => {
+    const { Miniflare, convertV4MiniflareOptions } = await import('miniflare');
+    const runtime = new Miniflare(
+      convertV4MiniflareOptions({
+        modules: true,
+        script: 'export default {fetch(){return new Response("ok")}}',
+        compatibilityDate: '2026-10-01',
+        d1Databases: ['DB'],
+      }),
+    );
+    try {
+      const db = await runtime.getD1Database('DB');
+      await db
+        .prepare(
+          'CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, category TEXT UNIQUE, caption TEXT GENERATED ALWAYS AS (name || char(33)) VIRTUAL)',
+        )
+        .run();
+      await db.prepare("INSERT INTO items(id,name,category) VALUES (1,'old','unique')").run();
+      proxy.mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        return Response.json(
+          await db
+            .prepare(body.sql)
+            .bind(...body.params)
+            .all(),
+        );
+      });
+      const token = rowReference(await readRows());
+      expect(await payload(readCell(token))).toMatchObject({ data: { editable: true } });
+      expect(await payload(saveCell(token, 'old', 'é🙂'))).toMatchObject({
+        data: { kind: 'cell-saved', text: 'é🙂' },
+      });
+      expect(await payload(saveCell(token, 'old', 'wrong'))).toMatchObject({
+        data: { kind: 'conflict' },
+      });
+      proxy.mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.sql.startsWith('UPDATE ')) {
+          await db
+            .prepare(
+              "CREATE TRIGGER changed AFTER UPDATE ON items BEGIN UPDATE items SET category='side effect'; END",
+            )
+            .run();
+        }
+        return Response.json(
+          await db
+            .prepare(body.sql)
+            .bind(...body.params)
+            .all(),
+        );
+      });
+      expect(await payload(saveCell(token, 'é🙂', 'wrong'))).toMatchObject({
+        data: { kind: 'conflict' },
+      });
+      expect(await db.prepare('SELECT name,category FROM items').first()).toEqual({
+        name: 'é🙂',
+        category: 'unique',
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+  it('conditionally saves exact Unicode, empty and BOM text with stable row identity', async () => {
+    const token = rowReference(await readRows());
+    const opened = await payload(readCell(token));
+    if (!isRecord(opened) || !isRecord(opened.data)) {
+      throw Error('Missing opened value');
+    }
+    expect(opened).toMatchObject({
+      data: { editable: true, rowId: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) },
+    });
+    let expected = 'Item 1';
+    for (const text of ['é🙂\uFEFF\u0000尾', '', '\uFEFFstart', 'finished']) {
+      const result = await payload(saveCell(token, expected, text));
+      expect(result).toMatchObject({
+        data: {
+          kind: 'cell-saved',
+          text,
+          table: 'items',
+          column: 'name',
+          rowToken: token,
+          rowId: opened.data.rowId,
+        },
+      });
+      expect(
+        sqlite.prepare('SELECT hex(CAST(name AS BLOB)) AS value FROM items WHERE id = 1').get(),
+      ).toEqual({ value: Buffer.from(text).toString('hex').toUpperCase() });
+      expected = text;
+    }
+    const next = await payload(readCell(rowReference(await readRows())));
+    if (!isRecord(next) || !isRecord(next.data)) {
+      throw Error('Missing refreshed value');
+    }
+    expect(next.data.rowId).toBe(opened.data.rowId);
+    expect(await payload(saveCell(token, 'Item 1', 'overwrite'))).toMatchObject({
+      data: { kind: 'conflict' },
+    });
+  });
+  it('matches composite primary keys and opened values by exact type and bytes despite NOCASE', async () => {
+    sqlite.exec(
+      "CREATE TABLE composite (a TEXT COLLATE NOCASE, b INTEGER, value TEXT COLLATE NOCASE, PRIMARY KEY(a,b)); INSERT INTO composite VALUES ('Alpha', 9223372036854775807, 'Hello')",
+    );
+    const token = rowReference(await readRows({ table: 'composite' }));
+    expect(await payload(saveCell(token, 'hello', 'wrong', 'value', 'composite'))).toMatchObject({
+      data: { kind: 'conflict' },
+    });
+    expect(await payload(saveCell(token, 'Hello', 'right', 'value', 'composite'))).toMatchObject({
+      data: { kind: 'cell-saved', text: 'right' },
+    });
+    sqlite.exec("UPDATE composite SET a='ALPHA'");
+    expect(await payload(saveCell(token, 'right', 'wrong', 'value', 'composite'))).toMatchObject({
+      data: { kind: 'conflict' },
+    });
+  });
+  it('allows unrelated ordinary unique keys and generated columns but blocks indirect key changes', async () => {
+    sqlite.exec('CREATE UNIQUE INDEX item_quantity ON items(quantity)');
+    const token = rowReference(await readRows());
+    expect(await payload(readCell(token))).toMatchObject({ data: { editable: true } });
+    expect(await payload(saveCell(token, 'Item 1', 'Allowed'))).toMatchObject({
+      data: { kind: 'cell-saved' },
+    });
+    sqlite.exec('CREATE UNIQUE INDEX calculated_key ON items(caption)');
+    expect(await payload(readCell(token))).toMatchObject({ data: { editable: false } });
+    expect(await payload(saveCell(token, 'Allowed', 'Blocked'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    sqlite.exec(
+      'DROP INDEX calculated_key; CREATE UNIQUE INDEX conditional_key ON items(name) WHERE quantity > 3',
+    );
+    expect(await payload(readCell(token))).toMatchObject({ data: { editable: false } });
+    sqlite.exec(
+      'DROP INDEX conditional_key; CREATE UNIQUE INDEX expression_key ON items(lower(name))',
+    );
+    expect(await payload(readCell(token))).toMatchObject({ data: { editable: false } });
+  });
+  it('blocks linked fields, generated parent dependencies and direct unique keys without cascading rows', async () => {
+    sqlite.exec(
+      "PRAGMA foreign_keys=ON; CREATE TABLE parents (id INTEGER PRIMARY KEY, code TEXT UNIQUE, body TEXT, derived TEXT GENERATED ALWAYS AS (body || '!') STORED UNIQUE); CREATE TABLE children (id INTEGER PRIMARY KEY, parent TEXT REFERENCES parents(code) ON UPDATE CASCADE, body TEXT); INSERT INTO parents(id,code,body) VALUES(1,'code','body'); INSERT INTO children VALUES(1,'code','child')",
+    );
+    const parent = rowReference(await readRows({ table: 'parents' }));
+    expect(await payload(readCell(parent, 'code', 'parents'))).toMatchObject({
+      data: { editable: false },
+    });
+    expect(await payload(readCell(parent, 'body', 'parents'))).toMatchObject({
+      data: { editable: false },
+    });
+    const child = rowReference(await readRows({ table: 'children' }));
+    expect(await payload(readCell(child, 'parent', 'children'))).toMatchObject({
+      data: { editable: false },
+    });
+    expect(await payload(saveCell(child, 'child', 'changed', 'body', 'children'))).toMatchObject({
+      data: { kind: 'cell-saved' },
+    });
+    sqlite.exec(
+      'CREATE TABLE derived_children (id INTEGER PRIMARY KEY, parent TEXT REFERENCES parents(derived) ON UPDATE CASCADE)',
+    );
+    expect(await payload(saveCell(parent, 'body', 'changed', 'body', 'parents'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    expect(sqlite.prepare('SELECT code,body FROM parents').get()).toEqual({
+      code: 'code',
+      body: 'body',
+    });
+  });
+  it('fences a trigger or schema installed after eligibility and an intervening value update atomically', async () => {
+    const token = rowReference(await readRows());
+    for (const race of [
+      "UPDATE items SET name='Concurrent' WHERE id=1",
+      "CREATE TRIGGER changed AFTER UPDATE ON items BEGIN UPDATE items SET category='side effect'; END",
+      'CREATE UNIQUE INDEX new_key ON items(name)',
+    ]) {
+      sqlite.exec(
+        "DROP TRIGGER IF EXISTS changed; DROP INDEX IF EXISTS new_key; UPDATE items SET name='Item 1' WHERE id=1",
+      );
+      proxy.mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.sql.startsWith('UPDATE ')) {
+          sqlite.exec(race);
+        }
+        return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+      });
+      expect(await payload(saveCell(token, 'Item 1', 'Edited'))).toMatchObject({
+        data: { kind: 'conflict' },
+      });
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM items WHERE category='side effect'").get(),
+      ).toEqual({ n: 0 });
+    }
+  });
+  it('rejects protected, generated, primary key and non-text writes and reports constraint failure honestly', async () => {
+    const token = rowReference(await readRows());
+    for (const column of ['id', 'api_key', 'caption', 'quantity']) {
+      expect(await payload(saveCell(token, '1', '2', column))).toMatchObject({
+        data: { kind: 'unavailable' },
+      });
+    }
+    expect(await payload(saveCell(token, '', 'new', 'category'))).toMatchObject({
+      data: { kind: 'conflict' },
+    });
+    sqlite.exec(
+      "CREATE TABLE constrained (id INTEGER PRIMARY KEY, body TEXT CHECK(length(body)<5)); INSERT INTO constrained VALUES(1,'old')",
+    );
+    const constrained = rowReference(await readRows({ table: 'constrained' }));
+    expect(
+      await payload(saveCell(constrained, 'old', 'too long', 'body', 'constrained')),
+    ).toMatchObject({ data: { kind: 'unknown' } });
+    expect(sqlite.prepare('SELECT body FROM constrained').get()).toEqual({ body: 'old' });
+  });
+  it('requires fresh ownership before mutation and reports post-write scope changes as unknown', async () => {
+    const token = rowReference(await readRows());
+    for (const phase of ['before', 'after']) {
+      await env.db
+        .update(resources)
+        .set({ cf_id: 'test-db' })
+        .where(eq(resources.id, 'res_database'));
+      const fresh = rowReference(await readRows());
+      let updates = 0;
+      proxy.mockImplementation(async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        const results = sqlite.prepare(body.sql).all(...body.params);
+        if (body.sql.startsWith('UPDATE ')) {
+          updates++;
+        }
+        if (
+          (phase === 'before' && body.sql.includes('AS incoming')) ||
+          (phase === 'after' && body.sql.startsWith('UPDATE '))
+        ) {
+          await env.db
+            .update(resources)
+            .set({ cf_id: 'changed-db' })
+            .where(eq(resources.id, 'res_database'));
+        }
+        return Response.json({ results });
+      });
+      expect(await payload(saveCell(fresh, 'Item 1', 'Saved'))).toMatchObject({
+        data: { kind: phase === 'before' ? 'unavailable' : 'unknown' },
+      });
+      expect(updates).toBe(phase === 'before' ? 0 : 1);
+    }
+    expect(token).toEqual(expect.any(String));
+  });
+  it('reports unknown when authorization lookup throws after a committed cell save', async () => {
+    const token = rowReference(await readRows());
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const results = sqlite.prepare(body.sql).all(...body.params);
+      if (body.sql.startsWith('UPDATE ')) {
+        vi.spyOn(env.db, 'select').mockImplementationOnce(() => {
+          throw Error('Database unavailable');
+        });
+      }
+      return Response.json({ results });
+    });
+    try {
+      expect(await payload(saveCell(token, 'Item 1', 'Committed'))).toMatchObject({
+        data: { kind: 'unknown' },
+      });
+      expect(sqlite.prepare('SELECT name FROM items WHERE id=1').get()).toEqual({
+        name: 'Committed',
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+  it('does not retry an update whose provider response was lost or malformed', async () => {
+    const token = rowReference(await readRows());
+    let updates = 0;
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const results = sqlite.prepare(body.sql).all(...body.params);
+      if (body.sql.startsWith('UPDATE ')) {
+        updates++;
+        return Response.json({ results: 'invalid' });
+      }
+      return Response.json({ results });
+    });
+    expect(await payload(saveCell(token, 'Item 1', 'Committed'))).toMatchObject({
+      data: { kind: 'unknown' },
+    });
+    expect(updates).toBe(1);
+    expect(sqlite.prepare('SELECT name FROM items WHERE id=1').get()).toEqual({
+      name: 'Committed',
+    });
+  });
+  it('keeps text readable when edit eligibility exceeds the bounded catalog or is unavailable', async () => {
+    const token = rowReference(await readRows());
+    for (let index = 0; index < 257; index++) {
+      sqlite.exec(`CREATE INDEX extra_${index} ON items(quantity)`);
+    }
+    expect(await payload(readCell(token))).toMatchObject({
+      data: { kind: 'cell', text: 'Item 1', editable: false },
+    });
+    expect(await payload(saveCell(token, 'Item 1', 'wrong'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.sql.includes('AS incoming')) {
+        throw Error('Unsupported metadata');
+      }
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+    expect(await payload(readCell(token))).toMatchObject({
+      data: { kind: 'cell', text: 'Item 1', editable: false },
+    });
+  });
+  it('rejects malformed and oversized write inputs before executing SQL', async () => {
+    const token = rowReference(await readRows());
+    for (const extra of [
+      { text: '🙂'.repeat(16385) },
+      { expectedText: '\ud800' },
+      { text: '\udfff' },
+      { sql: 'DROP TABLE items' },
+      { expectedText: undefined },
+    ]) {
+      proxy.mockClear();
+      const response = await call('resources.execute', {
+        project: project.id,
+        resourceId: 'res_database',
+        action: 'database.cell.save',
+        input: {
+          table: 'items',
+          column: 'name',
+          rowToken: token,
+          expectedText: 'Item 1',
+          text: 'new',
+          ...extra,
+        },
+      });
+      expect(response.status).toBe(400);
+      expect(proxy).not.toHaveBeenCalled();
+    }
+  });
   it('marks UTF-8 previews and reads the complete current value by signed primary key', async () => {
     const text = 'é'.repeat(499) + '🙂' + 'z'.repeat(4000);
     sqlite.prepare('UPDATE items SET name = ? WHERE id = 1').run(text);
@@ -1445,6 +1791,11 @@ describe('database structure and server queries', () => {
             id: 'res_database',
             browseCapabilities: { filterOperators: ['equals', 'contains', 'is-null'], sort: true },
             actions: [
+              expect.objectContaining({
+                id: 'database.cell.save',
+                effect: 'write',
+                result: 'cell-saved',
+              }),
               {
                 id: 'database.cell',
                 label: 'Read value',
