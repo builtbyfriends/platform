@@ -182,6 +182,7 @@ export async function deploymentLogs(
   id: string,
   options: {
     since?: string;
+    range?: '1h' | '24h' | '7d';
     limit?: number;
     cursor?: string;
     order?: 'oldest-first' | 'newest-first';
@@ -207,6 +208,11 @@ export async function deploymentLogs(
       ? parseSince(options.since ?? '1h')
       : Math.max(0, parseFollowAfter(options.after) - FOLLOW_OVERLAP_MS);
   let until = Math.floor(Date.now() / 1000) * 1000;
+  const duration =
+    options.range === '7d' ? 604_800_000 : options.range === '24h' ? 86_400_000 : 3_600_000;
+  if (options.range) {
+    since = until - duration;
+  }
   let offset = 0;
   if (options.cursor) {
     try {
@@ -216,6 +222,7 @@ export async function deploymentLogs(
         until: unknown;
         offset: unknown;
         clock: unknown;
+        range?: unknown;
       };
       if (
         parsed.id !== id ||
@@ -225,7 +232,12 @@ export async function deploymentLogs(
         ) ||
         Number(parsed.offset) > 1000000 ||
         Number(parsed.since) > Number(parsed.until) ||
-        Number(parsed.until) > Date.now()
+        Number(parsed.until) > Date.now() ||
+        (options.range !== undefined &&
+          (parsed.range !== options.range ||
+            Number(parsed.until) - Number(parsed.since) !== duration ||
+            Number(parsed.since) % 1000 !== 0 ||
+            Number(parsed.until) % 1000 !== 0))
       ) {
         throw new Error('Invalid cursor');
       }
@@ -236,12 +248,16 @@ export async function deploymentLogs(
       throw new OperatorError(400, 'Invalid deployment log cursor.');
     }
   }
+  const pageCursor = (pageOffset: number) =>
+    btoa(JSON.stringify({ id, since, until, offset: pageOffset, clock, range: options.range }));
   if (isDevBypass(env)) {
     const data = mockLogData();
     return {
       data: options.order === 'newest-first' ? data : data.reverse(),
       nextCursor: null,
+      previousCursor: null,
       watermark: String(until),
+      window: options.range ? { from: since, to: until } : undefined,
       ...runtimeLogsField(env),
     };
   }
@@ -280,10 +296,7 @@ export async function deploymentLogs(
   }
   const result = (await response.json()) as { data?: ReadonlyArray<LogRow> };
   const rows = result.data ?? [];
-  const nextCursor =
-    rows.length > limit
-      ? btoa(JSON.stringify({ id, since, until, offset: offset + limit, clock }))
-      : null;
+  const nextCursor = rows.length > limit ? pageCursor(offset + limit) : null;
   return {
     data: rows.slice(0, limit).map((row) => ({
       timestamp: Number(row.ts),
@@ -296,7 +309,9 @@ export async function deploymentLogs(
       ingestedAt: analyticsTimestamp(row.ingestedAt),
     })),
     nextCursor,
+    previousCursor: options.range && offset > 0 ? pageCursor(Math.max(0, offset - limit)) : null,
     watermark: String(until),
+    window: options.range ? { from: since, to: until } : undefined,
     ...runtimeLogsField(env),
   };
 }

@@ -28,6 +28,7 @@ import type { TestEnv } from './helpers.ts';
 let env: TestEnv & { PLATFORM_PROXY?: Fetcher };
 let registration: Awaited<ReturnType<typeof registerOAuthClient>>;
 let project: { id: string; slug: string };
+let ownerId: string;
 let other: { id: string; slug: string };
 const proxy = vi.fn<(request: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
 const basic = () => `Basic ${btoa(`${registration.client.id}:${registration.clientSecret}`)}`;
@@ -45,6 +46,14 @@ const payload = async (response: Promise<Response> | Response) => {
   const answer = await response;
   expect(answer.status).toBe(200);
   return answer.json();
+};
+
+const activityData = async (body: unknown) => {
+  const value = await payload(call('projects.activity', body));
+  if (!isRecord(value) || !isRecord(value.data)) {
+    throw Error('Invalid activity response');
+  }
+  return value.data;
 };
 
 beforeAll(async () => {
@@ -65,6 +74,7 @@ beforeEach(async () => {
     'app:' + registration.client.id,
     'person',
   );
+  ownerId = owner.id;
   const foreign = await createTestUser(env.db, 'foreign-owner');
   project = await createTestProject(env.db, owner.id);
   other = await createTestProject(env.db, foreign.id);
@@ -435,6 +445,178 @@ describe('connected app runtime reads', () => {
     });
     expect(response.status).toBe(409);
     expect(await response.text()).not.toContain('private.txt');
+  });
+
+  it.each(['1h', '24h', '7d'] as const)(
+    'reads the requested %s ingestion window',
+    async (range) => {
+      const deployment = await createTestDeployment(env.db, project.id);
+      const fetcher = vi.fn().mockResolvedValue(Response.json({ data: [] }));
+      vi.stubGlobal('fetch', fetcher);
+      env.PLATFORM_RUNTIME_LOGS = 'minimal';
+      const result = await activityData({ project: project.id, range });
+      expect(result).toMatchObject({
+        range,
+        deploymentId: deployment.id,
+        partial: true,
+        available: true,
+        previousCursor: null,
+        cursor: null,
+      });
+      if (
+        !isRecord(result.window) ||
+        typeof result.window.from !== 'number' ||
+        typeof result.window.to !== 'number'
+      ) {
+        throw Error('Invalid window');
+      }
+      const { from, to } = result.window;
+      expect(to - from).toBe(
+        range === '7d' ? 604_800_000 : range === '24h' ? 86_400_000 : 3_600_000,
+      );
+      expect(from % 1000).toBe(0);
+      expect(to % 1000).toBe(0);
+      expect(to).toBeLessThanOrEqual(Date.now());
+      const query = String(fetcher.mock.calls[0]?.[1]?.body);
+      expect(query).toContain(new Date(from).toISOString().replace('T', ' ').slice(0, 19));
+      expect(query).toContain(new Date(to).toISOString().replace('T', ' ').slice(0, 19));
+      expect(query).toContain('ORDER BY ingestedAt DESC, ts DESC');
+      expect(query).not.toMatch(/double1 >=/);
+    },
+  );
+
+  it('keeps both directions on the same captured window and defaults to one hour', async () => {
+    await createTestDeployment(env.db, project.id);
+    const row = {
+      ts: Date.now() - 1000,
+      ingestedAt: new Date().toISOString(),
+      outcome: 'ok',
+      logData: '[]',
+      exceptionData: '[]',
+      url: '/products',
+      method: 'GET',
+      statusCode: '200',
+    };
+    const fetcher = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(Response.json({ data: Array.from({ length: 51 }, () => row) })),
+      );
+    vi.stubGlobal('fetch', fetcher);
+    const first = await activityData({ project: project.id });
+    expect(first.range).toBe('1h');
+    expect(first.previousCursor).toBeNull();
+    expect(first.cursor).toEqual(expect.any(String));
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    try {
+      const second = await activityData({ project: project.id, cursor: first.cursor });
+      expect(second.window).toEqual(first.window);
+      expect(second.previousCursor).toEqual(expect.any(String));
+      expect(String(fetcher.mock.calls[1]?.[1]?.body)).toContain('OFFSET 50');
+      const back = await activityData({ project: project.id, cursor: second.previousCursor });
+      expect(back.window).toEqual(first.window);
+      expect(back.previousCursor).toBeNull();
+      expect(String(fetcher.mock.calls[2]?.[1]?.body)).toContain('OFFSET 0');
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it.each([
+    'mismatch',
+    'missing-range',
+    'too-wide',
+    'fractional-bound',
+    'future',
+    'deployment',
+    'clock',
+  ])('rejects %s activity cursors before querying', async (change) => {
+    const deployment = await createTestDeployment(env.db, project.id);
+    const until = Math.floor(Date.now() / 1000) * 1000;
+    const cursor = {
+      id: deployment.id,
+      range: '24h' as string | undefined,
+      since: until - 86_400_000,
+      until,
+      offset: 50,
+      clock: 'ingestion',
+    };
+    if (change === 'mismatch') {
+      cursor.range = '1h';
+    }
+    if (change === 'missing-range') {
+      delete cursor.range;
+    }
+    if (change === 'too-wide') {
+      cursor.since = until - 691_200_000;
+    }
+    if (change === 'fractional-bound') {
+      cursor.since -= 1;
+      cursor.until -= 1;
+    }
+    if (change === 'future') {
+      cursor.since += 60_000;
+      cursor.until += 60_000;
+    }
+    if (change === 'deployment') {
+      cursor.id = 'another-deployment';
+    }
+    if (change === 'clock') {
+      cursor.clock = 'event';
+    }
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    expect(
+      (
+        await call('projects.activity', {
+          project: project.id,
+          range: '24h',
+          cursor: btoa(JSON.stringify(cursor)),
+        })
+      ).status,
+    ).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(['8d', '', null, 24])('rejects invalid activity range %s', async (range) => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    expect((await call('projects.activity', { project: project.id, range })).status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable scope without claiming a queried window', async () => {
+    expect(await activityData({ project: project.id, range: '7d' })).toMatchObject({
+      range: '7d',
+      deploymentId: null,
+      window: null,
+      available: false,
+      previousCursor: null,
+    });
+    const deployment = await createTestDeployment(env.db, project.id);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+    expect(await activityData({ project: project.id, range: '24h' })).toMatchObject({
+      range: '24h',
+      deploymentId: deployment.id,
+      window: null,
+      available: false,
+      previousCursor: null,
+    });
+  });
+
+  it('refuses suspended owners before reading and after a query', async () => {
+    await createTestDeployment(env.db, project.id);
+    await env.db.update(users).set({ suspended_reason: 'admin' }).where(eq(users.id, ownerId));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    expect((await activityData({ project: project.id })).available).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    await env.db.update(users).set({ suspended_reason: null }).where(eq(users.id, ownerId));
+    fetcher.mockImplementation(async () => {
+      await env.db.update(users).set({ suspended_reason: 'admin' }).where(eq(users.id, ownerId));
+      return Response.json({ data: [] });
+    });
+    expect((await call('projects.activity', { project: project.id })).status).toBe(409);
   });
 
   it('reads actual deployment activity and failure context without URL query credentials', async () => {
