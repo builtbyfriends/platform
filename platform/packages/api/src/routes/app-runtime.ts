@@ -507,6 +507,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         {
           limit: pageSize,
           range,
+          scope: 'customer-activity-v1',
           order: 'newest-first',
           cursor: typeof body.cursor === 'string' ? body.cursor : undefined,
         },

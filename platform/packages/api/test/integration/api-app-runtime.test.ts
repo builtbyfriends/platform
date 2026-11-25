@@ -14,6 +14,7 @@ import {
 import { APP } from '../../src/app-credits.ts';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
+import { deploymentLogs } from '../../src/operator/deployment-operations.ts';
 import { projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
@@ -56,6 +57,37 @@ const activityData = async (body: unknown) => {
   }
   return value.data;
 };
+
+function activitySql(deploymentId: string, urls: Array<string>) {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.function('startsWith', (value, prefix) =>
+    String(value).startsWith(String(prefix)) ? 1 : 0,
+  );
+  sqlite.function('toDateTime', String);
+  sqlite.exec(
+    'CREATE TABLE platform_logs(timestamp TEXT, index1 TEXT, blob1 TEXT, blob2 TEXT, blob3 TEXT, blob4 TEXT, blob5 TEXT, blob6 TEXT, blob7 TEXT, blob8 TEXT, double1 INTEGER)',
+  );
+  const insert = sqlite.prepare(
+    'INSERT INTO platform_logs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  const now = Date.now() - 5000;
+  urls.forEach((url, i) =>
+    insert.run(
+      new Date(now - i * 1000).toISOString().replace('T', ' ').slice(0, 19),
+      'user-' + project.slug,
+      'ok',
+      '[]',
+      '[]',
+      url,
+      'GET',
+      '200',
+      deploymentId,
+      'ray-' + i,
+      now - i * 1000,
+    ),
+  );
+  return sqlite;
+}
 
 beforeAll(async () => {
   env = await setupEnv();
@@ -443,6 +475,157 @@ describe('connected app runtime reads', () => {
     expect(await response.text()).not.toContain('private.txt');
   });
 
+  it('leaves operator logs unfiltered and refuses customer cursor scope', async () => {
+    const deployment = await createTestDeployment(env.db, project.id);
+    const sqlite = activitySql(deployment.id, [
+      'https://worker/__platform/ready',
+      'https://internal/__platform/r2/list',
+      'https://app.test/import',
+    ]);
+    const fetcher = vi.fn(async (_url, init) =>
+      Response.json({ data: sqlite.prepare(String(init.body)).all() }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const page = await deploymentLogs(env.db, env, deployment.id, { limit: 2 });
+      expect(page.data).toHaveLength(2);
+      expect(String(fetcher.mock.calls[0]?.[1]?.body)).not.toContain('startsWith');
+      if (!page.nextCursor) {
+        throw Error('Missing test cursor');
+      }
+      const cursor: unknown = JSON.parse(atob(page.nextCursor));
+      if (!isRecord(cursor)) {
+        throw Error('Invalid test cursor');
+      }
+      expect(cursor.scope).toBeUndefined();
+      const second = await deploymentLogs(env.db, env, deployment.id, {
+        limit: 2,
+        cursor: page.nextCursor,
+      });
+      expect(second.data).toHaveLength(1);
+      await expect(
+        deploymentLogs(env.db, env, deployment.id, {
+          cursor: btoa(JSON.stringify({ ...cursor, scope: 'customer-activity-v1' })),
+        }),
+      ).rejects.toThrow('Invalid deployment log cursor');
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('filters housekeeping before counting customer pages in the actual generated SQL', async () => {
+    const deployment = await createTestDeployment(env.db, project.id);
+    const controls = Array.from(
+      { length: 110 },
+      (_, i) => `https://worker/__platform/r2/list?cursor=${i}`,
+    );
+    const customers = Array.from({ length: 60 }, (_, i) => `https://app.test/import/${i}`);
+    const sqlite = activitySql(deployment.id, [...controls, ...customers]);
+    const returnedCounts: Array<number> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url, init) => {
+        const rows = sqlite.prepare(String(init.body)).all();
+        returnedCounts.push(rows.length);
+        return Response.json({ data: rows });
+      }),
+    );
+    try {
+      const first = await activityData({ project: project.id });
+      expect(first.events).toMatchObject(
+        customers.slice(0, 50).map((url) => ({ request: { url } })),
+      );
+      expect(first.previousCursor).toBeNull();
+      const second = await activityData({ project: project.id, cursor: first.cursor });
+      expect(second.events).toMatchObject(customers.slice(50).map((url) => ({ request: { url } })));
+      expect(second.cursor).toBeNull();
+      expect(second.window).toEqual(first.window);
+      const back = await activityData({ project: project.id, cursor: second.previousCursor });
+      expect(back.events).toEqual(first.events);
+      expect(back.window).toEqual(first.window);
+      expect(returnedCounts).toEqual([51, 10, 51]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps exact relay and public-host URLs in the SQL predicate while excluding control suffixes', async () => {
+    const deployment = await createTestDeployment(env.db, project.id);
+    const origins = ['https://worker', 'https://internal', 'http://worker', 'http://internal'];
+    const hidden = origins.flatMap((origin) =>
+      [
+        '/__platform',
+        '/__platform?probe=1',
+        '/__platform#probe',
+        '/__platform/ready',
+        '/__platform/queue/status',
+        '/__platform/scheduled/status',
+      ].map((path) => origin + path),
+    );
+    const kept = origins.flatMap((origin) =>
+      [
+        '/__platform/queue',
+        '/__platform/queue?token=private',
+        '/__platform/scheduled#fragment',
+        '/__queue',
+        '/__scheduled',
+        '/__platformish',
+      ].map((path) => origin + path),
+    );
+    kept.push(
+      'https://app.test/__platform/ready',
+      'https://worker.example/__platform/ready',
+      'https://app.test/__platform/queue',
+      'https://app.test/__platform/scheduled',
+      'https://app.test/normal?next=https://worker/__platform/ready',
+      '',
+    );
+    const sqlite = activitySql(deployment.id, [...hidden, ...kept]);
+    let observed: Array<string> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url, init) => {
+        const rows = sqlite.prepare(String(init.body)).all();
+        observed = rows.map((row) => String(row.url));
+        return Response.json({ data: rows });
+      }),
+    );
+    try {
+      const result = await activityData({ project: project.id });
+      expect(observed).toEqual(kept);
+      expect(result.events).toHaveLength(kept.length);
+      expect(JSON.stringify(result.events)).toContain('Background job');
+      expect(JSON.stringify(result.events)).toContain('Scheduled task');
+      expect(JSON.stringify(result.events)).not.toContain('token=private');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([undefined, 'operator', 'customer-activity-v0'])(
+    'refuses old or mismatched Activity cursor scope %s',
+    async (scope) => {
+      const deployment = await createTestDeployment(env.db, project.id);
+      const until = Math.floor(Date.now() / 1000) * 1000;
+      const cursor = btoa(
+        JSON.stringify({
+          id: deployment.id,
+          range: '1h',
+          since: until - 3_600_000,
+          until,
+          offset: 50,
+          clock: 'ingestion',
+          scope,
+        }),
+      );
+      const fetcher = vi.fn();
+      vi.stubGlobal('fetch', fetcher);
+      expect((await call('projects.activity', { project: project.id, cursor })).status).toBe(400);
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['1h', '24h', '7d'] as const)(
     'reads the requested %s ingestion window',
     async (range) => {
@@ -565,6 +748,7 @@ describe('connected app runtime reads', () => {
     const cursor = {
       id: deployment.id,
       range: '24h' as string | undefined,
+      scope: 'customer-activity-v1',
       since: until - 86_400_000,
       until,
       offset: 50,
