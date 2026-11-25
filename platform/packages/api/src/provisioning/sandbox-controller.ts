@@ -162,8 +162,9 @@ export async function provisionSandboxController(input: {
   apiService: string;
   identity: SandboxControllerIdentity;
   sandbox: NonNullable<DeployManifest['sandbox']>;
+  backupBucket?: string;
 }): Promise<void> {
-  const { accountId, apiToken, apiService, identity, sandbox } = input;
+  const { accountId, apiToken, apiService, identity, sandbox, backupBucket } = input;
   const workerName = sandboxControllerWorkerName(identity.projectId, identity.deploymentId);
   const source = getSandboxControllerSource();
   const digest = Array.from(
@@ -205,6 +206,10 @@ export async function provisionSandboxController(input: {
           entrypoint: 'SandboxControl',
           props: identity,
         },
+        // Decision: Backups share the static assets bucket under `sandbox-backups/`, so the installer needs no new bucket.
+        ...(backupBucket
+          ? [{ type: 'r2_bucket', name: '__PLATFORM_SANDBOX_BACKUPS', bucket_name: backupBucket }]
+          : []),
         ...Object.entries({
           [OWNER_BINDING]: JSON.stringify({
             protocol: 1,

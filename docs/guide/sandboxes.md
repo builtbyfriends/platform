@@ -83,6 +83,24 @@ Calling `getSandbox()` with new hosts or secrets applies them to a running sandb
 
 For code that runs on both deployment targets, use `getSandbox()`. Direct access through `c.env.SANDBOX` is available only on local and native Cloudflare deployments.
 
+### Back up a directory
+
+`backup()` saves a directory to R2 and returns a record. Keep the record, for example in your database, and pass it to `restore()` to bring the files back into a later container, or into another sandbox of the same app:
+
+```ts
+const sandbox = await getSandbox(`task-${task.id}`);
+const record = await sandbox.backup({ dir: '/workspace', exclude: ['node_modules/'] });
+await db.update(tasks).set({ backup: record }).where(eq(tasks.id, task.id));
+
+// Later, in a new container:
+await sandbox.restore(record);
+await sandbox.deleteBackup(record);
+```
+
+Stop programs that write to the directory before a backup, because files that change while it's read are saved as they are at that moment. `restore()` swaps the directory in only after the download is checked. `gitignore: true` also skips what the directory's `.gitignore` files list. Backups don't expire on their own, so delete the ones you no longer need.
+
+On a bwf platform, backups belong to the project, so a later deployment can restore them, and deleting the project removes them. On native Cloudflare deployments and in local development, add an R2 bucket binding named `SANDBOX_BACKUPS`; bwf exports the `DirectoryBackupGateway` the backups need from your Worker. A managed deployment made before backups existed needs a redeploy first.
+
 ## Usage limits
 
 Sandbox limits reject with `SandboxLimitError`, which extends `UsageLimit` from `@builtbyfriends/bwf/limits`. The error includes `resource: 'sandbox'` and a `reason` of `concurrency` or `runtime_budget`. bwf route handlers and Pages actions automatically send a structured HTTP 429 when the error is left uncaught.
@@ -116,7 +134,7 @@ Keep user input available so it can be retried. Checking `running()`, stopping a
 
 `getSandbox(id)` selects the same Durable Object for that ID within a deployment. Native Cloudflare deployments preserve that namespace across Worker versions. Each managed platform deployment has its own namespace; rolling back to a retained deployment reconnects to that deployment's namespace.
 
-Files, running processes, and listening servers last only as long as the container. It can stop after inactivity, crash, or restart. Save anything you need to keep in your database, KV, or R2. Deleting a project on a bwf platform removes both its Durable Objects and containers.
+Files, running processes, and listening servers last only as long as the container. It can stop after inactivity, crash, or restart. Save anything you need to keep in your database, KV, or R2, or [back up a directory](#back-up-a-directory). Deleting a project on a bwf platform removes both its Durable Objects and containers.
 
 ## Configuration
 

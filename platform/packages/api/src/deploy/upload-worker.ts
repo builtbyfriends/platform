@@ -447,6 +447,7 @@ export async function uploadDeploymentWorker(input: {
         slug: project.slug,
       },
       sandbox: manifest.sandbox,
+      backupBucket: context.env.R2_STATIC_ASSETS_BUCKET,
     });
     await assertDeploymentCanProceed(context.get('db'), deployment.id, projectId);
   }

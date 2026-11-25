@@ -762,6 +762,7 @@ export async function deleteProjectAssets(r2: R2Bucket, projectId: string): Prom
   await paginatedR2Delete(r2, `deployment-inputs/${projectId}/`);
   // Decision: Page caches written by earlier releases, which served ISR.
   await paginatedR2Delete(r2, `isr-cache/${projectId}/`);
+  await paginatedR2Delete(r2, `sandbox-backups/${projectId}/`);
 }
 
 /**

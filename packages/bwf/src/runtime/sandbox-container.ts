@@ -1,4 +1,10 @@
-import { Files } from '@cloudflare/sandbox';
+import { DirectoryBackup, Files } from '@cloudflare/sandbox';
+import type {
+  DirectoryBackupGatewayBinding,
+  DirectoryBackupOptions,
+  DirectoryBackupRecord,
+  DirectoryBackupStorage,
+} from '@cloudflare/sandbox';
 import { DurableObject, RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 export type SandboxInstance =
@@ -321,6 +327,7 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
   #ready: Promise<void>;
   protected starting = false;
   #epoch = 0;
+  #directoryBackup: DirectoryBackup | undefined;
 
   // Decision: WebSockets must travel through DO fetch, since RPC cannot serialize them.
   async fetch(request: Request): Promise<Response> {
@@ -401,6 +408,32 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
   protected get inactivityTimeoutMs(): number {
     return this.#options.inactivityTimeoutMs ?? DEFAULT_SANDBOX_INACTIVITY_TIMEOUT_MS;
   }
+  /** Where directory backups go. Without it, backup, restore and deleteBackup are unavailable. */
+  protected backupStorage(): DirectoryBackupStorage | undefined {
+    return undefined;
+  }
+
+  #backups(): DirectoryBackup | undefined {
+    const storage = this.backupStorage();
+    const gateway = (this.ctx.exports as { DirectoryBackupGateway?: DirectoryBackupGatewayBinding })
+      .DirectoryBackupGateway;
+    if (!storage || !gateway) {
+      return undefined;
+    }
+    this.#directoryBackup ??= new DirectoryBackup(this.container, gateway, storage);
+    return this.#directoryBackup;
+  }
+
+  #requireBackups(): DirectoryBackup {
+    const backups = this.#backups();
+    if (!backups) {
+      throw new Error(
+        'Sandbox backups are unavailable here. A managed deployment made before backups existed needs a redeploy.',
+      );
+    }
+    return backups;
+  }
+
   protected async beforeStart(): Promise<void> {}
   protected async afterStart(): Promise<void> {}
   protected async beforeUse(): Promise<void> {}
@@ -502,6 +535,9 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
       }
       if (!this.container.running) {
         if (this.#options.outbound) {
+          // Decision: The backup route has to be registered before the catch-all, or the catch-all takes backup traffic
+          // for the life of the container.
+          await this.#backups()?.intercept();
           // Decision: HTTPS intercepts go in before start, so the container's CA file exists when it boots.
           await this.#intercept(this.#options.outbound);
         }
@@ -551,6 +587,28 @@ export class SandboxContainer<Env = unknown> extends DurableObject<Env> {
     }
     if (operation === 'running') {
       return this.container.running;
+    }
+    if (operation === 'backup' || operation === 'restore') {
+      const backups = this.#requireBackups();
+      const index = operation === 'backup' ? 0 : 1;
+      const { options, finish } = operationOptions(args[index]);
+      try {
+        await this.ensureRunning();
+        if (operation === 'restore') {
+          return await backups.restore(args[0] as DirectoryBackupRecord, options);
+        }
+        const { dir } = options;
+        if (typeof dir !== 'string') {
+          throw new TypeError('Sandbox backup needs the absolute path of a directory as dir.');
+        }
+        const backupOptions: DirectoryBackupOptions = { ...options, dir };
+        return await backups.backup(backupOptions);
+      } finally {
+        finish();
+      }
+    }
+    if (operation === 'deleteBackup') {
+      return this.#requireBackups().delete(args[0] as DirectoryBackupRecord);
     }
     if (operation === 'files') {
       const [method, ...parameters] = args;

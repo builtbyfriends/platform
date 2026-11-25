@@ -143,6 +143,28 @@ describe('Sandbox runtime', () => {
       undefined,
     ]);
   });
+  it('sends backup, restore and deleteBackup to the capability', async () => {
+    const record = {
+      id: 'b1',
+      dir: '/workspace',
+      size: 1,
+      sha256: 'x',
+      format: 'tar+zstd/1' as const,
+    };
+    const invoke = vi.fn().mockResolvedValue(record);
+    await envContext.run(
+      { __PLATFORM_SANDBOX: { getSandbox: async () => ({ invoke }) } },
+      async () => {
+        const client = await getSandbox();
+        expect(await client.backup({ dir: '/workspace', gitignore: true })).toEqual(record);
+        await client.restore(record);
+        await client.deleteBackup(record);
+      },
+    );
+    expect(invoke).toHaveBeenNthCalledWith(1, 'backup', [{ dir: '/workspace', gitignore: true }]);
+    expect(invoke).toHaveBeenNthCalledWith(2, 'restore', [record, undefined]);
+    expect(invoke).toHaveBeenNthCalledWith(3, 'deleteBackup', [record]);
+  });
   it('encodes aborts as cancellable RPC streams and rejects an already aborted signal', async () => {
     const c = capability();
     const controller = new AbortController();
