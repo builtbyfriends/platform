@@ -8,6 +8,8 @@ import {
   readPackageJson,
 } from '../shared/package-json.ts';
 import { viteConfigImportsBwfPlugin } from './vite-config-patch.ts';
+import { findWorkspaceMemberRoot, parsePackageManagerField } from './workspace.ts';
+import type { PackageManager } from './workspace.ts';
 
 /** Build output conventions for a known SSG (static site generator). */
 type SsgPreset = {
@@ -61,7 +63,10 @@ export type StaticPreset = {
  */
 export function resolveProjectCommand(root: string, command: string): string {
   const [bin, ...args] = command.trim().split(/\s+/);
-  const resolvedBin = shellQuoteExecutable(localBin(root, resolveCommandBin(root, bin)));
+  const vitePlusRoot = bin === 'vite' ? findVitePlusRoot(root) : undefined;
+  const resolvedBin = shellQuoteExecutable(
+    vitePlusRoot === undefined ? localBin(root, bin) : localBin(vitePlusRoot, 'vp'),
+  );
   return args.length > 0 ? `${resolvedBin} ${args.join(' ')}` : resolvedBin;
 }
 
@@ -111,7 +116,7 @@ export function resolveCloudflareOperationArgv(): Array<string> {
  */
 export function formatProjectCommand(root: string, command: string): string {
   const [bin, ...args] = command.trim().split(/\s+/);
-  const formattedBin = resolveCommandBin(root, bin);
+  const formattedBin = bin === 'vite' && findVitePlusRoot(root) !== undefined ? 'vp' : bin;
   return args.length > 0 ? `${formattedBin} ${args.join(' ')}` : formattedBin;
 }
 
@@ -167,13 +172,22 @@ export function detectPreset(
     return null;
   }
 
-  if (pkg && hasViteLike(pkg)) {
-    const buildCommand = resolveProjectScriptCommand(root, 'build');
-    return {
-      buildCommand: buildCommand ?? resolveProjectCommand(root, 'vite build'),
-      outputDir: resolve(root, viteSpaOutputDir(root, pkg)),
-      appType: 'spa',
-    };
+  if (pkg) {
+    const vitePlusRoot = findVitePlusRoot(root, pkg);
+    const hasLocalVite = vitePlusRoot === root || hasViteDependency(pkg);
+    if (hasLocalVite || vitePlusRoot !== undefined) {
+      const buildCommand = resolveProjectScriptCommand(root, 'build');
+      const viteConfig = VITE_CONFIG_FILES.map((name) => join(root, name)).find((path) =>
+        existsSync(path),
+      );
+      if (hasLocalVite || buildCommand || viteConfig || existsSync(join(root, 'index.html'))) {
+        return {
+          buildCommand: buildCommand ?? resolveProjectCommand(root, 'vite build'),
+          outputDir: resolve(root, viteSpaOutputDir(viteConfig)),
+          appType: 'spa',
+        };
+      }
+    }
   }
 
   if (existsSync(join(root, 'dist/index.html'))) {
@@ -224,15 +238,8 @@ function localBin(root: string, name: string): string {
   return existsSync(bin) ? bin : name;
 }
 
-function resolveCommandBin(root: string, name: string): string {
-  if (name === 'vite') {
-    return detectViteBinary(root);
-  }
-  return name;
-}
-
-function detectPackageManager(root: string): 'pnpm' | 'yarn' | 'bun' | 'npm' {
-  if (existsSync(join(root, 'pnpm-lock.yaml'))) {
+function readProjectPackageManager(root: string): PackageManager | undefined {
+  if (existsSync(join(root, 'pnpm-lock.yaml')) || existsSync(join(root, 'pnpm-workspace.yaml'))) {
     return 'pnpm';
   }
   if (existsSync(join(root, 'yarn.lock'))) {
@@ -241,7 +248,21 @@ function detectPackageManager(root: string): 'pnpm' | 'yarn' | 'bun' | 'npm' {
   if (existsSync(join(root, 'bun.lock')) || existsSync(join(root, 'bun.lockb'))) {
     return 'bun';
   }
-  return 'npm';
+  if (existsSync(join(root, 'package-lock.json'))) {
+    return 'npm';
+  }
+  return parsePackageManagerField(readPackageJson(root));
+}
+
+function detectPackageManager(root: string): PackageManager {
+  const local = readProjectPackageManager(root);
+  if (local !== undefined) {
+    return local;
+  }
+  const workspaceRoot = findWorkspaceMemberRoot(root);
+  return (
+    (workspaceRoot === undefined ? undefined : readProjectPackageManager(workspaceRoot)) ?? 'npm'
+  );
 }
 
 function resolveProjectScriptCommand(root: string, scriptName: string): string | null {
@@ -268,10 +289,6 @@ function resolveProjectScriptCommand(root: string, scriptName: string): string |
   }
 }
 
-function hasViteLike<T extends Record<string, unknown>>(pkg: T): boolean {
-  return hasPackageDependency(pkg, 'vite') || hasPackageDependency(pkg, 'vite-plus');
-}
-
 const VITE_CONFIG_FILES = [
   'vite.config.ts',
   'vite.config.mts',
@@ -289,22 +306,37 @@ const VITE_CONFIG_FILES = [
  * publishes the server files and leaves `/` without an `index.html`. A
  * project that installs `@builtbyfriends/bwf` only for its CLI keeps Vite's plain `dist`.
  */
-function viteSpaOutputDir(root: string, pkg: Record<string, unknown>): string {
-  if (!hasPackageDependency(pkg, '@builtbyfriends/bwf')) {
-    return 'dist';
-  }
-  const config = VITE_CONFIG_FILES.map((name) => join(root, name)).find((path) => existsSync(path));
+function viteSpaOutputDir(config: string | undefined): string {
   return config && viteConfigImportsBwfPlugin(config, readFileSync(config, 'utf8'))
     ? 'dist/client'
     : 'dist';
 }
 
-function detectViteBinary(root: string): 'vite' | 'vp' {
-  const pkg = readPackageJson(root);
-  if (pkg && hasPackageDependency(pkg, 'vite-plus')) {
-    return 'vp';
+function hasViteDependency(pkg: Record<string, unknown>): boolean {
+  return hasPackageDependency(pkg, 'vite', [
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+  ]);
+}
+
+function findVitePlusRoot(root: string, pkg = readPackageJson(root)): string | undefined {
+  if (pkg === null) {
+    return undefined;
   }
-  return 'vite';
+  if (hasPackageDependency(pkg, 'vite-plus')) {
+    return root;
+  }
+  if (hasViteDependency(pkg)) {
+    return undefined;
+  }
+  const workspaceRoot = findWorkspaceMemberRoot(root);
+  if (workspaceRoot !== undefined) {
+    const workspace = readPackageJson(workspaceRoot);
+    if (workspace && hasPackageDependency(workspace, 'vite-plus')) {
+      return workspaceRoot;
+    }
+  }
 }
 
 /**
