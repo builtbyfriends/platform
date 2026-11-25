@@ -91,8 +91,8 @@ export function inspectPackage(tarball) {
 }
 
 // Decision: Names this repository releases, so they have to come from the packed cohort.
-// The @builtbyfriends/realtime packages are released from their own repository and come from npm
-// like any other dependency. `bwf` is listed because the unscoped name on npm belongs to someone
+// The @builtbyfriends/realtime packages are released from their own repository to GitHub Packages
+// and come from there. `bwf` is listed because the unscoped name on npm belongs to someone
 // else: a request for it means something installs the CLI by its bin name instead of
 // @builtbyfriends/bwf.
 export function isReleaseCohortName(name) {
@@ -110,7 +110,14 @@ export function isReleaseCohortName(name) {
   );
 }
 
-export async function startPackedRegistry(packages) {
+const githubPackages = 'https://npm.pkg.github.com';
+const githubDownloads = '/_github_packages';
+
+export function isGithubPackagesName(name) {
+  return name.startsWith('@builtbyfriends/') && !isReleaseCohortName(name);
+}
+
+export async function startPackedRegistry(packages, { githubToken } = {}) {
   const byName = new Map(packages.map((pkg) => [pkg.manifest.name, pkg]));
   const byFile = new Map(packages.map((pkg, index) => [`/_platform_tarball/${index}.tgz`, pkg]));
   const metadata = new Map();
@@ -146,12 +153,25 @@ export async function startPackedRegistry(packages) {
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(body);
         return;
       }
+      if (url.pathname.startsWith(`${githubDownloads}/`)) {
+        const fetched = await fetch(
+          new URL(url.pathname.slice(githubDownloads.length), githubPackages),
+          {
+            headers: githubHeaders(githubToken, 'application/octet-stream'),
+            signal: AbortSignal.timeout(60_000),
+          },
+        );
+        response.writeHead(fetched.status, { 'Content-Type': 'application/octet-stream' });
+        response.end(Buffer.from(await fetched.arrayBuffer()));
+        return;
+      }
       if (isReleaseCohortName(name)) {
         // Decision: Don't let a missing local version quietly resolve to a registry release.
         response.writeHead(404).end('Package is outside the packed release cohort.');
         return;
       }
-      const upstream = new URL('https://registry.npmjs.org');
+      const fromGithub = isGithubPackagesName(name);
+      const upstream = new URL(fromGithub ? githubPackages : 'https://registry.npmjs.org');
       upstream.pathname = url.pathname;
       upstream.search = url.search;
       // Decision: Install clients need compact package metadata, not the full registry history.
@@ -161,13 +181,23 @@ export async function startPackedRegistry(packages) {
       let result = metadata.get(key);
       if (!result) {
         const fetched = await fetch(upstream, {
-          headers: { Accept: accept },
+          headers: fromGithub ? githubHeaders(githubToken, accept) : { Accept: accept },
           signal: AbortSignal.timeout(30_000),
         });
+        let contents = Buffer.from(await fetched.arrayBuffer());
+        if (fromGithub) {
+          // Decision: GitHub Packages needs a sign-in for tarballs too, and the consumer has no token,
+          // so its tarballs come through this registry.
+          contents = Buffer.from(
+            contents
+              .toString('utf8')
+              .replaceAll(`${githubPackages}/download/`, `${origin}${githubDownloads}/download/`),
+          );
+        }
         result = {
           status: fetched.status,
           type: fetched.headers.get('content-type') ?? 'application/json',
-          contents: Buffer.from(await fetched.arrayBuffer()),
+          contents,
         };
         if (result.status === 200 && result.contents.byteLength <= 16 * 1024 * 1024) {
           metadata.set(key, result);
@@ -196,4 +226,11 @@ export async function startPackedRegistry(packages) {
       await once(server, 'close');
     },
   };
+}
+
+function githubHeaders(token, accept) {
+  if (!token) {
+    throw new Error('Reading @builtbyfriends packages from GitHub Packages needs NODE_AUTH_TOKEN.');
+  }
+  return { Accept: accept, Authorization: `Bearer ${token}` };
 }

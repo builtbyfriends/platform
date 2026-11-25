@@ -84,6 +84,8 @@ jobs:
       # ci.yml's build job requests an OIDC token for remote cache uploads, so its caller must
       # grant it, though release runs only download.
       id-token: write
+    secrets:
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
   platform-ci:
     needs: [release-tag, validate-release]
@@ -93,6 +95,8 @@ jobs:
     permissions:
       contents: read
       deployments: read
+    secrets:
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
   prepublish-test:
     name: Prepublish Test
@@ -104,6 +108,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    secrets:
+      PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
   # Decision: Zack moved our packages from npm to GitHub Packages on 2026-11-25. Each package's
   # publishConfig names the registry, and the workflow's own token publishes, so nothing is stored.
@@ -123,6 +129,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
         with:
           node-version-file: .node-version

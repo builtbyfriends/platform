@@ -15,7 +15,7 @@
     "@astryxdesign/core": "catalog:",
     "@astryxdesign/theme-neutral": "catalog:",
     "@builtbyfriends/platform": "workspace:*",
-    "@builtbyfriends/realtime": "^0.1.0",
+    "@builtbyfriends/realtime": "^0.7.0",
     "@stylexjs/stylex": "catalog:",
     "hono": "catalog:platform",
     "lucide-react": "catalog:",

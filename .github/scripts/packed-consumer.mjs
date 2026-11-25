@@ -126,7 +126,7 @@ for (const entry of readdirSync(join(root, 'packages'), { withFileTypes: true })
   await run('vp', ['pm', 'pack', '--out', archive], directory);
   packages.push(inspectPackage(archive));
 }
-const registry = await startPackedRegistry(packages);
+const registry = await startPackedRegistry(packages, { githubToken: process.env.NODE_AUTH_TOKEN });
 // Decision: Packed tests have to install new local builds, even when the matching npm release is less than
 // a day old. Keep this policy inside the temporary fixture config.
 environment.XDG_CONFIG_HOME = join(work, 'config');
