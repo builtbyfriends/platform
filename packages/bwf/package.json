@@ -56,6 +56,11 @@
       "require": "./dist/index.mjs"
     },
     "./schema.json": "./schema.json",
+    "./lint": {
+      "types": "./dist/lint.d.mts",
+      "import": "./dist/lint.mjs",
+      "require": "./dist/lint.mjs"
+    },
     "./config": {
       "types": "./dist/config-entry.d.mts",
       "import": "./dist/config-entry.mjs",
@@ -302,6 +307,7 @@
     "typecheck": "tsc --noEmit --rootDir ../.."
   },
   "dependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "catalog:",
     "@builtbyfriends/deploy-cloudflare": "workspace:*",
     "@builtbyfriends/deploy-core": "workspace:*",
     "@builtbyfriends/edge": "workspace:*",
@@ -312,6 +318,7 @@
     "@builtbyfriends/realtime-mcp": "^0.1.0",
     "@cloudflare/build-output-utils": "catalog:",
     "@cloudflare/config": "catalog:",
+    "@cloudflare/oxlint-config": "catalog:",
     "@cloudflare/sandbox": "catalog:",
     "@cloudflare/vite-plugin": "catalog:",
     "@cloudflare/workers-auth": "catalog:",
@@ -331,6 +338,7 @@
     "drizzle-zod": "^0.8.3",
     "email-validator": "^2.0.4",
     "esbuild": "^0.28.2",
+    "eslint-plugin-react-you-might-not-need-an-effect": "catalog:",
     "get-tsconfig": "^4.14.3",
     "hono": "catalog:",
     "ignore": "catalog:",
@@ -340,6 +348,7 @@
     "miniflare": "catalog:",
     "minimatch": "catalog:",
     "mysql2": "^3.24.6",
+    "oxlint-plugin-react-doctor": "catalog:",
     "pg": "^8.23.1",
     "postal-mime": "catalog:",
     "proper-lockfile": "^4.1.2",

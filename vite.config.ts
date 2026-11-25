@@ -2,6 +2,7 @@ import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import cloudflare from '@cloudflare/oxlint-config';
 import { defineConfig } from 'vite-plus';
+import bwfLint from './packages/bwf/src/lint.ts';
 import { SuiteSequencer } from './test/sequencer.ts';
 
 const maxWorkers = process.env.CI ? 2 : Math.max(2, Math.floor(availableParallelism() * 0.75));
@@ -197,7 +198,7 @@ export default defineConfig({
     ],
   },
   lint: {
-    ...cloudflare,
+    ...bwfLint,
     categories: {
       correctness: 'off',
     },
@@ -208,7 +209,7 @@ export default defineConfig({
       node: true,
     },
     jsPlugins: [
-      ...(cloudflare.jsPlugins ?? []),
+      ...(bwfLint.jsPlugins ?? []),
       {
         name: 'vite-plus',
         specifier: 'vite-plus/oxlint-plugin',
@@ -220,15 +221,6 @@ export default defineConfig({
       {
         name: 'bwf',
         specifier: './scripts/lint-plugin.mjs',
-      },
-      'eslint-plugin-react-you-might-not-need-an-effect',
-      {
-        name: 'anti-slop',
-        specifier: '@aranlucas/oxlint-plugin-anti-slop',
-      },
-      {
-        name: 'react-doctor',
-        specifier: 'oxlint-plugin-react-doctor',
       },
     ],
     plugins: [...new Set([...(cloudflare.plugins ?? []), 'node', 'jsdoc'] as const)],
@@ -249,7 +241,7 @@ export default defineConfig({
       'platform/packages/api/src/admin/fate/client.generated.ts',
     ],
     overrides: [
-      ...(cloudflare.overrides ?? []),
+      ...(bwfLint.overrides ?? []),
       { files: ['**/*'], rules: unfinishedRules },
       {
         files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
@@ -356,8 +348,6 @@ export default defineConfig({
           '**/*.test-d.*',
         ],
         rules: {
-          // Decision: A describe block holds a whole file's tests, so the function size limit doesn't fit there.
-          'max-lines-per-function': 'off',
           'no-promise-executor-return': 'off',
           'quality/no-chained-type-assertions': 'off',
           'quality/no-known-value-widening': 'off',
@@ -379,7 +369,7 @@ export default defineConfig({
       },
     ],
     rules: {
-      ...cloudflare.rules,
+      ...bwfLint.rules,
       'bwf/no-comments': 'error',
       // Decision: Workers send their logs through console, and the command line tool and scripts print on purpose.
       'no-console': 'off',
@@ -388,35 +378,15 @@ export default defineConfig({
       // Decision: In untyped .mjs files this rule takes a string for an array, and its fix turned a substring check
       // into a Set of characters.
       'unicorn/prefer-set-has': 'off',
-      'react-you-might-not-need-an-effect/no-derived-state': 'error',
-      'react-you-might-not-need-an-effect/no-chain-state-updates': 'error',
-      'react-you-might-not-need-an-effect/no-event-handler': 'error',
-      'react-you-might-not-need-an-effect/no-adjust-state-on-prop-change': 'error',
-      'react-you-might-not-need-an-effect/no-reset-all-state-on-prop-change': 'error',
-      'react-you-might-not-need-an-effect/no-pass-live-state-to-parent': 'error',
-      'react-you-might-not-need-an-effect/no-pass-data-to-parent': 'error',
-      'react-you-might-not-need-an-effect/no-external-store-subscription': 'error',
-      'react-you-might-not-need-an-effect/no-initialize-state': 'error',
-      // Decision: Dillon Mulroy's anti-slop rules that Cloudflare's preset doesn't carry yet (it has the rest as
-      // `quality/*`), from a packaged copy of his repository. A cast is justified with a `Decision:` line, the one
-      // comment the comment rule keeps. Module mocking is an error, though it only knows `vi` from vitest, not from
-      // vite-plus/test, so it doesn't see our tests yet. The rest warn while older code still has reports, like the
-      // list above.
-      'anti-slop/no-module-mocking': 'error',
+      // Decision: These rules from the shared bwf preset still have reports in older code, so they warn,
+      // like the list above.
       'anti-slop/no-runtime-typeof': 'warn',
       'anti-slop/no-shape-in-symbol-names': 'warn',
       'anti-slop/no-unknown-parameters': 'warn',
       'anti-slop/require-readable-spacing': 'warn',
       'anti-slop/require-safety-comment-for-type-assertion': ['warn', { markers: ['Decision'] }],
-      // Decision: Limits that point at functions and components to split. Oxlint's complexity counts the paths through
-      // any function; React Doctor scores only components and hooks, and flags components over 300 lines or defined
-      // inside another. The size limits warn, so the list shows what to split first.
-      complexity: ['warn', { max: 15 }],
-      'max-depth': ['warn', 4],
-      'max-lines-per-function': ['warn', { max: 150, skipBlankLines: true, skipComments: true }],
-      'react-doctor/no-high-complexity-react-function': 'warn',
-      'react-doctor/no-giant-component': 'warn',
-      'react-doctor/no-nested-component-definition': 'error',
+      'react/exhaustive-effect-dependencies': 'warn',
+      'react/rule-suppression': 'warn',
       '@typescript-eslint/array-type': [
         'error',
         {

@@ -212,6 +212,8 @@ const EMPTY_PROJECT_ALLOWED_PACKAGES = new Set([
   'vite',
   'vite-plus',
   'typescript',
+  'oxlint',
+  'tsrs',
   '@rolldown/plugin-babel',
   '@vitejs/plugin-react',
   'babel-plugin-react-compiler',
@@ -229,6 +231,7 @@ const EMPTY_PROJECT_ALLOWED_SCRIPTS: Record<string, Set<string> | undefined> = {
   dev: new Set(['vite', 'vp dev']),
   build: new Set(['vite build', 'vp build']),
   preview: new Set(['vite preview', 'vp preview']),
+  lint: new Set(['oxlint']),
   postinstall: new Set(['bwf prepare']),
 };
 const EMPTY_PROJECT_STARTER_SCRIPT_COMMANDS = new Set(
