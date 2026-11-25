@@ -486,8 +486,19 @@ describe('connected app runtime reads', () => {
       Response.json({ data: sqlite.prepare(String(init.body)).all() }),
     );
     vi.stubGlobal('fetch', fetcher);
+    const logEnv = {
+      ...env,
+      CRON_FIRES_QUEUE: {
+        send() {
+          throw Error('Unexpected cron queue write');
+        },
+        sendBatch() {
+          throw Error('Unexpected cron batch write');
+        },
+      },
+    };
     try {
-      const page = await deploymentLogs(env.db, env, deployment.id, { limit: 2 });
+      const page = await deploymentLogs(env.db, logEnv, deployment.id, { limit: 2 });
       expect(page.data).toHaveLength(2);
       expect(String(fetcher.mock.calls[0]?.[1]?.body)).not.toContain('startsWith');
       if (!page.nextCursor) {
@@ -498,13 +509,13 @@ describe('connected app runtime reads', () => {
         throw Error('Invalid test cursor');
       }
       expect(cursor.scope).toBeUndefined();
-      const second = await deploymentLogs(env.db, env, deployment.id, {
+      const second = await deploymentLogs(env.db, logEnv, deployment.id, {
         limit: 2,
         cursor: page.nextCursor,
       });
       expect(second.data).toHaveLength(1);
       await expect(
-        deploymentLogs(env.db, env, deployment.id, {
+        deploymentLogs(env.db, logEnv, deployment.id, {
           cursor: btoa(JSON.stringify({ ...cursor, scope: 'customer-activity-v1' })),
         }),
       ).rejects.toThrow('Invalid deployment log cursor');
