@@ -97,6 +97,7 @@ export { get as "GET", post as "POST", DELETE as "helper" };
         join(directory, 'queues'),
         {
           runtimeEnvPath: source('env.ts'),
+          bindingHandlerPath: source('remote/binding-handler.ts'),
           projectRoot: directory,
           homeDir: tmpdir(),
           auth: null,
@@ -155,6 +156,7 @@ export { get as "GET", post as "POST", DELETE as "helper" };
         modulesRoot: output,
         scriptPath: join(output, 'worker.mjs'),
         bindings: { PUBLIC: 'public', __PLATFORM_PROXY_TOKEN: 'secret' },
+        r2Buckets: ['FILES'],
         assets: {
           directory: assets,
           binding: 'ASSETS',
@@ -164,6 +166,65 @@ export { get as "GET", post as "POST", DELETE as "helper" };
         },
       }),
     );
+    const files = await runtime.getR2Bucket('FILES');
+    const original = await files.put('note.txt', 'Original', {
+      httpMetadata: { contentType: 'text/plain', cacheControl: 'private' },
+      customMetadata: { author: 'owner' },
+    });
+    const input = { binding: 'FILES', key: 'note.txt' };
+    const denied = await runtime.dispatchFetch('https://worker/__platform/r2/get', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    expect(denied.status).toBe(403);
+    const headers = { 'content-type': 'application/json', 'x-platform-internal': 'secret' };
+    const opened = await runtime.dispatchFetch('https://worker/__platform/r2/get', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+    });
+    expect(opened.status).toBe(200);
+    expect(await opened.text()).toBe('Original');
+    expect(
+      JSON.parse(decodeURIComponent(opened.headers.get('x-platform-r2-object') ?? '')),
+    ).toMatchObject({
+      key: 'note.txt',
+      etag: original.etag,
+      httpMetadata: { cacheControl: 'private' },
+      customMetadata: { author: 'owner' },
+    });
+    const changed = await runtime.dispatchFetch('https://worker/__platform/r2/put-conditional', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...input,
+        value: 'Updated',
+        onlyIf: { etagMatches: original.etag },
+        httpMetadata: { contentType: 'text/plain', cacheControl: 'private' },
+        customMetadata: { author: 'owner' },
+      }),
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ key: 'note.txt' });
+    const stale = await runtime.dispatchFetch('https://worker/__platform/r2/put-conditional', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...input,
+        value: 'Stale overwrite',
+        onlyIf: { etagMatches: original.etag },
+      }),
+    });
+    expect(stale.status).toBe(200);
+    expect(await stale.json()).toBeNull();
+    const saved = await files.get('note.txt');
+    expect(await saved?.text()).toBe('Updated');
+    expect(saved?.httpMetadata).toMatchObject({
+      contentType: 'text/plain',
+      cacheControl: 'private',
+    });
+    expect(saved?.customMetadata).toEqual({ author: 'owner' });
     const hello = await runtime.dispatchFetch('https://app.test/hello');
     expect(await hello.json()).toEqual({ path: '/hello', rewritten: false, public: 'public' });
     expect(hello.headers.get('x-user-middleware')).toBe('ran');
