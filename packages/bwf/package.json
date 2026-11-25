@@ -301,6 +301,9 @@
       "import": "./dist/deploy.mjs"
     }
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "node scripts/sync-docs.mjs && vp pack",
     "dev": "vp pack --watch",
@@ -432,8 +435,5 @@
   },
   "engines": {
     "node": "^24.22.0 || >=26.12.0"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   }
 }
