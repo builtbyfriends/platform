@@ -189,7 +189,15 @@ function parseFollowAfter(value: string): number {
 /** Historical Analytics Engine pages use a fixed upper bound; clients exhaust nextCursor before advancing to watermark. */
 export async function deploymentLogs(
   db: Db,
-  env: ApiEnv['Bindings'],
+  env: Pick<
+    ApiEnv['Bindings'],
+    | 'DEV_AUTH_BYPASS'
+    | 'PLATFORM_ENV'
+    | 'PLATFORM_RUNTIME_LOGS'
+    | 'LOGS_DATASET'
+    | 'CF_ACCOUNT_ID'
+    | 'CF_API_TOKEN'
+  >,
   id: string,
   options: {
     since?: string;
