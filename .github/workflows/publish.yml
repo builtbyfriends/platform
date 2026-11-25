@@ -4,15 +4,50 @@ on:
   push:
     tags:
       - 'v*'
+    # Decision: Zack asked on 2026-11-25 for releases to start from a version bump on main, since agent sessions
+    # can't push tags. A bump with no matching tag yet releases that version and tags it at the end.
+    branches: [main]
+    paths:
+      - 'packages/bwf/package.json'
+      - '.github/workflows/publish.yml'
 
 permissions: {}
 
 jobs:
-  validate-release:
-    name: Validate release tag
+  release-tag:
+    name: Find the release tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag="v$(node -p "require('./packages/bwf/package.json').version")"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already tagged, so there's nothing to release."
+          else
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+  validate-release:
+    name: Validate release tag
+    needs: release-tag
+    if: needs.release-tag.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.release-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,7 +90,7 @@ jobs:
       pull-requests: read
 
   publish:
-    needs: [ci, platform-ci, prepublish-test]
+    needs: [release-tag, ci, platform-ci, prepublish-test]
     runs-on: ubuntu-latest
     environment: Release
     permissions:
@@ -63,6 +98,7 @@ jobs:
       id-token: write
     env:
       PLATFORM_SOURCE_REVISION: ${{ github.sha }}
+      RELEASE_TAG: ${{ needs.release-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,3 +118,16 @@ jobs:
         env:
           RELEASE_NPM_TAG: ${{ steps.release.outputs.npm-tag }}
         run: vp pm publish -r --access public --tag "$RELEASE_NPM_TAG" --no-git-checks
+
+  tag-release:
+    name: Tag the release
+    if: github.ref_type == 'branch'
+    needs: [release-tag, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.release-tag.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
