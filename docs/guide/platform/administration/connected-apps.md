@@ -139,6 +139,23 @@ Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads 
 
 Activity reads the current deployment's last hour with up to 50 invocations per page. Messages can arrive after a request finishes. With minimal runtime logging, `partial: true` indicates that URLs and message bodies weren't collected. URL query strings and fragments are omitted. Failed reads return `available: false`; local development doesn't substitute sample logs. These calls don't retry jobs, change data or deploy code.
 
+### Open and edit resource contents
+
+The resource inventory includes an `actions` array. Each action supplies its ID, label, read/write effect, bounded input fields and result kind. Use those descriptors to offer supported operations. The connected application must check its own person's or bot's permission to read or change the project before forwarding a call.
+
+Send `POST /app-billing/resources.execute` with `{ project, owner, resourceId, action, input }`. Choose the resource ID from the inventory. These calls don't accept a binding name, provider command or SQL.
+
+| Action           | Input                         | Result                                                                                  |
+| ---------------- | ----------------------------- | --------------------------------------------------------------------------------------- |
+| `files.readText` | `{ key }`                     | `file-text`: UTF-8 contents, content type, size, ETag and whether editing is available. |
+| `files.saveText` | `{ key, text, expectedEtag }` | `file-saved`: the key and new ETag. Pass the ETag from the opened file.                 |
+| `keys.list`      | `{ prefix?, cursor? }`        | `keys`: up to 50 names and expiration times, with a continuation cursor.                |
+| `keys.read`      | `{ key }`                     | `key-value`: bounded text contents.                                                     |
+
+Text previews and saves are limited to 64 KiB of UTF-8. Binary files aren't editable here. File saves preserve existing HTTP and custom metadata and require a conditional-write-capable app deployment. Older deployments remain read-only or return `unavailable`; saves don't fall back to unconditional writes. An ETag mismatch returns `conflict`. If a save can't be confirmed, `unknown` asks the caller to reopen the file and check it before another edit. Keep the unsaved draft for either result.
+
+Credential-named keys aren't shown or read. JSON key values redact credential-named fields, including nested fields. This uses names and doesn't detect secrets in ordinary text. Missing, unsupported or oversized values return `unavailable` with a reason. Queue resources can be listed, but don't advertise actions yet.
+
 ### Custom domains and sign-in for an application's apps
 
 An application can add custom domains to its people's apps and put an app behind sign-in. Both depend on the payer's plan: add `"customDomains": true` or `"protection": true` to a plan in the application's plan list. A payer on another plan gets `plan_required` with the `feature` it lacks. Custom domains also need the installation's `customDomains` capability, or the calls answer `CAPABILITY_UNAVAILABLE`.

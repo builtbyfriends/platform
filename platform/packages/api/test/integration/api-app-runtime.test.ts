@@ -599,3 +599,289 @@ it('reads a group resource only for that connected app and exact group owner', a
     ).status,
   ).toBe(404);
 });
+
+describe('connected app resource actions', () => {
+  const execute = (action: string, input: unknown, resourceId = 'res_files') =>
+    call('resources.execute', { project: project.id, resourceId, action, input });
+  const file = (
+    content = 'Hello',
+    options: { etag?: string; native?: boolean; contentType?: string } = {},
+  ) => {
+    const etag = options.etag ?? 'original-etag';
+    const headers = new Headers({
+      'content-type': options.contentType ?? 'text/plain',
+      etag: `"${etag}"`,
+    });
+    if (options.native !== false) {
+      headers.set(
+        'x-platform-r2-object',
+        encodeURIComponent(
+          JSON.stringify({
+            key: 'note.txt',
+            size: new TextEncoder().encode(content).length,
+            etag,
+            httpMetadata: { contentType: 'text/plain', cacheControl: 'private' },
+            customMetadata: { author: 'owner' },
+          }),
+        ),
+      );
+    }
+    return new Response(content, { headers });
+  };
+  beforeEach(async () => {
+    await env.db.insert(resources).values({
+      id: 'res_keys',
+      project_id: project.id,
+      type: 'kv',
+      cf_id: 'private-namespace',
+      binding_name: 'CACHE',
+    });
+  });
+  it('describes only supported bounded actions without provider identifiers', async () => {
+    const result = await payload(call('projects.resources', { project: project.id }));
+    expect(result).toMatchObject({
+      data: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'res_files',
+            actions: [
+              expect.objectContaining({
+                id: 'files.readText',
+                effect: 'read',
+                result: 'file-text',
+              }),
+              expect.objectContaining({
+                id: 'files.saveText',
+                effect: 'write',
+                fields: [
+                  expect.objectContaining({ name: 'key', maxLength: 1024 }),
+                  expect.objectContaining({ name: 'text', maxLength: 65_536 }),
+                ],
+              }),
+            ],
+          }),
+          expect.objectContaining({ id: 'res_queue', actions: [] }),
+        ]),
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private-namespace');
+  });
+  it('requires the connected client, exact owner and project resource', async () => {
+    const body = {
+      project: project.id,
+      resourceId: 'res_files',
+      action: 'files.readText',
+      input: { key: 'note.txt' },
+    };
+    expect((await call('resources.execute', body, 'Basic bad')).status).toBe(401);
+    expect(
+      (await call('resources.execute', { ...body, owner: { person: 'someone-else' } })).status,
+    ).toBe(404);
+    expect((await call('resources.execute', { ...body, project: other.id })).status).toBe(404);
+    expect((await execute('files.readText', { key: 'note.txt' }, 'res_foreign')).status).toBe(404);
+    expect(proxy).not.toHaveBeenCalled();
+  });
+  it('rejects unknown actions, injected fields, unbounded or incomplete inputs before provider access', async () => {
+    for (const [action, input] of [
+      ['sql.run', { sql: 'DROP TABLE notes' }],
+      ['files.readText', { key: 'note.txt', binding: 'OTHER' }],
+      ['files.readText', { key: '' }],
+      ['files.saveText', { key: 'note.txt', text: 'x' }],
+      ['files.saveText', { key: 'note.txt', text: 'é'.repeat(40_000), expectedEtag: 'old' }],
+      ['keys.list', { cursor: 'x'.repeat(4097) }],
+    ] as const) {
+      expect((await execute(action, input)).status).toBe(400);
+    }
+    expect(proxy).not.toHaveBeenCalled();
+  });
+  it('opens native text and saves through only a conditional write with all metadata preserved', async () => {
+    proxy.mockResolvedValueOnce(file());
+    expect(await payload(execute('files.readText', { key: 'note.txt' }))).toMatchObject({
+      data: { kind: 'file-text', text: 'Hello', etag: 'original-etag', size: 5, editable: true },
+    });
+    proxy
+      .mockResolvedValueOnce(file())
+      .mockResolvedValueOnce(Response.json({ key: 'note.txt', etag: 'new-etag' }));
+    expect(
+      await payload(
+        execute('files.saveText', {
+          key: 'note.txt',
+          text: 'Updated',
+          expectedEtag: 'original-etag',
+        }),
+      ),
+    ).toMatchObject({ data: { kind: 'file-saved', key: 'note.txt', etag: 'new-etag' } });
+    const [url, init] = proxy.mock.calls[2];
+    expect(String(url)).toBe('https://proxy/r2/put-conditional');
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      projectId: project.id,
+      binding: 'UPLOADS',
+      key: 'note.txt',
+      value: 'Updated',
+      onlyIf: { etagMatches: 'original-etag' },
+      httpMetadata: { contentType: 'text/plain', cacheControl: 'private' },
+      customMetadata: { author: 'owner' },
+    });
+  });
+  it('reports unknown when authorization lookup fails after the provider accepted a save', async () => {
+    proxy.mockResolvedValueOnce(file()).mockImplementationOnce(async () => {
+      vi.spyOn(env.db, 'select').mockImplementationOnce(() => {
+        throw new Error('Database unavailable');
+      });
+      return Response.json({ key: 'note.txt', etag: 'saved-etag' });
+    });
+    try {
+      expect(
+        await payload(
+          execute('files.saveText', {
+            key: 'note.txt',
+            text: 'Saved',
+            expectedEtag: 'original-etag',
+          }),
+        ),
+      ).toMatchObject({ data: { kind: 'unknown' } });
+      expect(proxy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+  it('refuses stale content before writing and treats a provider precondition miss as conflict', async () => {
+    proxy.mockResolvedValueOnce(file('Hello', { etag: 'someone-else' }));
+    expect(
+      await payload(
+        execute('files.saveText', { key: 'note.txt', text: 'New', expectedEtag: 'original-etag' }),
+      ),
+    ).toMatchObject({ data: { kind: 'conflict' } });
+    expect(proxy).toHaveBeenCalledTimes(1);
+    proxy.mockResolvedValueOnce(file()).mockResolvedValueOnce(Response.json(null));
+    expect(
+      await payload(
+        execute('files.saveText', { key: 'note.txt', text: 'New', expectedEtag: 'original-etag' }),
+      ),
+    ).toMatchObject({ data: { kind: 'conflict' } });
+  });
+  it('keeps legacy reads read-only and never downgrades unsupported or uncertain conditional writes', async () => {
+    proxy.mockResolvedValueOnce(file('Hello', { native: false }));
+    expect(await payload(execute('files.readText', { key: 'note.txt' }))).toMatchObject({
+      data: { kind: 'file-text', editable: false },
+    });
+    proxy.mockResolvedValueOnce(file('Hello', { native: false }));
+    expect(
+      await payload(
+        execute('files.saveText', { key: 'note.txt', text: 'New', expectedEtag: 'original-etag' }),
+      ),
+    ).toMatchObject({ data: { kind: 'unavailable' } });
+    expect(proxy).toHaveBeenCalledTimes(2);
+    for (const response of [
+      new Response('unsupported', { status: 501 }),
+      new Response('failed', { status: 502 }),
+      Response.json({ success: true }),
+    ]) {
+      proxy.mockResolvedValueOnce(file()).mockResolvedValueOnce(response);
+      expect(
+        await payload(
+          execute('files.saveText', {
+            key: 'note.txt',
+            text: 'New',
+            expectedEtag: 'original-etag',
+          }),
+        ),
+      ).toMatchObject({ data: { kind: response.status === 501 ? 'unavailable' : 'unknown' } });
+    }
+    expect(proxy.mock.calls.filter(([url]) => String(url).endsWith('/r2/put'))).toHaveLength(0);
+  });
+  it('refuses binary, oversized, malformed and missing file responses', async () => {
+    const broken = file();
+    broken.headers.set('x-platform-r2-object', '%broken');
+    for (const response of [
+      file('x'.repeat(65_537)),
+      file('\u0000binary'),
+      file('plain', { contentType: 'image/png' }),
+      new Response(new Uint8Array([255, 254]), {
+        headers: { etag: '"raw"', 'content-type': 'text/plain' },
+      }),
+      broken,
+      Response.json(null),
+    ]) {
+      proxy.mockResolvedValueOnce(response);
+      expect(await payload(execute('files.readText', { key: 'note.txt' }))).toMatchObject({
+        data: { kind: 'unavailable' },
+      });
+    }
+  });
+  it('rechecks scope after reads and before writes', async () => {
+    proxy.mockImplementationOnce(async () => {
+      await env.db
+        .update(resources)
+        .set({ cf_id: 'new-bucket' })
+        .where(eq(resources.id, 'res_files'));
+      return file();
+    });
+    expect((await execute('files.readText', { key: 'note.txt' })).status).toBe(409);
+    proxy.mockImplementationOnce(async () => {
+      await env.db
+        .update(resources)
+        .set({ binding_name: 'OTHER' })
+        .where(eq(resources.id, 'res_files'));
+      return file();
+    });
+    expect(
+      await payload(
+        execute('files.saveText', { key: 'note.txt', text: 'New', expectedEtag: 'original-etag' }),
+      ),
+    ).toMatchObject({ data: { kind: 'unknown' } });
+    expect(proxy).toHaveBeenCalledTimes(2);
+  });
+  it('lists bounded keys, excludes credential keys and redacts nested JSON credential values', async () => {
+    proxy.mockResolvedValueOnce(
+      Response.json({
+        keys: [{ name: 'settings' }, { name: 'password' }, { name: 'session', expiration: 1000 }],
+        list_complete: false,
+        cursor: 'next',
+      }),
+    );
+    expect(
+      await payload(execute('keys.list', { prefix: '', cursor: 'previous' }, 'res_keys')),
+    ).toMatchObject({
+      data: {
+        kind: 'keys',
+        keys: [
+          { name: 'settings', expiration: null },
+          { name: 'session', expiration: 1000 },
+        ],
+        cursor: 'next',
+      },
+    });
+    proxy.mockResolvedValueOnce(
+      Response.json('{"title":"Hello","nested":{"api_key":"secret-value"}}'),
+    );
+    const result = await payload(execute('keys.read', { key: 'settings' }, 'res_keys'));
+    expect(result).toMatchObject({
+      data: { text: JSON.stringify({ title: 'Hello', nested: { api_key: '[redacted]' } }) },
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-value');
+    const before = proxy.mock.calls.length;
+    expect(await payload(execute('keys.read', { key: 'access-token' }, 'res_keys'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    expect(proxy).toHaveBeenCalledTimes(before);
+  });
+  it('rejects malformed, missing and oversized key values and lists', async () => {
+    for (const value of [
+      { keys: 'bad' },
+      { keys: [{ name: 'name', expiration: 'bad' }], list_complete: true },
+      { keys: [], list_complete: false },
+    ]) {
+      proxy.mockResolvedValueOnce(Response.json(value));
+      expect(await payload(execute('keys.list', {}, 'res_keys'))).toMatchObject({
+        data: { kind: 'unavailable' },
+      });
+    }
+    for (const value of [null, { bad: true }, 'x'.repeat(65_537), '\u0000binary']) {
+      proxy.mockResolvedValueOnce(Response.json(value));
+      expect(await payload(execute('keys.read', { key: 'settings' }, 'res_keys'))).toMatchObject({
+        data: { kind: 'unavailable' },
+      });
+    }
+  });
+});

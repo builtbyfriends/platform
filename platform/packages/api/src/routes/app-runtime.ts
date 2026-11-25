@@ -10,6 +10,7 @@ import { OperatorError } from '../operator/common.ts';
 import { deploymentLogs } from '../operator/deployment-operations.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
+import { actionInput, executeResourceAction, resourceActions } from './app-runtime-actions.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
 type ResolveProject = (
@@ -336,6 +337,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                     ? 'queue'
                     : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
+          actions: context.env.PLATFORM_PROXY ? resourceActions(resource) : [],
         })),
       },
     });
@@ -401,6 +403,82 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           appId: project.id,
           resourceId: resource.id,
           reason: 'Could not read this resource. Refresh and try again.',
+        },
+      });
+    }
+  });
+  app.post('/resources.execute', bodyLimit({ maxSize: 420_000 }), async (context) => {
+    const body: unknown = await context.req.json().catch(() => null);
+    if (!isRecord(body) || !text(body.resourceId) || !text(body.action)) {
+      return context.json({ error: 'invalid_action' }, 400);
+    }
+    const input = actionInput(body.action, body.input);
+    if (!input) {
+      return context.json({ error: 'invalid_action' }, 400);
+    }
+    const owner = runtimeOwner(body.owner);
+    if (!owner) {
+      return context.json({ error: 'invalid_owner' }, 400);
+    }
+    const project = await resolveProject(context, body.project, owner);
+    if (!project) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    const resource = (await getProjectResources(context.get('db'), project.id)).find(
+      (entry) => entry.id === body.resourceId,
+    );
+    if (!resource) {
+      return context.json({ error: 'unknown_resource' }, 404);
+    }
+    const stillAuthorized = async () => {
+      const current = await resolveProject(context, project.id, owner);
+      const currentResource = (await getProjectResources(context.get('db'), project.id)).find(
+        (entry) => entry.id === resource.id,
+      );
+      return Boolean(
+        current &&
+        current.user_id === project.user_id &&
+        current.proxy_token_gen === project.proxy_token_gen &&
+        current.active_deployment_id === project.active_deployment_id &&
+        currentResource?.cf_id === resource.cf_id &&
+        currentResource?.binding_name === resource.binding_name,
+      );
+    };
+    try {
+      const data = await executeResourceAction(
+        context.env,
+        project,
+        resource,
+        body.action,
+        input,
+        stillAuthorized,
+      );
+      if (!(await stillAuthorized())) {
+        if (body.action === 'files.saveText') {
+          return context.json({
+            data: {
+              appId: project.id,
+              resourceId: resource.id,
+              action: body.action,
+              kind: 'unknown',
+              reason: 'This resource changed during the save. Open it again to check the result.',
+            },
+          });
+        }
+        return context.json({ error: 'resource_changed' }, 409);
+      }
+      return context.json({ data });
+    } catch {
+      return context.json({
+        data: {
+          appId: project.id,
+          resourceId: resource.id,
+          action: body.action,
+          kind: body.action === 'files.saveText' ? 'unknown' : 'unavailable',
+          reason:
+            body.action === 'files.saveText'
+              ? 'The save could not be confirmed. Open the file again to check the result.'
+              : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }
