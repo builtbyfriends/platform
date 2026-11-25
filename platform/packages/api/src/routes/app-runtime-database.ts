@@ -471,20 +471,19 @@ function parseCells(value: string, count: number, full = false) {
     throw Error('Invalid database cells.');
   }
   return cells.map((cell: unknown): CellMetadata & { text: string | null } => {
-    if (
-      !Array.isArray(cell) ||
-      cell.length !== 3 ||
-      typeof cell[0] !== 'string' ||
-      typeof cell[2] !== 'string' ||
-      !/^(?:[0-9A-F]{2})*$/.test(cell[2])
-    ) {
+    if (!Array.isArray(cell) || cell.length !== 3) {
       throw Error('Invalid database cell.');
     }
-    const [kind, totalBytes, hex] = cell;
+    const kind: unknown = cell[0];
+    const totalBytes: unknown = cell[1];
+    const hex: unknown = cell[2];
+    if (typeof kind !== 'string' || typeof hex !== 'string' || !/^(?:[0-9A-F]{2})*$/.test(hex)) {
+      throw Error('Invalid database cell.');
+    }
     if (kind === 'protected' && totalBytes === null && hex === '') {
       return { type: 'protected', totalBytes: null, truncated: false, text: null };
     }
-    if (!Number.isSafeInteger(totalBytes) || totalBytes < 0) {
+    if (typeof totalBytes !== 'number' || !Number.isSafeInteger(totalBytes) || totalBytes < 0) {
       throw Error('Invalid database cell size.');
     }
     if (kind === 'null' && totalBytes === 0 && hex === '') {
@@ -529,37 +528,40 @@ function parseKey(value: unknown, count: number): RowKey | null {
   const result: RowKey = [];
   let bytes = 0;
   for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      return null;
+    }
+    const kind: unknown = entry[0];
+    const hex: unknown = entry[1];
     if (
-      !Array.isArray(entry) ||
-      entry.length !== 2 ||
-      (entry[0] !== 'text' && entry[0] !== 'integer') ||
-      typeof entry[1] !== 'string' ||
-      !/^(?:[0-9A-F]{2})*$/.test(entry[1])
+      (kind !== 'text' && kind !== 'integer') ||
+      typeof hex !== 'string' ||
+      !/^(?:[0-9A-F]{2})*$/.test(hex)
     ) {
       return null;
     }
-    bytes += entry[1].length / 2;
+    bytes += hex.length / 2;
     if (bytes > 1024) {
       return null;
     }
-    result.push([entry[0], entry[1]]);
+    result.push([kind, hex]);
   }
   return result;
 }
+const unavailableCell = () => ({
+  kind: 'unavailable' as const,
+  reason:
+    'This row or table changed, or its reference expired. Refresh the table and open the value again.',
+});
 export async function databaseCell(
   env: ApiEnv['Bindings'],
   project: Project,
   resource: Resource,
   input: { table: string; column: string; rowToken: string },
 ) {
-  const unavailable = () => ({
-    kind: 'unavailable' as const,
-    reason:
-      'This row or table changed, or its reference expired. Refresh the table and open the value again.',
-  });
   const parts = input.rowToken.split('.');
   if (parts.length !== 2 || !parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) {
-    return unavailable();
+    return unavailableCell();
   }
   const signature = decode(parts[1]);
   const expected = await signRow(env, project, resource, parts[0]);
@@ -568,7 +570,7 @@ export async function databaseCell(
     signature.length !== expected.length ||
     signature.reduce((difference, byte, index) => difference | (byte ^ expected[index]), 0) !== 0
   ) {
-    return unavailable();
+    return unavailableCell();
   }
   const payload: unknown = JSON.parse(
     new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(decode(parts[0])),
@@ -581,7 +583,7 @@ export async function databaseCell(
     payload.expires < Date.now() ||
     payload.expires > Date.now() + 900_000
   ) {
-    return unavailable();
+    return unavailableCell();
   }
   const query = databaseQuery(env, project, resource);
   const schema = await columns(query, input.table);
@@ -596,7 +598,7 @@ export async function databaseCell(
     primary.some((entry) => entry.redacted) ||
     payload.schema !== (await schemaHash(schema))
   ) {
-    return unavailable();
+    return unavailableCell();
   }
   const params = key.map((entry) =>
     new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
@@ -619,14 +621,14 @@ export async function databaseCell(
     !isRecord(result.results[0]) ||
     typeof result.results[0].cells !== 'string'
   ) {
-    return unavailable();
+    return unavailableCell();
   }
   const cell = parseCells(result.results[0].cells, 1, true)[0];
   if (cell.type === 'protected' || cell.totalBytes === null) {
-    return unavailable();
+    return unavailableCell();
   }
   if ((await schemaHash(await columns(query, input.table))) !== payload.schema) {
-    return unavailable();
+    return unavailableCell();
   }
   return {
     kind: 'cell' as const,
