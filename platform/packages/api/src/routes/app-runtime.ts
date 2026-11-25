@@ -334,7 +334,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       });
     }
   });
-  app.post('/resources.execute', bodyLimit({ maxSize: 420_000 }), async (context) => {
+  app.post('/resources.execute', bodyLimit({ maxSize: 820_000 }), async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
     if (!isRecord(body) || !text(body.resourceId) || !text(body.action)) {
       return context.json({ error: 'invalid_action' }, 400);
@@ -383,6 +383,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       );
     };
     const keyWrite = body.action === 'keys.save';
+    const cellWrite = body.action === 'database.cell.save';
     const queueWrite = body.action === 'queue.pause' || body.action === 'queue.resume';
     try {
       if (resource.type === 'vectorize') {
@@ -407,24 +408,26 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         stillAuthorized,
       );
       if (
-        (queueWrite || keyAction) &&
+        (queueWrite || keyAction || cellWrite) &&
         (data.kind === 'unavailable' || data.kind === 'conflict' || data.kind === 'unknown')
       ) {
         return context.json({ data });
       }
       if (!(await stillAuthorized())) {
-        if (body.action === 'files.saveText' || queueWrite || keyWrite) {
+        if (body.action === 'files.saveText' || queueWrite || keyWrite || cellWrite) {
           return context.json({
             data: {
               appId: project.id,
               resourceId: resource.id,
               action: body.action,
               kind: 'unknown',
-              reason: keyWrite
-                ? 'The key update could not be confirmed. Wait, then open it before making another change.'
-                : queueWrite
-                  ? 'The app connection changed while updating delivery. Refresh queue status before making another change.'
-                  : 'This resource changed during the save. Open it again to check the result.',
+              reason: cellWrite
+                ? 'The save could not be confirmed. Read the latest value before making another change.'
+                : keyWrite
+                  ? 'The key update could not be confirmed. Wait, then open it before making another change.'
+                  : queueWrite
+                    ? 'The app connection changed while updating delivery. Refresh queue status before making another change.'
+                    : 'This resource changed during the save. Open it again to check the result.',
             },
           });
         }
@@ -438,20 +441,24 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           resourceId: resource.id,
           action: body.action,
           kind:
-            body.action === 'files.saveText' || queueWrite || keyWrite ? 'unknown' : 'unavailable',
-          reason: keyWrite
-            ? 'The key update could not be confirmed. Wait, then open it before making another change.'
-            : queueWrite
-              ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
-              : body.action === 'index.info' || body.action === 'index.query'
-                ? 'Could not read this search index. Check its connection and query dimensions, then try again.'
-                : body.action === 'files.saveText'
-                  ? 'The save could not be confirmed. Open the file again to check the result.'
-                  : body.action === 'queue.status'
-                    ? 'Could not verify queue status. Refresh and try again.'
-                    : body.action === 'database.schema' || body.action === 'database.indexes'
-                      ? 'Could not read this table structure. Refresh the table list and try again.'
-                      : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
+            body.action === 'files.saveText' || queueWrite || keyWrite || cellWrite
+              ? 'unknown'
+              : 'unavailable',
+          reason: cellWrite
+            ? 'The save could not be confirmed. Read the latest value before making another change.'
+            : keyWrite
+              ? 'The key update could not be confirmed. Wait, then open it before making another change.'
+              : queueWrite
+                ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
+                : body.action === 'index.info' || body.action === 'index.query'
+                  ? 'Could not read this search index. Check its connection and query dimensions, then try again.'
+                  : body.action === 'files.saveText'
+                    ? 'The save could not be confirmed. Open the file again to check the result.'
+                    : body.action === 'queue.status'
+                      ? 'Could not verify queue status. Refresh and try again.'
+                      : body.action === 'database.schema' || body.action === 'database.indexes'
+                        ? 'Could not read this table structure. Refresh the table list and try again.'
+                        : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }
