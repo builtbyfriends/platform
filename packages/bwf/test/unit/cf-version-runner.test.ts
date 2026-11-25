@@ -2029,7 +2029,37 @@ it('refuses to pin when a required secret is absent from the live version', asyn
         bindings: [],
         requiredNames: ['AUTH_SECRET'],
       }),
-    ).toBe(false);
+    ).toEqual({ diagnostic: expect.stringContaining('`AUTH_SECRET`') });
+  } finally {
+    prepared.dispose();
+  }
+});
+
+it('names live secrets that the build also sets as vars', async () => {
+  const prepared = await output({ vars: { FLAG: 'true', MODE: 'dev', OTHER: 'x' } });
+  try {
+    const pinned = await pinActiveWorkerSecrets({
+      output: prepared,
+      activeVersionId: '11111111-1111-4111-8111-111111111111',
+      bindings: [
+        { name: 'FLAG', type: 'secret_text' },
+        { name: 'MODE', type: 'secret_text' },
+        { name: 'TOKEN', type: 'secret_text' },
+      ],
+      requiredNames: [],
+    });
+    expect(pinned).toEqual({
+      diagnostic: expect.stringContaining('named `FLAG`, `MODE`, and this build'),
+    });
+    expect(prepared.activeSecrets).toBeUndefined();
+    const message = formatCloudflareActivationError({
+      ok: false,
+      reason: 'inheritance-source-changed',
+      diagnostic: (pinned as { diagnostic: string }).diagnostic,
+    });
+    expect(message).toContain("the live Worker's secrets can't be carried over");
+    expect(message).toContain('wrangler secret delete');
+    expect(message).not.toContain('not the latest upload');
   } finally {
     prepared.dispose();
   }
