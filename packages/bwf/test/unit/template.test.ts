@@ -55,7 +55,7 @@ describe('Vite+ starter', () => {
 describe('Starter lint', () => {
   // Decision: A new app lints with the same Oxlint and tsrs as this repository, so the bwf preset behaves the
   // same in both.
-  it('pins oxlint and tsrs to the versions this repository lints with', () => {
+  it('pins oxlint, tsrs and the lint plugins to the versions this repository lints with', () => {
     const workspace = readFileSync(
       new URL('../../../../pnpm-workspace.yaml', import.meta.url),
       'utf8',
@@ -69,6 +69,19 @@ describe('Starter lint', () => {
 
     expect(`=${SCAFFOLD_BASE_DEV_DEPENDENCIES.oxlint}`).toBe(vitePlus.dependencies.oxlint);
     expect(SCAFFOLD_BASE_DEV_DEPENDENCIES.tsrs).toBe(/^ {2}tsrs: (\S+)$/m.exec(workspace)?.[1]);
+
+    for (const name of [
+      '@aranlucas/oxlint-plugin-anti-slop',
+      '@cloudflare/oxlint-config',
+      'eslint-plugin-react-you-might-not-need-an-effect',
+      'oxlint-plugin-react-doctor',
+    ] as const) {
+      const quoted = name.startsWith('@') ? `'${name}'` : name;
+
+      expect(SCAFFOLD_BASE_DEV_DEPENDENCIES[name]).toBe(
+        new RegExp(`^ {2}${quoted.replaceAll('/', '\\/')}: (\\S+)$`, 'm').exec(workspace)?.[1],
+      );
+    }
   });
 
   it.each(['spa', 'sqlite', 'postgresql', 'mysql'] as const)(

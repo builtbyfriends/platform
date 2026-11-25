@@ -431,9 +431,6 @@ importers:
 
   packages/bwf:
     dependencies:
-      '@aranlucas/oxlint-plugin-anti-slop':
-        specifier: 'catalog:'
-        version: 0.1.1(oxlint@1.94.0(vite-plus@1.7.0(@astrojs/compiler-rs@0.5.3)(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/ui@5.1.0)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(playwright@1.65.1)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.73.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)))
       '@builtbyfriends/deploy-cloudflare':
         specifier: workspace:*
         version: link:../deploy-cloudflare
@@ -464,9 +461,6 @@ importers:
       '@cloudflare/config':
         specifier: 'catalog:'
         version: 1.0.0-rc.3
-      '@cloudflare/oxlint-config':
-        specifier: 'catalog:'
-        version: 0.1.0(eslint@10.13.0(jiti@2.7.0)(supports-color@10.2.2))(oxlint@1.94.0(vite-plus@1.7.0(@astrojs/compiler-rs@0.5.3)(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/ui@5.1.0)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(playwright@1.65.1)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.73.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)))(supports-color@10.2.2)(tsrs@0.25.0-ts7.1.0-beta)(typescript@7.0.2)
       '@cloudflare/sandbox':
         specifier: 'catalog:'
         version: 1.0.3
@@ -527,9 +521,6 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
-      eslint-plugin-react-you-might-not-need-an-effect:
-        specifier: 'catalog:'
-        version: 1.3.1(eslint@10.13.0(jiti@2.7.0)(supports-color@10.2.2))
       get-tsconfig:
         specifier: ^4.14.3
         version: 4.14.3
@@ -557,9 +548,6 @@ importers:
       mysql2:
         specifier: ^3.24.6
         version: 3.24.6(@types/node@26.6.6)
-      oxlint-plugin-react-doctor:
-        specifier: 'catalog:'
-        version: 0.9.23
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -579,9 +567,15 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
     devDependencies:
+      '@aranlucas/oxlint-plugin-anti-slop':
+        specifier: 'catalog:'
+        version: 0.1.1(oxlint@1.94.0(vite-plus@1.7.0(@astrojs/compiler-rs@0.5.3)(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/ui@5.1.0)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(playwright@1.65.1)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.73.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)))
       '@cloudflare/codemods':
         specifier: 'catalog:'
         version: 0.9.0
+      '@cloudflare/oxlint-config':
+        specifier: 'catalog:'
+        version: 0.1.0(eslint@10.13.0(jiti@2.7.0)(supports-color@10.2.2))(oxlint@1.94.0(vite-plus@1.7.0(@astrojs/compiler-rs@0.5.3)(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/ui@5.1.0)(esbuild@0.28.2)(happy-dom@21.0.4)(jiti@2.7.0)(playwright@1.65.1)(sass-embedded@1.104.1)(sass@1.104.1)(svelte@5.57.2(@typescript-eslint/types@8.73.0))(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)))(supports-color@10.2.2)(tsrs@0.25.0-ts7.1.0-beta)(typescript@7.0.2)
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.5.17
@@ -612,6 +606,9 @@ importers:
       ci-info:
         specifier: 'catalog:'
         version: 4.5.0
+      eslint-plugin-react-you-might-not-need-an-effect:
+        specifier: 'catalog:'
+        version: 1.3.1(eslint@10.13.0(jiti@2.7.0)(supports-color@10.2.2))
       estree-walker:
         specifier: ^3.0.3
         version: 3.0.3
@@ -627,6 +624,9 @@ importers:
       ofetch:
         specifier: 2.0.0-alpha.3
         version: 2.0.0-alpha.3
+      oxlint-plugin-react-doctor:
+        specifier: 'catalog:'
+        version: 0.9.23
       pathslash:
         specifier: 'catalog:'
         version: 0.1.0

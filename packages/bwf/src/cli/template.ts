@@ -34,6 +34,13 @@ export const SCAFFOLD_BASE_DEV_DEPENDENCIES = {
   // catalog. The bwf lint preset is type-aware, and tsrs is the backend Oxlint loads for that.
   oxlint: '1.94.0',
   tsrs: '0.25.0-ts7.1.0-beta',
+  // Decision: The app installs the preset's plugins, not bwf. Cloudflare's preset brings a plugin whose
+  // TypeScript peer stops before 7, so npm picks TypeScript 6 for it when bwf installs alone, and then refuses
+  // bwf's own TypeScript 7 peer. Next to the app's TypeScript 7, npm installs them.
+  '@aranlucas/oxlint-plugin-anti-slop': '0.1.1',
+  '@cloudflare/oxlint-config': '0.1.0',
+  'eslint-plugin-react-you-might-not-need-an-effect': '1.3.1',
+  'oxlint-plugin-react-doctor': '0.9.23',
 } as const;
 
 type ScaffoldVitePlusDevDependencies = {
