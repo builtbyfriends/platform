@@ -235,6 +235,29 @@ describe('owner-scoped binary file transfers', () => {
     expect(Buffer.from(sent.base64, 'base64')).toEqual(Buffer.from(bytes));
     expect(sent).not.toHaveProperty('cf_id');
   });
+  it.each(['GET', 'PUT'] as const)(
+    'uses Workers-supported manual redirects for %s transfers',
+    async (method) => {
+      proxy.mockResolvedValueOnce(method === 'PUT' ? saved(1) : object());
+      const response = await call(method, method === 'PUT' ? 'x' : undefined);
+      expect(response.status).toBe(200);
+      expect(proxy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ redirect: 'manual' }),
+      );
+    },
+  );
+  it.each(['GET', 'PUT'] as const)('does not follow redirected %s transfers', async (method) => {
+    proxy.mockResolvedValueOnce(
+      new Response(null, { status: 307, headers: { location: 'https://other.test/file' } }),
+    );
+    const response = await call(method, method === 'PUT' ? 'x' : undefined);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      data: { kind: method === 'PUT' ? 'unknown' : 'unavailable' },
+    });
+    expect(proxy).toHaveBeenCalledTimes(1);
+  });
   it('accepts zero-byte files without substituting text', async () => {
     proxy.mockResolvedValueOnce(saved(0));
     expect((await call('PUT', new Uint8Array())).status).toBe(200);

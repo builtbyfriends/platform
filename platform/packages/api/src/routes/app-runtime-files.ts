@@ -258,7 +258,7 @@ export function appRuntimeFileRoutes(resolve: ResolveProject) {
         writeStarted = true;
         const response = (activeResponse = await proxy.fetch('https://proxy/r2/put-conditional', {
           method: 'POST',
-          redirect: 'error',
+          redirect: 'manual',
           headers: { 'Content-Type': 'application/json' },
           body,
           signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
@@ -304,7 +304,7 @@ export function appRuntimeFileRoutes(resolve: ResolveProject) {
       signal.throwIfAborted();
       const response = (activeResponse = await proxy.fetch('https://proxy/r2/get', {
         method: 'POST',
-        redirect: 'error',
+        redirect: 'manual',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(base),
         signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
