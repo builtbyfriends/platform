@@ -112,7 +112,7 @@ const actions: ActionCatalog = {
   d1: [
     {
       id: 'database.cell',
-      label: 'Read full value',
+      label: 'Read value',
       effect: 'read',
       fields: [
         { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
