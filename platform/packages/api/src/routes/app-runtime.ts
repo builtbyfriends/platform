@@ -20,6 +20,7 @@ import {
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
+import { runtimeReleases } from './app-runtime-releases.ts';
 import { runtimeSchedules, scheduleAction, scheduleOverview } from './app-runtime-schedules.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
@@ -182,6 +183,49 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
   };
   const app = new Hono<ApiEnv>().route('/', appRuntimeFileRoutes(resolveProject));
   const boundedBody = bodyLimit({ maxSize: 8192 });
+  app.post('/projects.releases', boundedBody, async (context) => {
+    const body: unknown = await context.req.json().catch(() => null);
+    const owner = runtimeOwner(isRecord(body) ? body.owner : undefined);
+    if (!isRecord(body) || !owner || !text(body.project)) {
+      return context.json({ error: 'invalid_project' }, 400);
+    }
+    const project = await resolveProject(context, body.project, owner);
+    if (!project) {
+      return context.json({ error: 'unknown_project' }, 404);
+    }
+    const identity = {
+      appId: project.id,
+      checkedAt: Date.now(),
+      environment: project.preview_client_id ? ('preview' as const) : ('published' as const),
+    };
+    try {
+      const releases = await runtimeReleases(context.get('db'), project);
+      const current = await resolveProject(context, project.id, owner);
+      if (
+        !current ||
+        current.user_id !== project.user_id ||
+        current.active_deployment_id !== project.active_deployment_id ||
+        current.proxy_token_gen !== project.proxy_token_gen
+      ) {
+        return context.json({
+          data: {
+            ...identity,
+            available: false,
+            reason: 'The app changed while reading releases. Refresh to try again.',
+          },
+        });
+      }
+      return context.json({ data: { ...identity, available: true, ...releases } });
+    } catch {
+      return context.json({
+        data: {
+          ...identity,
+          available: false,
+          reason: 'Release history is unavailable. Refresh to try again.',
+        },
+      });
+    }
+  });
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
     const owner = runtimeOwner(isRecord(body) ? body.owner : undefined);
