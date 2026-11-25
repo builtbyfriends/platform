@@ -1,4 +1,4 @@
 # Last upstream Void commit this fork has reviewed. scripts/upstream-sync.ts reads it.
 upstream https://github.com/voidzero-dev/void main
-commit b0ff2fae21093df8aa456480e206d3182654acd1
-subject Enable unsafe assertion checks at validated input boundaries.
+commit 710736aa03d03dd46b4137dc537ce599a246af74
+subject fix(pages): hydrate islands added while the dev server runs (#870)
