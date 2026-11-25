@@ -10,6 +10,7 @@ import { OperatorError } from '../operator/common.ts';
 import { deploymentLogs } from '../operator/deployment-operations.ts';
 import type { Project, Resource } from '../types.ts';
 import { actionInput, executeResourceAction } from './app-runtime-actions.ts';
+import { observeResourceBindings } from './app-runtime-bindings.ts';
 import { resourceCapabilities } from './app-runtime-capabilities.ts';
 import { appRuntimeCatalogRoutes } from './app-runtime-catalog.ts';
 import { databaseInspect, validDatabaseFilter, validDatabaseSort } from './app-runtime-database.ts';
@@ -184,7 +185,11 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
     const owner = runtimeOwner(isRecord(body) ? body.owner : undefined);
-    if (!isRecord(body) || !owner) {
+    if (
+      !isRecord(body) ||
+      !owner ||
+      (body.includeBindings !== undefined && typeof body.includeBindings !== 'boolean')
+    ) {
       return context.json({ error: 'invalid_owner' }, 400);
     }
     const project = await resolveProject(context, body.project, owner);
@@ -193,15 +198,30 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     }
     const resources = await getProjectResources(context.get('db'), project.id);
     const filesActive = await fileOwnerActive(context.get('db'), project);
+    const topology =
+      body.includeBindings === true
+        ? await observeResourceBindings(context.env, context.get('db'), project, resources, () =>
+            resolveProject(context, project.id, owner),
+          )
+        : undefined;
     const current = await resolveProject(context, project.id, owner);
     if (!current || current.user_id !== project.user_id) {
       return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (
+      topology?.status === 'verified' &&
+      (current.active_deployment_id !== project.active_deployment_id ||
+        current.proxy_token_gen !== project.proxy_token_gen ||
+        current.status !== project.status)
+    ) {
+      return context.json({ error: 'deployment_changed' }, 409);
     }
     return context.json({
       data: {
         checkedAt: Date.now(),
         appId: project.id,
         available: true,
+        ...(topology && { topology }),
         resources: resources.map((resource) =>
           resourceCapabilities(context, project, resource, filesActive, current),
         ),

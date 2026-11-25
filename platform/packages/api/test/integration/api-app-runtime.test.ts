@@ -2513,3 +2513,320 @@ describe('connected app resource actions', () => {
     }
   });
 });
+
+describe('deployment binding observations', () => {
+  async function serving(options: { preview?: boolean; static?: boolean; failed?: boolean } = {}) {
+    const deployment = await createTestDeployment(
+      env.db,
+      project.id,
+      options.failed ? 'failed' : 'live',
+    );
+    if (options.preview) {
+      project = { ...project, slug: 'preview-runtime-bindings' };
+    }
+    await env.db
+      .update(projects)
+      .set({
+        active_deployment_id: deployment.id,
+        ...(options.preview && {
+          slug: project.slug,
+          preview_client_id: registration.client.id,
+          preview_workspace_id: 'binding-test',
+          preview_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      })
+      .where(eq(projects.id, project.id));
+    const key = options.preview ? `preview:${project.slug}` : project.slug;
+    const route = {
+      projectId: project.id,
+      userId: ownerId,
+      version: deployment.id,
+      ...(options.preview && { privatePreview: true }),
+      ...(options.static
+        ? { staticDeploymentId: deployment.id }
+        : { workerName: `user-${project.slug}-${deployment.id}` }),
+    };
+    await env.ROUTING.put(key, JSON.stringify(route));
+    return { deployment, key, route };
+  }
+  const providerBindings = () => [
+    { name: '__PROJECT_ID', type: 'plain_text', text: project.id },
+    { name: '__PLATFORM_PROXY_TOKEN', type: 'plain_text', text: 'never-return-proxy-token' },
+    { name: 'PASSWORD', type: 'secret_text', text: 'never-return-password' },
+    { name: 'DATA', type: 'd1', database_id: 'private-db-id' },
+    { name: 'UPLOADS', type: 'r2_bucket', bucket_name: 'private-bucket-id' },
+  ];
+  const observed = async () => {
+    const value = await payload(
+      call('projects.resources', { project: project.id, includeBindings: true }),
+    );
+    if (!isRecord(value) || !isRecord(value.data) || !isRecord(value.data.topology)) {
+      throw new Error('Invalid topology response');
+    }
+    return value.data.topology;
+  };
+
+  it('reads bindings only when requested and returns owned resource identities, not provider values', async () => {
+    const { deployment } = await serving();
+    await env.db.insert(resources).values([
+      {
+        id: 'res_cache',
+        project_id: project.id,
+        type: 'kv',
+        cf_id: 'private-kv-id',
+        binding_name: 'CACHE',
+      },
+      {
+        id: 'res_old',
+        project_id: project.id,
+        type: 'd1',
+        cf_id: 'old-db-id',
+        binding_name: 'OLD',
+      },
+    ]);
+    const fetcher = vi.fn(async (url: string) => {
+      expect(url).toBe(
+        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/platform-users/scripts/user-${project.slug}-${deployment.id}/bindings`,
+      );
+      return Response.json({
+        success: true,
+        result: [
+          ...providerBindings(),
+          { name: 'CACHE', type: 'kv_namespace', namespace_id: 'private-kv-id' },
+        ],
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const ordinary = await payload(call('projects.resources', { project: project.id }));
+    expect(JSON.stringify(ordinary)).not.toContain('topology');
+    expect(fetcher).not.toHaveBeenCalled();
+    const result = await observed();
+    expect(result).toMatchObject({
+      status: 'verified',
+      deploymentId: deployment.id,
+      connections: [
+        { resourceId: 'res_cache', relation: 'access' },
+        { resourceId: 'res_database', relation: 'access' },
+        { resourceId: 'res_files', relation: 'access' },
+      ],
+      unboundResourceIds: ['res_old'],
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /private-|never-return|PASSWORD|res_foreign|res_queue|cf_id|database_id|bucket_name/,
+    );
+    expect(
+      (await call('projects.resources', { project: project.id, includeBindings: 'yes' })).status,
+    ).toBe(400);
+  });
+
+  it('observes the serving preview even when its retained deployment has a historical failed status', async () => {
+    const { deployment } = await serving({ preview: true, failed: true });
+    await createTestDeployment(env.db, project.id, 'uploading');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ success: true, result: providerBindings() })),
+    );
+    expect(await observed()).toMatchObject({
+      status: 'verified',
+      deploymentId: deployment.id,
+      connections: [{ resourceId: 'res_database' }, { resourceId: 'res_files' }],
+    });
+  });
+
+  it('classifies supported storage as unbound for a verified static deployment without calling Cloudflare', async () => {
+    await serving({ static: true });
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    expect(await observed()).toMatchObject({
+      status: 'verified',
+      connections: [],
+      unboundResourceIds: ['res_database', 'res_files'],
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'missing-marker',
+    'foreign-marker',
+    'duplicate-name',
+    'invalid-identity',
+    'conflicting-d1-id',
+    'empty',
+    'error',
+  ])('refuses incomplete provider evidence: %s', async (failure) => {
+    await serving();
+    const result: Array<unknown> = providerBindings();
+    if (failure === 'missing-marker') {
+      result.shift();
+    }
+    if (failure === 'foreign-marker') {
+      result[0] = { name: '__PROJECT_ID', type: 'plain_text', text: other.id };
+    }
+    if (failure === 'duplicate-name') {
+      result.push({ name: 'DATA', type: 'd1', id: 'private-db-id' });
+    }
+    if (failure === 'invalid-identity') {
+      result[3] = { name: 'DATA', type: 'd1' };
+    }
+    if (failure === 'conflicting-d1-id') {
+      result[3] = { name: 'DATA', type: 'd1', database_id: 'private-db-id', id: 'another-db' };
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ success: failure !== 'error', result: failure === 'empty' ? [] : result }),
+      ),
+    );
+    expect(await observed()).toMatchObject({
+      status: 'unavailable',
+      connections: [],
+      unboundResourceIds: [],
+    });
+  });
+
+  it('leaves mismatched or ambiguous identities unknown and accepts the provider legacy D1 ID field', async () => {
+    await serving();
+    const result = providerBindings();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          success: true,
+          result: [
+            ...result.slice(0, 3),
+            { name: 'DATA', type: 'd1', id: 'private-db-id' },
+            { name: 'UPLOADS', type: 'r2_bucket', bucket_name: 'foreign-bucket' },
+          ],
+        }),
+      ),
+    );
+    expect(await observed()).toMatchObject({
+      status: 'verified',
+      connections: [{ resourceId: 'res_database' }],
+      unboundResourceIds: [],
+    });
+    await env.db.insert(resources).values({
+      id: 'res_alias',
+      project_id: project.id,
+      type: 'd1',
+      cf_id: 'private-db-id',
+      binding_name: 'ALIAS',
+    });
+    expect(await observed()).toMatchObject({
+      status: 'verified',
+      connections: [],
+      unboundResourceIds: [],
+    });
+  });
+
+  it.each(['deployment', 'resource', 'route', 'owner', 'preview-expiry'])(
+    'discards evidence when %s changes during the provider read',
+    async (change) => {
+      const { key, route } = await serving({ preview: change === 'preview-expiry' });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          if (change === 'deployment') {
+            await env.db
+              .update(projects)
+              .set({ active_deployment_id: (await createTestDeployment(env.db, project.id)).id })
+              .where(eq(projects.id, project.id));
+          }
+          if (change === 'resource') {
+            await env.db
+              .update(resources)
+              .set({ cf_id: 'replacement-db' })
+              .where(eq(resources.id, 'res_database'));
+          }
+          if (change === 'route') {
+            await env.ROUTING.put(key, JSON.stringify({ ...route, version: 'changed' }));
+          }
+          if (change === 'owner') {
+            await env.db
+              .update(projects)
+              .set({ user_id: (await createTestUser(env.db, 'new-owner')).id })
+              .where(eq(projects.id, project.id));
+          }
+          if (change === 'preview-expiry') {
+            await env.db
+              .update(projects)
+              .set({ preview_expires_at: new Date(Date.now() - 1).toISOString() })
+              .where(eq(projects.id, project.id));
+          }
+          return Response.json({ success: true, result: providerBindings() });
+        }),
+      );
+      const answer = await call('projects.resources', {
+        project: project.id,
+        includeBindings: true,
+      });
+      if (change === 'owner' || change === 'preview-expiry') {
+        expect(answer.status).toBe(404);
+      } else {
+        expect(await answer.json()).toMatchObject({
+          data: { topology: { status: 'unavailable', connections: [], unboundResourceIds: [] } },
+        });
+      }
+    },
+  );
+
+  it('rejects foreign deployment pointers and mismatched routes before contacting Cloudflare', async () => {
+    const { key, route } = await serving();
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    await env.ROUTING.put(key, JSON.stringify({ ...route, workerName: 'foreign-script' }));
+    expect(await observed()).toMatchObject({ status: 'unavailable' });
+    await env.ROUTING.put(key, JSON.stringify(route));
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: (await createTestDeployment(env.db, other.id)).id })
+      .where(eq(projects.id, project.id));
+    expect(await observed()).toMatchObject({ status: 'unavailable' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('stops oversized provider responses before parsing them', async () => {
+    await serving();
+    const canceled = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              pull(output) {
+                output.enqueue(new Uint8Array(100_001));
+              },
+              cancel: canceled,
+            }),
+          ),
+      ),
+    );
+    expect(await observed()).toMatchObject({
+      status: 'unavailable',
+      connections: [],
+      unboundResourceIds: [],
+    });
+    expect(canceled).toHaveBeenCalled();
+  });
+
+  it('bounds stalled provider body reads and aborts the request', async () => {
+    await serving();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        signal = init.signal ?? undefined;
+        return new Response(new ReadableStream({ start() {} }));
+      }),
+    );
+    const started = Date.now();
+    expect(await observed()).toMatchObject({
+      status: 'unavailable',
+      connections: [],
+      unboundResourceIds: [],
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 10_000);
+});
