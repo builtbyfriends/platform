@@ -2,7 +2,7 @@ import { isRecord } from '@builtbyfriends/deploy-core';
 import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
-import { databaseIndexes, databaseSchema } from './app-runtime-database.ts';
+import { databaseCell, databaseIndexes, databaseSchema } from './app-runtime-database.ts';
 import { executeKeyAction, keyEditorAvailable, validKey, validKeySave } from './app-runtime-kv.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
 import { vectorQuery, vectorizeRecords } from './app-runtime-vectorize.ts';
@@ -29,6 +29,7 @@ type Action = {
   fields: Array<Field>;
   view?: { scope: 'table' | 'resource'; label: string };
   result:
+    | 'cell'
     | 'file-text'
     | 'file-saved'
     | 'keys'
@@ -109,6 +110,17 @@ const actions: ActionCatalog = {
     })),
   ],
   d1: [
+    {
+      id: 'database.cell',
+      label: 'Read full value',
+      effect: 'read',
+      fields: [
+        { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
+        { name: 'column', label: 'Column', type: 'text', required: true, maxLength: 200 },
+        { name: 'rowToken', label: 'Row reference', type: 'text', required: true, maxLength: 8192 },
+      ],
+      result: 'cell',
+    },
     {
       id: 'database.indexes',
       label: 'View indexes',
@@ -216,6 +228,8 @@ export function resourceActions(resource: Resource, keyEditing = false): Array<A
 export type RuntimeActionInput = {
   vector?: string;
   topK?: string;
+  column?: string;
+  rowToken?: string;
   mode?: 'create' | 'replace';
   expectedFingerprint?: string;
   expiration?: string;
@@ -265,7 +279,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     }
     if (
       !bounded(value, field.maxLength) ||
-      ((field.name === 'key' || field.name === 'table') && !value)
+      (['key', 'table', 'column', 'rowToken'].includes(field.name) && !value)
     ) {
       return null;
     }
@@ -297,6 +311,8 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
         ? input.expectedDelivery
         : undefined,
     table: typeof input.table === 'string' ? input.table : undefined,
+    column: typeof input.column === 'string' ? input.column : undefined,
+    rowToken: typeof input.rowToken === 'string' ? input.rowToken : undefined,
     key: typeof input.key === 'string' ? input.key : undefined,
     text: typeof input.text === 'string' ? input.text : undefined,
     expectedEtag: typeof input.expectedEtag === 'string' ? input.expectedEtag : undefined,
@@ -484,6 +500,19 @@ export async function executeResourceAction(
   }
   if (!env.PLATFORM_PROXY) {
     return unavailable('This action is not available for this resource.');
+  }
+  if (action === 'database.cell') {
+    if (!input.table || !input.column || !input.rowToken) {
+      return unavailable('Choose a row value from this database.');
+    }
+    return {
+      ...identity,
+      ...(await databaseCell(env, project, resource, {
+        table: input.table,
+        column: input.column,
+        rowToken: input.rowToken,
+      })),
+    };
   }
   if (action === 'database.schema' || action === 'database.indexes') {
     if (!input.table) {

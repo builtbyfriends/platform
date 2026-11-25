@@ -1143,6 +1143,300 @@ describe('database structure and server queries', () => {
     });
   });
   afterEach(() => sqlite.close());
+
+  const readRows = async (input: InspectionInput = {}) => {
+    const value = await payload(inspect(input));
+    if (!isRecord(value) || !isRecord(value.data)) {
+      throw Error('Missing row response');
+    }
+    const { rows, rowTokens, cellMetadata, kind } = value.data;
+    if (!Array.isArray(rows) || !Array.isArray(rowTokens) || !Array.isArray(cellMetadata)) {
+      throw Error('Missing row metadata');
+    }
+    return {
+      kind,
+      rows: rows.map((row: unknown) => {
+        if (!Array.isArray(row)) {
+          throw Error('Invalid row');
+        }
+        return row;
+      }),
+      cellMetadata: cellMetadata.map((row: unknown) => {
+        if (!Array.isArray(row)) {
+          throw Error('Invalid metadata');
+        }
+        return row;
+      }),
+      rowTokens: rowTokens.map((token: unknown) => {
+        if (token !== null && typeof token !== 'string') {
+          throw Error('Invalid token');
+        }
+        return token;
+      }),
+    };
+  };
+  const rowReference = (page: Awaited<ReturnType<typeof readRows>>, index = 0) => {
+    const value = page.rowTokens[index];
+    if (typeof value !== 'string') {
+      throw Error('Expected safe row reference');
+    }
+    return value;
+  };
+  const readCell = (
+    rowToken: string,
+    column = 'name',
+    table = 'items',
+    resourceId = 'res_database',
+  ) =>
+    call('resources.execute', {
+      project: project.id,
+      resourceId,
+      action: 'database.cell',
+      input: { table, column, rowToken },
+    });
+  it('marks UTF-8 previews and reads the complete current value by signed primary key', async () => {
+    const text = 'é'.repeat(499) + '🙂' + 'z'.repeat(4000);
+    sqlite.prepare('UPDATE items SET name = ? WHERE id = 1').run(text);
+    const page = await readRows();
+    expect(page.rows[0][1]).toBe('é'.repeat(160));
+    expect(page.cellMetadata[0][1]).toEqual({ type: 'text', totalBytes: 5002, truncated: true });
+    expect(page.cellMetadata[0][4]).toEqual({
+      type: 'protected',
+      totalBytes: null,
+      truncated: false,
+    });
+    expect(page.rowTokens[0]).toEqual(expect.any(String));
+    const result = await payload(readCell(rowReference(page)));
+    expect(result).toMatchObject({
+      data: {
+        kind: 'cell',
+        table: 'items',
+        column: 'name',
+        rowToken: page.rowTokens[0],
+        valueType: 'text',
+        text,
+        totalBytes: 5002,
+        truncated: false,
+        checkedAt: expect.any(Number),
+      },
+    });
+    sqlite.prepare('UPDATE items SET name = ? WHERE id = 1').run('Current value');
+    expect(await payload(readCell(rowReference(page)))).toMatchObject({
+      data: { kind: 'cell', text: 'Current value' },
+    });
+    expect(await payload(readCell(rowReference(page), 'api_key'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+  });
+  it('bounds a full field at 64 KiB without splitting a Unicode code point', async () => {
+    const text = 'a'.repeat(65_535) + '🙂' + 'end';
+    sqlite.prepare('UPDATE items SET name = ? WHERE id = 1').run(text);
+    const page = await readRows();
+    expect(await payload(readCell(rowReference(page)))).toMatchObject({
+      data: { kind: 'cell', text: 'a'.repeat(65_535), totalBytes: 65_542, truncated: true },
+    });
+  });
+  it('returns explicit binary, null and normalized numeric full-field states', async () => {
+    sqlite.exec("UPDATE items SET category = X'0001FF', quantity = 1.0 WHERE id = 1");
+    const page = await readRows();
+    expect(page.cellMetadata[0][2]).toEqual({ type: 'binary', totalBytes: 3, truncated: false });
+    expect(page.cellMetadata[0][3]).toEqual({ type: 'number', totalBytes: 1, truncated: false });
+    expect(await payload(readCell(rowReference(page), 'category'))).toMatchObject({
+      data: { valueType: 'binary', text: null, totalBytes: 3, truncated: false },
+    });
+    expect(await payload(readCell(rowReference(page), 'quantity'))).toMatchObject({
+      data: { valueType: 'number', text: '1', totalBytes: 1, truncated: false },
+    });
+    sqlite.exec('UPDATE items SET category = NULL WHERE id = 1');
+    expect(await payload(readCell(rowReference(page), 'category'))).toMatchObject({
+      data: { valueType: 'null', text: null, totalBytes: 0, truncated: false },
+    });
+  });
+  it('preserves a leading BOM in text values and primary keys and round-trips real numbers', async () => {
+    sqlite.exec('CREATE TABLE unicode_keys (id TEXT PRIMARY KEY, body TEXT, amount REAL)');
+    const value = '\uFEFF' + 'Body'.repeat(500);
+    sqlite
+      .prepare('INSERT INTO unicode_keys VALUES (?,?,?)')
+      .run('\uFEFFkey', value, 1.2345678901234567);
+    const page = await readRows({ table: 'unicode_keys' });
+    expect(page.rows[0][0]).toBe('\uFEFFkey');
+    expect(page.rows[0][2]).toBe(1.2345678901234567);
+    expect(page.cellMetadata[0][2]).toEqual({ type: 'number', totalBytes: 18, truncated: false });
+    expect(await payload(readCell(rowReference(page), 'body', 'unicode_keys'))).toMatchObject({
+      data: { text: value, totalBytes: 2003, truncated: false },
+    });
+    expect(await payload(readCell(rowReference(page), 'amount', 'unicode_keys'))).toMatchObject({
+      data: { text: '1.2345678901234567', totalBytes: 18, truncated: false },
+    });
+  });
+  it('rejects invalid UTF-8 instead of trimming malformed bytes from a bounded prefix', async () => {
+    sqlite.exec(
+      "UPDATE items SET name = CAST(X'FF' AS TEXT) || printf('%2000s','tail') WHERE id = 1",
+    );
+    expect(await payload(inspect())).toMatchObject({ data: { kind: 'unavailable' } });
+  });
+  it('keeps SQLite integers beyond JavaScript precision exact', async () => {
+    for (const number of ['9007199254740993', '-9223372036854775808']) {
+      sqlite.exec('UPDATE items SET quantity = ' + number + ' WHERE id = 1');
+      const page = await readRows();
+      expect(page.rows[0][3]).toBe(number);
+      expect(page.cellMetadata[0][3]).toEqual({
+        type: 'text',
+        totalBytes: number.length,
+        truncated: false,
+      });
+      expect(await payload(readCell(rowReference(page), 'quantity'))).toMatchObject({
+        data: { valueType: 'number', text: number, totalBytes: number.length, truncated: false },
+      });
+    }
+  });
+  it('locates complete composite keys after insertions and rejects deleted rows', async () => {
+    sqlite.exec(
+      'CREATE TABLE compound (group_name TEXT, item INTEGER, body TEXT, PRIMARY KEY(group_name,item)) WITHOUT ROWID',
+    );
+    sqlite.prepare('INSERT INTO compound VALUES (?,?,?)').run('é,"group', 7, 'right row');
+    const page = await readRows({ table: 'compound' });
+    sqlite.prepare('INSERT INTO compound VALUES (?,?,?)').run('a', 1, 'new earlier row');
+    expect(await payload(readCell(rowReference(page), 'body', 'compound'))).toMatchObject({
+      data: { text: 'right row' },
+    });
+    sqlite.prepare('DELETE FROM compound WHERE item = ?').run(7);
+    expect(await payload(readCell(rowReference(page), 'body', 'compound'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+  });
+  it('omits references for rowid-only, nullable, protected, binary and oversized keys', async () => {
+    const cases = [
+      ['no_key', 'body TEXT', "'preview'"],
+      ['null_key', 'id TEXT PRIMARY KEY, body TEXT', "NULL, 'preview'"],
+      ['secret_key', 'api_key TEXT PRIMARY KEY, body TEXT', "'secret', 'preview'"],
+      ['binary_key', 'id BLOB PRIMARY KEY, body TEXT', "X'01', 'preview'"],
+      ['large_key', 'id TEXT PRIMARY KEY, body TEXT', "printf('%1100s','key'), 'preview'"],
+    ];
+    for (const [table, definition, values] of cases) {
+      sqlite.exec(
+        'CREATE TABLE ' +
+          table +
+          ' (' +
+          definition +
+          '); INSERT INTO ' +
+          table +
+          ' VALUES (' +
+          values +
+          ')',
+      );
+      expect((await readRows({ table })).rowTokens).toEqual([null]);
+    }
+  });
+  it('rejects foreign, altered, expired and schema-stale references', async () => {
+    const page = await readRows();
+    const token = rowReference(page);
+    proxy.mockClear();
+    expect(
+      await payload(readCell(token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A'))),
+    ).toMatchObject({ data: { kind: 'unavailable' } });
+    expect(proxy).not.toHaveBeenCalled();
+    expect((await readCell(token, 'name', 'items', 'res_foreign')).status).toBe(404);
+    expect(await payload(readCell(token, 'name', 'another_table'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 900_001);
+    expect(await payload(readCell(token))).toMatchObject({ data: { kind: 'unavailable' } });
+    clock.mockRestore();
+    sqlite.exec('ALTER TABLE items ADD COLUMN added TEXT');
+    expect(await payload(readCell(token))).toMatchObject({ data: { kind: 'unavailable' } });
+  });
+  it('fences references to the exact database binding and rejects access changed during a read', async () => {
+    const page = await readRows();
+    const token = rowReference(page);
+    await env.db.insert(resources).values({
+      id: 'second_db',
+      project_id: project.id,
+      type: 'd1',
+      cf_id: 'another-db',
+      binding_name: 'SECOND',
+    });
+    proxy.mockClear();
+    expect(await payload(readCell(token, 'name', 'items', 'second_db'))).toMatchObject({
+      data: { kind: 'unavailable' },
+    });
+    expect(proxy).not.toHaveBeenCalled();
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const results = sqlite.prepare(body.sql).all(...body.params);
+      if (body.sql.includes(' LIMIT 2')) {
+        await env.db
+          .update(resources)
+          .set({ cf_id: 'changed-db' })
+          .where(eq(resources.id, 'res_database'));
+      }
+      return Response.json({ results });
+    });
+    expect((await readCell(token)).status).toBe(409);
+  });
+  it('rejects schema changes during field retrieval and strict malformed inputs', async () => {
+    const page = await readRows();
+    const token = rowReference(page);
+    for (const input of [
+      { table: 'items', column: 'name', rowToken: token, sql: 'SELECT secret' },
+      { table: 'items', column: 'name' },
+      { table: 'items', column: 'name', rowToken: 'x'.repeat(8193) },
+    ]) {
+      expect(
+        (
+          await call('resources.execute', {
+            project: project.id,
+            resourceId: 'res_database',
+            action: 'database.cell',
+            input,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const results = sqlite.prepare(body.sql).all(...body.params);
+      if (body.sql.includes(' LIMIT 2')) {
+        sqlite.exec('ALTER TABLE items ADD COLUMN changed TEXT');
+      }
+      return Response.json({ results });
+    });
+    expect(await payload(readCell(token))).toMatchObject({ data: { kind: 'unavailable' } });
+  });
+  it('bounds wide SQL pages before transport while keeping explicit truncation metadata', async () => {
+    const names = Array.from({ length: 100 }, (_, index) => 'c' + index);
+    sqlite.exec(
+      'CREATE TABLE wide (' +
+        names
+          .map((name, index) => name + (index === 0 ? ' INTEGER PRIMARY KEY' : ' TEXT'))
+          .join(',') +
+        ')',
+    );
+    const insert = sqlite.prepare(
+      'INSERT INTO wide VALUES (' + names.map(() => '?').join(',') + ')',
+    );
+    for (let index = 1; index <= 51; index++) {
+      insert.run(index, ...names.slice(1).map(() => '\\'.repeat(5000)));
+    }
+    let maxBytes = 0;
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const result = { results: sqlite.prepare(body.sql).all(...body.params) };
+      maxBytes = Math.max(maxBytes, new TextEncoder().encode(JSON.stringify(result)).length);
+      return Response.json(result);
+    });
+    const page = await readRows({ table: 'wide' });
+    expect(page.kind).toBe('rows');
+    expect(page.rows).toHaveLength(50);
+    expect(page.cellMetadata[0][1]).toMatchObject({
+      type: 'text',
+      totalBytes: 5000,
+      truncated: true,
+    });
+    expect(maxBytes).toBeLessThan(512 * 1024);
+  });
+
   it('advertises schema and query capabilities, and omits them without a storage connection', async () => {
     expect(await payload(call('projects.resources', { project: project.id }))).toMatchObject({
       data: {
@@ -1151,6 +1445,23 @@ describe('database structure and server queries', () => {
             id: 'res_database',
             browseCapabilities: { filterOperators: ['equals', 'contains', 'is-null'], sort: true },
             actions: [
+              {
+                id: 'database.cell',
+                label: 'Read full value',
+                effect: 'read',
+                result: 'cell',
+                fields: [
+                  { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
+                  { name: 'column', label: 'Column', type: 'text', required: true, maxLength: 200 },
+                  {
+                    name: 'rowToken',
+                    label: 'Row reference',
+                    type: 'text',
+                    required: true,
+                    maxLength: 8192,
+                  },
+                ],
+              },
               {
                 id: 'database.indexes',
                 label: 'View indexes',
