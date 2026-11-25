@@ -11,6 +11,7 @@ import {
 } from './app-runtime-database.ts';
 import { executeKeyAction, keyEditorAvailable, validKey, validKeySave } from './app-runtime-kv.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
+import { scheduleAction } from './app-runtime-schedules.ts';
 
 const maxText = 65_536;
 const secretKey =
@@ -31,7 +32,7 @@ type Action = {
   label: string;
   effect: 'read' | 'write';
   fields: Array<Field>;
-  view?: { scope: 'table'; label: string };
+  view?: { scope: 'table' | 'resource'; label: string };
   result:
     | 'cell'
     | 'cell-saved'
@@ -229,9 +230,13 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   if (!isRecord(input)) {
     return null;
   }
-  const definition = [...actions.r2, ...actions.kv, ...actions.d1, ...actions.queue].find(
-    (entry) => entry.id === action,
-  );
+  const definition = [
+    ...actions.r2,
+    ...actions.kv,
+    ...actions.d1,
+    ...actions.queue,
+    scheduleAction,
+  ].find((entry) => entry.id === action);
   if (!definition) {
     return null;
   }

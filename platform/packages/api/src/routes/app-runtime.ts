@@ -19,6 +19,7 @@ import {
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
+import { runtimeSchedules, scheduleAction, scheduleOverview } from './app-runtime-schedules.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
@@ -191,9 +192,15 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     const resources = await getProjectResources(context.get('db'), project.id);
+    const schedules = await runtimeSchedules(context.get('db'), project);
     const filesActive = await fileOwnerActive(context.get('db'), project);
     const current = await resolveProject(context, project.id, owner);
-    if (!current || current.user_id !== project.user_id) {
+    if (
+      !current ||
+      current.user_id !== project.user_id ||
+      current.active_deployment_id !== project.active_deployment_id ||
+      current.proxy_token_gen !== project.proxy_token_gen
+    ) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     return context.json({
@@ -201,46 +208,55 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         checkedAt: Date.now(),
         appId: project.id,
         available: true,
-        resources: resources.map((resource) => ({
-          id: resource.id,
-          name: resource.binding_name,
-          kind:
-            resource.type === 'r2'
-              ? 'files'
-              : resource.type === 'd1'
-                ? 'database'
-                : resource.type === 'kv'
-                  ? 'key-value'
-                  : resource.type === 'queue'
-                    ? 'queue'
-                    : 'other',
-          browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
-          fileTransfers: fileTransfers(context.env, project, resource, filesActive),
-          actions: (
-            resource.type === 'queue'
-              ? !!context.env.CF_ACCOUNT_ID &&
-                !!context.env.CF_API_TOKEN &&
-                !project.preview_client_id &&
-                !!project.active_deployment_id
-              : !!context.env.PLATFORM_PROXY ||
-                (filesActive && keyEditorAvailable(context.env, current, resource))
-          )
-            ? resourceActions(
-                resource,
-                filesActive && keyEditorAvailable(context.env, current, resource),
-              ).filter(
-                (action) =>
-                  resource.type !== 'kv' ||
-                  !!context.env.PLATFORM_PROXY ||
-                  action.id === 'keys.inspect' ||
-                  action.id === 'keys.save',
-              )
-            : [],
-          browseCapabilities:
-            resource.type === 'd1' && context.env.PLATFORM_PROXY
-              ? databaseBrowseCapabilities
-              : undefined,
-        })),
+        resources: [
+          ...resources.map((resource) => ({
+            id: resource.id,
+            name: resource.binding_name,
+            kind:
+              resource.type === 'r2'
+                ? 'files'
+                : resource.type === 'd1'
+                  ? 'database'
+                  : resource.type === 'kv'
+                    ? 'key-value'
+                    : resource.type === 'queue'
+                      ? 'queue'
+                      : 'other',
+            browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
+            fileTransfers: fileTransfers(context.env, project, resource, filesActive),
+            actions: (
+              resource.type === 'queue'
+                ? !!context.env.CF_ACCOUNT_ID &&
+                  !!context.env.CF_API_TOKEN &&
+                  !project.preview_client_id &&
+                  !!project.active_deployment_id
+                : !!context.env.PLATFORM_PROXY ||
+                  (filesActive && keyEditorAvailable(context.env, current, resource))
+            )
+              ? resourceActions(
+                  resource,
+                  filesActive && keyEditorAvailable(context.env, current, resource),
+                ).filter(
+                  (action) =>
+                    resource.type !== 'kv' ||
+                    !!context.env.PLATFORM_PROXY ||
+                    action.id === 'keys.inspect' ||
+                    action.id === 'keys.save',
+                )
+              : [],
+            browseCapabilities:
+              resource.type === 'd1' && context.env.PLATFORM_PROXY
+                ? databaseBrowseCapabilities
+                : undefined,
+          })),
+          ...schedules.map((schedule) => ({
+            id: schedule.id,
+            name: schedule.name,
+            kind: 'schedule',
+            browse: null,
+            actions: context.env.CRON_SCHEDULER && context.env.ROUTING ? [scheduleAction] : [],
+          })),
+        ],
       },
     });
   });
@@ -329,6 +345,41 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     const project = await resolveProject(context, body.project, owner);
     if (!project) {
       return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (body.action === 'schedule.overview') {
+      const identity = { appId: project.id, resourceId: body.resourceId, action: body.action };
+      try {
+        const schedule = (await runtimeSchedules(context.get('db'), project)).find(
+          (entry) => entry.id === body.resourceId,
+        );
+        if (!schedule) {
+          return context.json({ error: 'unknown_resource' }, 404);
+        }
+        const data = await scheduleOverview(context.env, project, schedule);
+        const current = await resolveProject(context, project.id, owner);
+        const deployment = project.active_deployment_id
+          ? await getDeployment(context.get('db'), project.active_deployment_id)
+          : null;
+        if (
+          !current ||
+          current.user_id !== project.user_id ||
+          current.active_deployment_id !== project.active_deployment_id ||
+          current.proxy_token_gen !== project.proxy_token_gen ||
+          deployment?.project_id !== project.id ||
+          deployment.manifest !== schedule.manifest
+        ) {
+          return context.json({ error: 'resource_changed' }, 409);
+        }
+        return context.json({ data: { ...identity, ...data } });
+      } catch {
+        return context.json({
+          data: {
+            ...identity,
+            kind: 'unavailable',
+            reason: 'Could not verify this schedule. Refresh and try again.',
+          },
+        });
+      }
     }
     const resource = (await getProjectResources(context.get('db'), project.id)).find(
       (entry) => entry.id === body.resourceId,

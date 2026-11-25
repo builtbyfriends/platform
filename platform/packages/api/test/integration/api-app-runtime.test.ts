@@ -13,7 +13,8 @@ import {
 } from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
-import { projects, resources, users } from '../../src/schema.ts';
+import { buildRoutingJson } from '../../src/routing.ts';
+import { deployments, projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -2473,5 +2474,284 @@ describe('connected app resource actions', () => {
         data: { kind: 'unavailable' },
       });
     }
+  });
+});
+
+describe('registered schedule overview', () => {
+  let deploymentId: string;
+  let status: unknown;
+  const requests: Array<string> = [];
+  const statusFetch = vi.fn(async (request: RequestInfo | URL) => {
+    requests.push(request instanceof Request ? request.url : String(request));
+    return Response.json(status);
+  });
+  const declared = [{ name: 'daily-summary', cron: '0 9 * * MON-FRI' }];
+  const workerName = () => 'user-' + project.slug + '-' + deploymentId;
+  const inventory = async () => {
+    const result = await payload(call('projects.resources', { project: project.id }));
+    if (!isRecord(result) || !isRecord(result.data) || !Array.isArray(result.data.resources)) {
+      throw Error('Missing resource inventory');
+    }
+    return result.data.resources.filter(
+      (item: unknown) => isRecord(item) && item.kind === 'schedule',
+    );
+  };
+  const resourceId = async () => {
+    const item: unknown = (await inventory())[0];
+    if (!isRecord(item) || typeof item.id !== 'string') {
+      throw Error('Missing schedule');
+    }
+    return item.id;
+  };
+  const execute = (id: string, input = {}) =>
+    call('resources.execute', {
+      project: project.id,
+      resourceId: id,
+      action: 'schedule.overview',
+      input,
+    });
+  const rows = async (id: string) => {
+    const value = await payload(execute(id));
+    if (!isRecord(value) || !isRecord(value.data) || !Array.isArray(value.data.rows)) {
+      throw Error('Missing overview records');
+    }
+    return value.data.rows;
+  };
+  beforeEach(async () => {
+    deploymentId = (await createTestDeployment(env.db, project.id)).id;
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ schedules: declared }) })
+      .where(eq(deployments.id, deploymentId));
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: deploymentId })
+      .where(eq(projects.id, project.id));
+    await env.ROUTING.put(
+      project.slug,
+      buildRoutingJson({
+        workerName: workerName(),
+        projectId: project.id,
+        userId: ownerId,
+        manifest: null,
+        deploymentId,
+        dispatchLimits: null,
+        hasCrons: true,
+      }),
+    );
+    status = {
+      state: { workerName: workerName(), schedules: declared, proxyToken: 'must-not-leak' },
+      nextAlarm: Date.now() + 60000,
+    };
+    requests.length = 0;
+    statusFetch.mockClear();
+    statusFetch.mockImplementation(async (request) => {
+      requests.push(request instanceof Request ? request.url : String(request));
+      return Response.json(status);
+    });
+    const stub = env.CRON_SCHEDULER.get(env.CRON_SCHEDULER.idFromName(project.id));
+    vi.spyOn(stub, 'fetch').mockImplementation(statusFetch);
+    vi.spyOn(env.CRON_SCHEDULER, 'get').mockImplementation((id) => {
+      expect(id.toString()).toBe(project.id);
+      return stub;
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+  it('discovers stable synthetic resources without rows or scheduler mutation and returns bounded records', async () => {
+    const before = await env.db.select().from(resources);
+    const entries = await inventory();
+    expect(entries).toEqual([
+      {
+        id: expect.stringMatching(/^schedule_[A-Za-z0-9_-]{43}$/),
+        name: 'daily-summary',
+        kind: 'schedule',
+        browse: null,
+        actions: [
+          {
+            id: 'schedule.overview',
+            label: 'View schedule',
+            effect: 'read',
+            fields: [],
+            view: { scope: 'resource', label: 'Overview' },
+            result: 'records',
+          },
+        ],
+      },
+    ]);
+    expect(await env.db.select().from(resources)).toEqual(before);
+    expect(statusFetch).not.toHaveBeenCalled();
+    const id = await resourceId();
+    const result = await payload(execute(id));
+    expect(result).toMatchObject({
+      data: {
+        appId: project.id,
+        resourceId: id,
+        action: 'schedule.overview',
+        kind: 'records',
+        checkedAt: expect.any(Number),
+        truncated: false,
+        rows: expect.arrayContaining([
+          { id: 'registration', cells: ['Registration', 'Registered'] },
+          { id: 'zone', cells: ['Time zone', 'UTC'] },
+        ]),
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
+    expect(JSON.stringify(result)).not.toContain(workerName());
+    expect(requests).toEqual(['https://do/status']);
+    const newer = await createTestDeployment(env.db, project.id);
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ schedules: declared }) })
+      .where(eq(deployments.id, newer.id));
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: newer.id })
+      .where(eq(projects.id, project.id));
+    expect(await resourceId()).toBe(id);
+  });
+  it('distinguishes absent registration, stale deployment and suspension from execution history', async () => {
+    const id = await resourceId();
+    status = { state: null, nextAlarm: null };
+    expect(await rows(id)).toContainEqual({
+      id: 'registration',
+      cells: ['Registration', 'Not registered'],
+    });
+    status = {
+      state: { workerName: 'stale-worker', schedules: declared },
+      nextAlarm: Date.now() + 1000,
+    };
+    expect(await rows(id)).toContainEqual({
+      id: 'registration',
+      cells: ['Registration', 'Deployment mismatch'],
+    });
+    await env.ROUTING.put('project-suspended:' + project.id, 'admin');
+    expect(await rows(id)).toContainEqual({
+      id: 'suspension',
+      cells: ['Scheduled firing suspended', 'Yes'],
+    });
+    expect(await rows(id)).toContainEqual({
+      id: 'execution',
+      cells: ['Execution readiness and history', 'Not reported by this view'],
+    });
+  });
+  it('keeps predicted expression time separate from the actual shared alarm', async () => {
+    const alarm = Date.now() + 12345;
+    status = { state: { workerName: workerName(), schedules: declared }, nextAlarm: alarm };
+    const result = await rows(await resourceId());
+    expect(result).toContainEqual({
+      id: 'alarm',
+      cells: ['Project scheduler alarm (shared)', new Date(alarm).toISOString()],
+    });
+    expect(result).toContainEqual({
+      id: 'prediction',
+      cells: ['Next time from expression (predicted)', expect.stringMatching(/T09:00:00.000Z$/)],
+    });
+  });
+  it('rejects malformed, oversized or unavailable scheduler status without exposing payloads', async () => {
+    const id = await resourceId();
+    for (const value of [
+      {},
+      { state: {}, nextAlarm: null },
+      { state: null, nextAlarm: -1 },
+      {
+        state: { workerName: workerName(), schedules: [...declared, ...declared] },
+        nextAlarm: null,
+      },
+      { state: null, nextAlarm: null, secret: 'x'.repeat(70000) },
+    ]) {
+      status = value;
+      expect(await payload(execute(id))).toMatchObject({ data: { kind: 'unavailable' } });
+    }
+    statusFetch.mockResolvedValueOnce(new Response('secret failure', { status: 503 }));
+    const response = await payload(execute(id));
+    expect(response).toMatchObject({ data: { kind: 'unavailable' } });
+    expect(JSON.stringify(response)).not.toContain('secret failure');
+  });
+  it('rejects foreign or stale routes and client-supplied schedule arguments', async () => {
+    const id = await resourceId();
+    const good = JSON.parse(String(await env.ROUTING.get(project.slug)));
+    for (const change of [
+      { projectId: other.id },
+      { userId: 'foreign' },
+      { version: 'old-deployment' },
+      { workerName: 'foreign' },
+    ]) {
+      await env.ROUTING.put(project.slug, JSON.stringify({ ...good, ...change }));
+      expect(await payload(execute(id))).toMatchObject({ data: { kind: 'unavailable' } });
+    }
+    expect((await execute(id, { cron: '* * * * *' })).status).toBe(400);
+    expect((await execute('schedule_foreign')).status).toBe(404);
+    expect(
+      (
+        await call('resources.execute', {
+          project: other.id,
+          resourceId: id,
+          action: 'schedule.overview',
+          input: {},
+        })
+      ).status,
+    ).toBe(404);
+  });
+  it('drops readings after ownership, active deployment or manifest changes', async () => {
+    const id = await resourceId();
+    statusFetch.mockImplementationOnce(async () => {
+      await env.db
+        .update(deployments)
+        .set({ manifest: JSON.stringify({ schedules: [] }) })
+        .where(eq(deployments.id, deploymentId));
+      return Response.json(status);
+    });
+    expect((await execute(id)).status).toBe(409);
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ schedules: declared }) })
+      .where(eq(deployments.id, deploymentId));
+    statusFetch.mockImplementationOnce(async () => {
+      await env.db
+        .update(projects)
+        .set({ active_deployment_id: null })
+        .where(eq(projects.id, project.id));
+      return Response.json(status);
+    });
+    expect((await execute(id)).status).toBe(409);
+    await env.db
+      .update(projects)
+      .set({ active_deployment_id: deploymentId })
+      .where(eq(projects.id, project.id));
+    const newOwner = await createTestUser(env.db, 'new-schedule-owner');
+    statusFetch.mockImplementationOnce(async () => {
+      await env.db
+        .update(projects)
+        .set({ user_id: newOwner.id })
+        .where(eq(projects.id, project.id));
+      return Response.json(status);
+    });
+    expect((await execute(id)).status).toBe(409);
+  });
+  it('omits previews, missing deployments and malformed or duplicate schedule manifests', async () => {
+    for (const manifest of [
+      'not json',
+      JSON.stringify({ schedules: [...declared, ...declared] }),
+      JSON.stringify({ schedules: [{ name: 'bad', cron: 7 }] }),
+    ]) {
+      await env.db.update(deployments).set({ manifest }).where(eq(deployments.id, deploymentId));
+      expect(await inventory()).toEqual([]);
+    }
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify({ schedules: declared }) })
+      .where(eq(deployments.id, deploymentId));
+    await env.db
+      .update(projects)
+      .set({
+        preview_client_id: registration.client.id,
+        preview_workspace_id: 'schedule-test',
+        slug: 'preview-schedule-test',
+        preview_expires_at: new Date(Date.now() + 60000).toISOString(),
+      })
+      .where(eq(projects.id, project.id));
+    expect(await inventory()).toEqual([]);
+    expect(statusFetch).not.toHaveBeenCalled();
   });
 });
