@@ -1,7 +1,16 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'pathslash';
+// Decision: Only the manifest is bundled, so a new app pins the Vite+ release bwf builds with.
+import vitePlusManifest from 'vite-plus/package.json' with { type: 'json' };
 import { parseDocument } from 'yaml';
-import { SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES } from './template.ts';
+
+export const SCAFFOLD_VITE_PLUS_DEV_DEPENDENCIES: {
+  readonly vite: string;
+  readonly 'vite-plus': string;
+} = {
+  vite: vitePlusManifest.dependencies.vite,
+  'vite-plus': `^${vitePlusManifest.version}`,
+};
 
 type JsonObject = Record<string, unknown>;
 
