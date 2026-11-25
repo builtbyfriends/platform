@@ -475,6 +475,57 @@ describe('connected app runtime reads', () => {
     expect(queries[0]).toContain(`user-${project.slug}`);
   });
 
+  it('hides control requests while retaining customer traffic and HTTP failure severity', async () => {
+    await createTestDeployment(env.db, project.id);
+    const inputs = [
+      ['https://worker/__platform/d1/query', 404],
+      ['https://worker/__platform/r2/list', 404],
+      ['https://internal/__platform/ready', 200],
+      ['https://internal/__platform/migrate/start', 500],
+      ['https://app.test/__platform/d1/query', 404],
+      ['https://app.test/upload', 500],
+      ['https://worker/customer', 200],
+      ['https://internal/__platformish', 200],
+      ['https://worker.example/__platform/ready', 400],
+      ['https://app.test/exception', 400],
+    ] as const;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          data: inputs.map(([url, statusCode], index) => ({
+            ts: Date.now() - 1000 - index,
+            outcome: 'ok',
+            logData: '[]',
+            exceptionData: url.endsWith('/exception')
+              ? '[{"name":"Error","message":"Request failed"}]'
+              : '[]',
+            url,
+            method: 'POST',
+            statusCode: String(statusCode),
+            ingestedAt: new Date().toISOString(),
+          })),
+        }),
+      ),
+    );
+    const result = await payload(call('projects.activity', { project: project.id }));
+    expect(result).toMatchObject({
+      data: {
+        available: true,
+        events: [
+          { level: 'warn', message: 'Request returned HTTP 404', request: { url: inputs[4][0] } },
+          { level: 'error', message: 'Request returned HTTP 500', request: { url: inputs[5][0] } },
+          { level: 'info', request: { url: inputs[6][0] } },
+          { level: 'info', request: { url: inputs[7][0] } },
+          { level: 'warn', request: { url: inputs[8][0] } },
+          { level: 'error', request: { url: inputs[9][0] } },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('https://worker/__platform/');
+    expect(JSON.stringify(result)).not.toContain('https://internal/__platform/');
+  });
+
   it('refuses a cross-project deployment pointer before reading logs', async () => {
     const foreign = await createTestDeployment(env.db, other.id);
     await env.db
