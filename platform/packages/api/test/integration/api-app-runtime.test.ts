@@ -327,7 +327,7 @@ describe('connected app runtime reads', () => {
           nextOffset: null,
         },
       });
-      expect(queries.every((query) => /^(SELECT|PRAGMA table_info)/.test(query))).toBe(true);
+      expect(queries.every((query) => /^(SELECT|PRAGMA table_xinfo)/.test(query))).toBe(true);
       expect(
         (
           await call('resources.inspect', {
@@ -677,6 +677,290 @@ it('reads a group resource only for that connected app and exact group owner', a
       )
     ).status,
   ).toBe(404);
+});
+
+describe('database structure and server queries', () => {
+  let sqlite: DatabaseSync;
+  const queries: Array<{ sql: string; params: Array<string | number> }> = [];
+  type InspectionInput = {
+    table?: string;
+    resourceId?: string;
+    offset?: number;
+    filter?: unknown;
+    sort?: unknown;
+  };
+  const inspect = (input: InspectionInput = {}) =>
+    call('resources.inspect', {
+      project: project.id,
+      resourceId: 'res_database',
+      table: 'items',
+      ...input,
+    });
+  const schema = (table = 'items') =>
+    call('resources.execute', {
+      project: project.id,
+      resourceId: 'res_database',
+      action: 'database.schema',
+      input: { table },
+    });
+  beforeEach(() => {
+    sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(
+      "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT 'private-default', category TEXT, quantity INTEGER, api_key TEXT, caption TEXT GENERATED ALWAYS AS (name || '!') VIRTUAL)",
+    );
+    const insert = sqlite.prepare(
+      'INSERT INTO items (name,category,quantity,api_key) VALUES (?,?,?,?)',
+    );
+    for (let i = 1; i <= 125; i++) {
+      insert.run(
+        i === 75 ? 'Café, 100%_quoted' : `Item ${i}`,
+        i % 2 ? 'odd' : null,
+        i,
+        `private-${i}`,
+      );
+    }
+    queries.length = 0;
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      queries.push({ sql: body.sql, params: body.params });
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+  });
+  afterEach(() => sqlite.close());
+  it('advertises schema and query capabilities, and omits them without a storage connection', async () => {
+    expect(await payload(call('projects.resources', { project: project.id }))).toMatchObject({
+      data: {
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'res_database',
+            browseCapabilities: { filterOperators: ['equals', 'contains', 'is-null'], sort: true },
+            actions: [
+              {
+                id: 'database.schema',
+                label: 'View structure',
+                effect: 'read',
+                fields: [
+                  { name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 },
+                ],
+                result: 'table-schema',
+              },
+            ],
+          }),
+        ]),
+      },
+    });
+    delete env.PLATFORM_PROXY;
+    const result = await payload(call('projects.resources', { project: project.id }));
+    expect(JSON.stringify(result)).not.toContain('browseCapabilities');
+    expect(JSON.stringify(result)).not.toContain('database.schema');
+  });
+  it('returns declared structure and generated columns without defaults or credential values', async () => {
+    const result = await payload(schema());
+    expect(result).toMatchObject({
+      data: {
+        appId: project.id,
+        resourceId: 'res_database',
+        action: 'database.schema',
+        kind: 'table-schema',
+        table: 'items',
+        columns: [
+          { name: 'id', type: 'INTEGER', notNull: false, primaryKey: 1, redacted: false },
+          { name: 'name', type: 'TEXT', notNull: true, primaryKey: 0, redacted: false },
+          { name: 'category', type: 'TEXT', notNull: false, primaryKey: 0, redacted: false },
+          { name: 'quantity', type: 'INTEGER', notNull: false, primaryKey: 0, redacted: false },
+          { name: 'api_key', type: 'TEXT', notNull: false, primaryKey: 0, redacted: true },
+          { name: 'caption', type: 'TEXT', notNull: false, primaryKey: 0, redacted: false },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private-default|dflt_value|private-1/);
+    sqlite.exec('CREATE TABLE composite (a TEXT, b INTEGER, PRIMARY KEY(b,a)) WITHOUT ROWID');
+    expect(await payload(schema('composite'))).toMatchObject({
+      data: {
+        columns: [
+          { name: 'a', notNull: true, primaryKey: 2 },
+          { name: 'b', notNull: true, primaryKey: 1 },
+        ],
+      },
+    });
+    sqlite.exec(
+      "CREATE TABLE generated (name TEXT, secret_token TEXT GENERATED ALWAYS AS ('private-generated')); INSERT INTO generated(name) VALUES ('visible')",
+    );
+    const generated = await payload(schema('generated'));
+    expect(generated).toMatchObject({
+      data: {
+        columns: [
+          { name: 'name', redacted: false },
+          { name: 'secret_token', redacted: true },
+        ],
+      },
+    });
+    expect(JSON.stringify(generated)).not.toContain('private-generated');
+    expect(await payload(inspect({ table: 'generated' }))).toMatchObject({
+      data: { rows: [['visible', '[redacted]']] },
+    });
+    expect(
+      (
+        await inspect({
+          table: 'generated',
+          filter: { column: 'secret_token', operator: 'contains', value: 'private' },
+        })
+      ).status,
+    ).toBe(400);
+  });
+  it('filters all rows using bound literal values and echoes the applied query', async () => {
+    for (const value of ['Café, 100%_quoted', '%_', "'; DROP TABLE items; --"]) {
+      const filter = { column: 'name', operator: 'contains', value };
+      const result = await payload(inspect({ filter }));
+      expect(result).toMatchObject({
+        data: {
+          kind: 'rows',
+          query: { filter },
+          nextOffset: null,
+          rows: value.startsWith("'")
+            ? []
+            : [[75, 'Café, 100%_quoted', 'odd', 75, '[redacted]', 'Café, 100%_quoted!']],
+        },
+      });
+      const selected = queries.at(-1)!;
+      expect(selected.sql).not.toContain(value);
+      expect(selected.params).toEqual([value, 51, 0]);
+    }
+    expect(
+      await payload(inspect({ filter: { column: 'quantity', operator: 'equals', value: '75' } })),
+    ).toMatchObject({
+      data: { rows: [[75, 'Café, 100%_quoted', 'odd', 75, '[redacted]', 'Café, 100%_quoted!']] },
+    });
+    const nulls = await payload(inspect({ filter: { column: 'category', operator: 'is-null' } }));
+    expect(nulls).toMatchObject({
+      data: { nextOffset: 50, query: { filter: { column: 'category', operator: 'is-null' } } },
+    });
+    expect(await payload(inspect())).toMatchObject({ data: { query: {} } });
+  });
+  it('keeps repeated sort values and nullable primary keys stable across pages', async () => {
+    sqlite.exec('CREATE TABLE nullable (id TEXT PRIMARY KEY, value TEXT)');
+    const insert = sqlite.prepare('INSERT INTO nullable VALUES(NULL, ?)');
+    for (let i = 0; i < 80; i++) {
+      insert.run(`value ${i}`);
+    }
+    const sort = { column: 'id', direction: 'asc' };
+    const first = await payload(inspect({ table: 'nullable', sort }));
+    const second = await payload(inspect({ table: 'nullable', sort, offset: 50 }));
+    expect(first).toMatchObject({
+      data: {
+        nextOffset: 50,
+        query: { sort },
+        rows: Array.from({ length: 50 }, (_, i) => [null, `value ${i}`]),
+      },
+    });
+    expect(second).toMatchObject({
+      data: {
+        nextOffset: null,
+        rows: Array.from({ length: 30 }, (_, i) => [null, `value ${i + 50}`]),
+      },
+    });
+    expect(
+      await payload(inspect({ sort: { column: 'quantity', direction: 'desc' } })),
+    ).toMatchObject({
+      data: {
+        rows: expect.arrayContaining([[125, 'Item 125', 'odd', 125, '[redacted]', 'Item 125!']]),
+      },
+    });
+  });
+  it('reports the browse cap separately from the end and does not overlap off-boundary pages', async () => {
+    sqlite.exec('CREATE TABLE many (id INTEGER PRIMARY KEY, name TEXT); BEGIN');
+    const insert = sqlite.prepare("INSERT INTO many VALUES (?, 'same')");
+    for (let id = 0; id < 10_051; id++) {
+      insert.run(id);
+    }
+    sqlite.exec('COMMIT');
+    const sort = { column: 'name', direction: 'asc' };
+    expect(await payload(inspect({ table: 'many', sort, offset: 9999 }))).toMatchObject({
+      data: { rows: [[9999, 'same']], nextOffset: 10_000, limitReached: false },
+    });
+    expect(await payload(inspect({ table: 'many', sort, offset: 10_000 }))).toMatchObject({
+      data: {
+        rows: Array.from({ length: 50 }, (_, i) => [10_000 + i, 'same']),
+        nextOffset: null,
+        limitReached: true,
+      },
+    });
+    sqlite.exec('DELETE FROM many WHERE id = 10050');
+    expect(await payload(inspect({ table: 'many', sort, offset: 10_000 }))).toMatchObject({
+      data: { nextOffset: null, limitReached: false },
+    });
+  });
+  it('rejects credential inference and invalid query shapes before reading data', async () => {
+    for (const input of [
+      { filter: { column: 'api_key', operator: 'equals', value: 'guess' } },
+      { filter: { column: 'api_key', operator: 'is-null' } },
+      { sort: { column: 'api_key', direction: 'asc' } },
+      { sort: { column: 'name"; DROP TABLE items; --', direction: 'asc' } },
+      { filter: { column: 'name', operator: 'equals' } },
+      { filter: { column: 'name', operator: 'is-null', value: '' } },
+      { filter: { column: 'name', operator: 'contains', value: 'a'.repeat(1001) } },
+      { filter: { column: 'name', operator: 'equals', value: 'x', sql: 'SELECT 1' } },
+      { sort: { column: 'name', direction: 'DESC; DROP TABLE items' } },
+    ]) {
+      expect((await inspect(input)).status).toBe(400);
+    }
+    expect(
+      queries.every(
+        (query) =>
+          query.sql.startsWith('SELECT name FROM sqlite_schema') ||
+          query.sql.startsWith('PRAGMA table_xinfo'),
+      ),
+    ).toBe(true);
+    expect(
+      (await inspect({ resourceId: 'res_files', sort: { column: 'name', direction: 'asc' } }))
+        .status,
+    ).toBe(400);
+  });
+  it('does not use a secret primary key or a shadowed rowid to order customer pages', async () => {
+    sqlite.exec(
+      'CREATE TABLE secret (token TEXT PRIMARY KEY, name TEXT) WITHOUT ROWID; CREATE TABLE shadowed (rowid TEXT, _rowid_ TEXT, oid TEXT, name TEXT)',
+    );
+    for (const table of ['secret', 'shadowed']) {
+      expect(
+        await payload(inspect({ table, sort: { column: 'name', direction: 'asc' } })),
+      ).toMatchObject({
+        data: {
+          kind: 'unavailable',
+          reason: 'This table has no safe unique row order for filtered or sorted pages.',
+        },
+      });
+    }
+  });
+  it('keeps schema and filtered reads behind owner, deployment and binding fences', async () => {
+    expect(
+      (
+        await call('resources.execute', {
+          project: project.id,
+          resourceId: 'res_database',
+          action: 'database.schema',
+          input: { table: 'items' },
+          owner: { person: 'someone-else' },
+        })
+      ).status,
+    ).toBe(404);
+    expect(proxy).not.toHaveBeenCalled();
+    proxy.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      await env.db
+        .update(resources)
+        .set({ cf_id: 'changed-db' })
+        .where(eq(resources.id, 'res_database'));
+      return Response.json({ results: sqlite.prepare(body.sql).all(...body.params) });
+    });
+    expect((await schema()).status).toBe(409);
+    await env.db
+      .update(resources)
+      .set({ cf_id: 'private-db-id' })
+      .where(eq(resources.id, 'res_database'));
+    expect(
+      (await inspect({ filter: { column: 'name', operator: 'equals', value: 'Item 1' } })).status,
+    ).toBe(409);
+  });
 });
 
 describe('connected app resource actions', () => {

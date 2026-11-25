@@ -2,6 +2,7 @@ import { isRecord } from '@builtbyfriends/deploy-core';
 import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
+import { databaseSchema } from './app-runtime-database.ts';
 
 const maxText = 65_536;
 const secretKey =
@@ -22,11 +23,20 @@ type Action = {
   label: string;
   effect: 'read' | 'write';
   fields: Array<Field>;
-  result: 'file-text' | 'file-saved' | 'keys' | 'key-value';
+  result: 'file-text' | 'file-saved' | 'keys' | 'key-value' | 'table-schema';
 };
 const key: Field = { name: 'key', label: 'Key', type: 'text', required: true, maxLength: 1024 };
-type ActionCatalog = { r2: Array<Action>; kv: Array<Action> };
+type ActionCatalog = { r2: Array<Action>; kv: Array<Action>; d1: Array<Action> };
 const actions: ActionCatalog = {
+  d1: [
+    {
+      id: 'database.schema',
+      label: 'View structure',
+      effect: 'read',
+      fields: [{ name: 'table', label: 'Table', type: 'text', required: true, maxLength: 200 }],
+      result: 'table-schema',
+    },
+  ],
   r2: [
     {
       id: 'files.readText',
@@ -67,9 +77,16 @@ const actions: ActionCatalog = {
   ],
 };
 export function resourceActions(resource: Resource): Array<Action> {
-  return resource.type === 'r2' ? actions.r2 : resource.type === 'kv' ? actions.kv : [];
+  return resource.type === 'r2'
+    ? actions.r2
+    : resource.type === 'kv'
+      ? actions.kv
+      : resource.type === 'd1'
+        ? actions.d1
+        : [];
 }
 export type RuntimeActionInput = {
+  table?: string;
   key?: string;
   text?: string;
   expectedEtag?: string;
@@ -80,7 +97,9 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   if (!isRecord(input)) {
     return null;
   }
-  const definition = [...actions.r2, ...actions.kv].find((entry) => entry.id === action);
+  const definition = [...actions.r2, ...actions.kv, ...actions.d1].find(
+    (entry) => entry.id === action,
+  );
   if (!definition) {
     return null;
   }
@@ -96,7 +115,10 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     if (value === undefined && !field.required) {
       continue;
     }
-    if (!bounded(value, field.maxLength) || (field.name === 'key' && !value)) {
+    if (
+      !bounded(value, field.maxLength) ||
+      ((field.name === 'key' || field.name === 'table') && !value)
+    ) {
       return null;
     }
   }
@@ -109,6 +131,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     return null;
   }
   return {
+    table: typeof input.table === 'string' ? input.table : undefined,
     key: typeof input.key === 'string' ? input.key : undefined,
     text: typeof input.text === 'string' ? input.text : undefined,
     expectedEtag: typeof input.expectedEtag === 'string' ? input.expectedEtag : undefined,
@@ -251,6 +274,12 @@ export async function executeResourceAction(
   });
   if (!env.PLATFORM_PROXY || !resourceActions(resource).some((entry) => entry.id === action)) {
     return unavailable('This action is not available for this resource.');
+  }
+  if (action === 'database.schema') {
+    if (!input.table) {
+      return unavailable('Choose a table from this database.');
+    }
+    return { ...identity, ...(await databaseSchema(env, project, resource, input.table)) };
   }
   const proxy = env.PLATFORM_PROXY;
   const token = await deriveProxyToken(env.JWT_SECRET, project.id, project.proxy_token_gen);
