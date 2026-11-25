@@ -3,6 +3,7 @@ import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { aiModelsAction } from './app-runtime-ai.ts';
+import { connectionAction, databaseConnection } from './app-runtime-connection.ts';
 import {
   databaseCell,
   databaseCellSave,
@@ -209,7 +210,9 @@ export function resourceActions(resource: Resource, keyEditing = false): Array<A
         ? actions.d1
         : resource.type === 'queue'
           ? actions.queue
-          : [];
+          : resource.type === 'hyperdrive'
+            ? [connectionAction]
+            : [];
 }
 export type RuntimeActionInput = {
   search?: string;
@@ -239,6 +242,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     ...actions.queue,
     scheduleAction,
     aiModelsAction,
+    connectionAction,
   ].find((entry) => entry.id === action);
   if (!definition) {
     return null;
@@ -461,6 +465,9 @@ export async function executeResourceAction(
         stillAuthorized,
       )),
     };
+  }
+  if (action === 'database.connection') {
+    return { ...identity, ...(await databaseConnection(env, project, resource)) };
   }
   if (action === 'queue.status') {
     return { ...identity, ...(await queueStatus(env, project, resource)) };
