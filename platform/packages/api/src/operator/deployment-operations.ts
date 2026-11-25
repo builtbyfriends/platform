@@ -1,7 +1,11 @@
 import { and, count, desc, eq, getTableColumns, ilike, or } from 'drizzle-orm';
 import { cancelDeployment, getDeployment, getProject, type Db } from '../db.ts';
 import { type ApiEnv, isDevBypass } from '../env.ts';
-import { LOG_ROW_GROUP_BY, runtimeLogsField } from '../observability/log-rows.ts';
+import {
+  CUSTOMER_ACTIVITY_WHERE,
+  LOG_ROW_GROUP_BY,
+  runtimeLogsField,
+} from '../observability/log-rows.ts';
 import { deployments, projects } from '../schema.ts';
 import { OperatorError } from './common.ts';
 
@@ -183,6 +187,7 @@ export async function deploymentLogs(
   options: {
     since?: string;
     range?: '1h' | '24h' | '7d';
+    scope?: 'customer-activity-v1';
     limit?: number;
     cursor?: string;
     order?: 'oldest-first' | 'newest-first';
@@ -223,10 +228,12 @@ export async function deploymentLogs(
         offset: unknown;
         clock: unknown;
         range?: unknown;
+        scope?: unknown;
       };
       if (
         parsed.id !== id ||
         parsed.clock !== clock ||
+        parsed.scope !== options.scope ||
         ![parsed.since, parsed.until, parsed.offset].every(
           (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
         ) ||
@@ -249,7 +256,17 @@ export async function deploymentLogs(
     }
   }
   const pageCursor = (pageOffset: number) =>
-    btoa(JSON.stringify({ id, since, until, offset: pageOffset, clock, range: options.range }));
+    btoa(
+      JSON.stringify({
+        id,
+        since,
+        until,
+        offset: pageOffset,
+        clock,
+        range: options.range,
+        scope: options.scope,
+      }),
+    );
   if (isDevBypass(env)) {
     const data = mockLogData();
     return {
@@ -280,6 +297,7 @@ export async function deploymentLogs(
   const query = `SELECT blob1 as outcome, blob2 as logData, blob3 as exceptionData, blob4 as url, blob5 as method, blob6 as statusCode, double1 as ts, min(timestamp) as ingestedAt
     FROM ${dataset} WHERE index1 = ${sqlString(`user-${project.slug}`)} AND blob7 = ${sqlString(deployment.id)}
     AND ${timeFilter}
+    ${options.scope === 'customer-activity-v1' ? `AND ${CUSTOMER_ACTIVITY_WHERE}` : ''}
     ${LOG_ROW_GROUP_BY}
     ORDER BY ${order}, outcome ${direction}, logData ${direction}, exceptionData ${direction}, url ${direction}, method ${direction}, statusCode ${direction} LIMIT ${limit + 1} OFFSET ${offset}`;
   const response = await fetch(

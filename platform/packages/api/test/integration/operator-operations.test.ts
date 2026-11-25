@@ -375,6 +375,13 @@ describe('operator deployment operations', () => {
       'GROUP BY blob1, blob2, blob3, blob4, blob5, blob6, blob7, blob8, double1',
     );
     expect(fetch.mock.calls[0][1]?.body).toContain('ORDER BY ts ASC, ingestedAt ASC');
+    expect(fetch.mock.calls[0][1]?.body).not.toContain('startsWith');
+    const scoped = btoa(
+      JSON.stringify({ ...JSON.parse(atob(page.nextCursor)), scope: 'customer-activity-v1' }),
+    );
+    expect(
+      (await req(`/deployments/${deployment.id}/logs?cursor=${encodeURIComponent(scoped)}`)).status,
+    ).toBe(400);
     expect(fetch.mock.calls[0][1]?.body).toMatch(/double1 >= \d+ AND double1 < \d+/);
     expect(fetch.mock.calls[1][1]?.body).toContain('OFFSET 2');
     expect((await req(`/deployments/${deployment.id}/logs?cursor=garbage`)).status).toBe(400);
