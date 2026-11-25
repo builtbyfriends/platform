@@ -212,7 +212,16 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                     ? 'queue'
                     : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
-          actions: context.env.PLATFORM_PROXY ? resourceActions(resource) : [],
+          actions: (
+            resource.type === 'queue'
+              ? !!context.env.CF_ACCOUNT_ID &&
+                !!context.env.CF_API_TOKEN &&
+                !project.preview_client_id &&
+                !!project.active_deployment_id
+              : !!context.env.PLATFORM_PROXY
+          )
+            ? resourceActions(resource)
+            : [],
           browseCapabilities:
             resource.type === 'd1' && context.env.PLATFORM_PROXY
               ? databaseBrowseCapabilities
@@ -324,6 +333,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         current.proxy_token_gen === project.proxy_token_gen &&
         current.active_deployment_id === project.active_deployment_id &&
         currentResource?.cf_id === resource.cf_id &&
+        currentResource.type === resource.type &&
         currentResource?.binding_name === resource.binding_name,
       );
     };
@@ -361,9 +371,11 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           reason:
             body.action === 'files.saveText'
               ? 'The save could not be confirmed. Open the file again to check the result.'
-              : body.action === 'database.schema'
-                ? 'Could not read this table structure. Refresh the table list and try again.'
-                : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
+              : body.action === 'queue.status'
+                ? 'Could not verify queue status. Refresh and try again.'
+                : body.action === 'database.schema'
+                  ? 'Could not read this table structure. Refresh the table list and try again.'
+                  : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }
