@@ -915,7 +915,7 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
       ? (sandbox.runtimePath ?? '@builtbyfriends/bwf/sandbox')
       : '@builtbyfriends/bwf/sandbox';
   const sandboxImport = hasSandbox
-    ? `import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, __setSandboxBindingName } from ${JSON.stringify(sandboxRuntimePath)};\nexport { SandboxOutboundHandler };\n`
+    ? `import { BwfPlatformSandbox as __PlatformSandbox, SandboxOutboundHandler, DirectoryBackupGateway, __setSandboxBindingName } from ${JSON.stringify(sandboxRuntimePath)};\nexport { SandboxOutboundHandler, DirectoryBackupGateway };\n`
     : '';
   const sandboxInstanceType = typeof sandbox === 'object' ? sandbox.instanceType : undefined;
   const sandboxExport = hasSandbox
