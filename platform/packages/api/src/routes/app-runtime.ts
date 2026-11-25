@@ -17,11 +17,12 @@ import {
   validDatabaseSort,
 } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
+import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 import { vectorizeManifestOwns, vectorizeRuntimeAvailable } from './app-runtime-vectorize.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
-type ResolveProject = (
+export type ResolveProject = (
   context: Context<ApiEnv>,
   id: unknown,
   owner: RuntimeOwner,
@@ -177,7 +178,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     }
     return project;
   };
-  const app = new Hono<ApiEnv>();
+  const app = new Hono<ApiEnv>().route('/', appRuntimeFileRoutes(resolveProject));
   const boundedBody = bodyLimit({ maxSize: 8192 });
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
@@ -195,6 +196,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         ? await getDeployment(context.get('db'), project.active_deployment_id)
         : null;
     const manifest = deployment?.project_id === project.id ? deployment.manifest : null;
+    const filesActive = await fileOwnerActive(context.get('db'), project);
     const current = await resolveProject(context, project.id, owner);
     if (
       !current ||
@@ -224,6 +226,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                       ? 'vector-index'
                       : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
+          fileTransfers: fileTransfers(context.env, project, resource, filesActive),
           actions: (
             resource.type === 'vectorize'
               ? vectorizeRuntimeAvailable(context.env, current) &&
