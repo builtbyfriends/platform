@@ -264,7 +264,19 @@ function requestAddress(value: string) {
   }
 }
 
-export function appRuntimeRoutes(resolveProject: ResolveProject) {
+export function appRuntimeRoutes(resolve: ResolveProject) {
+  const resolveProject: ResolveProject = async (context, id, owner) => {
+    const project = await resolve(context, id, owner);
+    if (
+      project?.preview_client_id &&
+      (project.preview_client_id !== context.get('billingClient') ||
+        project.status !== 'active' ||
+        !(Date.parse(project.preview_expires_at ?? '') > Date.now()))
+    ) {
+      return null;
+    }
+    return project;
+  };
   const app = new Hono<ApiEnv>();
   const boundedBody = bodyLimit({ maxSize: 8192 });
   app.post('/projects.resources', boundedBody, async (context) => {
