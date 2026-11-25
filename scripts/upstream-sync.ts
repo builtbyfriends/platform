@@ -91,7 +91,7 @@ function fetchUpstream(): void {
 
 // Decision: The fork keeps the runtime as flat files where upstream moved it into folders
 // (runtime/routing/index.ts is runtime/routing.ts here, runtime/ws/room.ts is runtime/ws-room.ts,
-// runtime/env/runtime.ts is runtime/env.ts). The flat name is used when only it exists here.
+// runtime/env/runtime.ts is runtime/env.ts, runtime/routing/route-url.ts is runtime/route-url.ts). The flat name is used when only it exists here.
 function flatRuntimePath(path: string): string | undefined {
   const match = path.match(/^(.*\/src\/runtime\/)([\w-]+)\/([\w-]+)\.(tsx?)$/);
   if (!match) {
@@ -101,6 +101,7 @@ function flatRuntimePath(path: string): string | undefined {
   const candidates = [
     file === 'index' || file === 'runtime' ? `${dir}${folder}.${ext}` : undefined,
     `${dir}${folder}-${file}.${ext}`,
+    `${dir}${file}.${ext}`,
   ];
   return candidates.find((candidate) => candidate && existsSync(candidate));
 }

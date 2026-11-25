@@ -74,6 +74,14 @@ const empty: Href = '';
 // @ts-expect-error route URLs exclude external links
 const external: RouteUrl = 'https://vite.dev';
 void [plain, hrefs, unknown, unchecked, relative, protocolRelative, empty, external];
+const paged: RouteUrl = \`\${user}?page=2\`;
+const hashed: RouteUrl = \`\${user}#details\`;
+const builtPaged: RouteUrl = \`\${routeUrl('/about')}?page=2\`;
+// @ts-expect-error a suffix does not replace the route check
+const unknownPaged: RouteUrl = '/unknown?page=2';
+// @ts-expect-error a suffix needs its own separator
+const unseparated: RouteUrl = \`\${user}page=2\`;
+void [paged, hashed, builtPaged, unknownPaged, unseparated];
 declare const context: CloudContext;
 void context.rewrite('/users/42');
 void context.rewrite(user);
