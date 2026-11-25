@@ -60,7 +60,13 @@ function respond(input: RequestInfo | URL) {
   );
 }
 const call = (
-  body: { project?: string; resourceId?: string; owner?: { person: string }; input?: unknown } = {},
+  body: {
+    project?: string;
+    resourceId?: string;
+    owner?: { person: string };
+    input?: unknown;
+    action?: string;
+  } = {},
   path = 'resources.execute',
 ) =>
   app.fetch(
@@ -152,7 +158,37 @@ describe('owned queue status', () => {
         resources: [
           {
             id: 'res_queue',
-            actions: [{ id: 'queue.status', effect: 'read', fields: [], result: 'queue-status' }],
+            actions: [
+              { id: 'queue.status', effect: 'read', fields: [], result: 'queue-status' },
+              {
+                id: 'queue.pause',
+                effect: 'write',
+                fields: [
+                  {
+                    name: 'expectedDelivery',
+                    label: 'Current delivery state',
+                    type: 'text',
+                    required: true,
+                    maxLength: 7,
+                  },
+                ],
+                result: 'queue-status',
+              },
+              {
+                id: 'queue.resume',
+                effect: 'write',
+                fields: [
+                  {
+                    name: 'expectedDelivery',
+                    label: 'Current delivery state',
+                    type: 'text',
+                    required: true,
+                    maxLength: 7,
+                  },
+                ],
+                result: 'queue-status',
+              },
+            ],
           },
         ],
       },
@@ -432,4 +468,267 @@ describe('owned queue status', () => {
       }
     },
   );
+});
+
+function delivery(initial: boolean | undefined = false) {
+  let paused = initial;
+  const patches: Array<unknown> = [];
+  provider.mockImplementation(async (input, init) => {
+    if (init?.method === 'PATCH') {
+      const change = JSON.parse(String(init.body));
+      patches.push(change);
+      paused = change.settings.delivery_paused;
+      return ok(queue());
+    }
+    if (String(input).endsWith('/consumers')) {
+      return ok(consumers());
+    }
+    if (String(input).endsWith('/metrics')) {
+      return ok(metrics);
+    }
+    return ok({
+      ...queue(),
+      settings: { delivery_paused: paused, delivery_delay: 27, message_retention_period: 604_800 },
+    });
+  });
+  return patches;
+}
+const changeDelivery = (action: 'queue.pause' | 'queue.resume' = 'queue.pause') =>
+  call({ action, input: { expectedDelivery: action === 'queue.pause' ? 'running' : 'paused' } });
+
+describe('owned queue delivery changes', () => {
+  it.each(['queue.pause', 'queue.resume'] as const)(
+    'patches only delivery_paused once and returns a fresh verified %s snapshot',
+    async (action) => {
+      const patches = delivery(action === 'queue.resume');
+      const result = await payload(changeDelivery(action));
+      expect(result).toMatchObject({
+        data: {
+          appId: project.id,
+          resourceId: 'res_queue',
+          action,
+          kind: 'queue-status',
+          delivery: action === 'queue.pause' ? 'paused' : 'running',
+          backlog: null,
+          consumer: { connected: true },
+        },
+      });
+      expect(patches).toEqual([{ settings: { delivery_paused: action === 'queue.pause' } }]);
+      expect(provider.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+      expect(
+        provider.mock.calls.filter(
+          ([url, init]) => (init?.method ?? 'GET') === 'GET' && !String(url).endsWith('/consumers'),
+        ),
+      ).toHaveLength(2);
+      expect(provider.mock.calls.some(([url]) => String(url).endsWith('/metrics'))).toBe(false);
+      for (const privateValue of [queueId, name, 'platform-dispatch', env.CF_API_TOKEN]) {
+        expect(JSON.stringify(result)).not.toContain(privateValue);
+      }
+    },
+  );
+  it.each([
+    {},
+    { expectedDelivery: 'unknown' },
+    { expectedDelivery: 'paused' },
+    { expectedDelivery: true },
+    { expectedDelivery: 'running', queueId },
+    { expectedDelivery: 'running', delivery_paused: true },
+  ])('rejects invalid pause input without a provider call (%j)', async (input) => {
+    expect((await call({ action: 'queue.pause', input })).status).toBe(400);
+    expect(provider).not.toHaveBeenCalled();
+  });
+  it('requires paused as the expected state for resume', async () => {
+    expect(
+      (await call({ action: 'queue.resume', input: { expectedDelivery: 'running' } })).status,
+    ).toBe(400);
+    expect(provider).not.toHaveBeenCalled();
+  });
+  it.each([true, undefined])(
+    'does not patch when the delivery state changed or is unknown (%s)',
+    async (state) => {
+      const patches = delivery();
+      provider.mockImplementation(async (input) =>
+        String(input).endsWith('/consumers')
+          ? ok(consumers())
+          : ok({ ...queue(), settings: { delivery_paused: state } }),
+      );
+      expect(await payload(changeDelivery())).toMatchObject({ data: { kind: 'conflict' } });
+      expect(patches).toEqual([]);
+      expect(provider.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    },
+  );
+  it.each(['owner', 'resource', 'preview', 'unpublished', 'route', 'consumer', 'queue-name'])(
+    'refuses %s mismatch before a write',
+    async (change) => {
+      const patches = delivery();
+      if (change === 'preview') {
+        await env.db
+          .update(projects)
+          .set({
+            slug: 'preview-queue-write-test',
+            preview_client_id: registration.client.id,
+            preview_workspace_id: 'workspace-test',
+            preview_expires_at: new Date(Date.now() + 60_000).toISOString(),
+          })
+          .where(eq(projects.id, project.id));
+      }
+      if (change === 'unpublished') {
+        await env.db
+          .update(projects)
+          .set({ active_deployment_id: null })
+          .where(eq(projects.id, project.id));
+      }
+      if (change === 'route') {
+        await env.ROUTING.put(
+          `queue:${name}`,
+          JSON.stringify({ ...JSON.parse(route), projectId: foreign.id }),
+        );
+      }
+      if (change === 'consumer' || change === 'queue-name') {
+        provider.mockImplementation(async (input) =>
+          String(input).endsWith('/consumers')
+            ? ok([
+                {
+                  ...consumers()[0],
+                  script: change === 'consumer' ? 'other-dispatch' : 'platform-dispatch',
+                },
+              ])
+            : ok({ ...queue(), queue_name: change === 'queue-name' ? 'other-queue' : name }),
+        );
+      }
+      const response = await call({
+        action: 'queue.pause',
+        input: { expectedDelivery: 'running' },
+        owner: { person: change === 'owner' ? 'other' : 'person' },
+        resourceId: change === 'resource' ? 'res_other' : 'res_queue',
+      });
+      if (change === 'owner' || change === 'resource') {
+        expect(response.status).toBe(404);
+      } else {
+        expect(await response.json()).toMatchObject({ data: { kind: 'unavailable' } });
+      }
+      expect(patches).toEqual([]);
+      expect(provider.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    },
+  );
+  it.each(['route', 'owner', 'binding', 'deployment'])(
+    'rechecks %s after preflight and before PATCH',
+    async (change) => {
+      const otherOwner = await createTestUser(env.db, 'new-owner');
+      provider.mockImplementation(async (input) => {
+        if (String(input).endsWith('/consumers')) {
+          if (change === 'route') {
+            await env.ROUTING.put(`queue:${name}`, '{}');
+          }
+          if (change === 'owner') {
+            await env.db
+              .update(projects)
+              .set({ user_id: otherOwner.id })
+              .where(eq(projects.id, project.id));
+          }
+          if (change === 'binding') {
+            await env.db
+              .update(resources)
+              .set({ cf_id: 'b'.repeat(32) })
+              .where(eq(resources.id, 'res_queue'));
+          }
+          if (change === 'deployment') {
+            await env.db
+              .update(projects)
+              .set({ active_deployment_id: null })
+              .where(eq(projects.id, project.id));
+          }
+          return ok(consumers());
+        }
+        return ok(queue());
+      });
+      expect(await payload(changeDelivery())).toMatchObject({ data: { kind: 'unavailable' } });
+      expect(provider.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    },
+  );
+  it.each([
+    'timeout',
+    'rejected',
+    'malformed',
+    'wrong-state',
+    'route',
+    'owner',
+    'binding',
+    'deployment',
+    'verification-failure',
+  ])('reports unknown without retry after an uncertain write (%s)', async (change) => {
+    const otherOwner = await createTestUser(env.db, 'post-write-owner');
+    let attempted = false;
+    provider.mockImplementation(async (input, init) => {
+      if (init?.method === 'PATCH') {
+        attempted = true;
+        if (change === 'timeout') {
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('timeout')), {
+              once: true,
+            });
+          });
+        }
+        if (change === 'rejected') {
+          return Response.json(
+            { success: false, errors: [{ message: 'provider-private-error' }] },
+            { status: 503 },
+          );
+        }
+        if (change === 'malformed') {
+          return new Response('invalid-json');
+        }
+        if (change === 'route') {
+          await env.ROUTING.put(`queue:${name}`, '{}');
+        }
+        if (change === 'owner') {
+          await env.db
+            .update(projects)
+            .set({ user_id: otherOwner.id })
+            .where(eq(projects.id, project.id));
+        }
+        if (change === 'binding') {
+          await env.db
+            .update(resources)
+            .set({ cf_id: 'b'.repeat(32) })
+            .where(eq(resources.id, 'res_queue'));
+        }
+        if (change === 'deployment') {
+          await env.db
+            .update(projects)
+            .set({ active_deployment_id: null })
+            .where(eq(projects.id, project.id));
+        }
+        return ok(queue());
+      }
+      if (attempted && change === 'verification-failure') {
+        throw new Error('provider-private-error');
+      }
+      return String(input).endsWith('/consumers')
+        ? ok(consumers())
+        : ok({ ...queue(), settings: { delivery_paused: attempted && change !== 'wrong-state' } });
+    });
+    const start = Date.now();
+    const result = await payload(changeDelivery());
+    expect(result).toMatchObject({
+      data: { kind: 'unknown', reason: expect.stringContaining('Refresh queue status') },
+    });
+    expect(JSON.stringify(result)).not.toContain('provider-private-error');
+    expect(provider.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+    expect(Date.now() - start).toBeLessThan(9000);
+  });
+  it('stops before PATCH when provider preflight times out', async () => {
+    provider.mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('timeout')), {
+            once: true,
+          });
+        }),
+    );
+    const start = Date.now();
+    expect(await payload(changeDelivery())).toMatchObject({ data: { kind: 'unavailable' } });
+    expect(provider.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    expect(Date.now() - start).toBeLessThan(9000);
+  });
 });

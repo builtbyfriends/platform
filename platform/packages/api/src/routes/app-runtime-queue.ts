@@ -52,13 +52,39 @@ function backlog(value: unknown): Backlog | null {
     oldestMessageAt: typeof oldest === 'number' && oldest > 0 ? oldest : null,
   };
 }
-async function readRouting(env: ApiEnv['Bindings'], key: string): Promise<string | null> {
+function remaining(deadline: number, maximum: number) {
+  const left = deadline - Date.now();
+  if (left <= 0) {
+    throw new Error('Queue action timed out.');
+  }
+  return Math.min(left, maximum);
+}
+async function authorized(check: () => Promise<boolean>, deadline: number) {
+  const timeout = remaining(deadline, 1000);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      check(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Queue authorization timed out.')), timeout);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function readRouting(
+  env: ApiEnv['Bindings'],
+  key: string,
+  deadline: number,
+): Promise<string | null> {
+  const timeout = remaining(deadline, 750);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       env.ROUTING.get(key),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error('Queue routing is unavailable.')), 750);
+        timer = setTimeout(() => reject(new Error('Queue routing is unavailable.')), timeout);
       }),
     ]);
   } finally {
@@ -66,11 +92,13 @@ async function readRouting(env: ApiEnv['Bindings'], key: string): Promise<string
   }
 }
 
-export async function queueStatus(
+async function inspectQueue(
   env: ApiEnv['Bindings'],
   project: Project,
   resource: Resource,
-): Promise<QueueStatus> {
+  withMetrics: boolean,
+  deadline: number,
+) {
   if (
     resource.type !== 'queue' ||
     resource.project_id !== project.id ||
@@ -84,7 +112,7 @@ export async function queueStatus(
   }
   const name = getProjectQueueName(project.id, resource.binding_name);
   const routingKey = `queue:${name}`;
-  const routing = await readRouting(env, routingKey);
+  const routing = await readRouting(env, routingKey, deadline);
   const route: unknown = routing ? JSON.parse(routing) : null;
   if (
     !isRecord(route) ||
@@ -101,7 +129,9 @@ export async function queueStatus(
   const read = (path: '' | '/consumers' | '/metrics') =>
     cfFetch<unknown>(`${url}${path}`, env.CF_API_TOKEN, {
       // Decision: Leave room for both routing fences and the caller's ten-second request deadline.
-      signal: AbortSignal.timeout(path === '/metrics' ? 2000 : 4000),
+      signal: AbortSignal.timeout(
+        remaining(deadline, path === '/metrics' || !withMetrics ? 2000 : 4000),
+      ),
     });
   const [queue, consumers] = await Promise.all([read(''), read('/consumers')]);
   if (
@@ -137,15 +167,17 @@ export async function queueStatus(
     maxConcurrency: settings.max_concurrency === null ? null : setting(settings.max_concurrency),
   };
   let metrics: Backlog | null = null;
-  try {
-    metrics = backlog(await read('/metrics'));
-  } catch {
-    // Decision: A missing measurement doesn't erase verified delivery settings or imply an empty queue.
+  if (withMetrics) {
+    try {
+      metrics = backlog(await read('/metrics'));
+    } catch {
+      // Decision: A missing measurement doesn't erase verified delivery settings or imply an empty queue.
+    }
   }
-  if ((await readRouting(env, routingKey)) !== routing) {
+  if ((await readRouting(env, routingKey, deadline)) !== routing) {
     throw new Error('Queue delivery changed while reading.');
   }
-  return {
+  const status: QueueStatus = {
     kind: 'queue-status',
     checkedAt: Date.now(),
     delivery:
@@ -157,4 +189,70 @@ export async function queueStatus(
     backlog: metrics,
     consumer: verified,
   };
+  return { status, routing, routingKey, url };
+}
+
+export async function queueStatus(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+): Promise<QueueStatus> {
+  return (await inspectQueue(env, project, resource, true, Date.now() + 7500)).status;
+}
+
+export async function changeQueueDelivery(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+  action: 'queue.pause' | 'queue.resume',
+  expectedDelivery: 'running' | 'paused',
+  stillAuthorized: () => Promise<boolean>,
+) {
+  const deadline = Date.now() + 7500;
+  const unavailable = {
+    kind: 'unavailable' as const,
+    reason:
+      'Could not verify this queue before changing delivery. Refresh its status and try again.',
+  };
+  const unknown = {
+    kind: 'unknown' as const,
+    reason:
+      'The delivery change could not be confirmed. Refresh queue status before making another change.',
+  };
+  let attempted = false;
+  try {
+    const before = await inspectQueue(env, project, resource, false, deadline);
+    if (before.status.delivery !== expectedDelivery) {
+      return {
+        kind: 'conflict' as const,
+        reason:
+          'Queue delivery changed or is not reported. Refresh its status before making a change.',
+      };
+    }
+    if (
+      !(await authorized(stillAuthorized, deadline)) ||
+      (await readRouting(env, before.routingKey, deadline)) !== before.routing
+    ) {
+      return unavailable;
+    }
+    const signal = AbortSignal.timeout(remaining(deadline, 2000));
+    attempted = true;
+    // Decision: Cloudflare PATCH changes only supplied settings; it has no conditional state token, so recheck after the write and never replay an uncertain result.
+    await cfFetch<unknown>(before.url, env.CF_API_TOKEN, {
+      method: 'PATCH',
+      signal,
+      body: JSON.stringify({ settings: { delivery_paused: action === 'queue.pause' } }),
+    });
+    const after = await inspectQueue(env, project, resource, false, deadline);
+    if (
+      after.routing !== before.routing ||
+      after.status.delivery !== (action === 'queue.pause' ? 'paused' : 'running') ||
+      !(await authorized(stillAuthorized, deadline))
+    ) {
+      return unknown;
+    }
+    return after.status;
+  } catch {
+    return attempted ? unknown : unavailable;
+  }
 }
