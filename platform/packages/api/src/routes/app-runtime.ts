@@ -19,6 +19,7 @@ import {
 } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
+import { keyEditorAvailable } from './app-runtime-kv.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 import { vectorizeManifestOwns, vectorizeRuntimeAvailable } from './app-runtime-vectorize.ts';
 
@@ -242,9 +243,19 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                   !!context.env.CF_API_TOKEN &&
                   !project.preview_client_id &&
                   !!project.active_deployment_id
-                : !!context.env.PLATFORM_PROXY
+                : !!context.env.PLATFORM_PROXY ||
+                  (filesActive && keyEditorAvailable(context.env, current, resource))
           )
-            ? resourceActions(resource)
+            ? resourceActions(
+                resource,
+                filesActive && keyEditorAvailable(context.env, current, resource),
+              ).filter(
+                (action) =>
+                  resource.type !== 'kv' ||
+                  !!context.env.PLATFORM_PROXY ||
+                  action.id === 'keys.inspect' ||
+                  action.id === 'keys.save',
+              )
             : [],
           browseCapabilities:
             resource.type === 'd1' && context.env.PLATFORM_PROXY
@@ -346,6 +357,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     if (!resource) {
       return context.json({ error: 'unknown_resource' }, 404);
     }
+    const keyAction = body.action === 'keys.inspect' || body.action === 'keys.save';
     const stillAuthorized = async () => {
       const current = await resolveProject(context, project.id, owner);
       const currentResource = (await getProjectResources(context.get('db'), project.id)).find(
@@ -353,6 +365,9 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       );
       return Boolean(
         current &&
+        (!keyAction ||
+          (keyEditorAvailable(context.env, current, resource) &&
+            (await fileOwnerActive(context.get('db'), current)))) &&
         current.user_id === project.user_id &&
         current.proxy_token_gen === project.proxy_token_gen &&
         current.active_deployment_id === project.active_deployment_id &&
@@ -367,6 +382,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
             currentResource.metadata.metric === resource.metadata.metric)),
       );
     };
+    const keyWrite = body.action === 'keys.save';
     const queueWrite = body.action === 'queue.pause' || body.action === 'queue.resume';
     try {
       if (resource.type === 'vectorize') {
@@ -391,22 +407,24 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         stillAuthorized,
       );
       if (
-        queueWrite &&
+        (queueWrite || keyAction) &&
         (data.kind === 'unavailable' || data.kind === 'conflict' || data.kind === 'unknown')
       ) {
         return context.json({ data });
       }
       if (!(await stillAuthorized())) {
-        if (body.action === 'files.saveText' || queueWrite) {
+        if (body.action === 'files.saveText' || queueWrite || keyWrite) {
           return context.json({
             data: {
               appId: project.id,
               resourceId: resource.id,
               action: body.action,
               kind: 'unknown',
-              reason: queueWrite
-                ? 'The app connection changed while updating delivery. Refresh queue status before making another change.'
-                : 'This resource changed during the save. Open it again to check the result.',
+              reason: keyWrite
+                ? 'The key update could not be confirmed. Wait, then open it before making another change.'
+                : queueWrite
+                  ? 'The app connection changed while updating delivery. Refresh queue status before making another change.'
+                  : 'This resource changed during the save. Open it again to check the result.',
             },
           });
         }
@@ -419,18 +437,21 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
           appId: project.id,
           resourceId: resource.id,
           action: body.action,
-          kind: body.action === 'files.saveText' || queueWrite ? 'unknown' : 'unavailable',
-          reason: queueWrite
-            ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
-            : body.action === 'index.info' || body.action === 'index.query'
-              ? 'Could not read this search index. Check its connection and query dimensions, then try again.'
-              : body.action === 'files.saveText'
-                ? 'The save could not be confirmed. Open the file again to check the result.'
-                : body.action === 'queue.status'
-                  ? 'Could not verify queue status. Refresh and try again.'
-                  : body.action === 'database.schema' || body.action === 'database.indexes'
-                    ? 'Could not read this table structure. Refresh the table list and try again.'
-                    : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
+          kind:
+            body.action === 'files.saveText' || queueWrite || keyWrite ? 'unknown' : 'unavailable',
+          reason: keyWrite
+            ? 'The key update could not be confirmed. Wait, then open it before making another change.'
+            : queueWrite
+              ? 'The delivery change could not be confirmed. Refresh queue status before making another change.'
+              : body.action === 'index.info' || body.action === 'index.query'
+                ? 'Could not read this search index. Check its connection and query dimensions, then try again.'
+                : body.action === 'files.saveText'
+                  ? 'The save could not be confirmed. Open the file again to check the result.'
+                  : body.action === 'queue.status'
+                    ? 'Could not verify queue status. Refresh and try again.'
+                    : body.action === 'database.schema' || body.action === 'database.indexes'
+                      ? 'Could not read this table structure. Refresh the table list and try again.'
+                      : 'Could not open this value. It may be unavailable, binary, or larger than 64 KiB.',
         },
       });
     }
