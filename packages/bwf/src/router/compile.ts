@@ -769,7 +769,7 @@ export function compileRouteTable(
       '  if (!__platformBindingApp) __platformBindingApp = __createBindingHandler(__getRawEnv());',
     );
     lines.push('  const url = new URL(c.req.url);');
-    lines.push('  url.pathname = url.pathname.slice(7);');
+    lines.push('  url.pathname = url.pathname.slice("/__platform".length);');
     lines.push('  return __platformBindingApp.fetch(new Request(url.toString(), c.req.raw));');
     lines.push('});');
     lines.push('');
