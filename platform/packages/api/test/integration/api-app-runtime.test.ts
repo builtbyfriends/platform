@@ -1447,7 +1447,7 @@ describe('database structure and server queries', () => {
             actions: [
               {
                 id: 'database.cell',
-                label: 'Read full value',
+                label: 'Read value',
                 effect: 'read',
                 result: 'cell',
                 fields: [
