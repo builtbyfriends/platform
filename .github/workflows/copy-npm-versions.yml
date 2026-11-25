@@ -39,7 +39,7 @@ jobs:
           for f in "$GITHUB_WORKSPACE"/packages/*/package.json; do
             [ "$(node -p "require('$f').private === true")" = true ] && continue
             name=$(node -p "require('$f').name")
-            for v in $(npm view "$name" versions --json --registry "$NPM" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=s?JSON.parse(s):[];console.log([].concat(v).join(' '))})"); do
+            for v in $(npm view "$name" versions --json --registry "$NPM" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=s?JSON.parse(s):[];console.log([].concat(v).filter(x=>typeof x==='string').join(' '))})"); do
               if npm view "$name@$v" version --registry "$REGISTRY" >/dev/null 2>&1; then
                 continue
               fi
