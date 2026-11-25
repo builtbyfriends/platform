@@ -484,6 +484,10 @@ describe('connected app runtime reads', () => {
       ['https://internal/__platformish', 200],
       ['https://worker.example/__platform/ready', 400],
       ['https://app.test/exception', 400],
+      ['https://internal/__platform/queue/status', 500],
+      ['https://worker/__platform/scheduled/status', 500],
+      ['https://app.test/__platform/queue', 500],
+      ['https://app.test/__platform/scheduled', 200],
     ] as const;
     vi.stubGlobal(
       'fetch',
@@ -515,11 +519,67 @@ describe('connected app runtime reads', () => {
           { level: 'info', request: { url: inputs[7][0] } },
           { level: 'warn', request: { url: inputs[8][0] } },
           { level: 'error', request: { url: inputs[9][0] } },
+          { level: 'error', message: 'Request returned HTTP 500', request: { url: inputs[12][0] } },
+          { level: 'info', message: 'Request finished: ok', request: { url: inputs[13][0] } },
         ],
       },
     });
     expect(JSON.stringify(result)).not.toContain('https://worker/__platform/');
     expect(JSON.stringify(result)).not.toContain('https://internal/__platform/');
+  });
+
+  it.each([
+    ['/__platform/queue', 'Background job'],
+    ['/__platform/scheduled', 'Scheduled task'],
+    ['/__queue', 'Background job'],
+    ['/__scheduled', 'Scheduled task'],
+  ])(
+    'keeps customer failures from the %s relay without exposing its internal URL',
+    async (path, label) => {
+      await createTestDeployment(env.db, project.id);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          Response.json({
+            data: ['internal', 'worker'].map((host, index) => ({
+              ts: Date.now() - 1000 - index,
+              outcome: 'exception',
+              logData: '[{"level":"error","message":"Import attempt failed"}]',
+              exceptionData: '[{"name":"TypeError","message":"Invalid supplier record"}]',
+              url: `https://${host}${path}?token=private#secret`,
+              method: 'POST',
+              statusCode: '500',
+              ingestedAt: new Date().toISOString(),
+            })),
+          }),
+        ),
+      );
+      const result = await payload(call('projects.activity', { project: project.id }));
+      expect(result).toMatchObject({
+        data: {
+          appId: project.id,
+          scope: 'app',
+          available: true,
+          events: Array.from({ length: 2 }, () => ({
+            level: 'error',
+            message: `${label}: TypeError: Invalid supplier record\nImport attempt failed`,
+          })),
+        },
+      });
+      expect(JSON.stringify(result)).not.toMatch(/https:\/\/(internal|worker)|token=|"request":/);
+    },
+  );
+
+  it('refuses other owners before querying background activity', async () => {
+    await createTestDeployment(env.db, project.id);
+    const network = vi.fn();
+    vi.stubGlobal('fetch', network);
+    expect((await call('projects.activity', { project: other.id })).status).toBe(404);
+    expect(
+      (await call('projects.activity', { project: project.id, owner: { person: 'other-person' } }))
+        .status,
+    ).toBe(404);
+    expect(network).not.toHaveBeenCalled();
   });
 
   it('refuses a cross-project deployment pointer before reading logs', async () => {
@@ -546,10 +606,25 @@ describe('connected app runtime reads', () => {
           .update(projects)
           .set({ user_id: foreign.user_id })
           .where(eq(projects.id, project.id));
-        return Response.json({ data: [] });
+        return Response.json({
+          data: [
+            {
+              ts: Date.now() - 1000,
+              outcome: 'exception',
+              logData: '[]',
+              exceptionData: '[{"message":"Private import error"}]',
+              url: 'https://internal/__platform/queue',
+              method: 'POST',
+              statusCode: '500',
+              ingestedAt: new Date().toISOString(),
+            },
+          ],
+        });
       }),
     );
-    expect((await call('projects.activity', { project: project.id })).status).toBe(409);
+    const response = await call('projects.activity', { project: project.id });
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain('Private import error');
   });
 
   it('does not substitute synthetic logs with local dev bypass', async () => {

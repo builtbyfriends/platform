@@ -267,15 +267,24 @@ function logMessage(value: unknown): string {
     .join(': ')
     .slice(0, 4000);
 }
-function platformControlRequest(value: string) {
+function platformRequest(value: string) {
   try {
     const url = new URL(value);
-    return (
-      (url.hostname === 'worker' || url.hostname === 'internal') &&
-      (url.pathname === '/__platform' || url.pathname.startsWith('/__platform/'))
-    );
+    if (url.hostname !== 'worker' && url.hostname !== 'internal') {
+      return undefined;
+    }
+    // Decision: These relay routes run customer code; other platform requests are housekeeping.
+    if (url.pathname === '/__platform/queue' || url.pathname === '/__queue') {
+      return 'Background job';
+    }
+    if (url.pathname === '/__platform/scheduled' || url.pathname === '/__scheduled') {
+      return 'Scheduled task';
+    }
+    return url.pathname === '/__platform' || url.pathname.startsWith('/__platform/')
+      ? 'control'
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -536,38 +545,44 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       ) {
         return context.json({ error: 'deployment_changed' }, 409);
       }
-      const events = result.data
-        .filter((row) => !platformControlRequest(row.url))
-        .map((row, index) => {
-          const messages = [...row.exceptions, ...row.logs].flatMap((value) => {
-            const message = logMessage(value);
-            return message ? [message] : [];
-          });
-          const error =
-            row.outcome !== 'ok' ||
-            row.exceptions.length > 0 ||
-            Number(row.status) >= 500 ||
-            row.logs.some((log) => isRecord(log) && log.level === 'error');
-          const warn =
-            Number(row.status) >= 400 ||
-            row.logs.some((log) => isRecord(log) && log.level === 'warn');
-          return {
+      const events = result.data.flatMap((row, index) => {
+        const trigger = platformRequest(row.url);
+        if (trigger === 'control') {
+          return [];
+        }
+        const messages = [...row.exceptions, ...row.logs].flatMap((value) => {
+          const message = logMessage(value);
+          return message ? [message] : [];
+        });
+        const error =
+          row.outcome !== 'ok' ||
+          row.exceptions.length > 0 ||
+          Number(row.status) >= 500 ||
+          row.logs.some((log) => isRecord(log) && log.level === 'error');
+        const warn =
+          Number(row.status) >= 400 ||
+          row.logs.some((log) => isRecord(log) && log.level === 'warn');
+        const summary =
+          messages.join('\n') ||
+          (Number(row.status) >= 400
+            ? `Request returned HTTP ${row.status}`
+            : `Request finished: ${row.outcome}`);
+        return [
+          {
             id: `${project.active_deployment_id}:${row.timestamp}:${index}`,
             timestamp: row.timestamp,
             level: error ? 'error' : warn ? 'warn' : 'info',
-            message: (
-              messages.join('\n') ||
-              (Number(row.status) >= 400
-                ? `Request returned HTTP ${row.status}`
-                : `Request finished: ${row.outcome}`)
-            ).slice(0, 8000),
-            request: {
-              method: row.method,
-              url: requestAddress(row.url),
-              status: Number(row.status) || 0,
-            },
-          };
-        });
+            message: (trigger ? `${trigger}: ${summary}` : summary).slice(0, 8000),
+            request: trigger
+              ? undefined
+              : {
+                  method: row.method,
+                  url: requestAddress(row.url),
+                  status: Number(row.status) || 0,
+                },
+          },
+        ];
+      });
       return context.json({
         data: { ...base, available: true, events, cursor: result.nextCursor },
       });
