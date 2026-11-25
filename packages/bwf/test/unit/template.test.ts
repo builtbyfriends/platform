@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   createSpaStarterTemplate,
@@ -102,21 +102,28 @@ describe('Starter lint', () => {
 
         writeFileSync(
           join(root, 'oxlint.config.ts'),
-          `import bwf from ${JSON.stringify(fileURLToPath(new URL('../../src/lint.ts', import.meta.url)))};
+          `import bwf from ${JSON.stringify(new URL('../../src/lint.ts', import.meta.url).href)};
 
 export default { ...bwf, options: { ...bwf.options, typeAware: false } };
 `,
         );
 
-        const oxlint = fileURLToPath(
-          new URL('../../../../node_modules/.bin/oxlint', import.meta.url),
+        // Decision: Oxlint runs through Node from its own package, since the shell shim in node_modules/.bin
+        // doesn't start on Windows. Only the system variables go through, so the test runner's own settings
+        // don't change how Oxlint finds its config.
+        const fromVitePlus = createRequire(
+          createRequire(import.meta.url).resolve('vite-plus/package.json'),
         );
-        // Decision: Only PATH and HOME go through, so the test runner's own settings don't change how Oxlint
-        // finds its config.
-        const result = spawnSync(oxlint, ['-c', 'oxlint.config.ts', '.'], {
+        const oxlint = join(dirname(fromVitePlus.resolve('oxlint/package.json')), 'bin', 'oxlint');
+        const env = Object.fromEntries(
+          ['PATH', 'Path', 'HOME', 'USERPROFILE', 'SystemRoot', 'TEMP', 'TMP'].flatMap((name) =>
+            process.env[name] === undefined ? [] : [[name, process.env[name]]],
+          ),
+        );
+        const result = spawnSync(process.execPath, [oxlint, '-c', 'oxlint.config.ts', '.'], {
           cwd: root,
           encoding: 'utf8',
-          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+          env,
         });
 
         expect(result.stdout + result.stderr).toMatch(/^Found 0 warnings and 0 errors\./m);
