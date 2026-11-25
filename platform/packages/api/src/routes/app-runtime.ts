@@ -17,10 +17,11 @@ import {
   validDatabaseSort,
 } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
+import { appRuntimeFileRoutes, fileOwnerActive, fileTransfers } from './app-runtime-files.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
-type ResolveProject = (
+export type ResolveProject = (
   context: Context<ApiEnv>,
   id: unknown,
   owner: RuntimeOwner,
@@ -176,7 +177,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     }
     return project;
   };
-  const app = new Hono<ApiEnv>();
+  const app = new Hono<ApiEnv>().route('/', appRuntimeFileRoutes(resolveProject));
   const boundedBody = bodyLimit({ maxSize: 8192 });
   app.post('/projects.resources', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
@@ -189,6 +190,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     const resources = await getProjectResources(context.get('db'), project.id);
+    const filesActive = await fileOwnerActive(context.get('db'), project);
     const current = await resolveProject(context, project.id, owner);
     if (!current || current.user_id !== project.user_id) {
       return context.json({ error: 'unknown_project' }, 404);
@@ -212,6 +214,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
                     ? 'queue'
                     : 'other',
           browse: resource.type === 'r2' ? 'files' : resource.type === 'd1' ? 'tables' : null,
+          fileTransfers: fileTransfers(context.env, project, resource, filesActive),
           actions: (
             resource.type === 'queue'
               ? !!context.env.CF_ACCOUNT_ID &&
