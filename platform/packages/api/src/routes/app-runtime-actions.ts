@@ -3,6 +3,7 @@ import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { databaseIndexes, databaseSchema } from './app-runtime-database.ts';
+import { executeKeyAction, keyEditorAvailable, validKey, validKeySave } from './app-runtime-kv.ts';
 import { changeQueueDelivery, queueStatus } from './app-runtime-queue.ts';
 import { vectorQuery, vectorizeRecords } from './app-runtime-vectorize.ts';
 
@@ -32,6 +33,8 @@ type Action = {
     | 'file-saved'
     | 'keys'
     | 'key-value'
+    | 'key-editor'
+    | 'key-saved'
     | 'table-schema'
     | 'queue-status'
     | 'records';
@@ -143,6 +146,39 @@ const actions: ActionCatalog = {
   ],
   kv: [
     {
+      id: 'keys.inspect',
+      label: 'Edit value',
+      effect: 'read',
+      fields: [{ ...key, maxLength: 512 }],
+      result: 'key-editor',
+    },
+    {
+      id: 'keys.save',
+      label: 'Save value',
+      effect: 'write',
+      fields: [
+        { ...key, maxLength: 512 },
+        { name: 'text', label: 'Value', type: 'textarea', required: true, maxLength: maxText },
+        { name: 'mode', label: 'Create or replace', type: 'text', required: true, maxLength: 7 },
+        {
+          name: 'expectedFingerprint',
+          label: 'Opened version',
+          type: 'text',
+          required: true,
+          maxLength: 64,
+        },
+        { name: 'expiration', label: 'Expiry', type: 'text', required: true, maxLength: 12 },
+        {
+          name: 'review',
+          label: 'Concurrent update review',
+          type: 'text',
+          required: true,
+          maxLength: 15,
+        },
+      ],
+      result: 'key-saved',
+    },
+    {
       id: 'keys.list',
       label: 'Browse keys',
       effect: 'read',
@@ -161,14 +197,16 @@ const actions: ActionCatalog = {
     },
   ],
 };
-export function resourceActions(resource: Resource): Array<Action> {
+export function resourceActions(resource: Resource, keyEditing = false): Array<Action> {
   if (resource.type === 'vectorize') {
     return actions.vectorize;
   }
   return resource.type === 'r2'
     ? actions.r2
     : resource.type === 'kv'
-      ? actions.kv
+      ? actions.kv.filter(
+          (action) => keyEditing || (action.id !== 'keys.inspect' && action.id !== 'keys.save'),
+        )
       : resource.type === 'd1'
         ? actions.d1
         : resource.type === 'queue'
@@ -178,6 +216,10 @@ export function resourceActions(resource: Resource): Array<Action> {
 export type RuntimeActionInput = {
   vector?: string;
   topK?: string;
+  mode?: 'create' | 'replace';
+  expectedFingerprint?: string;
+  expiration?: string;
+  review?: 'last-write-wins';
   expectedDelivery?: 'running' | 'paused';
   table?: string;
   key?: string;
@@ -201,6 +243,12 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     return null;
   }
   if (action === 'index.query' && !vectorQuery(input.vector, input.topK)) {
+    return null;
+  }
+  if (
+    (action === 'keys.save' && !validKeySave(input)) ||
+    (action === 'keys.inspect' && (typeof input.key !== 'string' || !validKey(input.key)))
+  ) {
     return null;
   }
   const allowed = new Set(definition.fields.map((field) => field.name));
@@ -239,6 +287,11 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   return {
     vector: typeof input.vector === 'string' ? input.vector : undefined,
     topK: typeof input.topK === 'string' ? input.topK : undefined,
+    mode: input.mode === 'create' || input.mode === 'replace' ? input.mode : undefined,
+    expectedFingerprint:
+      typeof input.expectedFingerprint === 'string' ? input.expectedFingerprint : undefined,
+    expiration: typeof input.expiration === 'string' ? input.expiration : undefined,
+    review: input.review === 'last-write-wins' ? input.review : undefined,
     expectedDelivery:
       input.expectedDelivery === 'running' || input.expectedDelivery === 'paused'
         ? input.expectedDelivery
@@ -384,8 +437,28 @@ export async function executeResourceAction(
     kind: 'unknown' as const,
     reason: 'The save could not be confirmed. Open the file again before making another change.',
   });
-  if (!resourceActions(resource).some((entry) => entry.id === action)) {
+  if (
+    !resourceActions(resource, keyEditorAvailable(env, project, resource)).some(
+      (entry) => entry.id === action,
+    )
+  ) {
     return unavailable('This action is not available for this resource.');
+  }
+  if (action === 'keys.inspect' || action === 'keys.save') {
+    if (!input.key || (action === 'keys.save' && !validKeySave(input))) {
+      return unavailable('Review the key before saving.');
+    }
+    return {
+      ...identity,
+      ...(await executeKeyAction(
+        env,
+        project,
+        resource,
+        action,
+        { ...input, key: input.key },
+        stillAuthorized,
+      )),
+    };
   }
   if (action === 'queue.status') {
     return { ...identity, ...(await queueStatus(env, project, resource)) };
