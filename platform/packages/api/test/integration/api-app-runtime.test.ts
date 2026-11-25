@@ -526,7 +526,9 @@ describe('connected app runtime reads', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url, init) => {
-        const rows = sqlite.prepare(String(init.body)).all();
+        const query = String(init.body);
+        expect(query.length).toBeLessThan(10_000);
+        const rows = sqlite.prepare(query).all();
         returnedCounts.push(rows.length);
         return Response.json({ data: rows });
       }),
