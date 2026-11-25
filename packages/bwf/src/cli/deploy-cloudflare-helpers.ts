@@ -605,8 +605,11 @@ function formatCloudflareActivationFailure(
       if (result.versionId) {
         return `deploy: Worker version ${result.versionId} was uploaded but not activated because Cloudflare returned an unexpected version history. Inspect the Worker versions in Cloudflare before retrying. Production traffic is unchanged.`;
       }
+      if (result.diagnostic) {
+        return `deploy: the live Worker's secrets can't be carried over to the new version.${diagnostic}\n\nNo version was uploaded; production traffic is unchanged.`;
+      }
       return [
-        'deploy: the active Worker Version is not the latest upload, and its secrets could not be pinned safely.',
+        "deploy: the live Worker's secrets could not be pinned safely to the new version.",
         'Inspect the active and latest Worker versions in Cloudflare before retrying.',
         'No version was uploaded; production traffic is unchanged.',
       ].join('\n');

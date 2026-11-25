@@ -522,6 +522,21 @@ describe('Cloudflare version activation', () => {
     },
   );
 
+  it('keeps the reason an active-secret pin gives for refusing', async () => {
+    const fixture = sdkDraftActivation();
+    fixture.ordinary();
+    const result = await activateCloudflareVersion({
+      ...fixture.options,
+      pinActiveSecrets: async () => ({ diagnostic: 'TOKEN is also a var.' }),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'inheritance-source-changed',
+      diagnostic: 'TOKEN is also a var.',
+    });
+    expect(fixture.events).not.toContain('upload');
+  });
+
   it.each([
     [{ name: '', type: 'secret_text' }],
     [{ name: ' TOKEN ', type: 'secret_text' }],

@@ -115,7 +115,7 @@ export async function pinActiveWorkerSecrets(options: {
   bindings: ReadonlyArray<{ name: string; type: 'secret_text' | 'secret_key' }>;
   requiredNames: ReadonlyArray<string>;
   explicitNames?: ReadonlyArray<string>;
-}): Promise<boolean> {
+}): Promise<boolean | { diagnostic: string }> {
   const { activeVersionId, bindings, requiredNames, explicitNames = [] } = options;
   if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(activeVersionId)) {
     return false;
@@ -128,8 +128,11 @@ export async function pinActiveWorkerSecrets(options: {
   ) {
     return false;
   }
-  if (requiredNames.some((name) => !secretNames.has(name) && !explicit.has(name))) {
-    return false;
+  const missing = requiredNames.filter((name) => !secretNames.has(name) && !explicit.has(name));
+  if (missing.length) {
+    return {
+      diagnostic: `The app requires ${listNames(missing)}, but the live Worker version has no secret with ${missing.length === 1 ? 'that name' : 'those names'}. Set ${missing.length === 1 ? 'it' : 'them'} on the Worker, then deploy again.`,
+    };
   }
   const path = getWorkerConfigPath(options.output.directory);
   const worker = parseJson(readFileSync(path, 'utf8'));
@@ -147,19 +150,29 @@ export async function pinActiveWorkerSecrets(options: {
       return false;
     }
   }
-  for (const { name } of bindings) {
-    if (explicit.has(name)) {
-      continue;
-    }
-    const current = env[name];
-    if (current !== undefined && (!record(current) || !isSecretBindingType(current.type))) {
-      return false;
-    }
+  const shadowed = bindings
+    .map(({ name }) => name)
+    .filter((name) => {
+      const current = env[name];
+      return (
+        !explicit.has(name) &&
+        current !== undefined &&
+        (!record(current) || !isSecretBindingType(current.type))
+      );
+    });
+  if (shadowed.length) {
+    return {
+      diagnostic: `The live Worker has ${shadowed.length === 1 ? 'a secret' : 'secrets'} named ${listNames(shadowed)}, and this build gives the same ${shadowed.length === 1 ? 'name' : 'names'} to another binding, such as a var in the Wrangler config. A Worker can't hold both. Delete ${shadowed.length === 1 ? 'that secret' : 'those secrets'} from the Worker (\`wrangler secret delete <NAME>\`) if the build's values should win, or rename the other ${shadowed.length === 1 ? 'binding' : 'bindings'}, then deploy again.`,
+    };
   }
   // Decision: The scripts upload API rejects a UUID inheritance source (10057). The version-aware API accepts
   // one, so leave cf's Build Output untouched and carry the source only to that uploader.
   options.output.activeSecrets = { versionId: activeVersionId, bindings: [...bindings] };
   return true;
+}
+
+function listNames(names: ReadonlyArray<string>): string {
+  return names.map((name) => `\`${name}\``).join(', ');
 }
 
 /** Prevent cf's prebuilt uploader from creating a resource as a side effect. */
