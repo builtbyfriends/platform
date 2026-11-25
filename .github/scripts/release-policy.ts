@@ -65,7 +65,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       );
       return manifest.private ? [] : [{ name: manifest.name, version: manifest.version }];
     });
-  const result = releasePolicy(process.env.GITHUB_REF_NAME ?? '', packages);
+  const result = releasePolicy(process.env.RELEASE_TAG ?? '', packages);
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(
       process.env.GITHUB_OUTPUT,
