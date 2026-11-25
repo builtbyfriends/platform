@@ -3,6 +3,7 @@ import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
 import { databaseSchema } from './app-runtime-database.ts';
+import { queueStatus } from './app-runtime-queue.ts';
 
 const maxText = 65_536;
 const secretKey =
@@ -23,11 +24,25 @@ type Action = {
   label: string;
   effect: 'read' | 'write';
   fields: Array<Field>;
-  result: 'file-text' | 'file-saved' | 'keys' | 'key-value' | 'table-schema';
+  result: 'file-text' | 'file-saved' | 'keys' | 'key-value' | 'table-schema' | 'queue-status';
 };
 const key: Field = { name: 'key', label: 'Key', type: 'text', required: true, maxLength: 1024 };
-type ActionCatalog = { r2: Array<Action>; kv: Array<Action>; d1: Array<Action> };
+type ActionCatalog = {
+  r2: Array<Action>;
+  kv: Array<Action>;
+  d1: Array<Action>;
+  queue: Array<Action>;
+};
 const actions: ActionCatalog = {
+  queue: [
+    {
+      id: 'queue.status',
+      label: 'View queue status',
+      effect: 'read',
+      fields: [],
+      result: 'queue-status',
+    },
+  ],
   d1: [
     {
       id: 'database.schema',
@@ -83,7 +98,9 @@ export function resourceActions(resource: Resource): Array<Action> {
       ? actions.kv
       : resource.type === 'd1'
         ? actions.d1
-        : [];
+        : resource.type === 'queue'
+          ? actions.queue
+          : [];
 }
 export type RuntimeActionInput = {
   table?: string;
@@ -97,7 +114,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
   if (!isRecord(input)) {
     return null;
   }
-  const definition = [...actions.r2, ...actions.kv, ...actions.d1].find(
+  const definition = [...actions.r2, ...actions.kv, ...actions.d1, ...actions.queue].find(
     (entry) => entry.id === action,
   );
   if (!definition) {
@@ -272,7 +289,13 @@ export async function executeResourceAction(
     kind: 'unknown' as const,
     reason: 'The save could not be confirmed. Open the file again before making another change.',
   });
-  if (!env.PLATFORM_PROXY || !resourceActions(resource).some((entry) => entry.id === action)) {
+  if (!resourceActions(resource).some((entry) => entry.id === action)) {
+    return unavailable('This action is not available for this resource.');
+  }
+  if (action === 'queue.status') {
+    return { ...identity, ...(await queueStatus(env, project, resource)) };
+  }
+  if (!env.PLATFORM_PROXY) {
     return unavailable('This action is not available for this resource.');
   }
   if (action === 'database.schema') {
