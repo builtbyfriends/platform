@@ -19,7 +19,7 @@ function files(dir: string): Array<string> {
 describe('eeao boundary', () => {
   it('only the procedures adapter imports Realtime packages', () => {
     const offenders = files(src)
-      .map((f) => relative(src, f))
+      .map((f) => relative(src, f).replaceAll('\\', '/'))
       .filter((f) => !adapter.has(f))
       .filter((f) =>
         /['"]@builtbyfriends\/realtime(?:-[a-z]+)?['"/]/.test(readFileSync(join(src, f), 'utf8')),
