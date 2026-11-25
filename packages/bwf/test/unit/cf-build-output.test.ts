@@ -516,7 +516,9 @@ it(
   'preserves additional module types from a real Cloudflare Vite build',
   async () => {
     // Decision: Vite canonicalizes root; use the same path for Cloudflare's output directory.
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'platform-cf-additional-modules-')));
+    const root = realpathSync.native(
+      mkdtempSync(join(tmpdir(), 'platform-cf-additional-modules-')),
+    );
     roots.push(root);
     writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
     const assets = {

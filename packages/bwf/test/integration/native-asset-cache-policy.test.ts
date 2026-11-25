@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,8 @@ let customAsset: string;
 let uncachedAsset: string;
 
 beforeAll(async () => {
-  directory = mkdtempSync(join(tmpdir(), 'platform-native-asset-policy-'));
+  // Decision: Vite resolves its root to the long path, and Windows' temp directory can be a short 8.3 path.
+  directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'platform-native-asset-policy-')));
   const assets = join(directory, 'client');
   const output = join(directory, 'output');
   const clientRoot = join(directory, 'app');

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { toSlash } from 'pathslash';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 const { home, keyring } = vi.hoisted(() => ({
@@ -50,16 +51,16 @@ function addRegistry(name: string) {
 
 describe('platform registry from earlier releases', () => {
   it('uses ~/.bwf/platforms when no earlier registry exists', () => {
-    expect(platformRegistryDirectory()).toBe(join(home.value, '.bwf', 'platforms'));
+    expect(platformRegistryDirectory()).toBe(toSlash(join(home.value, '.bwf', 'platforms')));
   });
 
   it('keeps using an earlier registry in place', () => {
     const voidDirectory = addRegistry('.void');
-    expect(platformRegistryDirectory()).toBe(voidDirectory);
+    expect(platformRegistryDirectory()).toBe(toSlash(voidDirectory));
     const platformDirectory = addRegistry('.platform');
-    expect(platformRegistryDirectory()).toBe(platformDirectory);
+    expect(platformRegistryDirectory()).toBe(toSlash(platformDirectory));
     const bwfDirectory = addRegistry('.bwf');
-    expect(platformRegistryDirectory()).toBe(bwfDirectory);
+    expect(platformRegistryDirectory()).toBe(toSlash(bwfDirectory));
   });
 
   it('reads the old registry directory variable', () => {
@@ -82,7 +83,7 @@ describe('platform registry from earlier releases', () => {
     writePendingInstallationSecrets(manifest, { token: 'secret' }, directory);
     vi.stubEnv('PLATFORM_RECOVERY_KEY', undefined);
     expect(() => readPendingInstallationSecrets(manifest, directory)).toThrow('encryption key');
-    const account = `recovery:${createHash('sha256').update(directory).digest('hex')}`;
+    const account = `recovery:${createHash('sha256').update(toSlash(directory)).digest('hex')}`;
     keyring.set(`dev.void.cli.platform\0${account}`, key);
     expect(readPendingInstallationSecrets(manifest, directory)).toEqual({ token: 'secret' });
   });

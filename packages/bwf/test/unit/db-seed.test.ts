@@ -748,8 +748,9 @@ import { value as pkg } from 'extensionless-esm';
 import { label } from './helper';
 import data from './data.cjs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 export default async ({ db, schema }) => {
-  const helper = await import(join(import.meta.dirname, 'helper'));
+  const helper = await import(pathToFileURL(join(import.meta.dirname, 'helper')).href);
   await db.insert(schema.messages).values({ text: [text, label, data.label, helper.label, pkg, data.fixture === fixture].join(',') });
 };`,
       },
