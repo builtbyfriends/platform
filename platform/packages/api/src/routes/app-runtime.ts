@@ -458,9 +458,17 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
   });
   app.post('/projects.activity', boundedBody, async (context) => {
     const body: unknown = await context.req.json().catch(() => null);
-    if (!isRecord(body) || !optionalText(body.cursor, 4096)) {
+    if (
+      !isRecord(body) ||
+      !optionalText(body.cursor, 4096) ||
+      (body.range !== undefined &&
+        body.range !== '1h' &&
+        body.range !== '24h' &&
+        body.range !== '7d')
+    ) {
       return context.json({ error: 'invalid_activity' }, 400);
     }
+    const range = body.range ?? '1h';
     const owner = runtimeOwner(body.owner);
     if (!owner) {
       return context.json({ error: 'invalid_owner' }, 400);
@@ -472,10 +480,18 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     const base = {
       checkedAt: Date.now(),
       appId: project.id,
+      range,
+      deploymentId: project.active_deployment_id ?? null,
+      window: null,
+      previousCursor: null,
       scope: 'app' as const,
       partial: context.env.PLATFORM_RUNTIME_LOGS === 'minimal',
     };
-    if (!project.active_deployment_id || isDevBypass(context.env)) {
+    if (
+      !project.active_deployment_id ||
+      isDevBypass(context.env) ||
+      !(await fileOwnerActive(context.get('db'), project))
+    ) {
       return context.json({
         data: {
           ...base,
@@ -497,6 +513,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         project.active_deployment_id,
         {
           limit: pageSize,
+          range,
           order: 'newest-first',
           cursor: typeof body.cursor === 'string' ? body.cursor : undefined,
         },
@@ -504,6 +521,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       const current = await resolveProject(context, project.id, owner);
       if (
         !current ||
+        !(await fileOwnerActive(context.get('db'), current)) ||
         current.user_id !== project.user_id ||
         current.active_deployment_id !== project.active_deployment_id
       ) {
@@ -548,7 +566,14 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         ];
       });
       return context.json({
-        data: { ...base, available: true, events, cursor: result.nextCursor },
+        data: {
+          ...base,
+          window: result.window ?? null,
+          previousCursor: result.previousCursor,
+          available: true,
+          events,
+          cursor: result.nextCursor,
+        },
       });
     } catch (error) {
       if (error instanceof OperatorError && error.status === 400) {
