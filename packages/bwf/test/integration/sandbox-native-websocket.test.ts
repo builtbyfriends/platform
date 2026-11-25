@@ -12,7 +12,7 @@ it('transfers native Sandbox WebSockets through DO fetch and strips the routing 
   const sdk = join(directory, 'sdk.ts');
   let runtime: Miniflare | undefined;
   try {
-    writeFileSync(sdk, 'export class Files {}');
+    writeFileSync(sdk, 'export class Files {}\nexport class DirectoryBackup {}');
     writeFileSync(
       entry,
       `
