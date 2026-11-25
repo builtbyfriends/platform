@@ -4,6 +4,25 @@
   "description": "Configuration file for void projects (bwf.json)",
   "type": "object",
   "properties": {
+    "vectorize": {
+      "type": "array",
+      "description": "Vector indexes for published Workers. Index dimensions and distance metric are immutable. Local development and previews are unsupported.",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["bindingName", "dimensions", "metric"],
+        "additionalProperties": false,
+        "properties": {
+          "bindingName": {
+            "type": "string",
+            "pattern": "^(?!__)(?!(?:DB|KV|STORAGE|AI|SANDBOX|ASSETS|SEND_EMAIL|USAGE_EVENTS_QUEUE)$)[A-Za-z_$][A-Za-z0-9_$]{0,63}$",
+            "description": "Unique Worker binding name. It must not collide with another binding or variable."
+          },
+          "dimensions": { "type": "integer", "minimum": 1, "maximum": 1536 },
+          "metric": { "type": "string", "enum": ["cosine", "euclidean", "dot-product"] }
+        }
+      }
+    },
     "storage": {
       "type": "object",
       "description": "R2 bucket placement for new project buckets.",

@@ -603,6 +603,22 @@ describe('platform installation planning', () => {
     expect(fresh.deployment.capabilities.sandbox).toBe(true);
   });
 
+  it('enables Vectorize only for a supported runtime without provisioning an index', async () => {
+    const legacy = legacyInstallation();
+    const baseline = await createPlatformInstallPlan(client(), input, legacy);
+    const upgraded = await createPlatformInstallPlan(client(), input, legacy, {
+      enableVectorize: true,
+    });
+    expect(baseline.deployment.capabilities.vectorize).toBe(false);
+    expect(upgraded.deployment.capabilities.vectorize).toBe(true);
+    expect(upgraded.actions.map(({ key }) => key)).toEqual(baseline.actions.map(({ key }) => key));
+    const fresh = await createPlatformInstallPlan(client(), input, null, { enableVectorize: true });
+    expect(fresh.deployment.capabilities.vectorize).toBe(true);
+    expect(fresh.actions.map(({ key }) => key)).not.toEqual(
+      expect.arrayContaining([expect.stringContaining('vectorize')]),
+    );
+  });
+
   it('resumes the recorded namespaces using the real unfiltered KV API response', async () => {
     const initial = await createPlatformInstallPlan(client(), input, null);
     let manifest = manifestFor(initial, '2026-09-17T00:00:00.000Z');

@@ -244,6 +244,39 @@ Set `durableObject` to a file name in `durable-objects/` (for example `"bot"`) t
 
 Sandbox requires [Workers Paid](https://dash.cloudflare.com/?to=/:account/workers/plans) and Containers access. Managed runtime tokens need Account / Containers: Edit and Account / Cloudchamber: Edit. See [Sandbox deployment](../guide/sandboxes.md#deployment).
 
+### `vectorize`
+
+Declare vector indexes for a published Worker. Choose dimensions that match your embedding model and a distance metric:
+
+```ts
+import { defineConfig } from '@builtbyfriends/bwf/config';
+
+export default defineConfig({
+  vectorize: [{ bindingName: 'SEARCH', dimensions: 384, metric: 'cosine' }],
+});
+```
+
+An app can declare up to 32 indexes. Each binding name must be a unique JavaScript identifier of up to 64 characters, without a `__` prefix or a name used by another binding or variable. Dimensions range from 1 to 1536. Metrics are `cosine`, `euclidean`, and `dot-product`.
+
+After `bwf prepare`, use the typed Worker binding in a route:
+
+```ts
+import { defineHandler } from '@builtbyfriends/bwf';
+
+export const GET = defineHandler(async (c) => {
+  const info = await c.env.SEARCH.describe();
+  return c.json(info);
+});
+```
+
+Use `c.env.SEARCH.upsert()` to store vectors and `c.env.SEARCH.query()` to search them. Supply vectors from your embedding model; declaring an index doesn't generate embeddings. See [Cloudflare's Vectorize Worker API](https://developers.cloudflare.com/vectorize/reference/client-api/).
+
+Index dimensions and metric can't change in place. Add a new binding to create an index with different settings. Declarations provision indexes during deployment; an app without declarations creates none.
+
+Managed deployments require a platform runtime that advertises Vectorize support. The CLI checks this before upload and asks for an installation upgrade when support is absent. Local development, local preview, managed private previews, and remote development bindings don't support these declarations. Use a published deployment to test them.
+
+Native `bwf deploy --platform cloudflare` provisions and pins index names in `bwf.lock.json`. To adopt an existing index, also set `cloudflare.vectorize: [{ binding: 'SEARCH', index_name: 'my-existing-index' }]`. bwf verifies its dimensions and metric before using it and stops if a pinned index is missing. The Cloudflare token needs Account / Vectorize Read and Edit permissions; [Vectorize plan limits](https://developers.cloudflare.com/vectorize/platform/limits/) apply.
+
 ### `storage.locationHint`
 
 Choose a preferred region when bwf creates your app's R2 bucket, on either a bwf platform or a direct Cloudflare deployment:

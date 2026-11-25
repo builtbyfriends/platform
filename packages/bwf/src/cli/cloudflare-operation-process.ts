@@ -447,6 +447,12 @@ async function assertExistingProvisionableResources(
         `Cloudflare R2 bucket ${name} is unavailable; refusing automatic provisioning.`,
         jurisdiction ? { 'cf-r2-jurisdiction': jurisdiction } : {},
       );
+    } else if (binding.type === 'vectorize') {
+      const name = identifier('name');
+      await cloudflareApiGet(
+        `${accountPath}/vectorize/v2/indexes/${encodeURIComponent(name)}`,
+        `Cloudflare Vectorize index ${name} is unavailable; refusing automatic provisioning.`,
+      );
     } else if (binding.type === 'queue') {
       queueNames.add(identifier('name'));
     } else if (binding.type === 'dispatch-namespace') {
@@ -855,6 +861,42 @@ async function resources(): Promise<Result> {
       }
       updateBinding('kv_namespaces', operation.binding, { id: namespace.id });
       return created;
+    }
+    case 'vectorize.info':
+    case 'vectorize.create': {
+      const create = operation.type === 'vectorize.create';
+      const path =
+        '/accounts/' +
+        encodeURIComponent(accountId()) +
+        '/vectorize/v2/indexes' +
+        (create ? '' : '/' + encodeURIComponent(operation.name));
+      const response = await fetch(apiBaseUrl() + path, {
+        method: create ? 'POST' : 'GET',
+        headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
+        ...(create && {
+          body: JSON.stringify({
+            name: operation.name,
+            description: operation.description,
+            config: { dimensions: operation.dimensions, metric: operation.metric },
+          }),
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+      });
+      const body = object(await response.json());
+      if (!create && response.status === 404) {
+        return { ...result(1, '', 'Vectorize index does not exist.'), failure: 'not-found' };
+      }
+      if (!response.ok || body.success !== true) {
+        return result(
+          1,
+          '',
+          'Vectorize request failed (HTTP ' +
+            response.status +
+            '). Check Vectorize Read/Edit permissions.',
+        );
+      }
+      return result(0, '', '', body.result);
     }
     case 'r2.bucket.info':
       return runCf(['r2', 'buckets', 'get', operation.name]);

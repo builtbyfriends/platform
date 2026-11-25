@@ -118,6 +118,7 @@ export async function createPlatformInstallPlan(
     allowUnverifiedAiGateway?: boolean;
     includeEmailGateway?: boolean;
     enableSandbox?: boolean;
+    enableVectorize?: boolean;
     deploymentExecution?: boolean;
     /** upgrade only: a changed runtime logs setting is not drift. */
     allowRuntimeLogsChange?: boolean;
@@ -202,6 +203,7 @@ export async function createPlatformInstallPlan(
     options?.includeEmailGateway !== false && !!emailSharedZoneId && !!normalizedEmailSenderDomain;
   const capabilities = {
     ...existing?.deployment.capabilities,
+    ...(options?.enableVectorize ? { vectorize: true } : {}),
     ...(options?.enableSandbox ? { sandbox: true } : {}),
     ...(input.authentication
       ? {
@@ -291,8 +293,15 @@ export async function createPlatformInstallPlan(
           capabilities: { ...existingWithoutEmailZone.capabilities, sandbox: true },
         }
       : existingWithoutEmailZone;
+  const existingWithVectorize =
+    existing && options?.enableVectorize
+      ? {
+          ...existingWithSandbox,
+          capabilities: { ...existingWithSandbox.capabilities, vectorize: true },
+        }
+      : existingWithSandbox;
   const existingWithDashboard = {
-    ...existingWithSandbox,
+    ...existingWithVectorize,
     // Decision: The dashboard is separately deployed. Only the explicit option or the
     // normalized recorded origin can update this configuration during maintenance.
     controlPlane: {
@@ -878,6 +887,7 @@ export async function revalidatePlatformInstallAction(
       ...options,
       includeEmailGateway: original.actions.some((entry) => entry.key === 'email-gateway-worker'),
       enableSandbox: original.deployment.capabilities.sandbox,
+      enableVectorize: original.deployment.capabilities.vectorize,
       deploymentExecution: original.actions.some((entry) => entry.key === 'deployment-queue'),
     },
   );

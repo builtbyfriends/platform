@@ -6,6 +6,7 @@ import {
   readWranglerTopLevelString,
   type ExistingCloudflareWorker,
 } from '@builtbyfriends/deploy-cloudflare';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { confirm, isCancel } from '@voidzero-dev/vite-plus-prompts';
 import { basename, dirname, relative } from 'pathslash';
 import { analyzeApplicationSync, type ApplicationAnalysis } from '../application-analysis.ts';
@@ -548,12 +549,37 @@ export async function preflightCloudflareWorker(input: {
   const d1NeedsConfigReconciliation = !existingWorker && d1MigrationsDirMissing();
   if (
     options.provision ||
+    (!existingWorker && !!desired.vectorize?.length) ||
     initiallyMissing.length > 0 ||
     d1NeedsConfigReconciliation ||
     (!existingWorker && desired.d1?.readReplication !== undefined) ||
     absentQueues.length > 0
   ) {
     await provisionAndVerify();
+  }
+  if (existingWorker) {
+    for (const index of desired.vectorize ?? []) {
+      const read = await runWrangler(
+        { type: 'vectorize.info', name: index.name, configPath },
+        { capture: true },
+      );
+      const value = read.data;
+      if (
+        !isCleanCloudflareExit(read) ||
+        !isRecord(value) ||
+        value.name !== index.name ||
+        !isRecord(value.config) ||
+        value.config.dimensions !== index.dimensions ||
+        value.config.metric !== index.metric
+      ) {
+        log.error(
+          'deploy: The existing Vectorize index ' +
+            index.name +
+            ' does not match the declared dimensions and metric, or could not be verified. Linking does not create or replace indexes.',
+        );
+        return exit(1);
+      }
+    }
   }
 
   // Decision: Persist the Worker name and account before the build. The CF Vite plugin copies `account_id` only

@@ -206,6 +206,14 @@ describe('runtime manifest runtimeLogs protocol', () => {
     expect(parsePlatformRuntimeManifest(runtime)).not.toHaveProperty('runtimeLogs');
   });
 
+  it('negotiates the optional Vectorize protocol without enabling older runtimes', () => {
+    expect(parsePlatformRuntimeManifest(runtime)).not.toHaveProperty('vectorize');
+    expect(parsePlatformRuntimeManifest({ ...runtime, vectorize: 1 }).vectorize).toBe(1);
+    for (const vectorize of [0, 2, '1', true, null]) {
+      expect(() => parsePlatformRuntimeManifest({ ...runtime, vectorize })).toThrow('Vectorize');
+    }
+  });
+
   it('accepts and keeps runtimeLogs: 1', () => {
     expect(parsePlatformRuntimeManifest({ ...runtime, runtimeLogs: 1 }).runtimeLogs).toBe(1);
   });

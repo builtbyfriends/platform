@@ -12,6 +12,7 @@ describe('platform capabilities', () => {
       googleOAuth: true,
       managedBuilds: true,
       sandbox: true,
+      vectorize: false,
     });
   });
 
@@ -29,6 +30,19 @@ describe('platform capabilities', () => {
           sandbox: true,
         }),
       }).sandbox,
+    ).toBe(true);
+  });
+
+  it('requires an explicit search index capability and accepts older capability maps', () => {
+    const existing = { ...getPlatformCapabilities({}) };
+    delete existing.vectorize;
+    expect(
+      getPlatformCapabilities({ PLATFORM_CAPABILITIES: JSON.stringify(existing) }).vectorize,
+    ).toBe(false);
+    expect(
+      getPlatformCapabilities({
+        PLATFORM_CAPABILITIES: JSON.stringify({ ...existing, vectorize: true }),
+      }).vectorize,
     ).toBe(true);
   });
 

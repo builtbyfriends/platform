@@ -30,8 +30,10 @@ Forward source: `cb341d5` on `codex/infra-runtime`. Historical source: `2d335f2`
 
 Rollback restores the preceding database inspection version after checking this deployment and its settings are still current:
 
+Run from the historical worktree (`codex/infra-runtime-live`):
+
 ```sh
-cd /home/joe/Projects/dedworc/.worktrees/platform-runtime-live && node .local/queue-status/publish.mjs rollback
+node .local/queue-status/publish.mjs rollback
 ```
 
 The previous version is retained. The rollback path has not been executed.

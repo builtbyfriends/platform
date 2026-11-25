@@ -241,6 +241,7 @@ export async function runFullDeploy(
     bindings: liveConfig ? { ...bindings, needsLive: true } : bindings,
     alwaysUseHttps: bwfConfig.routing?.alwaysUseHttps,
     storage: bwfConfig.storage,
+    vectorize: bwfConfig.vectorize,
     database: typeof bwfConfig.database === 'object' ? bwfConfig.database : undefined,
     hasEmailHandlers: routeScan.email !== undefined && hasEmailHandlers(routeScan.email),
     migrations: validatedMigrations,

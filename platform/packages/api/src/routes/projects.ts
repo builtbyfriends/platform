@@ -485,6 +485,12 @@ const app = new Hono<ApiEnv>()
     }
     if (preCheck.manifest) {
       const manifest = JSON.parse(preCheck.manifest) as DeployManifest;
+      if (manifest.vectorize?.length && !getPlatformCapabilities(context.env).vectorize) {
+        return context.json(
+          { error: 'This Platform does not enable rollback to search index deployments.' },
+          501,
+        );
+      }
       if (manifest.sandbox && !getPlatformCapabilities(context.env).sandbox) {
         return context.json(
           { error: 'This Platform does not enable rollback to Sandbox deployments.' },
@@ -666,6 +672,12 @@ const app = new Hono<ApiEnv>()
           }
           if (target.manifest) {
             const manifest = JSON.parse(target.manifest) as DeployManifest;
+            if (manifest.vectorize?.length && !getPlatformCapabilities(context.env).vectorize) {
+              throw new RollbackError(
+                501,
+                'This Platform does not enable rollback to search index deployments.',
+              );
+            }
             if (manifest.sandbox && !getPlatformCapabilities(context.env).sandbox) {
               throw new RollbackError(
                 501,

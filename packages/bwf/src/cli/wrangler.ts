@@ -866,6 +866,7 @@ type WranglerQueueConsumer = {
  * scanner queues, and the Cloudflare plugin concatenates arrays, so they would duplicate.
  */
 export type ProvisionedWranglerPatch = {
+  vectorize?: { binding: string; indexName: string };
   /** Cloudflare account id → top-level `account_id` (always overwritten). */
   accountId?: string;
   /** Worker name → top-level `name` (only written when absent). */
@@ -1259,6 +1260,11 @@ export function writeProvisionedWranglerConfig(
   }
   if (patch.kv) {
     upsertAdoptedBinding('kv_namespaces', patch.kv.binding, { id: patch.kv.id });
+  }
+  if (patch.vectorize) {
+    upsertAdoptedBinding('vectorize', patch.vectorize.binding, {
+      index_name: patch.vectorize.indexName,
+    });
   }
   if (patch.r2) {
     upsertAdoptedBinding('r2_buckets', patch.r2.binding, { bucket_name: patch.r2.bucketName });

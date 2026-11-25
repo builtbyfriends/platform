@@ -33,6 +33,23 @@ const modern = {
   },
 };
 describe('authentication discovery compatibility', () => {
+  it('defaults absent Vectorize to false and retains explicit support', () => {
+    const discovery = createPlatformDiscoveryDocument(base);
+    expect(parsePlatformDiscoveryDocument(discovery).capabilities.vectorize).toBe(false);
+    expect(
+      parsePlatformDiscoveryDocument({
+        ...discovery,
+        capabilities: { ...discovery.capabilities, vectorize: true },
+      }).capabilities.vectorize,
+    ).toBe(true);
+    expect(() =>
+      parsePlatformDiscoveryDocument({
+        ...discovery,
+        capabilities: { ...discovery.capabilities, vectorize: null },
+      }),
+    ).toThrow('vectorize');
+  });
+
   it.each(['http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787'])(
     'supports loopback discovery at %s',
     (apiUrl) => {

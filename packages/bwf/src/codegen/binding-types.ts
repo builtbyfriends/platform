@@ -69,6 +69,14 @@ export function generateBindingTypes(config: BwfConfig): string | null {
       }
     }
   }
+  for (const index of config.vectorize ?? []) {
+    if (bindings.has(index.bindingName) && bindings.get(index.bindingName) !== 'VectorizeIndex') {
+      throw new Error(
+        'config: vectorize binding collides with cloudflare binding: ' + index.bindingName,
+      );
+    }
+    bindings.set(index.bindingName, 'VectorizeIndex');
+  }
   if (bindings.size === 0) {
     return null;
   }

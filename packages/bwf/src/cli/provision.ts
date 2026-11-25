@@ -17,7 +17,12 @@ import { createRequire } from 'node:module';
 import { resolve as resolvePosixPath } from 'node:path/posix';
 import { resolve as resolveWindowsPath } from 'node:path/win32';
 import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
-import { isRecord, type R2LocationHint } from '@builtbyfriends/deploy-core';
+import {
+  isRecord,
+  validateVectorize,
+  type R2LocationHint,
+  type VectorizeConfig,
+} from '@builtbyfriends/deploy-core';
 import { parse, type ParseError } from 'jsonc-parser';
 import { basename, dirname, join, normalize, resolve } from 'pathslash';
 import lockfile from 'proper-lockfile';
@@ -39,6 +44,7 @@ import {
 
 /** The Cloudflare resources an app needs, computed by the deploy orchestrator. */
 export interface DesiredResourceSet {
+  vectorize?: Array<VectorizeConfig & { name: string; description: string; existing?: boolean }>;
   /** `migrationsDir` is config-relative and defaults to `./db/migrations`. */
   d1?: { binding: string; name: string; migrationsDir?: string; readReplication?: boolean };
   /** KV namespaces. Titles are NOT account-unique. */
@@ -57,7 +63,7 @@ export interface DesiredResourceSet {
 export interface ProvisionDriftEntry {
   /** Binding name (`DB`, `KV`, `STORAGE`, `HYPERDRIVE`). */
   binding: string;
-  kind: 'd1' | 'kv' | 'r2' | 'hyperdrive';
+  kind: 'vectorize' | 'd1' | 'kv' | 'r2' | 'hyperdrive';
   /** Resource name / KV title / bucket name the deploy wants. */
   name: string;
 }
@@ -111,6 +117,13 @@ export function checkCloudflareProvisionDrift(
         kind: 'hyperdrive',
         name: desired.hyperdrive.name,
       });
+    }
+  }
+  for (const index of desired.vectorize ?? []) {
+    if (
+      !isProvisioned('vectorize', index.bindingName, (entry) => entry.index_name === index.name)
+    ) {
+      missing.push({ binding: index.bindingName, kind: 'vectorize', name: index.name });
     }
   }
   return { missing };
@@ -178,7 +191,7 @@ type ListHyperdriveConfigs = (ctx: {
 
 /** Per-resource outcome, so the orchestrator can log what happened. */
 interface ProvisionOutcome {
-  kind: 'd1' | 'kv' | 'r2' | 'hyperdrive' | 'queue';
+  kind: 'vectorize' | 'd1' | 'kv' | 'r2' | 'hyperdrive' | 'queue';
   /** Binding name (absent for queue resources, which are not bindings here). */
   binding?: string;
   /** Resource name / KV title / bucket name / queue name. */
@@ -3007,6 +3020,89 @@ async function reconcileHyperdrive(
   }
 }
 
+async function reconcileVectorize(
+  desired: DesiredResourceSet,
+  configPath: string,
+  run: PinnedRunWrangler,
+  write: ProvisionConfigWriter,
+  resources: Array<ProvisionOutcome>,
+): Promise<void> {
+  for (const index of desired.vectorize ?? []) {
+    const pinned = readBindingEntry(configPath, 'vectorize', index.bindingName);
+    if (pinned && pinned.index_name !== index.name) {
+      throw new Error('provision: Vectorize binding identity changed: ' + index.bindingName);
+    }
+    const read = await run({ type: 'vectorize.info', name: index.name, configPath });
+    let value = read.data;
+    let action: ProvisionOutcome['action'] = 'reused';
+    if (!isCleanSuccess(read)) {
+      if (read.failure !== 'not-found' || isHardFailure(read)) {
+        throw new Error(
+          'provision: Could not verify Vectorize index ' + index.name + '. No index was created.',
+        );
+      }
+      if (pinned || index.existing) {
+        throw new Error(
+          'provision: The pinned Vectorize index ' +
+            index.name +
+            ' is missing. Restore it or explicitly choose a new binding; it will not be replaced.',
+        );
+      }
+      const created = await run({
+        type: 'vectorize.create',
+        name: index.name,
+        dimensions: index.dimensions,
+        metric: index.metric,
+        description: index.description,
+        configPath,
+      });
+      if (!isCleanSuccess(created)) {
+        throw new Error(
+          'provision: Could not create Vectorize index ' +
+            index.name +
+            '. Check Vectorize Edit permission and retry.',
+        );
+      }
+      const verified = await run({ type: 'vectorize.info', name: index.name, configPath });
+      if (!isCleanSuccess(verified)) {
+        throw new Error(
+          'provision: Created Vectorize index could not be verified. Retry to recover it.',
+        );
+      }
+      value = verified.data;
+      action = 'created';
+    }
+    if (
+      !isRecord(value) ||
+      value.name !== index.name ||
+      !isRecord(value.config) ||
+      value.config.dimensions !== index.dimensions ||
+      value.config.metric !== index.metric
+    ) {
+      throw new Error(
+        'provision: Vectorize index ' +
+          index.name +
+          ' has different or unverifiable dimensions/metric. Index settings are immutable; use a new binding instead.',
+      );
+    }
+    if (!pinned && !index.existing && value.description !== index.description) {
+      throw new Error(
+        'provision: Vectorize index ' +
+          index.name +
+          ' is not owned by this app. It was not adopted.',
+      );
+    }
+    write({ vectorize: { binding: index.bindingName, indexName: index.name } });
+    resources.push({
+      kind: 'vectorize',
+      binding: index.bindingName,
+      name: index.name,
+      action: !pinned && action === 'reused' ? 'adopted' : action,
+      id: index.name,
+    });
+  }
+}
+
 async function reconcileQueues(
   desired: DesiredResourceSet,
   configPath: string,
@@ -3062,6 +3158,25 @@ async function provisionCloudflareResourcesLocked(
   }
 
   // Decision: Validate every argv name before any remote work.
+  const vectorizeError = validateVectorize(
+    (desired.vectorize ?? []).map(({ bindingName, dimensions, metric }) => ({
+      bindingName,
+      dimensions,
+      metric,
+    })),
+  );
+  if (vectorizeError) {
+    throw new Error('provision: ' + vectorizeError);
+  }
+  for (const index of desired.vectorize ?? []) {
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,63}$/.test(index.name) ||
+      !index.description ||
+      index.description.length > 1000
+    ) {
+      throw new Error('provision: Invalid Vectorize index name or ownership description.');
+    }
+  }
   if (desired.d1) {
     assertValidResourceName('d1', desired.d1.name);
   }
@@ -3120,6 +3235,7 @@ async function provisionCloudflareResourcesLocked(
   const persistCreatedConfig = (): void => persistMaterializedWranglerConfig(configPath);
 
   const hasRemoteWork =
+    !!desired.vectorize?.length ||
     !!desired.d1 ||
     desired.kvNamespaces.length > 0 ||
     !!desired.r2 ||
@@ -3247,6 +3363,7 @@ async function provisionCloudflareResourcesLocked(
     opts,
   );
 
+  await reconcileVectorize(desired, configPath, runWrangler, write, resources);
   await reconcileQueues(desired, configPath, runWrangler, resources);
 
   return { resources, configPath, accountIdWritten };

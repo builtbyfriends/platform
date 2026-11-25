@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isRecord } from '@builtbyfriends/deploy-core';
 import { join } from 'pathslash';
 import { cfAccessHeaders } from '../shared/cf-access.ts';
 import { getPackageDir } from './agents.ts';
@@ -747,6 +748,21 @@ export class PlatformClient {
     if (capabilities?.d1ReadReplication !== true) {
       throw new Error(
         'deploy: This bwf platform cannot apply `database.readReplication` from bwf.config.ts. Ask its administrator to upgrade with `bwf platform upgrade`.',
+      );
+    }
+  }
+
+  async requireVectorizeSupport(): Promise<void> {
+    const response = await this.request(`${this.baseUrl}/capabilities`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok && response.status !== 404) {
+      await throwPlatformApiError('Failed to check Vectorize support', response, 'deploy');
+    }
+    const capabilities: unknown = response.ok ? await response.json() : null;
+    if (!isRecord(capabilities) || capabilities.vectorize !== true) {
+      throw new Error(
+        'deploy: This bwf platform does not support managed Vectorize. Ask its administrator to enable Vectorize or upgrade with `bwf platform upgrade`.',
       );
     }
   }

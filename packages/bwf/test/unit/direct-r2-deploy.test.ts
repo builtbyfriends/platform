@@ -705,6 +705,22 @@ describe('D1 read replication', () => {
     return fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
   }
 
+  it('rejects Vectorize before uploads on old platforms and sends it unchanged on supported ones', async () => {
+    const vectorize = [{ bindingName: 'SEARCH', dimensions: 384, metric: 'cosine' as const }];
+    const unsupported = installPlatformMocks({ capabilities: {} });
+    await expect(
+      deployWith('https://api-vectorize-old.test', { ...manifest, version: 6, vectorize }),
+    ).rejects.toThrow('does not support managed Vectorize');
+    expect(unsupported.uploadUrlsCalls).toHaveLength(0);
+    expect(unsupported.r2PutCalls).toHaveLength(0);
+    expect(unsupported.finalizeCalls).toHaveLength(0);
+    const supported = installPlatformMocks({ capabilities: { vectorize: true } });
+    await deployWith('https://api-vectorize-new.test', { ...manifest, version: 6, vectorize });
+    expect(JSON.parse(supported.finalizeCalls[0].init.body as string).manifest.vectorize).toEqual(
+      vectorize,
+    );
+  });
+
   it.each([true, false])(
     'stops before any upload when the platform cannot apply readReplication: %s',
     async (readReplication) => {

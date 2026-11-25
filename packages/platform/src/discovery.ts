@@ -128,6 +128,7 @@ function normalizeDiscoveryDocument(input: PlatformDiscoveryInput): PlatformDisc
   }
   return {
     ...input,
+    capabilities: { ...input.capabilities, vectorize: input.capabilities.vectorize ?? false },
     apiUrl: normalizeOrigin(input.apiUrl, 'apiUrl'),
     applicationDomain: normalizeApplicationDomain(input.applicationDomain),
     authenticationProviders: [...input.authenticationProviders],
@@ -169,6 +170,7 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
   assertRecord(capabilities, 'capabilities');
   const capabilityNames: Array<keyof PlatformCapabilities> = [
     'ai',
+    'vectorize',
     'customDomains',
     'email',
     'githubActions',
@@ -179,7 +181,8 @@ export function parsePlatformDiscoveryDocument(value: unknown): PlatformDiscover
   ];
   const parsedCapabilities = {} as Record<keyof PlatformCapabilities, boolean>;
   for (const name of capabilityNames) {
-    const enabled = capabilities[name];
+    const enabled =
+      name === 'vectorize' && capabilities[name] === undefined ? false : capabilities[name];
     if (typeof enabled !== 'boolean') {
       throw new Error(`capabilities.${name} must be a boolean.`);
     }

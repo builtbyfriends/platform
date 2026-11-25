@@ -187,11 +187,12 @@ export async function requestPreviewDeployment(
     manifest.emailProtocolVersion ||
     manifest.schedules?.length ||
     manifest.queues?.length ||
+    manifest.vectorize?.length ||
     manifest.bindings.hyperdrive?.length
   ) {
     throw new OAuthError(
       'invalid_request',
-      'Private previews support HTTP apps with isolated D1, KV, R2, AI and Durable Objects. Publish to enable authentication, containers, email, schedules, queues or external databases.',
+      'Private previews support HTTP apps with isolated D1, KV, R2, AI and Durable Objects. Publish to enable authentication, containers, email, schedules, queues, search indexes or external databases.',
     );
   }
   const id = crypto.randomUUID();

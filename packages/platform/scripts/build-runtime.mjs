@@ -147,6 +147,7 @@ try {
     appAccessSetup: 1,
     runtimeLogs: 1,
     storageLocationHint: 1,
+    vectorize: 1,
     emailProtocolVersion: 1,
     database,
     platformVersion: packageJson.version,

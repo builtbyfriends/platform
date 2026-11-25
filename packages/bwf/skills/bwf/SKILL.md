@@ -52,6 +52,7 @@ Use `bwf deploy --skip-migrations` when database migrations run separately; it s
 | Platform AI logging policy                 | `docs/reference/cli/platform-users.md#ai-gateway-logging`                                 |
 | Durable State and WebSockets               | `docs/guide/durable-state.md`, `docs/guide/websockets.md`                                 |
 | Server-sent events and live streams        | `docs/guide/sse.md`, `docs/guide/live.md`                                                 |
+| Vector indexes / similarity search         | `docs/reference/config.md#vectorize`                                                      |
 | Sandboxes                                  | `docs/guide/sandboxes.md`                                                                 |
 | Email                                      | `docs/guide/email.md`, then the matching guide under `docs/guide/email/`                  |
 | KV / storage / queues / cron jobs          | `docs/guide/kv.md`, `docs/guide/storage.md`, `docs/guide/queues.md`, `docs/guide/jobs.md` |

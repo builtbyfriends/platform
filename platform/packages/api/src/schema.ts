@@ -837,7 +837,9 @@ export const resources = pgTable(
       .references(() => projects.id),
     type: text('type')
       .notNull()
-      .$type<'d1' | 'kv' | 'r2' | 'queue' | 'hyperdrive' | 'container' | 'durable-object'>(),
+      .$type<
+        'd1' | 'kv' | 'r2' | 'queue' | 'hyperdrive' | 'container' | 'durable-object' | 'vectorize'
+      >(),
     cf_id: text('cf_id').notNull(),
     binding_name: text('binding_name').notNull(),
     metadata: jsonb('metadata')

@@ -177,6 +177,7 @@ export async function verifyPlatformRuntimeTokenPermissions(
     accountId: string;
     applicationDomain: string;
     customDomains: boolean;
+    vectorize?: boolean;
     /** The shared email zone, only when platform email is on. */
     emailZoneId?: string;
     zoneId: string | null;
@@ -186,6 +187,15 @@ export async function verifyPlatformRuntimeTokenPermissions(
     await client.listHyperdriveConfigs(input.accountId);
   } catch (error) {
     throw runtimeTokenPreflightError('Account → Hyperdrive → Write', error);
+  }
+  if (input.vectorize) {
+    try {
+      await client.request(
+        `/accounts/${encodeURIComponent(input.accountId)}/vectorize/v2/indexes?per_page=1`,
+      );
+    } catch (error) {
+      throw runtimeTokenPreflightError('Account → Vectorize → Edit', error);
+    }
   }
 
   if (input.emailZoneId) {

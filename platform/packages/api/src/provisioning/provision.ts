@@ -21,15 +21,25 @@ import {
   getKVNamespaceByTitle,
   getQueueByName,
 } from './cloudflare-api.ts';
+import { ensureVectorize } from './vectorize.ts';
 
 export type WorkerBinding = Readonly<{
-  type: 'd1' | 'kv_namespace' | 'r2_bucket' | 'queue' | 'service' | 'plain_text' | 'hyperdrive';
+  type:
+    | 'd1'
+    | 'kv_namespace'
+    | 'r2_bucket'
+    | 'queue'
+    | 'service'
+    | 'plain_text'
+    | 'hyperdrive'
+    | 'vectorize';
   name: string;
   id?: string;
   namespace_id?: string;
   bucket_name?: string;
   queue_name?: string;
   queue_id?: string;
+  index_name?: string;
   service?: string;
   text?: string;
 }>;
@@ -54,6 +64,7 @@ export async function provisionBindings(
     proxyToken: string;
     /** Immutable deployment identity for signed inbound email receipts. */
     deploymentId?: string;
+    ownerUserId?: string;
     /**
      * Platform mail domain for this environment (`EMAIL_SENDER_DOMAIN` on
      * the api worker — `mail.buildwf.dev` in production,
@@ -84,6 +95,23 @@ export async function provisionBindings(
 
   for (const resource of plan.resources) {
     switch (resource.type) {
+      case 'vectorize':
+        tasks.push(
+          ensureVectorize(
+            db,
+            accountId,
+            apiToken,
+            projectId,
+            resource.bindingName,
+            resource,
+            platform.ownerUserId,
+          ).then((entry): WorkerBinding => ({
+            type: 'vectorize',
+            name: resource.bindingName,
+            index_name: entry.cf_id,
+          })),
+        );
+        break;
       case 'd1':
         tasks.push(
           ensureResource(db, accountId, apiToken, projectId, 'd1', resource.bindingName, existing, {
@@ -270,6 +298,7 @@ function deleteCfResource(
     case 'queue':
       return deleteQueue(accountId, apiToken, cfId);
     case 'durable-object':
+    case 'vectorize':
     case 'hyperdrive':
     case 'container':
       // Decision: ensureResource doesn't create these (createCfResource throws first), so a rollback can't get here.
@@ -308,6 +337,8 @@ async function createCfResource(
       throw new Error(
         'Hyperdrive resources are provisioned via the database endpoint, not ensureResource',
       );
+    case 'vectorize':
+      throw new Error('Search indexes require owned provisioning');
     case 'durable-object':
       throw new Error('Custom Durable Objects are provisioned during Worker deployment');
     case 'container':
@@ -322,6 +353,8 @@ async function lookupCfResource(
   resourceName: string,
 ): Promise<string> {
   switch (type) {
+    case 'vectorize':
+      throw new Error('Search indexes require owned provisioning');
     case 'd1': {
       const result = await getD1DatabaseByName(accountId, apiToken, resourceName);
       return result.uuid;
