@@ -10,6 +10,7 @@ import { OperatorError } from '../operator/common.ts';
 import { deploymentLogs } from '../operator/deployment-operations.ts';
 import type { Project, Resource } from '../types.ts';
 import { actionInput, executeResourceAction, resourceActions } from './app-runtime-actions.ts';
+import { aiModels, aiModelsAction, runtimeAi } from './app-runtime-ai.ts';
 import {
   databaseBrowseCapabilities,
   databaseInspect,
@@ -193,6 +194,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     }
     const resources = await getProjectResources(context.get('db'), project.id);
     const schedules = await runtimeSchedules(context.get('db'), project);
+    const ai = await runtimeAi(context.get('db'), project);
     const filesActive = await fileOwnerActive(context.get('db'), project);
     const current = await resolveProject(context, project.id, owner);
     if (
@@ -202,6 +204,9 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       current.proxy_token_gen !== project.proxy_token_gen
     ) {
       return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (ai && (await runtimeAi(context.get('db'), current))?.manifest !== ai.manifest) {
+      return context.json({ error: 'resource_changed' }, 409);
     }
     return context.json({
       data: {
@@ -256,6 +261,17 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
             browse: null,
             actions: context.env.CRON_SCHEDULER && context.env.ROUTING ? [scheduleAction] : [],
           })),
+          ...(ai
+            ? [
+                {
+                  id: ai.id,
+                  name: 'AI models',
+                  kind: 'ai',
+                  browse: null,
+                  actions: [aiModelsAction],
+                },
+              ]
+            : []),
         ],
       },
     });
@@ -345,6 +361,28 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     const project = await resolveProject(context, body.project, owner);
     if (!project) {
       return context.json({ error: 'unknown_project' }, 404);
+    }
+    if (body.action === 'ai.models') {
+      const ai = await runtimeAi(context.get('db'), project);
+      if (!ai || ai.id !== body.resourceId) {
+        return context.json({ error: 'unknown_resource' }, 404);
+      }
+      const data = await aiModels(context.env, project, input.search);
+      const current = await resolveProject(context, project.id, owner);
+      const currentAi = current ? await runtimeAi(context.get('db'), current) : null;
+      if (
+        !current ||
+        current.user_id !== project.user_id ||
+        current.active_deployment_id !== project.active_deployment_id ||
+        current.proxy_token_gen !== project.proxy_token_gen ||
+        currentAi?.id !== ai.id ||
+        currentAi.manifest !== ai.manifest
+      ) {
+        return context.json({ error: 'resource_changed' }, 409);
+      }
+      return context.json({
+        data: { appId: project.id, resourceId: ai.id, action: body.action, ...data },
+      });
     }
     if (body.action === 'schedule.overview') {
       const identity = { appId: project.id, resourceId: body.resourceId, action: body.action };

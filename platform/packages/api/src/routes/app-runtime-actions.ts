@@ -2,6 +2,7 @@ import { isRecord } from '@builtbyfriends/deploy-core';
 import type { ApiEnv } from '../env.ts';
 import { deriveProxyToken } from '../proxy-token.ts';
 import type { Project, Resource } from '../types.ts';
+import { aiModelsAction } from './app-runtime-ai.ts';
 import {
   databaseCell,
   databaseCellSave,
@@ -211,6 +212,7 @@ export function resourceActions(resource: Resource, keyEditing = false): Array<A
           : [];
 }
 export type RuntimeActionInput = {
+  search?: string;
   expectedText?: string;
   column?: string;
   rowToken?: string;
@@ -236,6 +238,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     ...actions.d1,
     ...actions.queue,
     scheduleAction,
+    aiModelsAction,
   ].find((entry) => entry.id === action);
   if (!definition) {
     return null;
@@ -282,6 +285,7 @@ export function actionInput(action: unknown, input: unknown): RuntimeActionInput
     return null;
   }
   return {
+    search: typeof input.search === 'string' ? input.search : undefined,
     expectedText: typeof input.expectedText === 'string' ? input.expectedText : undefined,
     mode: input.mode === 'create' || input.mode === 'replace' ? input.mode : undefined,
     expectedFingerprint:

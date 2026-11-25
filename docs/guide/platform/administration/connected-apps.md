@@ -115,6 +115,10 @@ File browsing reads up to 50 object names, sizes and modification times per page
 
 Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads return `kind: "unavailable"` with a reason. An empty supported page remains a successful page. Other resource kinds can appear in the inventory but don't yet have a data browser.
 
+Published apps that declare an AI binding also expose an `ai` resource with a read-only `ai.models` action. Send `resources.execute` with `{ project, owner, resourceId, action: "ai.models", input: { search: "text" } }`; `search` is optional and accepts up to 100 characters. The response contains Model and Task columns as `records`, with an observation time. Missing task information is `null`. Results show up to 100 models, omit experimental models, and mark a full page as `truncated`; narrow the search to find other models. Private previews do not expose this workspace yet.
+
+The catalog doesn't run a model, select the model used by the app, or establish that a listed model can run with the app's current plan. Model testing isn't available through this action. Disabled AI, request or usage limits, and unavailable catalog readings return `kind: "unavailable"` with a reason. Keep an earlier reading visible as an earlier reading when refresh fails.
+
 Activity reads the current deployment's last hour with up to 50 invocations per page. Messages can arrive after a request finishes. With minimal runtime logging, `partial: true` indicates that URLs and message bodies weren't collected. URL query strings and fragments are omitted. Failed reads return `available: false`; local development doesn't substitute sample logs. These calls don't retry jobs, change data or deploy code.
 
 A trusted connected app can request an app-person token for a team with `group` and `acting_person` instead of `person`. The group owns its apps; the acting person is recorded for a publish or preview request. Group accounts stay separate from personal accounts and from other connected apps. The existing operator allowlist and client credentials are required.
