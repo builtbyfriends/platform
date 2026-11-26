@@ -16,6 +16,7 @@ const policies: Array<{
   path: string;
   parameter: string;
   identity: string;
+  responseOwnership?: 'selected-resource';
   parameterAlternative?: number;
   fields: Array<string>;
   collection?: { defaultLimit: number; maxItems: number };
@@ -50,6 +51,15 @@ const policies: Array<{
     parameter: 'bucket_name',
     identity: 'name',
     fields: ['creation_date', 'jurisdiction', 'location', 'storage_class'],
+  },
+  {
+    type: 'r2',
+    path: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed',
+    parameter: 'bucket_name',
+    identity: 'bucketId',
+    // Decision: The response uses an internal bucket ID, not the owned bucket name. The exact injected URL and selected-resource checks before/after the read prove scope.
+    responseOwnership: 'selected-resource',
+    fields: ['domain', 'enabled'],
   },
   {
     type: 'kv',
@@ -312,9 +322,10 @@ async function boundedJson(response: Response) {
   }
 }
 
-export function cloudflareProviderReadSelection(resourceType: Resource['type']) {
-  const policy = policies.find((entry) => entry.type === resourceType);
-  return policy ? { method: 'GET' as const, path: policy.path } : null;
+export function cloudflareProviderReadSelections(resourceType: Resource['type']) {
+  return policies
+    .filter((entry) => entry.type === resourceType)
+    .map((policy) => ({ method: 'GET' as const, path: policy.path }));
 }
 
 export function prepareCloudflareProviderRead(
@@ -621,9 +632,12 @@ export function prepareCloudflareProviderRead(
         throw Error('The provider returned an unexpected resource response.');
       }
       const returned = record(envelope);
+      const resourceResult = policy.collection ? returned.result : record(returned.result);
       if (
         returned.success !== true ||
-        (!policy.collection && record(returned.result)[policy.identity] !== providerIdentity)
+        (!policy.collection &&
+          policy.responseOwnership !== 'selected-resource' &&
+          record(resourceResult)[policy.identity] !== providerIdentity)
       ) {
         throw Error('The provider returned a different resource.');
       }

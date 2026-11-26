@@ -18,7 +18,7 @@ import {
   cloudflareOpenApiIndex,
   cloudflareOpenApiKey,
 } from '../../src/infrastructure/cloudflare-openapi.ts';
-import { cloudflareProviderReadSelection } from '../../src/infrastructure/cloudflare-provider-read.ts';
+import { cloudflareProviderReadSelections } from '../../src/infrastructure/cloudflare-provider-read.ts';
 import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
 import { deployments, projects, resources, users } from '../../src/schema.ts';
 import {
@@ -104,6 +104,14 @@ beforeAll(async () => {
 });
 afterAll(teardownEnv);
 afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  const managed = (await cloudflareOpenApiIndex()).find(
+    (entry) => entry.operationId === 'r2-get-bucket-public-policy',
+  );
+  if (managed) {
+    await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(managed));
+  }
+});
 beforeEach(async () => {
   await clearTables(env.db);
   registration = await registerOAuthClient(env.db, {
@@ -160,7 +168,7 @@ beforeEach(async () => {
 });
 
 async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue' | 'hyperdrive') {
-  const selected = cloudflareProviderReadSelection(kind);
+  const selected = cloudflareProviderReadSelections(kind)[0];
   const entry = (await cloudflareOpenApiIndex()).find(
     (candidate) => candidate.method === selected?.method && candidate.path === selected.path,
   );
@@ -237,7 +245,172 @@ async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue' | 'hyperdrive
   return { entry, key, asset, body, descriptor, provider, cfId, data };
 }
 
+async function managedDomainResource() {
+  const metadata = await providerResource('r2');
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (candidate) => candidate.operationId === 'r2-get-bucket-public-policy',
+  );
+  if (!entry) {
+    throw Error('Missing pinned managed-domain operation');
+  }
+  const key = cloudflareOpenApiKey(entry);
+  const asset = await readFile(
+    new URL('../fixtures/cloudflare-openapi/r2-managed-domain-get.json.gz', import.meta.url),
+  );
+  await env.STATIC_ASSETS_R2.put(key, asset);
+  const data = { bucketId: 'c'.repeat(32), domain: 'pub-' + 'c'.repeat(32) + '.r2.dev', enabled: false };
+  metadata.provider.mockImplementation(async (url) =>
+    Response.json({
+      success: true,
+      errors: [],
+      messages: [],
+      result: String(url).endsWith('/domains/managed') ? data : metadata.data,
+    }),
+  );
+  const list = async () => {
+    const response = await call('projects.resourceOperations', {
+      ...scope(),
+      resourceId: metadata.body.resourceId,
+    });
+    expect(response.status).toBe(200);
+    return catalogSchema.assert(await response.json()).data.operations;
+  };
+  const operations = await list();
+  const descriptor = operations.find((operation) => operation.id === entry.operationId);
+  if (!descriptor) {
+    throw Error('Managed-domain operation was not registered');
+  }
+  const body = { ...metadata.body, operation: descriptor.id, version: descriptor.version };
+  return { metadata, entry, key, asset, data, body, descriptor, operations, list };
+}
+
 describe('schema-backed provider operations', () => {
+  it('discovers distinct R2 reads from only two pinned artifacts and routes each to its own handler', async () => {
+    const fixture = await managedDomainResource();
+    const get = vi.spyOn(env.STATIC_ASSETS_R2, 'get');
+    const operations = await fixture.list();
+    expect(get.mock.calls.map(([key]) => key)).toEqual([fixture.metadata.key, fixture.key]);
+    expect(operations).toEqual(fixture.operations);
+    expect(operations).toHaveLength(4);
+    expect(operations.find((entry) => entry.id === fixture.metadata.entry.operationId)).toEqual(
+      fixture.metadata.descriptor,
+    );
+    expect(fixture.descriptor.effect).toBe('read');
+    expect(fixture.descriptor.version).not.toBe(fixture.metadata.descriptor.version);
+    for (const [body, action, data] of [
+      [
+        fixture.metadata.body,
+        fixture.metadata.entry.operationId,
+        { name: 'My resource', jurisdiction: 'eu', storage_class: 'Standard' },
+      ],
+      [
+        fixture.body,
+        fixture.entry.operationId,
+        { name: 'My resource', domain: fixture.data.domain, enabled: false },
+      ],
+    ] as const) {
+      const response = await call('resources.invoke', body);
+      expect(response.status).toBe(200);
+      const output = await response.json();
+      expect(output).toEqual({
+        data: {
+          appId: project.id,
+          resourceId: body.resourceId,
+          action,
+          kind: 'provider-read',
+          data,
+        },
+      });
+      expect(JSON.stringify(output)).not.toContain(fixture.metadata.cfId);
+      expect(output).not.toHaveProperty('data.data.bucketId');
+    }
+    expect(fixture.metadata.provider.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.cloudflare.com/client/v4/accounts/' +
+        env.CF_ACCOUNT_ID +
+        '/r2/buckets/owned-bucket',
+      'https://api.cloudflare.com/client/v4/accounts/' +
+        env.CF_ACCOUNT_ID +
+        '/r2/buckets/owned-bucket/domains/managed',
+    ]);
+  });
+
+  it('does not cross-invoke provider IDs, versions, effects or caller-controlled scope', async () => {
+    const fixture = await managedDomainResource();
+    for (const [body, status] of [
+      [{ ...fixture.body, version: fixture.metadata.descriptor.version }, 409],
+      [{ ...fixture.metadata.body, version: fixture.descriptor.version }, 409],
+      [{ ...fixture.body, operation: 'r2-put-bucket-public-policy' }, 404],
+      [{ ...fixture.body, expectedEffect: 'write' }, 400],
+      [{ ...fixture.body, input: { account_id: 'other' } }, 400],
+      [{ ...fixture.body, input: { path: { bucket_name: 'other' } } }, 400],
+      [{ ...fixture.body, input: { headers: { 'cf-r2-jurisdiction': 'default' } } }, 400],
+      [{ ...fixture.body, resourceId: 'res_foreign' }, 404],
+      [{ ...fixture.body, owner: { person: 'someone-else' } }, 404],
+    ] as const) {
+      expect((await call('resources.invoke', body)).status).toBe(status);
+    }
+    expect(fixture.metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('omits a missing or damaged artifact independently while the other R2 read keeps its version and handler', async () => {
+    const fixture = await managedDomainResource();
+    for (const [unavailable, available] of [
+      [fixture, fixture.metadata],
+      [fixture.metadata, fixture],
+    ] as const) {
+      for (const corruption of ['missing', 'damaged'] as const) {
+        if (corruption === 'missing') {
+          await env.STATIC_ASSETS_R2.delete(unavailable.key);
+        } else {
+          await env.STATIC_ASSETS_R2.put(
+            unavailable.key,
+            new Uint8Array(unavailable.asset.byteLength),
+          );
+        }
+        const operations = await fixture.list();
+        expect(operations.some((entry) => entry.id === unavailable.entry.operationId)).toBe(false);
+        expect(operations.find((entry) => entry.id === available.entry.operationId)).toEqual(
+          available.descriptor,
+        );
+        expect((await call('resources.invoke', unavailable.body)).status).toBe(404);
+        const response = await call('resources.invoke', available.body);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: { action: available.entry.operationId },
+        });
+      }
+      await env.STATIC_ASSETS_R2.put(unavailable.key, unavailable.asset);
+    }
+  });
+
+  it.each(['jurisdiction', 'bucket', 'owner'] as const)(
+    'discards managed-domain data when selected %s changes during the request',
+    async (change) => {
+      const fixture = await managedDomainResource();
+      fixture.metadata.provider.mockImplementationOnce(async () => {
+        if (change === 'owner') {
+          await env.db
+            .update(projects)
+            .set({ proxy_token_gen: 99 })
+            .where(eq(projects.id, project.id));
+        } else {
+          await env.db
+            .update(resources)
+            .set(
+              change === 'jurisdiction'
+                ? { metadata: { jurisdiction: 'default' } }
+                : { cf_id: 'other-bucket' },
+            )
+            .where(eq(resources.id, fixture.body.resourceId));
+        }
+        return Response.json({ success: true, errors: [], messages: [], result: fixture.data });
+      });
+      const response = await call('resources.invoke', fixture.body);
+      expect(response.status).toBe(409);
+      expect(JSON.stringify(await response.json())).not.toContain(fixture.data.domain);
+      expect(fixture.metadata.provider).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each(['d1', 'r2', 'kv', 'queue', 'hyperdrive'] as const)(
     'discovers and invokes the pinned %s operation through the same registry',
     async (kind) => {
@@ -852,7 +1025,7 @@ describe('registered database SELECT queries', () => {
 
 describe('owned Durable Object instance operations', () => {
   async function managed() {
-    const selected = cloudflareProviderReadSelection('durable-object');
+    const selected = cloudflareProviderReadSelections('durable-object')[0];
     const entry = (await cloudflareOpenApiIndex()).find(
       (candidate) => candidate.method === selected?.method && candidate.path === selected.path,
     );

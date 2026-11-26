@@ -16,7 +16,7 @@ import {
 import type { Project, Resource } from '../types.ts';
 import { cloudflareOpenApiIndex, cloudflareOperationSchema } from './cloudflare-openapi.ts';
 import {
-  cloudflareProviderReadSelection,
+  cloudflareProviderReadSelections,
   prepareCloudflareProviderRead,
 } from './cloudflare-provider-read.ts';
 import { queryDatabase } from './database-query.ts';
@@ -269,26 +269,8 @@ function providerSchema(schema: Schema) {
 async function providerOperation(
   resourceType: Resource['type'],
   bindings: ApiEnv['Bindings'],
-  caller?: ResourceCaller,
+  entry: Awaited<ReturnType<typeof cloudflareOpenApiIndex>>[number],
 ) {
-  const selection = cloudflareProviderReadSelection(resourceType);
-  if (
-    !selection ||
-    !bindings.CF_API_TOKEN ||
-    !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
-    !bindings.STATIC_ASSETS_R2
-  ) {
-    return null;
-  }
-  if (resourceType === 'durable-object' && !(await caller?.resolveProviderIdentity?.())) {
-    return null;
-  }
-  const entry = (await cloudflareOpenApiIndex()).find(
-    (candidate) => candidate.method === selection.method && candidate.path === selection.path,
-  );
-  if (!entry) {
-    return null;
-  }
   const artifact = await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, entry);
   if (!artifact) {
     return null;
@@ -302,8 +284,9 @@ async function providerOperation(
     ...errors,
     PROVIDER_UNAVAILABLE: { status: 502, message: 'Could not load this resource. Try again.' },
   } as const;
-  // Decision: Realtime requires dotted camelCase names. The descriptor keeps the provider's exact operation ID and maps it to this request-scoped handler.
-  const operation = procedure('provider.read')
+  // Decision: Provider IDs are not valid Realtime names. An injective hexadecimal encoding keeps handlers distinct and stable when another artifact is absent.
+  const registryName = `provider.read${Array.from(new TextEncoder().encode(adapter.id), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  const operation = procedure(registryName)
     .use(owned)
     .input(providerSchema(adapter.inputSchema))
     .output(providerSchema(adapter.outputSchema))
@@ -345,6 +328,39 @@ async function providerOperation(
   return { procedure: operation, descriptor: { ...descriptor, version } };
 }
 
+async function providerOperations(
+  resourceType: Resource['type'],
+  bindings: ApiEnv['Bindings'],
+  caller?: ResourceCaller,
+) {
+  const selections = cloudflareProviderReadSelections(resourceType);
+  if (
+    !selections.length ||
+    !bindings.CF_API_TOKEN ||
+    !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
+    !bindings.STATIC_ASSETS_R2 ||
+    (resourceType === 'durable-object' && !(await caller?.resolveProviderIdentity?.()))
+  ) {
+    return [];
+  }
+  const index = await cloudflareOpenApiIndex();
+  const available = [];
+  // Decision: Only the selected resource's explicit policies load schemas. Sequential preparation bounds transient memory; one broken artifact does not hide another operation.
+  for (const selection of selections) {
+    const entry = index.find(
+      (candidate) => candidate.method === selection.method && candidate.path === selection.path,
+    );
+    if (!entry) {
+      continue;
+    }
+    const operation = await providerOperation(resourceType, bindings, entry).catch(() => null);
+    if (operation) {
+      available.push(operation);
+    }
+  }
+  return available;
+}
+
 export async function resourceOperationsFor(
   resourceType: Resource['type'],
   bindings: ApiEnv['Bindings'],
@@ -353,25 +369,27 @@ export async function resourceOperationsFor(
   const registered = operationManifest.filter((entry) => entry.resourceType === resourceType);
   const available = registered.filter((entry) => !!bindings[entry.requires]);
   const names = new Set<string>(available.map((entry) => entry.procedure.name));
-  // Decision: A request loads only its selected resource schema. Retaining the full provider catalog's validators would grow Worker isolate memory without a bound.
-  const provider = await providerOperation(resourceType, bindings, caller).catch(() => null);
+  const providers = await providerOperations(resourceType, bindings, caller).catch(() => []);
   const operations = [
     ...(await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
-    ...(provider ? [provider.descriptor] : []),
+    ...providers.map((provider) => provider.descriptor),
   ];
   return {
     reason: operations.length
       ? null
-      : !registered.length && !cloudflareProviderReadSelection(resourceType)
+      : !registered.length && !cloudflareProviderReadSelections(resourceType).length
         ? 'Schema-backed operations are not registered for this resource yet.'
         : 'Resource operations are not connected on this installation.',
     operations,
     registryNames: new Map([
       ...available.map((entry) => [entry.procedure.name, entry.procedure.name] as const),
-      ...(provider ? [[provider.descriptor.id, provider.procedure.name] as const] : []),
+      ...providers.map((provider) => [provider.descriptor.id, provider.procedure.name] as const),
     ]),
-    registry: provider
-      ? defineRegistry([...available.map((entry) => entry.procedure), provider.procedure])
+    registry: providers.length
+      ? defineRegistry([
+          ...available.map((entry) => entry.procedure),
+          ...providers.map((provider) => provider.procedure),
+        ])
       : resourceOperationRegistry,
   };
 }

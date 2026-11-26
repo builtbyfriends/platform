@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { type } from 'arktype';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import {
-  cloudflareProviderReadSelection,
+  cloudflareProviderReadSelections,
   prepareCloudflareProviderRead,
 } from '../../src/infrastructure/cloudflare-provider-read.ts';
 import type { Resource } from '../../src/types.ts';
@@ -86,7 +87,120 @@ function setup(kind: Kind) {
   return { artifact, caller, fetcher, prepare, read, data };
 }
 
+const managedDomainArtifact = {
+  operationId: 'r2-get-bucket-public-policy',
+  method: 'GET',
+  path: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/managed',
+  document: JSON.parse(
+    gunzipSync(
+      readFileSync(
+        new URL('../fixtures/cloudflare-openapi/r2-managed-domain-get.json.gz', import.meta.url),
+      ),
+    ).toString('utf8'),
+  ) as unknown,
+};
+const managedDomain = { bucketId: 'b'.repeat(32), domain: 'pub-example.r2.dev', enabled: false };
+
 describe('schema-driven Cloudflare resource reads', () => {
+  it('retains the existing R2 metadata descriptor version when a second policy is added', async () => {
+    expect((await setup('r2').prepare().describe()).version).toBe(
+      'df7c7ffe69bfa5afe633f179c369ab0e1c74d125a50c152378d90f884a66d55b',
+    );
+    expect(cloudflareProviderReadSelections('r2')).toEqual([
+      { method: 'GET', path: fixture.operations.r2.path },
+      { method: 'GET', path: managedDomainArtifact.path },
+    ]);
+  });
+
+  it('reads the pinned managed domain through the owned bucket and omits its internal ID', async () => {
+    const { caller, fetcher } = setup('r2');
+    caller.resource.metadata.jurisdiction = 'eu';
+    const adapter = prepareCloudflareProviderRead(managedDomainArtifact, 'r2');
+    if (!adapter) {
+      throw Error('Missing domain adapter');
+    }
+    fetcher.mockResolvedValueOnce(
+      Response.json({ success: true, errors: [], messages: [], result: managedDomain }),
+    );
+    expect(await adapter.read(bindings, caller, {}, fetcher)).toEqual({
+      appId: 'app',
+      resourceId: 'resource',
+      action: managedDomainArtifact.operationId,
+      kind: 'provider-read',
+      data: { name: 'My resource', domain: managedDomain.domain, enabled: false },
+    });
+    expect(String(fetcher.mock.calls[0][0])).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/' +
+        bindings.CF_ACCOUNT_ID +
+        '/r2/buckets/owned-bucket/domains/managed',
+    );
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('cf-r2-jurisdiction')).toBe('eu');
+    expect(caller.stillAuthorized).toHaveBeenCalledTimes(2);
+    expect((await adapter.describe()).effect).toBe('read');
+  });
+
+  it('keeps the identity-free response policy confined to the exact managed-domain read', async () => {
+    const { artifact, read, caller, fetcher } = setup('r2');
+    fetcher.mockResolvedValueOnce(
+      Response.json({ success: true, errors: [], messages: [], result: managedDomain }),
+    );
+    await expect(read()).rejects.toThrow('different resource');
+    expect(() =>
+      prepareCloudflareProviderRead(
+        { ...managedDomainArtifact, document: artifact.document },
+        'r2',
+      ),
+    ).toThrow();
+    expect(
+      prepareCloudflareProviderRead(
+        { ...managedDomainArtifact, path: managedDomainArtifact.path + '/extra' },
+        'r2',
+      ),
+    ).toBeNull();
+    expect(
+      prepareCloudflareProviderRead({ ...managedDomainArtifact, method: 'PUT' }, 'r2'),
+    ).toBeNull();
+    const adapter = prepareCloudflareProviderRead(managedDomainArtifact, 'r2');
+    if (!adapter) {
+      throw Error('Missing domain adapter');
+    }
+    fetcher.mockClear();
+    for (const input of [
+      { account_id: 'other' },
+      { path: { bucket_name: 'other' } },
+      { headers: { 'cf-r2-jurisdiction': 'default' } },
+    ]) {
+      await expect(adapter.read(bindings, caller, input, fetcher)).rejects.toThrow('input fields');
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+    for (const result of [
+      undefined,
+      { ...managedDomain, enabled: 'true' },
+      { domain: managedDomain.domain, enabled: true },
+    ]) {
+      fetcher.mockResolvedValueOnce(
+        Response.json({ success: true, errors: [], messages: [], result }),
+      );
+      await expect(adapter.read(bindings, caller, {}, fetcher)).rejects.toThrow();
+    }
+  });
+
+  it('requires current selected-resource ownership before and after a managed-domain response', async () => {
+    const { caller, fetcher } = setup('r2');
+    const adapter = prepareCloudflareProviderRead(managedDomainArtifact, 'r2');
+    if (!adapter) {
+      throw Error('Missing domain adapter');
+    }
+    caller.stillAuthorized.mockResolvedValueOnce(false);
+    await expect(adapter.read(bindings, caller, {}, fetcher)).rejects.toThrow('resource changed');
+    expect(fetcher).not.toHaveBeenCalled();
+    fetcher.mockImplementationOnce(async () => {
+      caller.stillAuthorized.mockResolvedValue(false);
+      return Response.json({ success: true, errors: [], messages: [], result: managedDomain });
+    });
+    await expect(adapter.read(bindings, caller, {}, fetcher)).rejects.toThrow('resource changed');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it('normalizes OpenAPI write-only requirements and exclusive numeric bounds', async () => {
     const { artifact, read, fetcher, data } = setup('r2');
     const document = type({
@@ -157,7 +271,7 @@ describe('schema-driven Cloudflare resource reads', () => {
   it.each(['d1', 'r2', 'kv', 'queue'] as const)(
     'uses the same executor and real provider schema for %s metadata',
     async (kind) => {
-      expect(cloudflareProviderReadSelection(kind)).toEqual({
+      expect(cloudflareProviderReadSelections(kind)).toContainEqual({
         method: 'GET',
         path: fixture.operations[kind].path,
       });
@@ -229,7 +343,7 @@ describe('schema-driven Cloudflare resource reads', () => {
 
   it('rejects mismatched scopes, account selection, arbitrary paths and writes without requests', async () => {
     const { artifact, caller, prepare, fetcher, read } = setup('r2');
-    expect(cloudflareProviderReadSelection('container')).toBeNull();
+    expect(cloudflareProviderReadSelections('container')).toEqual([]);
     expect(prepareCloudflareProviderRead(artifact, 'd1')).toBeNull();
     expect(prepareCloudflareProviderRead({ ...artifact, method: 'DELETE' }, 'r2')).toBeNull();
     expect(
