@@ -229,12 +229,35 @@ const readQuery = procedure('database.query')
     return queryOutput.assert(result);
   });
 
-export const resourceOperationRegistry = defineRegistry([readFile, saveFile, readQuery]);
+const operationManifest = [
+  { procedure: readFile, resourceType: 'r2', requires: 'PLATFORM_PROXY' },
+  { procedure: saveFile, resourceType: 'r2', requires: 'PLATFORM_PROXY' },
+  { procedure: readQuery, resourceType: 'd1', requires: 'PLATFORM_PROXY' },
+] satisfies Array<{
+  procedure: { name: string };
+  resourceType: Resource['type'];
+  requires: keyof ApiEnv['Bindings'];
+}>;
 
-export function resourceOperationSupported(id: string, resourceType: string) {
-  return resourceType === 'r2'
-    ? id === 'files.readText' || id === 'files.saveText'
-    : resourceType === 'd1' && id === 'database.query';
+export const resourceOperationRegistry = defineRegistry(
+  operationManifest.map((entry) => entry.procedure),
+);
+
+export async function resourceOperationsFor(
+  resourceType: Resource['type'],
+  bindings: ApiEnv['Bindings'],
+) {
+  const registered = operationManifest.filter((entry) => entry.resourceType === resourceType);
+  const available = registered.filter((entry) => !!bindings[entry.requires]);
+  const names = new Set<string>(available.map((entry) => entry.procedure.name));
+  return {
+    reason: !registered.length
+      ? 'Schema-backed operations are not registered for this resource yet.'
+      : !available.length
+        ? 'Resource operations are not connected on this installation.'
+        : null,
+    operations: (await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
+  };
 }
 
 async function describeOperations() {
@@ -270,6 +293,6 @@ async function describeOperations() {
   );
 }
 let descriptors: ReturnType<typeof describeOperations> | undefined;
-export function resourceOperationDescriptors() {
+function resourceOperationDescriptors() {
   return (descriptors ??= describeOperations());
 }

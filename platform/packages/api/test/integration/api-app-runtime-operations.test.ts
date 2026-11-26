@@ -121,6 +121,13 @@ beforeEach(async () => {
       cf_id: 'private-other',
       binding_name: 'FILES',
     },
+    {
+      id: 'res_keys',
+      project_id: project.id,
+      type: 'kv',
+      cf_id: 'private-keys',
+      binding_name: 'KEYS',
+    },
   ]);
   proxy.mockReset();
   env.PLATFORM_PROXY = {
@@ -177,6 +184,48 @@ describe('registered resource operations', () => {
       data: { available: false, operations: [] },
     });
     expect((await call('resources.invoke', body)).status).toBe(404);
+    expect(proxy).not.toHaveBeenCalled();
+  });
+
+  it('uses the same resource and connectivity selection for advertised and invoked operations', async () => {
+    const database = await call('projects.resourceOperations', {
+      ...scope(),
+      resourceId: 'res_database',
+    });
+    const descriptors = [
+      ...(await catalog()),
+      ...catalogSchema.assert(await database.json()).data.operations,
+    ];
+    for (const connected of [true, false]) {
+      if (!connected) {
+        delete env.PLATFORM_PROXY;
+      }
+      for (const [resourceId, supported] of [
+        ['res_files', ['files.readText', 'files.saveText']],
+        ['res_database', ['database.query']],
+        ['res_keys', []],
+      ] as const) {
+        const advertised = connected ? [...supported] : [];
+        const response = await call('projects.resourceOperations', { ...scope(), resourceId });
+        const body = await response.json();
+        expect(body).toMatchObject({ data: { available: advertised.length > 0 } });
+        expect(catalogSchema.assert(body).data.operations.map((entry) => entry.id)).toEqual(
+          advertised,
+        );
+        for (const descriptor of descriptors) {
+          const response = await call('resources.invoke', {
+            ...scope(),
+            resourceId,
+            operation: descriptor.id,
+            version: descriptor.version,
+            expectedEffect: descriptor.effect,
+            ...(descriptor.effect === 'write' ? { confirmation: 'reviewed' } : {}),
+            input: {},
+          });
+          expect(response.status).toBe(advertised.some((id) => id === descriptor.id) ? 400 : 404);
+        }
+      }
+    }
     expect(proxy).not.toHaveBeenCalled();
   });
 
