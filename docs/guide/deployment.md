@@ -81,7 +81,7 @@ If CI runs typechecking before deploy, run `bwf prepare` after installing depend
 
 ## Previews for pull requests {#previews}
 
-On Cloudflare, give each pull request its own copy of the app. A preview has its own Durable Objects and its own D1 databases. A preview has no binding to a Workflow. KV, R2, queues, secrets and containers are still the deployed app's, so a preview can change live data there:
+On Cloudflare, give each pull request its own copy of the app. A preview has its own Durable Objects and its own D1 databases. A preview has no binding to a Workflow, and it gets its own copy of the deployed app's secrets. KV, R2, queues and containers are still the deployed app's, so a preview can change live data there:
 
 ```sh
 bwf deploy --platform cloudflare --preview pr-12
@@ -89,6 +89,8 @@ bwf deploy --platform cloudflare --remove-preview pr-12
 ```
 
 The first command prints the preview's address. The second deletes the preview and its D1 copies, so run it when the pull request closes. To check what the app does, not only that it starts, set [`deploy.cloudflare.healthCheck`](../reference/config.md#deploy-cloudflare-healthcheck). See [Previews](../reference/cli/deploy.md#previews) for what a preview shares with the deployed app.
+
+A preview needs a value for each secret the deployed app has, and Cloudflare never returns those. In a CI workflow, make every secret the deployed app holds available to the preview step as an environment variable of the same name, or write them to a dotenv file and pass `--secrets-file <file>`. Run `bwf secret list` to see the names. If one is missing, the preview step fails before it deploys anything and names it. A pull request from a fork usually can't read repository secrets, so a preview of it can't run.
 
 ## Deploy to a team platform
 

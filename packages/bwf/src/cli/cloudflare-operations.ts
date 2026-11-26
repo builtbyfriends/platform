@@ -165,6 +165,24 @@ export async function syncCloudflareSecrets(
   );
 }
 
+/** Set secret values on a preview's latest deployment. The values go to the child process on stdin. */
+export async function setCloudflarePreviewSecrets(
+  context: CloudflareOperationContext,
+  preview: string,
+  values: Readonly<Record<string, string>>,
+): Promise<void> {
+  await run(
+    context,
+    {
+      type: 'preview.secrets',
+      preview,
+      configPath: context.configPath,
+      workerName: context.workerName,
+    },
+    { input: `${JSON.stringify(values)}\n` },
+  );
+}
+
 export async function deleteCloudflareSecret(
   context: CloudflareOperationContext,
   name: string,

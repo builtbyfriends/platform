@@ -30,20 +30,21 @@ For an existing bwf Worker, `bwf deploy` can link the Worker and migrate its roo
 
 For Drizzle projects, deploy performs a read-only schema drift check. If a new migration would be generated, deploy stops and tells you to run `bwf db generate`, review the migration, commit it yourself, and rerun `bwf deploy`.
 
-| Flag                            | Purpose                                                                                                         |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `--platform <cloudflare\|void>` | Override the platform stored in `.bwf/project.json`                                                             |
-| `--project <name>`              | Target a specific bwf project by slug; not supported with `--platform cloudflare`                               |
-| `--dir <path>`                  | Deploy a pre-built static directory (skips build)                                                               |
-| `--spa`                         | Use SPA mode instead of SSG for static deploys                                                                  |
-| `--skip-build`                  | Skip the build step; on Cloudflare this is supported for static/SPA/SSG deploys only                            |
-| `--skip-migrations`             | Deploy without applying application or authentication SQL migrations; supported on Cloudflare and bwf platforms |
-| `--require-email`               | Fail when email cannot be set up instead of deploying without it; requires `--platform cloudflare`              |
-| `--provision`                   | Run resource provisioning again even when every resource exists; requires `--platform cloudflare`               |
-| `--atomic`                      | Publish an existing Durable Object Worker directly; readiness is checked after traffic changes                  |
-| `--preview <name>`              | Deploy a Worker Preview with its own Durable Objects and D1 databases; requires `--platform cloudflare`         |
-| `--remove-preview <name>`       | Delete a Worker Preview and the D1 databases made for it; requires `--platform cloudflare`                      |
-| `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.bwf/logs/`)                                     |
+| Flag                            | Purpose                                                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--platform <cloudflare\|void>` | Override the platform stored in `.bwf/project.json`                                                                                  |
+| `--project <name>`              | Target a specific bwf project by slug; not supported with `--platform cloudflare`                                                    |
+| `--dir <path>`                  | Deploy a pre-built static directory (skips build)                                                                                    |
+| `--spa`                         | Use SPA mode instead of SSG for static deploys                                                                                       |
+| `--skip-build`                  | Skip the build step; on Cloudflare this is supported for static/SPA/SSG deploys only                                                 |
+| `--skip-migrations`             | Deploy without applying application or authentication SQL migrations; supported on Cloudflare and bwf platforms                      |
+| `--require-email`               | Fail when email cannot be set up instead of deploying without it; requires `--platform cloudflare`                                   |
+| `--provision`                   | Run resource provisioning again even when every resource exists; requires `--platform cloudflare`                                    |
+| `--atomic`                      | Publish an existing Durable Object Worker directly; readiness is checked after traffic changes                                       |
+| `--preview <name>`              | Deploy a Worker Preview with its own Durable Objects and D1 databases; requires `--platform cloudflare`                              |
+| `--secrets-file <file>`         | A dotenv file with the values of the deployed app's secrets, for `--preview`; environment variables of the same names are used first |
+| `--remove-preview <name>`       | Delete a Worker Preview and the D1 databases made for it; requires `--platform cloudflare`                                           |
+| `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.bwf/logs/`)                                                          |
 
 `--atomic` applies to one deployment. For an existing Durable Object Worker that consistently cannot stage, set `deploy: { cloudflare: { mode: 'atomic' } }` in `bwf.config.ts` so plain `bwf deploy` uses atomic publication. The default is `staged`.
 
@@ -56,7 +57,8 @@ A preview gets its own copy of two things, and shares the rest with the deployed
 - **Durable Objects.** Cloudflare gives a preview its own namespace for the Worker's own Durable Object classes. Objects you reach with `get()` and `getById()` from `defineDurableObject` and `defineDurableState` use it. A preview has no `c.env` binding to the Worker's own Durable Object classes. Code that reads one from `c.env` fails in a preview instead of reaching the deployed app's data, so use `get()` and `getById()`, or `ctx.exports`.
 - **D1.** Each D1 database the app binds gets a copy named `<database>-preview-<name>`, such as `app-index-preview-pr-12`. bwf stops if that name is also a database the app declares, so a preview never reuses, migrates or deletes a database of the app's own. bwf creates it, applies the migrations in the binding's `migrations_dir` (or `db/migrations` for the app's own database), and binds the preview to it. `--skip-migrations` leaves the copy as it is.
 - **Workflows.** Cloudflare doesn't make a Workflow for a preview, so a preview has no `c.env` binding to a Workflow of the app's own. Code that reads one fails in a preview. Without that, an instance a preview starts would run in the deployed app's Workflow and show on the live address.
-- **Everything else is shared.** KV, R2, queues, secrets and containers are the deployed app's. A preview reads and writes the live data there, so don't point a preview at an app that holds real data in those unless you want that. `bwf deploy --preview` lists this each time it runs.
+- **Secrets.** A preview starts without the deployed app's secrets, and Cloudflare never returns a secret's value. bwf lists the secrets the deployed app has and sets a copy of each on the preview, after the preview deploys and before the health check. It takes each value from an environment variable of the same name, or from the dotenv file `--secrets-file` names. If the deployed app has a secret and bwf has no value for it, the command stops before it builds anything, names the secret, and deploys nothing. The values are never written to a file, the log or the lock file. Deleting the preview deletes its secrets too.
+- **Everything else is shared.** KV, R2, queues and containers are the deployed app's. A preview reads and writes the live data there, so don't point a preview at an app that holds real data in those unless you want that. `bwf deploy --preview` lists this each time it runs.
 - **A new owner class.** A preview can add a Durable Object class the deployed Worker doesn't have yet. It reaches the class through `get()`, `getById()` or `ctx.exports`, and the preview deploys without `--atomic`.
 
 Deploying the same name again updates the preview and reuses its D1 copies. `bwf deploy --platform cloudflare --remove-preview pr-12` deletes the preview and its D1 copies in the same command, so a closed pull request leaves nothing behind. Run it again for a preview that is already gone and it reports nothing to delete.

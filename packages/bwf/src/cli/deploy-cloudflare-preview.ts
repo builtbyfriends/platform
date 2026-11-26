@@ -8,6 +8,7 @@ import type { CfCommand } from './cf-version-api.ts';
 import { createCfCommand } from './cf-version-runner.ts';
 import { createCloudflareChildReporter, observeCfCommand } from './cloudflare-child-report.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
+import { resolveCloudflareOperationContext } from './cloudflare-operations.ts';
 import {
   assertNotDeclared,
   ensurePreviewDatabase,
@@ -31,11 +32,17 @@ import { deployChildEnv } from './deploy-transport.ts';
 import type { CloudflareDeployDeps, RunDeployOptions } from './deploy-types.ts';
 import type { CliLogger } from './log-file.ts';
 import { getErrorMessage, note } from './output.ts';
+import {
+  applyPreviewSecrets,
+  collectPreviewSecrets,
+  missingPreviewSecretsMessage,
+} from './preview-secrets.ts';
+import type { PreviewSecretValues } from './preview-secrets.ts';
 
 const CF_TIMEOUT_MS = 300_000;
 
 const PREVIEW_SHARES =
-  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues, secrets and containers are the live app's, so a preview reads and writes the live data there. A preview has no Workflow binding.";
+  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues and containers are the live app's, so a preview reads and writes the live data there. A preview has no Workflow binding. It starts without secrets: bwf sets a copy of each secret the live app has, from environment variables or --secrets-file.";
 
 type PreviewRun = {
   root: string;
@@ -202,6 +209,26 @@ async function deployPreview(run: PreviewRun): Promise<void> {
   removeDeployPointer(root);
   log.info(PREVIEW_SHARES);
 
+  const context = resolveCloudflareOperationContext(root);
+  let secrets: PreviewSecretValues;
+
+  try {
+    secrets = await collectPreviewSecrets(context, {
+      secretsFile: run.options.secretsFile,
+      env: process.env,
+    });
+  } catch (error) {
+    log.error(`deploy: could not read the live app's secrets: ${getErrorMessage(error)}`);
+
+    return run.exit(1);
+  }
+
+  if (secrets.missing.length > 0) {
+    log.error(missingPreviewSecretsMessage(secrets.missing));
+
+    return run.exit(1);
+  }
+
   const build = await buildCloudflareWorker({
     root,
     bwfConfig: run.bwfConfig,
@@ -248,6 +275,16 @@ async function deployPreview(run: PreviewRun): Promise<void> {
 
   if (url === undefined) {
     log.error(`deploy: preview ${name} deployed, but cf gave no address for it.`);
+
+    return run.exit(1);
+  }
+
+  try {
+    await applyPreviewSecrets(context, name, secrets);
+  } catch (error) {
+    log.error(
+      `deploy: preview ${name} deployed, but its secrets could not be set: ${getErrorMessage(error)}`,
+    );
 
     return run.exit(1);
   }

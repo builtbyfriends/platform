@@ -199,6 +199,11 @@ const HELP_TREE = {
           'Deploy a Worker Preview with its own Durable Objects and D1 databases (with --platform cloudflare)',
       },
       {
+        command: '--secrets-file <file>',
+        description:
+          "Dotenv file with the live app's secret values for a preview. Environment variables of the same names are used first",
+      },
+      {
         command: '--remove-preview <name>',
         description:
           'Delete a Worker Preview and the D1 databases made for it (with --platform cloudflare)',

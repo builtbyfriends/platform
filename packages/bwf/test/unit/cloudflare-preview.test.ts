@@ -261,6 +261,18 @@ describe('deploy --preview and --remove-preview', () => {
     );
   });
 
+  it('reads --secrets-file for a preview only', () => {
+    expect(
+      parseDeployArgs(['--platform', 'cloudflare', '--preview', 'pr-7', '--secrets-file', 's.env']),
+    ).toMatchObject({ secretsFile: 's.env' });
+    expect(() => parseDeployArgs(['--platform', 'cloudflare', '--secrets-file', 's.env'])).toThrow(
+      '--secrets-file is used with --preview',
+    );
+    expect(() =>
+      parseDeployArgs(['--platform', 'cloudflare', '--preview', 'pr-7', '--secrets-file']),
+    ).toThrow('--secrets-file requires a file path');
+  });
+
   it('asks for the Cloudflare platform, one flag at a time, and a usable name', () => {
     expect(() => parseDeployArgs(['--preview', 'pr-7'])).toThrow('require --platform cloudflare');
     expect(() =>
