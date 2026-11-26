@@ -479,6 +479,24 @@ it('creates a missing preview with logs on, so its first deployment has them', a
   });
 });
 
+it('fails when Cloudflare refuses to create the preview', async () => {
+  const { result } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: (method) =>
+      method === 'GET'
+        ? { status: 404, body: { success: false, errors: [] } }
+        : {
+            status: 400,
+            body: { success: false, errors: [{ code: 1000, message: 'Not valid.' }] },
+          },
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('create preview pr-12 with logs on');
+  expect(result.stderr).toContain('HTTP 400');
+});
+
 it("leaves a preview's own observability settings alone when they are already on", async () => {
   const { result, apiCalls } = await runSecretScenario({
     operation: logsOperation,
