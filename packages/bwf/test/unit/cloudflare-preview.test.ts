@@ -193,7 +193,12 @@ describe('binding a preview to its own databases', () => {
       config: {
         name: 'app',
         compatibilityDate: '2026-10-12',
-        env: { INDEX: { type: 'd1', name: 'app-index', id: 'production-id' } },
+        env: {
+          INDEX: { type: 'd1', name: 'app-index', id: 'production-id' },
+          OWNER: { type: 'durable-object', worker: 'app', exportName: 'NewOwner' },
+          OTHER: { type: 'durable-object', worker: 'other-app', exportName: 'Shared' },
+        },
+        exports: { NewOwner: { type: 'durable-object', storage: 'sqlite' } },
       },
       manifest: {
         type: 'complete',
@@ -215,6 +220,10 @@ describe('binding a preview to its own databases', () => {
       expect(staged.rootConfig.buildContext).toEqual({ isPreview: true, mode: 'preview' });
       expect(staged.workers.default.config.env).toEqual({
         INDEX: { type: 'd1', name: 'app-index-pr-7', id: 'preview-id' },
+        OTHER: { type: 'durable-object', worker: 'other-app', exportName: 'Shared' },
+      });
+      expect(staged.workers.default.config.exports).toEqual({
+        NewOwner: { type: 'durable-object', storage: 'sqlite' },
       });
     } finally {
       await prepared?.dispose();
