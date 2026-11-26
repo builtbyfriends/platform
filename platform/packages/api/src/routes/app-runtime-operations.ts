@@ -2,6 +2,7 @@ import { type } from 'arktype';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ApiEnv } from '../env.ts';
+import { accessApplicationOperations } from '../infrastructure/access-application-read.ts';
 import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
 import { ownedReferenceCaller } from './app-runtime-resource-owner.ts';
 import { runtimeResourceReferences } from './app-runtime-resource-reference.ts';
@@ -42,6 +43,34 @@ async function ownedResource(
   return ownedReferenceCaller(context, project, resource, body.owner, resolve);
 }
 
+async function callerOperations(
+  context: Context<ApiEnv>,
+  caller: NonNullable<Awaited<ReturnType<typeof ownedResource>>>,
+) {
+  if ('reference' in caller) {
+    const prepared = await accessApplicationOperations(context.env, caller);
+    return {
+      ...prepared,
+      invoke: (name: string, input: unknown) =>
+        prepared.registry.call(name, input, {
+          request: context.req.raw,
+          env: { bindings: context.env, caller },
+          surface: 'direct',
+        }),
+    };
+  }
+  const prepared = await resourceOperationsFor(caller.resource.type, context.env, caller);
+  return {
+    ...prepared,
+    invoke: (name: string, input: unknown) =>
+      prepared.registry.call(name, input, {
+        request: context.req.raw,
+        env: { bindings: context.env, caller },
+        surface: 'direct',
+      }),
+  };
+}
+
 export function appRuntimeOperationRoutes(resolve: ResolveProject) {
   const app = new Hono<ApiEnv>();
   app.post(
@@ -59,30 +88,11 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
       }
-      if ('reference' in caller) {
-        if (!(await caller.stillAuthorized())) {
-          return context.json({ error: 'resource_changed' }, 409);
-        }
-        return context.json({
-          data: {
-            appId: caller.project.id,
-            resourceId: caller.reference.id,
-            checkedAt: Date.now(),
-            available: false,
-            reason: 'Schema-backed operations are not registered for this resource yet.',
-            coverage: 'registered-operations',
-            operations: [],
-          },
-        });
-      }
-      const { reason, operations } = await resourceOperationsFor(
-        caller.resource.type,
-        context.env,
-        caller,
-      );
+      const { reason, operations } = await callerOperations(context, caller);
       if (
         !(await caller.stillAuthorized()) ||
         (operations.length > 0 &&
+          'resolveProviderIdentity' in caller &&
           caller.resolveProviderIdentity &&
           !(await caller.resolveProviderIdentity()))
       ) {
@@ -91,7 +101,7 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       return context.json({
         data: {
           appId: caller.project.id,
-          resourceId: caller.resource.id,
+          resourceId: 'reference' in caller ? caller.reference.id : caller.resource.id,
           checkedAt: Date.now(),
           available: !reason,
           reason,
@@ -116,16 +126,10 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
       }
-      if ('reference' in caller) {
-        return (await caller.stillAuthorized())
-          ? context.json({ error: 'operation_unavailable' }, 404)
-          : context.json({ error: 'resource_changed' }, 409);
+      const { operations, registryNames, invoke } = await callerOperations(context, caller);
+      if ('reference' in caller && !(await caller.stillAuthorized())) {
+        return context.json({ error: 'resource_changed' }, 409);
       }
-      const { operations, registry, registryNames } = await resourceOperationsFor(
-        caller.resource.type,
-        context.env,
-        caller,
-      );
       const operation = operations.find((entry) => entry.id === body.operation);
       const registryName = registryNames.get(body.operation);
       if (!operation || !registryName) {
@@ -143,11 +147,7 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (operation.effect === 'read' && body.confirmation !== undefined) {
         return context.json({ error: 'unexpected_confirmation' }, 400);
       }
-      const result = await registry.call(registryName, body.input, {
-        request: context.req.raw,
-        env: { bindings: context.env, caller },
-        surface: 'direct',
-      });
+      const result = await invoke(registryName, body.input);
       if (!result.ok) {
         return Response.json(
           { error: result.code, message: result.message },

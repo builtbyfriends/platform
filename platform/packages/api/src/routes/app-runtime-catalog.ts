@@ -2,6 +2,10 @@ import { type } from 'arktype';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ApiEnv } from '../env.ts';
+import {
+  accessApplicationOperations,
+  accessApplicationReadSelection,
+} from '../infrastructure/access-application-read.ts';
 import { catalogPage, cloudflareCatalog } from '../infrastructure/cloudflare-catalog.ts';
 import {
   cloudflareOpenApiIndex,
@@ -14,7 +18,7 @@ import {
 import type { Project } from '../types.ts';
 import { referenceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
-import { ownedResourceCaller } from './app-runtime-resource-owner.ts';
+import { ownedReferenceCaller } from './app-runtime-resource-owner.ts';
 import {
   referenceProduct,
   runtimeResourceReferences,
@@ -142,11 +146,13 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
       }
 
       const caller =
-        !schema && body.resourceId && filesActive && selected[0].source === 'resources'
-          ? ownedResourceCaller(context, project, selected[0].resource, owner, resolve)
+        !schema && body.resourceId && filesActive
+          ? ownedReferenceCaller(context, project, selected[0], owner, resolve)
           : null;
       const registered = caller
-        ? await resourceOperationsFor(caller.resource.type, context.env, caller)
+        ? 'reference' in caller
+          ? await accessApplicationOperations(context.env, caller)
+          : await resourceOperationsFor(caller.resource.type, context.env, caller)
         : null;
       const providerIndex = registered ? await cloudflareOpenApiIndex() : [];
       const current = await resolve(context, project.id, owner);
@@ -178,6 +184,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         (!(await caller.stillAuthorized()) ||
           (registered &&
             registered.operations.length > 0 &&
+            'resolveProviderIdentity' in caller &&
             caller.resolveProviderIdentity &&
             !(await caller.resolveProviderIdentity())))
       ) {
@@ -232,8 +239,11 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
                       ? 'resource_not_selected'
                       : !currentFilesActive
                         ? 'resource_not_active'
-                        : selected[0].source !== 'resources' ||
-                            !providerPolicySelections(selected[0].resource.type).some(
+                        : !(
+                              selected[0].source === 'resources'
+                                ? providerPolicySelections(selected[0].resource.type)
+                                : [accessApplicationReadSelection]
+                            ).some(
                               (policy) =>
                                 policy.method === operation.httpMethod &&
                                 policy.path === operation.path,

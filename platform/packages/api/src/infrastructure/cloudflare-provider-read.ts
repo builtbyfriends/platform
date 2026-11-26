@@ -426,7 +426,7 @@ function scalar(value: unknown): value is string | number | boolean | null {
   );
 }
 
-function fieldSchema(value: unknown, path: Array<string>, document: unknown): Schema | undefined {
+export function fieldSchema(value: unknown, path: Array<string>, document: unknown): Schema | undefined {
   const schema = resolve(document, value);
   if (schema.writeOnly === true) {
     throw Error('The provider projection includes a private field.');

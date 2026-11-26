@@ -254,7 +254,7 @@ export const resourceOperationRegistry = defineRegistry(
   operationManifest.map((entry) => entry.procedure),
 );
 
-function providerSchema(schema: Schema) {
+export function providerSchema(schema: Schema) {
   const validator = new Validator(schema, '7');
   return {
     '~standard': {

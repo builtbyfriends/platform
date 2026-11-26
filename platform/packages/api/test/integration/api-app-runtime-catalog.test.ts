@@ -1227,4 +1227,165 @@ describe('project Access ownership references', () => {
       expect((await call(body)).status).toBe(404);
     }
   });
+  describe('projected Access application reads', () => {
+    const ownedApplicationId = '11111111-1111-4111-8111-111111111111';
+    const descriptorSchema = type({
+      data: { operations: type({ id: 'string', version: 'string', effect: "'read'" }).array() },
+    });
+    async function prepared() {
+      env.CF_ACCOUNT_ID = 'a'.repeat(32);
+      await seed();
+      await env.db
+        .update(projectZeroTrust)
+        .set({ protected_application_id: ownedApplicationId })
+        .where(eq(projectZeroTrust.project_id, project.id));
+      const entry = (await cloudflareOpenApiIndex()).find(
+        (entry) => entry.operationId === 'access-applications-get-an-access-application',
+      );
+      if (!entry) {
+        throw Error('Missing pinned Access application operation');
+      }
+      await env.STATIC_ASSETS_R2.put(
+        cloudflareOpenApiKey(entry),
+        await readFile(
+          new URL('../fixtures/cloudflare-openapi/access-get.json.gz', import.meta.url),
+        ),
+      );
+      const selectedResource = await selected();
+      const selection = {
+        project: selectedResource.project,
+        owner: selectedResource.owner,
+        resourceId: selectedResource.resourceId,
+      };
+      const installed = await route('projects.resourceOperations', selection);
+      expect(installed.status).toBe(200);
+      const [descriptor] = descriptorSchema.assert(await installed.json()).data.operations;
+      expect(descriptor.id).toBe(entry.operationId);
+      const response = {
+        id: ownedApplicationId,
+        name: 'private-project-access-name',
+        type: 'self_hosted',
+        domain: 'private.example.com',
+        session_duration: '24h',
+        aud: 'private-audience',
+        policies: [{ id: 'private-policy' }],
+        allowed_idps: ['private-idp'],
+      };
+      return {
+        entry,
+        selection,
+        descriptor,
+        response,
+        invocation: {
+          ...selection,
+          operation: descriptor.id,
+          version: descriptor.version,
+          expectedEffect: descriptor.effect,
+          input: {},
+        },
+      };
+    }
+    afterEach(async () => {
+      const entry = (await cloudflareOpenApiIndex()).find(
+        (entry) => entry.operationId === 'access-applications-get-an-access-application',
+      );
+      if (entry) {
+        await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
+      }
+    });
+
+    it('advertises the pinned owned read and runs a saved descriptor without exposing private provider fields', async () => {
+      const fixture = await prepared();
+      const provider = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async () =>
+          Response.json({ success: true, errors: [], messages: [], result: fixture.response }),
+        );
+      const discovery = await read(
+        await call({ ...fixture.selection, query: fixture.descriptor.id }),
+      );
+      expect(
+        discovery.data.operations.filter((operation) => operation.execution === 'registered'),
+      ).toEqual([expect.objectContaining({ id: fixture.descriptor.id, execution: 'registered' })]);
+      expect(
+        discovery.data.operations.find((operation) => operation.id.startsWith('zone-level-')),
+      ).toMatchObject({ execution: 'discovery-only' });
+      const invoked = await route('resources.invoke', fixture.invocation);
+      expect(invoked.status).toBe(200);
+      expect(await invoked.json()).toEqual({
+        data: {
+          appId: project.id,
+          resourceId: fixture.selection.resourceId,
+          action: fixture.descriptor.id,
+          kind: 'provider-read',
+          data: { name: 'Project access', type: 'self_hosted', session_duration: '24h' },
+        },
+      });
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(String(provider.mock.calls[0][0])).toBe(
+        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/access/apps/${ownedApplicationId}`,
+      );
+      expect(
+        (await route('resources.invoke', { ...fixture.invocation, resourceId: ownedApplicationId }))
+          .status,
+      ).toBe(404);
+      expect(
+        (
+          await route('resources.invoke', {
+            ...fixture.invocation,
+            input: { app_id: ownedApplicationId },
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (await route('resources.invoke', { ...fixture.invocation, version: 'f'.repeat(64) }))
+          .status,
+      ).toBe(409);
+      expect(
+        (await route('resources.invoke', { ...fixture.invocation, expectedEffect: 'write' }))
+          .status,
+      ).toBe(400);
+      expect(provider).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['application', 'generation', 'account', 'revocation'] as const)(
+      'rejects late %s proof changes after the provider read',
+      async (change) => {
+        const fixture = await prepared();
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+          if (change === 'account') {
+            await env.db
+              .update(platformSettings)
+              .set({ value: { ...configuration(), revision: 2, accountId: 'b'.repeat(32) } })
+              .where(eq(platformSettings.key, 'zeroTrust.configuration'));
+          } else if (change === 'revocation') {
+            await env.db
+              .delete(projectZeroTrust)
+              .where(eq(projectZeroTrust.project_id, project.id));
+          } else {
+            await env.db
+              .update(projectZeroTrust)
+              .set(
+                change === 'application'
+                  ? { protected_application_id: 'replacement-application' }
+                  : { reconciled_operation: 'replacement-generation' },
+              )
+              .where(eq(projectZeroTrust.project_id, project.id));
+          }
+          return Response.json({
+            success: true,
+            errors: [],
+            messages: [],
+            result: fixture.response,
+          });
+        });
+        const response = await route('resources.invoke', fixture.invocation);
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({
+          error: 'RESOURCE_CHANGED',
+          message: 'This resource changed. Refresh before continuing.',
+        });
+      },
+    );
+  });
 });
