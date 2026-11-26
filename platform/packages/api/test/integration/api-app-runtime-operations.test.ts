@@ -113,6 +113,8 @@ afterEach(async () => {
         'r2-put-bucket-cors-policy',
         "workers-kv-namespace-list-a-namespace'-s-keys",
         'queues-list-consumers',
+        'queues-get-consumer',
+        'r2-get-custom-domain-settings',
         'r2-list-custom-domains',
       ].includes(entry.operationId)
     ) {
@@ -576,6 +578,11 @@ describe('schema-backed provider operations', () => {
       cloudflareOpenApiKey(
         (await cloudflareOpenApiIndex()).find(
           (entry) => entry.operationId === 'r2-list-custom-domains',
+        )!,
+      ),
+      cloudflareOpenApiKey(
+        (await cloudflareOpenApiIndex()).find(
+          (entry) => entry.operationId === 'r2-get-custom-domain-settings',
         )!,
       ),
       cloudflareOpenApiKey(
@@ -1796,6 +1803,80 @@ describe.each([
     metadata.provider.mockImplementation(async () => Response.json(envelope));
     return { metadata, key, bytes, list, body, envelope };
   }
+
+  async function setupDetail() {
+    const collection = await setupCollection();
+    const id = fixture.kind === 'queue' ? 'queues-get-consumer' : 'r2-get-custom-domain-settings';
+    const file = fixture.kind === 'queue' ? 'queue-consumer-get' : 'r2-custom-domain-get';
+    const entry = (await cloudflareOpenApiIndex()).find((item) => item.operationId === id);
+    if (!entry) {
+      throw Error('Missing child schema');
+    }
+    const key = cloudflareOpenApiKey(entry);
+    await env.STATIC_ASSETS_R2.put(
+      key,
+      await readFile(
+        new URL('../fixtures/cloudflare-openapi/' + file + '.json.gz', import.meta.url),
+      ),
+    );
+    const descriptor = (await collection.list()).find((item) => item.id === id);
+    if (!descriptor) {
+      throw Error('Missing child descriptor');
+    }
+    const child = fixture.kind === 'queue' ? 'c'.repeat(32) : 'files.example.com';
+    collection.metadata.provider
+      .mockReset()
+      .mockResolvedValueOnce(Response.json(collection.envelope))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, errors: [], messages: [], result: fixture.records[0] }),
+      )
+      .mockResolvedValueOnce(Response.json(collection.envelope));
+    return {
+      ...collection,
+      descriptor,
+      childKey: key,
+      detail: {
+        ...collection.body,
+        operation: descriptor.id,
+        version: descriptor.version,
+        input: { child },
+      },
+    };
+  }
+
+  it('runs the registered child detail through owned scope and exact descriptor version', async () => {
+    const fixture = await setupDetail();
+    const response = await call('resources.invoke', fixture.detail);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { kind: 'provider-read', action: fixture.descriptor.id },
+    });
+    expect(fixture.metadata.provider).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects foreign, stale, write and spoofed-parent child requests before provider reads', async () => {
+    const fixture = await setupDetail();
+    for (const [change, status] of [
+      [{ resourceId: 'res_foreign' }, 404],
+      [{ owner: { person: 'stranger' } }, 404],
+      [{ version: '0'.repeat(64) }, 409],
+      [{ expectedEffect: 'write' }, 400],
+      [{ input: { ...fixture.detail.input, parent: 'foreign' } }, 400],
+    ] as const) {
+      expect((await call('resources.invoke', { ...fixture.detail, ...change })).status).toBe(
+        status,
+      );
+    }
+    expect(fixture.metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('withholds the child operation when its ownership collection schema is missing', async () => {
+    const fixture = await setupDetail();
+    await env.STATIC_ASSETS_R2.delete(fixture.key);
+    expect((await fixture.list()).some((item) => item.id === fixture.descriptor.id)).toBe(false);
+    expect((await call('resources.invoke', fixture.detail)).status).toBeGreaterThanOrEqual(400);
+    expect(fixture.metadata.provider).not.toHaveBeenCalled();
+  });
 
   it('registers independent complete-list descriptors and reads only the owned parent', async () => {
     const { metadata, list, body } = await setupCollection();

@@ -293,9 +293,27 @@ async function providerOperation(
   if (writePolicy && !readArtifact) {
     throw Error('schema_unavailable');
   }
+  const parentPath = cloudflareProviderReadSelections(resourceType).find(
+    (selection) => selection.path === artifact.path,
+  )?.parentPath;
+  const parentEntry = parentPath
+    ? (await cloudflareOpenApiIndex()).find(
+        (candidate) => candidate.method === 'GET' && candidate.path === parentPath,
+      )
+    : undefined;
+  const parentArtifact = parentEntry
+    ? await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, parentEntry)
+    : null;
+  if (parentPath && !parentArtifact) {
+    throw Error('schema_unavailable');
+  }
   const adapter = writePolicy
     ? readArtifact && prepareCloudflareProviderWrite(artifact, readArtifact, resourceType)
-    : prepareCloudflareProviderRead(artifact, resourceType);
+    : prepareCloudflareProviderRead(
+        artifact,
+        resourceType,
+        parentArtifact ? { parentArtifact } : undefined,
+      );
   if (!adapter) {
     return null;
   }

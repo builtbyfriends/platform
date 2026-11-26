@@ -51,6 +51,7 @@ const policies: Array<{
   identityPattern?: string;
   responseOwnership?: 'selected-resource';
   parameterAlternative?: number;
+  child?: { parameter: string; parentPath: string; schema: Schema };
   fields: Array<string>;
   nullableResponseComponents?: { [name: string]: 'number' | 'array' };
   structured?: { fields: { [key: string]: ReadFields } };
@@ -228,6 +229,47 @@ const policies: Array<{
       maxItems: 200,
       recordIdentity: { type: 'string', pattern: '^[a-fA-F0-9]{32}$' },
     },
+  },
+  {
+    type: 'queue',
+    path: '/accounts/{account_id}/queues/{queue_id}/consumers/{consumer_id}',
+    parameter: 'queue_id',
+    identity: 'consumer_id',
+    identityPattern: '^[a-fA-F0-9]{32}$',
+    child: {
+      parameter: 'consumer_id',
+      parentPath: '/accounts/{account_id}/queues/{queue_id}/consumers',
+      schema: { type: 'string', pattern: '^[a-fA-F0-9]{32}$', minLength: 32, maxLength: 32 },
+    },
+    nullableResponseComponents: {
+      'mq_api-v4-error': 'array',
+      'mq_api-v4-message': 'array',
+      'mq_max-concurrency': 'number',
+    },
+    fields: [
+      'consumer_id',
+      'type',
+      'created_on',
+      'settings/batch_size',
+      'settings/max_retries',
+      'settings/retry_delay',
+      'settings/max_concurrency',
+      'settings/max_wait_time_ms',
+      'settings/visibility_timeout_ms',
+    ],
+  },
+  {
+    type: 'r2',
+    path: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom/{domain}',
+    parameter: 'bucket_name',
+    identity: 'domain',
+    child: {
+      parameter: 'domain',
+      parentPath: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom',
+      schema: { type: 'string', pattern: '^[a-zA-Z0-9.-]+$', minLength: 1, maxLength: 253 },
+    },
+    fields: ['domain', 'enabled', 'minTLS', 'status/ownership', 'status/ssl'],
+    structured: { fields: { ciphers: { items: true } } },
   },
 ];
 
@@ -564,10 +606,14 @@ export async function boundedJson(response: Response) {
 export function cloudflareProviderReadSelections(resourceType: Resource['type']) {
   return policies
     .filter((entry) => entry.type === resourceType)
-    .map((policy) => ({ method: 'GET' as const, path: policy.path }));
+    .map((policy) => ({
+      method: 'GET' as const,
+      path: policy.path,
+      ...(policy.child ? { parentPath: policy.child.parentPath } : {}),
+    }));
 }
 
-export function prepareCloudflareProviderRead(
+function prepareRead(
   artifact: CloudflareReadArtifact,
   resourceType: Resource['type'],
   options?: { requireCompleteProjection: true },
@@ -600,7 +646,10 @@ export function prepareCloudflareProviderRead(
       ) {
         throw Error('Unsupported provider parameter.');
       }
-      if (parameter.in === 'path' && !['account_id', policy.parameter].includes(parameter.name)) {
+      if (
+        parameter.in === 'path' &&
+        !['account_id', policy.parameter, policy.child?.parameter].includes(parameter.name)
+      ) {
         throw Error('Unowned provider path parameter.');
       }
       if (parameter.in === 'header' && parameter.name !== 'cf-r2-jurisdiction') {
@@ -619,6 +668,12 @@ export function prepareCloudflareProviderRead(
       }
       parameters.set(`${parameter.in}:${parameter.name}`, parameter);
     }
+  }
+  const childParameter = policy.child
+    ? parameters.get('path:' + policy.child.parameter)
+    : undefined;
+  if (policy.child && (!childParameter || childParameter.required !== true)) {
+    throw Error('The child identity policy no longer matches its schema.');
   }
   const completeCollection = policy.collection?.pagination === 'none';
   if (
@@ -678,7 +733,22 @@ export function prepareCloudflareProviderRead(
     };
   };
   const inputSchema = validationSchema(
-    { type: 'object', additionalProperties: false, properties: { query: fields('query') } },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: fields('query'),
+        ...(policy.child
+          ? {
+              child: {
+                description: 'Child identifier from this resource’s current collection.',
+                allOf: [record(childParameter?.schema), policy.child.schema],
+              },
+            }
+          : {}),
+      },
+      ...(policy.child ? { required: ['child'] } : {}),
+    },
     document,
     'input',
   );
@@ -874,12 +944,16 @@ export function prepareCloudflareProviderRead(
       const headers = parameters.has('header:cf-r2-jurisdiction')
         ? { 'cf-r2-jurisdiction': resource.metadata.jurisdiction ?? 'default' }
         : {};
-      const path = { account_id: bindings.CF_ACCOUNT_ID, [policy.parameter]: providerIdentity };
+      const path = {
+        account_id: bindings.CF_ACCOUNT_ID,
+        [policy.parameter]: providerIdentity,
+        ...(policy.child ? { [policy.child.parameter]: selected.child } : {}),
+      };
       if (!pathValidator.validate(path).valid || !headerValidator.validate(headers).valid) {
         throw Error('The provider resource identity is invalid.');
       }
       const url = new URL(
-        `https://api.cloudflare.com/client/v4${policy.path.replace('{account_id}', encodeURIComponent(bindings.CF_ACCOUNT_ID)).replace(`{${policy.parameter}}`, encodeURIComponent(providerIdentity))}`,
+        `https://api.cloudflare.com/client/v4${policy.path.replace(/\{([^}]+)\}/g, (_match, key: string) => encodeURIComponent(String(path[key])))}`,
       );
       const requestHeaders = new Headers({
         Authorization: `Bearer ${bindings.CF_API_TOKEN}`,
@@ -949,7 +1023,8 @@ export function prepareCloudflareProviderRead(
         returned.success !== true ||
         (!policy.collection &&
           policy.responseOwnership !== 'selected-resource' &&
-          record(resourceResult)[policy.identity] !== providerIdentity)
+          record(resourceResult)[policy.identity] !==
+            (policy.child ? selected.child : providerIdentity))
       ) {
         throw Error('The provider returned a different resource.');
       }
@@ -1064,6 +1139,91 @@ export function prepareCloudflareProviderRead(
         throw Error('The provider metadata changed unexpectedly.');
       }
       return output;
+    },
+  };
+}
+
+export function prepareCloudflareProviderRead(
+  artifact: CloudflareReadArtifact,
+  resourceType: Resource['type'],
+  options?: { requireCompleteProjection?: true; parentArtifact?: CloudflareReadArtifact },
+) {
+  const adapter = prepareRead(
+    artifact,
+    resourceType,
+    options?.requireCompleteProjection ? { requireCompleteProjection: true } : undefined,
+  );
+  const policy = policies.find(
+    (entry) => entry.type === resourceType && entry.path === artifact.path,
+  );
+  if (!adapter || !policy?.child) {
+    return adapter;
+  }
+  const child = policy.child;
+  const parentPolicy = policies.find(
+    (entry) => entry.type === resourceType && entry.path === child.parentPath,
+  );
+  const parent =
+    options?.parentArtifact?.path === child.parentPath
+      ? prepareRead(options.parentArtifact, resourceType)
+      : null;
+  if (
+    !parent ||
+    parentPolicy?.collection?.pagination !== 'none' ||
+    parentPolicy.identity !== policy.identity
+  ) {
+    throw Error('The child collection ownership policy is not available.');
+  }
+  const inputValidator = new Validator(adapter.inputSchema, '7');
+  return {
+    ...adapter,
+    async describe() {
+      const descriptor = await adapter.describe();
+      const parentDescriptor = await parent.describe();
+      const hash = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(
+          JSON.stringify({
+            child: descriptor.version,
+            parent: parentDescriptor.version,
+            membershipVersion: 1,
+          }),
+        ),
+      );
+      return {
+        ...descriptor,
+        version: Array.from(new Uint8Array(hash), (value) =>
+          value.toString(16).padStart(2, '0'),
+        ).join(''),
+      };
+    },
+    async read(...args: Parameters<typeof adapter.read>) {
+      const [bindings, caller, input, fetcher = fetch] = args;
+      if (!inputValidator.validate(input).valid) {
+        throw Error('Check the operation input fields.');
+      }
+      const selection = record(input).child;
+      const deadline = AbortSignal.timeout(8000);
+      const boundedFetch: typeof fetch = (url, init) =>
+        fetcher(url, {
+          ...init,
+          signal: init?.signal ? AbortSignal.any([deadline, init.signal]) : deadline,
+        });
+      const verify = async () => {
+        const listing = await parent.read(bindings, caller, {}, boundedFetch);
+        const data = record(listing.data);
+        if (
+          !Array.isArray(data.records) ||
+          record(data.pagination).hasMore !== false ||
+          data.records.filter((row) => record(row)[policy.identity] === selection).length !== 1
+        ) {
+          throw Error('This child is not in the connected resource. Refresh its list.');
+        }
+      };
+      await verify();
+      const result = await adapter.read(bindings, caller, input, boundedFetch);
+      await verify();
+      return result;
     },
   };
 }
