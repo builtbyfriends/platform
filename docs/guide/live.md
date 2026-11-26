@@ -151,6 +151,33 @@ export const live = defineLiveStream({
 });
 ```
 
+## End A Subscription
+
+`onSubscribe` answers once, when a window subscribes. When the answer changes later, for example a person loses access to a project, the subscription they already hold keeps receiving events. Call `revoke()` to end it.
+
+```ts
+const { revoked } = await live.revoke({
+  connectionId,
+  topicPrefix: `project:${projectId}:`,
+  reason: 'You were removed from this project',
+});
+```
+
+`connectionId` is the `connection.id` that `onConnect` and `onSubscribe` receive, so an app that needs to find a person's connections later keeps it when it allows the subscription. `topic` ends the subscriptions to one topic, `topicPrefix` ends every topic that starts with the text, and with neither the connection loses all of its subscriptions. `revoke()` resolves with how many ended, and with `0` when the connection is closed.
+
+After `revoke()` resolves, the next `publish()` doesn't reach those subscriptions. Other connections on the same topic still get it. The window gets a `revoked` signal, and `subscribe()` takes an `onRevoked` handler for it:
+
+```ts
+await live.subscribe({
+  id: 'project',
+  topic: `project:${projectId}:tasks`,
+  onEvent: showTask,
+  onRevoked: ({ reason }) => showNotice(reason),
+});
+```
+
+The helper drops a revoked subscription, so it isn't sent again when the stream reopens. A new `subscribe()` goes through `onSubscribe` again, and your answer decides. A preview has its own live objects, so `revoke()` in a preview ends subscriptions on that preview only.
+
 ## Limits
 
 `@builtbyfriends/bwf/live` is designed for small and medium fanout. By default, a stream allows:

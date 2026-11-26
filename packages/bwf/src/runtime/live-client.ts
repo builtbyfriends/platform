@@ -7,11 +7,19 @@ import type {
 } from './live.ts';
 import type { RequestUrl } from './route-url.ts';
 
+export type LiveRevokedEvent = {
+  subscriptionId: string;
+  topic: string;
+  reason?: string;
+};
+
 export type LiveSubscribeOptions<Data = unknown> = {
   id: string;
   topic: string;
   lastEventId?: string;
   onEvent?: (event: LiveClientEvent<Data>) => void;
+  /** The app ended this subscription (`stream.revoke()`). It isn't sent again when the stream reopens. */
+  onRevoked?: (event: LiveRevokedEvent) => void;
 };
 
 export type ConnectLiveStreamOptions = {
@@ -46,6 +54,7 @@ type Subscription = {
   topic: string;
   lastEventId?: string;
   onEvent?: (event: LiveClientEvent) => void;
+  onRevoked?: (event: LiveRevokedEvent) => void;
   /** The server took it. Only these are sent again when the stream reopens. */
   confirmed?: boolean;
 };
@@ -273,6 +282,7 @@ export function connectLiveStream(
           current.removeEventListener('open', onOpen);
           current.removeEventListener('error', onError);
           current.removeEventListener('message', onMessage);
+          current.removeEventListener('revoked', onRevoked);
           current.close();
           source = null;
           openPromise = null;
@@ -291,6 +301,7 @@ export function connectLiveStream(
       current.addEventListener('open', onOpen);
       current.addEventListener('error', onError);
       current.addEventListener('message', onMessage);
+      current.addEventListener('revoked', onRevoked);
     });
     return openPromise;
   }
@@ -358,6 +369,24 @@ export function connectLiveStream(
       subscription.lastEventId = event.eventId;
     }
     subscription.onEvent?.(event);
+  }
+
+  function onRevoked(raw: Event): void {
+    let event: LiveRevokedEvent;
+    try {
+      event = JSON.parse(String((raw as MessageEvent).data)) as LiveRevokedEvent;
+    } catch (error) {
+      reportError(error);
+      return;
+    }
+    const subscription = subscriptions.get(event.subscriptionId);
+    if (!subscription || subscription.topic !== event.topic) {
+      return;
+    }
+    subscriptions.delete(subscription.id);
+    subscriptionVersions.delete(subscription.id);
+    subscription.onRevoked?.(event);
+    closeIfIdle();
   }
 
   function enqueue(operation: LiveControlOperation): Promise<void> {
@@ -493,6 +522,7 @@ export function connectLiveStream(
         topic: subscribeOptions.topic,
         lastEventId: subscribeOptions.lastEventId,
         onEvent: subscribeOptions.onEvent as ((event: LiveClientEvent) => void) | undefined,
+        onRevoked: subscribeOptions.onRevoked,
       };
       subscriptions.set(subscription.id, subscription);
       const rollback = (): void => {
