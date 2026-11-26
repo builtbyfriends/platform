@@ -23,3 +23,23 @@ For serving, store the gzip documents under an immutable prefix such as `infrast
 Exports for build tooling are `indexCloudflareOperations(document)`, `extractCloudflareOperation(document, { method, path })`, `buildCloudflareCatalog({ sourcePath, revision, outputDirectory?, selections? })`, and `writeCloudflareSnapshot(report, destination)`. Extraction returns `{ document, metadata }` with `execution: 'discovery-only'`.
 
 Run the focused checks with `node scripts/cloudflare-openapi.test.mjs`. The Platform unit suite also invokes them.
+
+## Publish the pinned artifacts
+
+First validate the generated directory against the committed snapshot, without credentials or network requests:
+
+```sh
+node scripts/publish-cloudflare-openapi.mjs /tmp/new-artifact-directory <existing-static-assets-bucket> --dry-run
+```
+
+When authorized to publish, provide `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` through the deployment environment, then use the same command with `--publish`. The token needs write access to the existing bucket used by `STATIC_ASSETS_R2`. The script does not create buckets, change bindings, delete objects or activate a Worker version.
+
+Publication checks the source revision/hash and the exact operation index against the committed snapshot. Before sending a request, it checks the complete artifact set: safe filenames, regular files, bounded decompression, sizes, operation identity and SHA-256. It then uploads the verified buffers to `infrastructure/cloudflare-openapi/<source-sha256>/<artifact-sha256>.json.gz`. The compressed set is limited to 64 MiB.
+
+The publisher uses Cloudflare's [R2 object upload API](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/objects/methods/upload/), also used by Wrangler. It fixes the API origin, refuses redirects and preserves literal key separators while encoding each segment. This avoids a CLI process per object and the installed Wrangler bulk command's experimental catalog override. The Basin Catalog protection header stays enabled.
+
+Uploads run four at a time. Rate limits and transient failures receive up to four attempts, honoring `Retry-After` with a five-minute maximum wait. Authentication/permission errors stop new work. A rerun reuploads the same verified content to the same keys, so a partial run can be repeated without deleting anything. It does not skip existing keys; Cloudflare rate limits can make a full publication take several minutes. Logs contain counts and HTTP status codes, not credentials or response bodies.
+
+Objects are stored as `application/gzip`, without an HTTP `Content-Encoding` setting. The runtime reader receives the compressed bytes and performs its own bounded verification. Publication success confirms the PUT responses; runtime retrieval should also be checked before activating a Worker that needs the new snapshot.
+
+Run mocked publication checks with `node scripts/publish-cloudflare-openapi.test.mjs`. These tests do not upload objects.
