@@ -52,7 +52,11 @@ const dataSchema = type({
   data: {
     available: 'boolean',
     scope: { resourceId: 'string | null', product: 'string | null' },
-    operations: type({ id: 'string', command: 'string', execution: "'discovery-only'" }).array(),
+    operations: type({
+      id: 'string',
+      command: 'string',
+      execution: "'discovery-only' | 'registered'",
+    }).array(),
     capabilities: type({ id: 'string', kind: 'string', actions: 'unknown[]' }).array(),
     products: 'unknown[]',
     nextCursor: 'string | null',
@@ -80,6 +84,8 @@ beforeAll(async () => {
 afterAll(teardownEnv);
 
 beforeEach(async () => {
+  env.CF_ACCOUNT_ID = 'test-account-id';
+  env.CF_API_TOKEN = 'test-cf-token';
   await clearTables(env.db);
   delete env.PLATFORM_PROXY;
   registration = await registerOAuthClient(env.db, {
@@ -138,6 +144,75 @@ beforeEach(async () => {
 });
 
 describe('owned operation discovery', () => {
+  it('links executable provider entries to the authoritative resource descriptor only for a selected owned resource', async () => {
+    env.CF_ACCOUNT_ID = 'a'.repeat(32);
+    const entry = (await cloudflareOpenApiIndex()).find(
+      (value) =>
+        value.method === 'GET' && value.path === '/accounts/{account_id}/r2/buckets/{bucket_name}',
+    );
+    if (!entry) {
+      throw Error('Missing R2 provider schema');
+    }
+    await env.STATIC_ASSETS_R2.put(
+      cloudflareOpenApiKey(entry),
+      await readFile(new URL('../fixtures/cloudflare-openapi/r2-get.json.gz', import.meta.url)),
+    );
+    const body = { ...input(), resourceId: 'res_files', limit: 50 };
+    const catalogResponse = await call(body);
+    expect(catalogResponse.status).toBe(200);
+    const catalog = type({
+      data: {
+        operations: type({
+          id: 'string',
+          execution: 'string',
+          'registeredOperation?': {
+            id: 'string',
+            version: 'string',
+            effect: 'string',
+            resourceId: 'string',
+          },
+        }).array(),
+      },
+    }).assert(await catalogResponse.json());
+    const registered = catalog.data.operations.filter((value) => value.execution === 'registered');
+    expect(registered).toHaveLength(1);
+    expect(registered[0].registeredOperation).toMatchObject({
+      id: entry.operationId,
+      effect: 'read',
+      resourceId: 'res_files',
+    });
+    const descriptorResponse = await app.fetch(
+      new Request('https://platform.test/app-billing/projects.resourceOperations', {
+        method: 'POST',
+        headers: request(input()).headers,
+        body: JSON.stringify({
+          project: project.id,
+          owner: { person: 'person' },
+          resourceId: 'res_files',
+        }),
+      }),
+      env,
+      createMockExecutionContext(),
+    );
+    const descriptors = type({
+      data: { operations: type({ id: 'string', version: 'string' }).array() },
+    }).assert(await descriptorResponse.json());
+    expect(registered[0].registeredOperation?.version).toBe(
+      descriptors.data.operations.find((value) => value.id === entry.operationId)?.version,
+    );
+    const schemaResponse = await call({ ...body, operationId: registered[0].id });
+    expect(await schemaResponse.json()).toMatchObject({ data: { execution: 'discovery-only' } });
+    const broad = await read(
+      await call({ project: project.id, owner: { person: 'person' }, product: 'r2', limit: 50 }),
+    );
+    expect(broad.data.operations.every((value) => value.execution === 'discovery-only')).toBe(true);
+    env.CF_API_TOKEN = '';
+    const disconnected = await read(await call(body));
+    expect(
+      disconnected.data.operations.every((value) => value.execution === 'discovery-only'),
+    ).toBe(true);
+  });
+
   it('reads a pinned full operation document after ownership checks and rejects missing or corrupted assets', async () => {
     const path = '/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}';
     const operation = (await cloudflareCatalog()).operations.find(

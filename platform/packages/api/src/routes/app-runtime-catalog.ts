@@ -8,6 +8,7 @@ import {
   cloudflareOpenApiIndex,
   cloudflareOperationSchema,
 } from '../infrastructure/cloudflare-openapi.ts';
+import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
 import type { Project, Resource } from '../types.ts';
 import { resourceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
@@ -138,6 +139,11 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         }
       }
 
+      const registered =
+        !schema && body.resourceId && filesActive
+          ? await resourceOperationsFor(selected[0].type, context.env)
+          : null;
+      const providerIndex = registered ? await cloudflareOpenApiIndex() : [];
       const current = await resolve(context, project.id, owner);
       const fresh = await getProjectResources(context.get('db'), project.id);
 
@@ -153,7 +159,8 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
                 value.id === entry.id &&
                 value.cf_id === entry.cf_id &&
                 value.type === entry.type &&
-                value.binding_name === entry.binding_name,
+                value.binding_name === entry.binding_name &&
+                value.metadata.jurisdiction === entry.metadata.jurisdiction,
             ),
         )
       ) {
@@ -171,6 +178,8 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
           },
         });
       }
+
+      const currentFilesActive = filesActive && (await fileOwnerActive(context.get('db'), current));
 
       try {
         const page = catalogPage(
@@ -193,10 +202,31 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
             available: true,
             reason: null,
             ...page,
+            operations: page.operations.map((operation) => {
+              const provider = providerIndex.find(
+                (entry) => entry.method === operation.httpMethod && entry.path === operation.path,
+              );
+              const descriptor =
+                currentFilesActive && provider
+                  ? registered?.operations.find((entry) => entry.id === provider.operationId)
+                  : undefined;
+              return descriptor
+                ? {
+                    ...operation,
+                    execution: 'registered' as const,
+                    registeredOperation: {
+                      id: descriptor.id,
+                      version: descriptor.version,
+                      effect: descriptor.effect,
+                      resourceId: body.resourceId,
+                    },
+                  }
+                : operation;
+            }),
             capabilitiesTruncated: capable.length > 50,
             capabilities: capable
               .slice(0, 50)
-              .map((entry) => resourceCapabilities(context, current, entry, filesActive)),
+              .map((entry) => resourceCapabilities(context, current, entry, currentFilesActive)),
           },
         });
       } catch {
