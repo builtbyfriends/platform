@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { type } from 'arktype';
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
@@ -5,6 +6,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
+import { cloudflareCatalog } from '../../src/infrastructure/cloudflare-catalog.ts';
+import {
+  cloudflareOpenApiIndex,
+  cloudflareOpenApiKey,
+  cloudflareOperationSchema,
+} from '../../src/infrastructure/cloudflare-openapi.ts';
 import { appRuntimeCatalogRoutes } from '../../src/routes/app-runtime-catalog.ts';
 import { projects, resources } from '../../src/schema.ts';
 import {
@@ -131,6 +138,52 @@ beforeEach(async () => {
 });
 
 describe('owned operation discovery', () => {
+  it('reads a pinned full operation document after ownership checks and rejects missing or corrupted assets', async () => {
+    const path = '/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}';
+    const operation = (await cloudflareCatalog()).operations.find(
+      (entry) => entry.httpMethod === 'GET' && entry.path === path,
+    );
+    const schema = (await cloudflareOpenApiIndex()).find(
+      (entry) => entry.method === 'GET' && entry.path === path,
+    );
+    if (!operation || !schema) {
+      throw Error('Expected the pinned Hyperdrive operation.');
+    }
+    const key = cloudflareOpenApiKey(schema);
+    await env.STATIC_ASSETS_R2.delete(key);
+    const body = { ...input(), operationId: operation.id };
+    expect((await call(body)).status).toBe(503);
+    await env.STATIC_ASSETS_R2.put(
+      key,
+      await readFile(
+        new URL('../fixtures/cloudflare-openapi/hyperdrive-get.json.gz', import.meta.url),
+      ),
+    );
+    const response = await call(body);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        requestedOperationId: operation.id,
+        execution: 'discovery-only',
+        sha256: schema.sha256,
+        source: { kind: 'cloudflare-openapi' },
+        document: {
+          openapi: '3.0.3',
+          paths: { [path]: { get: { operationId: schema.operationId } } },
+          components: { schemas: expect.any(Object) },
+        },
+      },
+    });
+    expect((await call({ ...body, project: foreign.id })).status).toBe(404);
+    expect((await call({ ...body, resourceId: 'res_files' })).status).toBe(404);
+    expect((await call(body, false)).status).toBe(401);
+    await expect(
+      cloudflareOperationSchema(env.STATIC_ASSETS_R2, { ...schema, bytes: 1 }),
+    ).rejects.toThrow('pinned size');
+    await env.STATIC_ASSETS_R2.put(key, new Uint8Array(schema.gzipBytes));
+    expect((await call(body)).status).toBe(503);
+    await env.STATIC_ASSETS_R2.delete(key);
+  });
   it('joins the pinned real CLI catalog with the same executable capabilities as resource discovery', async () => {
     const response = await call();
     expect(response.status).toBe(200);

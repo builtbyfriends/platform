@@ -4,6 +4,10 @@ import { bodyLimit } from 'hono/body-limit';
 import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
 import { catalogPage, cloudflareCatalog } from '../infrastructure/cloudflare-catalog.ts';
+import {
+  cloudflareOpenApiIndex,
+  cloudflareOperationSchema,
+} from '../infrastructure/cloudflare-openapi.ts';
 import type { Project, Resource } from '../types.ts';
 import { resourceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
@@ -34,6 +38,7 @@ const requestSchema = type({
     .narrow((value) => /^[a-z][a-z0-9-]*$/.test(value)),
   'cursor?': type('string > 0').atMostLength(2048),
   'limit?': type('number.integer').atLeast(1).atMost(50),
+  'operationId?': identifier,
 }).onUndeclaredKey('reject');
 
 function selectResources(
@@ -107,6 +112,32 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         return context.json({ error: 'unknown_product' }, 400);
       }
 
+      let schema;
+      if (body.operationId) {
+        const operation = catalog.operations.find(
+          (entry) =>
+            entry.id === body.operationId &&
+            (!product || entry.command.startsWith(`cf ${product} `)),
+        );
+        if (!operation) {
+          return context.json({ error: 'unknown_operation' }, 404);
+        }
+        const entry = (await cloudflareOpenApiIndex()).find(
+          (value) => value.method === operation.httpMethod && value.path === operation.path,
+        );
+        if (!entry) {
+          return context.json({ error: 'operation_schema_unavailable' }, 503);
+        }
+        try {
+          schema = await cloudflareOperationSchema(context.env.STATIC_ASSETS_R2, entry);
+        } catch {
+          return context.json({ error: 'operation_schema_unavailable' }, 503);
+        }
+        if (!schema) {
+          return context.json({ error: 'operation_schema_unavailable' }, 503);
+        }
+      }
+
       const current = await resolve(context, project.id, owner);
       const fresh = await getProjectResources(context.get('db'), project.id);
 
@@ -127,6 +158,18 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         )
       ) {
         return context.json({ error: 'resource_changed' }, 409);
+      }
+
+      if (schema) {
+        return context.json({
+          data: {
+            appId: project.id,
+            checkedAt: Date.now(),
+            scope: { resourceId: body.resourceId ?? null, product },
+            requestedOperationId: body.operationId,
+            ...schema,
+          },
+        });
       }
 
       try {
