@@ -45,6 +45,7 @@ export async function buildCloudflareWorker(input: {
   readonly exit: (code: number) => never;
   readonly atomic: boolean;
   readonly skipMigrations?: boolean;
+  readonly preview?: boolean;
   readonly source: CloudflareDeploySource;
   readonly preflight: CloudflarePreflight;
 }): Promise<{
@@ -144,14 +145,18 @@ export async function buildCloudflareWorker(input: {
   }
   try {
     deduplicateGeneratedCompatibilityFlags(lifecycleConfigPath, configPath);
-    await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
-      runWrangler,
-      configPath: lifecycleConfigPath,
-      workerName,
-      accountId,
-      apiBaseUrl,
-      allowPendingAtomicMigration: atomic,
-    });
+    // Decision: A preview has its own Durable Objects and never changes the live Worker's migration tags, so
+    // the live Worker's pending class migrations don't apply to it.
+    if (!input.preview) {
+      await (deps.assertDurableObjectLifecycle ?? assertCloudflareDurableObjectLifecycleSupported)({
+        runWrangler,
+        configPath: lifecycleConfigPath,
+        workerName,
+        accountId,
+        apiBaseUrl,
+        allowPendingAtomicMigration: atomic,
+      });
+    }
   } catch (error) {
     log.error(getErrorMessage(error));
     return exit(1);

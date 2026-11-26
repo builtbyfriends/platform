@@ -28,6 +28,7 @@ import {
   operationFixtureRequest,
 } from '../../../deploy-cloudflare/test/operation-fixture.ts';
 import { GENERATED_ASSET_HEADERS_MARKER } from '../../src/asset-worker-bypass.ts';
+import { createCloudflareChildReporter } from '../../src/cli/cloudflare-child-report.ts';
 import { readCloudflareLink } from '../../src/cli/cloudflare-link.ts';
 import { verifyGeneratedDeployConfig } from '../../src/cli/deploy-artifact-validation.ts';
 import {
@@ -44,10 +45,15 @@ import {
   readWranglerAuthToken,
   runWranglerAuthToken,
 } from '../../src/cli/deploy-cloudflare-auth.ts';
+import { buildCloudflareWorker } from '../../src/cli/deploy-cloudflare-build.ts';
 import {
   cloudflareCandidateActivationOptions,
   formatCloudflareActivationError,
 } from '../../src/cli/deploy-cloudflare-helpers.ts';
+import {
+  preflightCloudflareWorker,
+  prepareCloudflareDeploySource,
+} from '../../src/cli/deploy-cloudflare-preflight.ts';
 import { runCloudflareDeploy } from '../../src/cli/deploy-cloudflare.ts';
 import {
   assertMigrationsProduceAuthSchema,
@@ -119,6 +125,18 @@ vi.mock('../../src/cli/deploy-cloudflare.ts', async (importOriginal) => {
     runCloudflareDeploy: (
       ...[root, options, cliLog, deps]: Parameters<typeof actual.runCloudflareDeploy>
     ) => actual.runCloudflareDeploy(root, options, cliLog, deps ?? runDeployCloudflareDeps.current),
+  };
+});
+
+const cfOverride = vi.hoisted(() => ({
+  current: undefined as ((args: Array<string>) => unknown) | undefined,
+}));
+vi.mock('../../src/cli/cf-version-runner.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/cli/cf-version-runner.ts')>();
+  return {
+    ...actual,
+    createCfCommand: (...options: Parameters<typeof actual.createCfCommand>) =>
+      cfOverride.current ?? actual.createCfCommand(...options),
   };
 });
 
@@ -1657,6 +1675,68 @@ describe('existing Cloudflare site handoff', () => {
       expect.objectContaining({ allowPendingAtomicMigration: true }),
     );
     expect(activateVersion).toHaveBeenCalledWith(expect.objectContaining({ atomic: true }));
+  });
+
+  describe.each([
+    { preview: true, checksLiveMigrations: false },
+    { preview: false, checksLiveMigrations: true },
+  ])('a build with preview $preview', ({ preview, checksLiveMigrations }) => {
+    it('checks the live Worker for pending Durable Object class migrations only when it is not a preview', async () => {
+      const root = site();
+      const configPath = join(root, 'wrangler.jsonc');
+      const config = parseRootWranglerConfig(configPath);
+      config.migrations = [{ tag: 'v1', new_sqlite_classes: ['Room'] }];
+      writeFileSync(configPath, JSON.stringify(config));
+      const needsAtomic = new Error(
+        'deploy: this Durable Object class migration needs an atomic Cloudflare deployment.',
+      );
+      const assertDurableObjectLifecycle = vi
+        .fn<NonNullable<CloudflareDeployDeps['assertDurableObjectLifecycle']>>()
+        .mockRejectedValue(needsAtomic);
+      const { deps, exitCalls } = harness({
+        runBuild: () => build(root),
+        assertDurableObjectLifecycle,
+      });
+      const options = { platform: 'cloudflare' } as const;
+      const bwfConfig = readConfig(root);
+      const source = (await prepareCloudflareDeploySource(root, options, bwfConfig))!;
+      const exit = deps.exit!;
+      const preflight = await preflightCloudflareWorker({
+        root,
+        bwfConfig,
+        options,
+        deps,
+        exit,
+        cliLog: silentCliLog,
+        reporter: createCloudflareChildReporter(silentCliLog),
+        initialCloudflareLink: readCloudflareLink(root),
+        source,
+      });
+      const errors = vi.spyOn(log, 'error').mockImplementation(() => {});
+      try {
+        const run = buildCloudflareWorker({
+          root,
+          bwfConfig,
+          deps,
+          exit,
+          atomic: false,
+          preview,
+          source,
+          preflight,
+        });
+        if (checksLiveMigrations) {
+          await expect(run).rejects.toBeInstanceOf(ExitError);
+          expect(errors).toHaveBeenCalledWith(needsAtomic.message);
+          expect(exitCalls).toEqual([1]);
+        } else {
+          await run;
+          expect(assertDurableObjectLifecycle).not.toHaveBeenCalled();
+        }
+        expect(assertDurableObjectLifecycle.mock.calls.length > 0).toBe(checksLiveMigrations);
+      } finally {
+        errors.mockRestore();
+      }
+    });
   });
 
   it('uses the project Cloudflare deploy mode on subsequent plain deploys', async () => {

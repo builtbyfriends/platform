@@ -152,7 +152,7 @@ function stagePackageContext(directory: string, projectRoot: string): void {
 /** What turns a production build into a Worker Preview build: its own context, and a hook that swaps resources. */
 export interface PreviewBuild {
   /** Called with each staged Worker config; return the config to upload. */
-  rewriteWorker: <T extends { env?: object }>(config: T) => Promise<T> | T;
+  rewriteWorker: <T extends { env?: object; name?: string }>(config: T) => Promise<T> | T;
 }
 
 const PREVIEW_CONTEXT = { isPreview: true, mode: 'preview' } as const;
