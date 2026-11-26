@@ -1717,11 +1717,18 @@ describe.each([
       {
         consumer_id: 'c'.repeat(32),
         type: 'worker',
-        settings: { max_retries: 3 },
+        settings: { max_retries: 3, max_concurrency: null },
         script_name: 'private-worker',
       },
     ],
-    expected: [{ consumer_id: 'c'.repeat(32), type: 'worker', settings_max_retries: 3 }],
+    expected: [
+      {
+        consumer_id: 'c'.repeat(32),
+        type: 'worker',
+        settings_max_retries: 3,
+        settings_max_concurrency: null,
+      },
+    ],
   },
   {
     kind: 'r2',
@@ -1778,6 +1785,13 @@ describe.each([
       errors: [],
       messages: [],
       result: fixture.kind === 'r2' ? { domains: fixture.records } : fixture.records,
+      ...(fixture.kind === 'queue'
+        ? {
+            errors: null,
+            messages: null,
+            result_info: { page: 1, per_page: 20, count: 1, total_count: 1, total_pages: 1 },
+          }
+        : {}),
     };
     metadata.provider.mockImplementation(async () => Response.json(envelope));
     return { metadata, key, bytes, list, body, envelope };

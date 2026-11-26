@@ -266,3 +266,72 @@ it('projects both allowed consumer variants without leaking worker or dead-lette
   fetcher.mockResolvedValueOnce(response([{ ...consumer, type: 'unknown' }]));
   await expect(read()).rejects.toThrow('unexpected resource response');
 });
+
+it.each([undefined, null, 10])(
+  'accepts evidenced Queue diagnostics and documented concurrency %s without changing the artifact',
+  async (concurrency) => {
+    const { artifact, bytes, prepared, fetcher, response, read } = setup('queue');
+    expect(artifact.document).toEqual(JSON.parse(bytes.toString()));
+    const before = JSON.stringify(artifact);
+    fetcher.mockResolvedValueOnce(
+      response([{ ...consumer, settings: { max_concurrency: concurrency } }], {
+        errors: null,
+        messages: null,
+        result_info: { page: 1, per_page: 20, count: 1, total_count: 1, total_pages: 1 },
+      }),
+    );
+    const result = await read();
+    expect(result).toMatchObject({ data: { pagination: { hasMore: false, count: 1 } } });
+    expect(new Validator(prepared.outputSchema, '7').validate(result).valid).toBe(true);
+    expect(JSON.stringify(artifact)).toBe(before);
+    const row = (result.data as { records: Array<{ settings_max_concurrency?: number | null }> })
+      .records[0];
+    expect(row.settings_max_concurrency).toBe(concurrency);
+  },
+);
+
+it.each([
+  { errors: 'bad' },
+  { messages: {} },
+  { success: false },
+  { result_info: { page: 2, per_page: 20, count: 1, total_count: 1, total_pages: 1 } },
+  { result_info: { page: 1, per_page: 20, count: 1, total_count: 2, total_pages: 2 } },
+  { result_info: { page: 1, per_page: 20, count: 0, total_count: 1, total_pages: 1 } },
+  { result_info: { page: 1, per_page: '20', count: 1, total_count: 1, total_pages: 1 } },
+  { result_info: { page: 1, per_page: 201, count: 1, total_count: 1, total_pages: 1 } },
+  {
+    result_info: {
+      page: 1,
+      per_page: 20,
+      count: 1,
+      total_count: 1,
+      total_pages: 1,
+      cursor: 'next',
+    },
+  },
+])('rejects invalid raw Queue envelopes or partial/unknown pagination %j', async (extra) => {
+  const { fetcher, response, read } = setup('queue');
+  fetcher.mockResolvedValueOnce(response([consumer], extra));
+  await expect(read()).rejects.toThrow();
+});
+
+it.each(['automatic', {}, []])(
+  'rejects invalid concurrency %j instead of filtering the raw response',
+  async (value) => {
+    const { fetcher, response, read } = setup('queue');
+    fetcher.mockResolvedValueOnce(
+      response([{ ...consumer, settings: { max_concurrency: value } }]),
+    );
+    await expect(read()).rejects.toThrow('unexpected resource response');
+  },
+);
+
+it('fails closed when an audited response correction changes upstream', () => {
+  for (const name of ['mq_api-v4-error', 'mq_api-v4-message', 'mq_max-concurrency']) {
+    const { artifact } = setup('queue');
+    artifact.document.components.schemas[name].type = 'string';
+    expect(() => prepareCloudflareProviderRead(artifact, 'queue')).toThrow(
+      'correction no longer matches',
+    );
+  }
+});

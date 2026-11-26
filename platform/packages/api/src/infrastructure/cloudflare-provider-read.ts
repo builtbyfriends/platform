@@ -52,10 +52,12 @@ const policies: Array<{
   responseOwnership?: 'selected-resource';
   parameterAlternative?: number;
   fields: Array<string>;
+  nullableResponseComponents?: { [name: string]: 'number' | 'array' };
   structured?: { fields: { [key: string]: ReadFields } };
   collection?: {
     defaultLimit?: number;
     pagination?: 'none';
+    completePageInfo?: true;
     path?: Array<string>;
     maxItems: number;
     recordIdentity: Schema;
@@ -203,6 +205,12 @@ const policies: Array<{
     parameter: 'queue_id',
     identity: 'consumer_id',
     identityPattern: '^[a-fA-F0-9]{32}$',
+    // Decision: Queue GET returns null diagnostics on successful responses, and its documented automatic concurrency value is null. Keep these audited response corrections out of request schemas.
+    nullableResponseComponents: {
+      'mq_api-v4-error': 'array',
+      'mq_api-v4-message': 'array',
+      'mq_max-concurrency': 'number',
+    },
     fields: [
       'consumer_id',
       'type',
@@ -216,6 +224,7 @@ const policies: Array<{
     ],
     collection: {
       pagination: 'none',
+      completePageInfo: true,
       maxItems: 200,
       recordIdentity: { type: 'string', pattern: '^[a-fA-F0-9]{32}$' },
     },
@@ -678,7 +687,22 @@ export function prepareCloudflareProviderRead(
   const headerValidator = new Validator(validationSchema(fields('header'), document, 'input'), '7');
   const response = resolve(document, record(operation.responses)['200']);
   const responseSchema = record(record(response.content)['application/json']).schema;
-  const outputValidator = new Validator(validationSchema(responseSchema, document, 'output'), '7');
+  const responseDocument = policy.nullableResponseComponents ? structuredClone(document) : document;
+  for (const [name, type] of Object.entries(policy.nullableResponseComponents ?? {})) {
+    const component = record(record(record(responseDocument.components).schemas)[name]);
+    if (
+      component.type !== type ||
+      component.nullable !== undefined ||
+      component.writeOnly === true
+    ) {
+      throw Error('The provider response correction no longer matches its schema.');
+    }
+    component.nullable = true;
+  }
+  const outputValidator = new Validator(
+    validationSchema(responseSchema, responseDocument, 'output'),
+    '7',
+  );
   const structured = policy.structured
     ? structuredProjection(record(responseSchema), policy.structured, document)
     : null;
@@ -701,7 +725,7 @@ export function prepareCloudflareProviderRead(
         ...(policy.collection ? [...(policy.collection.path ?? []), '*'] : []),
         ...field.split('/'),
       ],
-      document,
+      responseDocument,
     );
     if (!schema) {
       throw Error('The provider metadata policy no longer matches its schema.');
@@ -963,7 +987,22 @@ export function prepareCloudflareProviderRead(
         }
         const info = returned.result_info === undefined ? {} : record(returned.result_info);
         if (completeCollection && returned.result_info !== undefined) {
-          throw Error('The complete collection returned unexpected pagination.');
+          const completePage =
+            policy.collection?.completePageInfo &&
+            info.page === 1 &&
+            info.total_pages === 1 &&
+            info.count === rows.length &&
+            info.total_count === rows.length &&
+            Number.isInteger(info.per_page) &&
+            Number(info.per_page) >= rows.length &&
+            Number(info.per_page) > 0 &&
+            Number(info.per_page) <= policy.collection.maxItems &&
+            Object.keys(info).every((key) =>
+              ['page', 'per_page', 'count', 'total_count', 'total_pages'].includes(key),
+            );
+          if (!completePage) {
+            throw Error('The complete collection returned unexpected pagination.');
+          }
         }
         const cursor = info.cursor;
         if (
