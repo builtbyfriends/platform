@@ -52,6 +52,10 @@ export type RunDeployOptions = {
   requireEmail?: boolean;
   /** Publish an existing Durable Object Worker atomically after explicit operator choice. */
   atomic?: boolean;
+  /** Deploy a Worker Preview with this name, with its own Durable Objects and D1 databases. `--platform cloudflare` only. */
+  preview?: string;
+  /** Delete the Worker Preview with this name, and the D1 databases made for it. `--platform cloudflare` only. */
+  removePreview?: string;
   /**
    * `CF_ACCESS_READINESS_ORIGIN` as recorded before project code ran (`null` when unset).
    * `--platform cloudflare` only.

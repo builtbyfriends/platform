@@ -53,6 +53,8 @@ export const POST = defineHandler(async () => {
 
 The same name always resolves to the same Durable Object. Use `getById(id)` when you already have a `DurableObjectId`. For advanced cases, both helpers also accept an explicit `DurableObjectNamespace` as their first argument.
 
+In a [Worker Preview](../reference/cli/deploy.md#previews), `get()` and `getById()` reach the preview's own objects, so a preview never changes the deployed app's state. A namespace you read from `c.env` is the deployed app's.
+
 ## Execution and persistence
 
 bwf loads state before the first operation and runs RPC methods one at a time. After a method, `fetch`, or `alarm` handler succeeds, it saves the updated state.

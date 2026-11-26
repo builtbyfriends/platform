@@ -299,6 +299,10 @@
               "type": "string",
               "enum": ["staged", "atomic"],
               "description": "Staged is the default and verifies readiness before traffic. Atomic publishes a Durable Object Worker directly and verifies readiness afterward."
+            },
+            "healthCheck": {
+              "type": "string",
+              "description": "A command to run after a deploy or a preview is ready. It gets the address in BWF_DEPLOY_URL and passes when it exits 0. A failed check fails the deploy and names the rollback command."
             }
           },
           "additionalProperties": false

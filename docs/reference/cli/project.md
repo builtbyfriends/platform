@@ -182,6 +182,8 @@ On a bwf platform, you can select a retained deployment. On Cloudflare, use a co
 
 Pass `--platform cloudflare` to roll back a one-off Cloudflare deployment.
 
+Cloudflare refuses to activate a version that lacks a Durable Object class the Worker has added since. After a deploy that adds a Durable Object class, you can roll back only as far as that deploy. For an earlier version, fix forward with a new deploy.
+
 Database recovery is separate from code rollback. bwf asks for confirmation when the earlier code may be incompatible with the current schema. For D1 on Cloudflare, use [`bwf db restore`](./database.md#platform-db-restore) with the restore point printed during deployment.
 
 ## `bwf project cancel [deployId]` {#platform-project-cancel-deployid}

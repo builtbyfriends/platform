@@ -189,6 +189,18 @@ describe('readConfig', () => {
     cleanup();
   });
 
+  it('reads a Cloudflare health check command', () => {
+    setup(JSON.stringify({ deploy: { cloudflare: { healthCheck: 'node health.mjs' } } }));
+    expect(readConfig(tmpDir).deploy?.cloudflare?.healthCheck).toBe('node health.mjs');
+    cleanup();
+  });
+
+  it.each(['', '  ', 7, true])('rejects an invalid Cloudflare health check: %j', (healthCheck) => {
+    setup(JSON.stringify({ deploy: { cloudflare: { healthCheck } } }));
+    expect(() => readConfig(tmpDir)).toThrow('"deploy.cloudflare.healthCheck" in bwf.json');
+    cleanup();
+  });
+
   it('returns empty config when no file exists', () => {
     setup();
     const config = readConfig(tmpDir);

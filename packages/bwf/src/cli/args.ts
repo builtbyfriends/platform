@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util';
+import { isPreviewName } from './cloudflare-preview.ts';
 import type { RunDeployOptions } from './deploy-types.ts';
 
 export function parseDeployArgs(
@@ -19,6 +20,8 @@ export function parseDeployArgs(
         provision: { type: 'boolean' },
         'require-email': { type: 'boolean' },
         atomic: { type: 'boolean' },
+        preview: { type: 'string' },
+        'remove-preview': { type: 'string' },
       },
       allowPositionals: true,
       strict: true,
@@ -33,6 +36,9 @@ export function parseDeployArgs(
         throw new Error("deploy: --platform requires a value ('cloudflare' or 'platform').", {
           cause: error,
         });
+      }
+      if (optionMatch?.[1] === '--preview' || optionMatch?.[1] === '--remove-preview') {
+        throw new Error(`deploy: ${optionMatch[1]} requires a name.`, { cause: error });
       }
       throw new Error('deploy: --project requires a slug.', { cause: error });
     }
@@ -100,6 +106,26 @@ export function parseDeployArgs(
     throw new Error('deploy: --require-email requires --platform cloudflare.');
   }
 
+  // Decision: A preview is a Cloudflare Worker Preview of the app's own Worker, so only the Cloudflare backend has one.
+  const preview = typeof parsed.values.preview === 'string' ? parsed.values.preview : undefined;
+  const removePreview =
+    typeof parsed.values['remove-preview'] === 'string'
+      ? parsed.values['remove-preview']
+      : undefined;
+  if ((preview !== undefined || removePreview !== undefined) && platform !== 'cloudflare') {
+    throw new Error('deploy: --preview and --remove-preview require --platform cloudflare.');
+  }
+  if (preview !== undefined && removePreview !== undefined) {
+    throw new Error('deploy: use --preview or --remove-preview, not both.');
+  }
+  for (const name of [preview, removePreview]) {
+    if (name !== undefined && !isPreviewName(name)) {
+      throw new Error(
+        'deploy: a preview name is lowercase letters, digits and hyphens, up to 32 characters, and starts and ends with a letter or digit.',
+      );
+    }
+  }
+
   // Decision: The Cloudflare backend deploys to the user's own account, so it doesn't resolve a bwf project.
   // Static flags are target-neutral: both backends honor `--dir` and `--spa` through their own static
   // deployment adapters.
@@ -123,5 +149,7 @@ export function parseDeployArgs(
     provision,
     requireEmail,
     atomic,
+    preview,
+    removePreview,
   };
 }

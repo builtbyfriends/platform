@@ -194,6 +194,16 @@ const HELP_TREE = {
           'Publish a Durable Object Worker without pre-traffic staging (Cloudflare only)',
       },
       {
+        command: '--preview <name>',
+        description:
+          'Deploy a Worker Preview with its own Durable Objects and D1 databases (with --platform cloudflare)',
+      },
+      {
+        command: '--remove-preview <name>',
+        description:
+          'Delete a Worker Preview and the D1 databases made for it (with --platform cloudflare)',
+      },
+      {
         command: '--debug',
         description: 'Mirror the deploy log to stderr (always written to ~/.bwf/logs)',
       },

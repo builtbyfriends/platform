@@ -325,6 +325,17 @@ deploy: { cloudflare: { mode: 'atomic' } },
 
 This choice applies to subsequent `bwf deploy` runs. Atomic deployment sends traffic to the new Worker before bwf checks readiness; a Durable Object class migration cannot be rolled back across its migration boundary. Use `--atomic` for a single deployment instead. `deploy` is a bwf setting and is not passed to Cloudflare's Worker config.
 
+### `deploy.cloudflare.healthCheck` {#deploy-cloudflare-healthcheck}
+
+A command to run once a deploy or a preview is ready. It checks what the app does, such as starting a record and reading it back, which the readiness check doesn't:
+
+```ts
+// Inside defineConfig({ ... })
+deploy: { cloudflare: { healthCheck: 'node scripts/health.mjs' } },
+```
+
+The command runs in the project folder with the address in `BWF_DEPLOY_URL`, and without your Cloudflare credentials. It passes when it exits with 0. On `bwf deploy --platform cloudflare`, the new version is already live when it runs, so a failure fails the deploy and prints `bwf project rollback --platform cloudflare`. On a preview, a failure fails the command and prints the `--remove-preview` command. The check stops after three minutes. If the deploy has no workers.dev or preview address to give it, the deploy fails and says so, since a check that doesn't run would pass nothing.
+
 ### `routing`
 
 Routing and edge configuration for headers, redirects, rewrites, and fallbacks.

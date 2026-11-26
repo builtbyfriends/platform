@@ -12,6 +12,8 @@ bwf deploy [--project <name>] [--dir <path>] [--spa] [--skip-build] [--skip-migr
 bwf deploy [--platform <cloudflare|void>] [--require-email]
 bwf deploy --platform cloudflare --atomic
 bwf deploy --platform cloudflare --provision
+bwf deploy --platform cloudflare --preview <name>
+bwf deploy --platform cloudflare --remove-preview <name>
 ```
 
 Auto-detects your project type and chooses the right pipeline. See [Supported App Types](../../guide/app-types.md) and [Deployment](../../guide/deployment.md) for details.
@@ -39,9 +41,26 @@ For Drizzle projects, deploy performs a read-only schema drift check. If a new m
 | `--require-email`               | Fail when email cannot be set up instead of deploying without it; requires `--platform cloudflare`              |
 | `--provision`                   | Run resource provisioning again even when every resource exists; requires `--platform cloudflare`               |
 | `--atomic`                      | Publish an existing Durable Object Worker directly; readiness is checked after traffic changes                  |
+| `--preview <name>`              | Deploy a Worker Preview with its own Durable Objects and D1 databases; requires `--platform cloudflare`         |
+| `--remove-preview <name>`       | Delete a Worker Preview and the D1 databases made for it; requires `--platform cloudflare`                      |
 | `--debug`                       | Mirror the structured deploy log to stderr (also written to `~/.bwf/logs/`)                                     |
 
 `--atomic` applies to one deployment. For an existing Durable Object Worker that consistently cannot stage, set `deploy: { cloudflare: { mode: 'atomic' } }` in `bwf.config.ts` so plain `bwf deploy` uses atomic publication. The default is `staged`.
+
+### Previews
+
+`bwf deploy --platform cloudflare --preview pr-12` builds the app and deploys it as a [Cloudflare Worker Preview](https://developers.cloudflare.com/workers/previews/) named `pr-12`, then prints its address. The Worker needs a first deploy before it can have previews. The name is lowercase letters, digits and hyphens, up to 32 characters.
+
+A preview gets its own copy of two things, and shares the rest with the deployed app:
+
+- **Durable Objects.** Cloudflare gives a preview its own namespace for the Worker's own Durable Object classes. Objects you reach with `get()` and `getById()` from `defineDurableObject` and `defineDurableState` use it. A namespace you read from `c.env` is the deployed app's, so use `get()` and `getById()`.
+- **D1.** Each D1 database the app binds gets a copy named `<database>-preview-<name>`, such as `app-index-preview-pr-12`. bwf stops if that name is also a database the app declares, so a preview never reuses, migrates or deletes a database of the app's own. bwf creates it, applies the migrations in the binding's `migrations_dir` (or `db/migrations` for the app's own database), and binds the preview to it. `--skip-migrations` leaves the copy as it is.
+- **Everything else is shared.** KV, R2, queues, secrets, Workflows and containers are the deployed app's. A preview reads and writes the live data there, so don't point a preview at an app that holds real data in those unless you want that. `bwf deploy --preview` lists this each time it runs.
+- **A new owner class.** What happens when a preview's code adds a Durable Object class the deployed Worker doesn't have yet hasn't been tried.
+
+Deploying the same name again updates the preview and reuses its D1 copies. `bwf deploy --platform cloudflare --remove-preview pr-12` deletes the preview and its D1 copies in the same command, so a closed pull request leaves nothing behind. Run it again for a preview that is already gone and it reports nothing to delete.
+
+If `deploy.cloudflare.healthCheck` is set, bwf runs it against the preview. See [`deploy.cloudflare.healthCheck`](../config.md#deploy-cloudflare-healthcheck).
 
 Use `--skip-migrations` when you run migrations separately or share a database with a preview. The code must work with the database's current schema. The next deploy without this flag applies pending migrations.
 

@@ -140,6 +140,7 @@ export async function runCloudflareDeploy(
       cliLog,
       reporter,
       atomic,
+      healthCheck: bwfConfig.deploy?.cloudflare?.healthCheck,
       initialCloudflareCandidate,
       source,
       preflight,

@@ -555,7 +555,9 @@ describe('compileWorkerEntry', () => {
     expect(code).toContain(
       'import __platformDurableObject0 from "/app/durable-objects/counter.ts";',
     );
-    expect(code).toContain('__platformDurableObject0.__bind("COUNTER");');
+    expect(code).toContain(
+      '__platformDurableObject0.__bind("COUNTER", undefined, "CounterDurableObject");',
+    );
     expect(code).toContain(
       'const CounterDurableObject = __platformDurableObject0.class;\nexport { CounterDurableObject };',
     );

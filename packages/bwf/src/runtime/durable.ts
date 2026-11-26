@@ -1,15 +1,30 @@
-import { DurableObject as CloudflareDurableObject } from 'cloudflare:workers';
+import {
+  DurableObject as CloudflareDurableObject,
+  exports as workerExports,
+} from 'cloudflare:workers';
 import { isResourceName } from '../shared/resource-name.ts';
 import { requireRuntimeBinding, withRuntimeEnv } from './env.ts';
 
 const DEFAULT_STORAGE_KEY = '__platform_durable_state';
+
+// Decision: A Worker Preview gets its own Durable Object namespace only for the Worker's own exports (ctx.exports). A namespace
+// reached through an env binding is the production one, so a preview would share its owners' data with production. The export
+// and the env binding are the same namespace outside a preview, so an app with no preview behaves as before.
+function resolveNamespace<T>(bindingName: string, className: string | undefined): T {
+  const exported =
+    className === undefined
+      ? undefined
+      : (workerExports as Record<string, unknown> | undefined)?.[className];
+
+  return (exported ?? requireRuntimeBinding<T>(bindingName)) as T;
+}
 
 type NativeDurableClass = new (...args: Array<never>) => CloudflareDurableObject<unknown>;
 
 export type DurableObjectApi<TClass extends NativeDurableClass> = {
   class: TClass;
   /** @internal Called by the generated Worker entry. */
-  __bind(bindingName: string, resourceName?: string): void;
+  __bind(bindingName: string, resourceName?: string, className?: string): void;
   get(name: string): DurableObjectStub<InstanceType<TClass>>;
   get(
     namespace: DurableObjectNamespace<InstanceType<TClass>>,
@@ -31,17 +46,18 @@ export function defineDurableObject<TClass extends NativeDurableClass>(definitio
     throw new Error('durable: name must contain a word starting with a letter.');
   }
   let bindingName: string | undefined;
+  let exportName: string | undefined;
   function boundNamespace(): DurableObjectNamespace<InstanceType<TClass>> {
     if (!bindingName) {
       throw new Error(
         'durable: this definition is not bound. Default-export it from a file in durable-objects/.',
       );
     }
-    return requireRuntimeBinding<DurableObjectNamespace<InstanceType<TClass>>>(bindingName);
+    return resolveNamespace<DurableObjectNamespace<InstanceType<TClass>>>(bindingName, exportName);
   }
   return {
     class: definition.class,
-    __bind(name, resourceName) {
+    __bind(name, resourceName, className) {
       if (definition.name !== resourceName) {
         throw new Error(
           'durable: name must be statically discoverable in defineDurableObject(). Run bwf info to inspect this definition.',
@@ -53,6 +69,7 @@ export function defineDurableObject<TClass extends NativeDurableClass>(definitio
         );
       }
       bindingName = name;
+      exportName = className;
     },
     get(
       namespaceOrName: DurableObjectNamespace<InstanceType<TClass>> | string,
@@ -152,7 +169,7 @@ export type DurableStateDefinition<
 export type DurableStateApi<TMethods> = {
   class: DurableStateClass<TMethods>;
   /** @internal Called by bwf's generated worker entry. */
-  __bind(bindingName: string, resourceName?: string): void;
+  __bind(bindingName: string, resourceName?: string, className?: string): void;
   get(name: string): TypedDurableObjectStub<TMethods>;
   get(namespace: DurableObjectNamespace, name: string): TypedDurableObjectStub<TMethods>;
   getById(id: DurableObjectId): TypedDurableObjectStub<TMethods>;
@@ -207,6 +224,7 @@ export function defineDurableState<
   const migrations = assertMigrations(version, definition.migrations ?? []);
   const storageKey = definition.storageKey ?? DEFAULT_STORAGE_KEY;
   let bindingName: string | undefined;
+  let exportName: string | undefined;
 
   function boundNamespace(): DurableObjectNamespace {
     if (!bindingName) {
@@ -214,7 +232,7 @@ export function defineDurableState<
         'durable: this state definition is not bound. Default-export it from a file in durable-objects/.',
       );
     }
-    return requireRuntimeBinding<DurableObjectNamespace>(bindingName);
+    return resolveNamespace<DurableObjectNamespace>(bindingName, exportName);
   }
 
   class BwfDurableState extends CloudflareDurableObject<TEnv> {
@@ -357,7 +375,7 @@ export function defineDurableState<
   return {
     // oxlint-disable-next-line quality/no-chained-type-assertions
     class: BwfDurableState as unknown as DurableStateClass<TMethods>,
-    __bind(name, resourceName) {
+    __bind(name, resourceName, className) {
       if (definition.name !== resourceName) {
         throw new Error(
           'durable: name must be statically discoverable in defineDurableState(). Run bwf info to inspect this definition.',
@@ -369,6 +387,7 @@ export function defineDurableState<
         );
       }
       bindingName = name;
+      exportName = className;
     },
     get(namespaceOrName: DurableObjectNamespace | string, maybeName?: string) {
       const namespace = typeof namespaceOrName === 'string' ? boundNamespace() : namespaceOrName;
