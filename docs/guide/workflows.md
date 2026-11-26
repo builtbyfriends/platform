@@ -61,3 +61,7 @@ export const GET = defineHandler(async (c) => {
 A deploy that adds a Workflow class changes the exports of the Worker. Cloudflare can't split traffic between two versions with different exports. If the deploy stops with that message, run it once with `--atomic`.
 
 Workflows work on the Workers Free plan.
+
+## Previews
+
+A [preview](/reference/cli/deploy#previews) uses the Workflow of the deployed app. An instance a preview starts runs in the live Workflow, and the live app can see it by its id.
