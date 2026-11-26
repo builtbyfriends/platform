@@ -11,6 +11,10 @@ export type CloudflareReadArtifact = {
   document: unknown;
 };
 
+type ReadFields = true | { fields: { [key: string]: ReadFields } } | { items: ReadFields };
+type ReadValue = string | number | boolean | null | Array<ReadValue> | { [key: string]: ReadValue };
+const projectionLimits = { depth: 8, items: 200, values: 4096, string: 16384, bytes: 128 * 1024 };
+
 const policies: Array<{
   type: Resource['type'];
   path: string;
@@ -19,6 +23,7 @@ const policies: Array<{
   responseOwnership?: 'selected-resource';
   parameterAlternative?: number;
   fields: Array<string>;
+  structured?: { fields: { [key: string]: ReadFields } };
   collection?: { defaultLimit: number; maxItems: number };
 }> = [
   {
@@ -60,6 +65,35 @@ const policies: Array<{
     // Decision: The response uses an internal bucket ID, not the owned bucket name. The exact injected URL and selected-resource checks before/after the read prove scope.
     responseOwnership: 'selected-resource',
     fields: ['domain', 'enabled'],
+  },
+  {
+    type: 'r2',
+    path: '/accounts/{account_id}/r2/buckets/{bucket_name}/cors',
+    parameter: 'bucket_name',
+    identity: 'name',
+    // Decision: Configuration responses omit bucket identity; the exact injected bucket path and fresh selected-resource checks prove ownership.
+    responseOwnership: 'selected-resource',
+    fields: [],
+    structured: {
+      fields: {
+        rules: {
+          items: {
+            fields: {
+              id: true,
+              allowed: {
+                fields: {
+                  headers: { items: true },
+                  methods: { items: true },
+                  origins: { items: true },
+                },
+              },
+              exposeHeaders: { items: true },
+              maxAgeSeconds: true,
+            },
+          },
+        },
+      },
+    },
   },
   {
     type: 'kv',
@@ -283,6 +317,96 @@ function fieldSchema(value: unknown, path: Array<string>, document: unknown): Sc
   return undefined;
 }
 
+function structuredProjection(
+  source: Schema,
+  selection: ReadFields,
+  document: unknown,
+  depth = 0,
+  path: Array<string> = ['result'],
+): { schema: Schema; project: (value: unknown, budget: { values: number }) => ReadValue } {
+  if (depth > projectionLimits.depth) {
+    throw Error('The provider projection is too deeply nested.');
+  }
+  const selectedSchema = fieldSchema(source, path, document);
+  if (!selectedSchema) {
+    throw Error('The provider projection no longer matches its schema.');
+  }
+  const resolved = resolve(document, selectedSchema);
+  if (resolved.writeOnly === true) {
+    throw Error('The provider projection includes a private field.');
+  }
+  const count = (budget: { values: number }) => {
+    if (++budget.values > projectionLimits.values) {
+      throw Error('The provider response contains too many values.');
+    }
+  };
+  if (selection === true) {
+    if (!['string', 'number', 'integer', 'boolean'].includes(String(resolved.type))) {
+      throw Error('The provider projection requires an explicit scalar field.');
+    }
+    return {
+      schema: {
+        allOf: [normalize(resolved, document, 'output'), { maxLength: projectionLimits.string }],
+      },
+      project(value, budget) {
+        count(budget);
+        if (
+          !scalar(value) ||
+          (typeof value === 'string' && value.length > projectionLimits.string)
+        ) {
+          throw Error('The provider response contains an invalid scalar.');
+        }
+        return value;
+      },
+    };
+  }
+  if ('items' in selection) {
+    if (resolved.type !== 'array') {
+      throw Error('The provider projection requires an array.');
+    }
+    const item = structuredProjection(source, selection.items, document, depth + 1, [...path, '*']);
+    return {
+      schema: { type: 'array', maxItems: projectionLimits.items, items: item.schema },
+      project(value, budget) {
+        count(budget);
+        if (!Array.isArray(value) || value.length > projectionLimits.items) {
+          throw Error('The provider response contains an invalid array.');
+        }
+        return value.map((entry) => item.project(entry, budget));
+      },
+    };
+  }
+  const children = Object.entries(selection.fields).map(([name, fields]) => {
+    if (['__proto__', 'constructor', 'prototype'].includes(name)) {
+      throw Error('The provider projection contains an unsafe property.');
+    }
+    return [
+      name,
+      structuredProjection(source, fields, document, depth + 1, [...path, name]),
+    ] as const;
+  });
+  const required = Array.isArray(resolved.required)
+    ? resolved.required.filter((name) => children.some(([key]) => key === name))
+    : [];
+  return {
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: Object.fromEntries(children.map(([name, child]) => [name, child.schema])),
+      required,
+    },
+    project(value, budget) {
+      count(budget);
+      const input = record(value);
+      return Object.fromEntries(
+        children
+          .filter(([name]) => Object.hasOwn(input, name))
+          .map(([name, child]) => [name, child.project(input[name], budget)]),
+      );
+    },
+  };
+}
+
 async function boundedJson(response: Response) {
   const limit = 256 * 1024;
   if (!response.body) {
@@ -426,6 +550,9 @@ export function prepareCloudflareProviderRead(
   const response = resolve(document, record(operation.responses)['200']);
   const responseSchema = record(record(response.content)['application/json']).schema;
   const outputValidator = new Validator(validationSchema(responseSchema, document, 'output'), '7');
+  const structured = policy.structured
+    ? structuredProjection(record(responseSchema), policy.structured, document)
+    : null;
   const properties: { [field: string]: Schema } = {};
   for (const field of policy.fields) {
     const schema = fieldSchema(
@@ -484,7 +611,7 @@ export function prepareCloudflareProviderRead(
         type: 'object',
         additionalProperties: false,
         required: ['name'],
-        properties: { name: { type: 'string' }, ...properties },
+        properties: { name: { type: 'string' }, ...properties, ...structured?.schema.properties },
       };
   const outputSchema: Schema = {
     type: 'object',
@@ -497,6 +624,7 @@ export function prepareCloudflareProviderRead(
       kind: { type: 'string', const: 'provider-read' },
       data: dataSchema,
     },
+    ...(structured ? { components: validationSchema({}, document, 'output').components } : {}),
   };
   const safeOutputValidator = new Validator(outputSchema, '7');
   const descriptor = {
@@ -517,6 +645,7 @@ export function prepareCloudflareProviderRead(
     policy,
     inputSchema,
     outputSchema,
+    ...(structured ? { projectionVersion: 1, projectionLimits } : {}),
   });
 
   return {
@@ -704,8 +833,18 @@ export function prepareCloudflareProviderRead(
         kind: 'provider-read' as const,
         data: policy.collection
           ? collectionData()
-          : { name: resource.binding_name, ...projectFields(returned.result) },
+          : {
+              name: resource.binding_name,
+              ...projectFields(returned.result),
+              ...(structured ? record(structured.project(returned.result, { values: 0 })) : {}),
+            },
       };
+      if (
+        structured &&
+        new TextEncoder().encode(JSON.stringify(output)).length > projectionLimits.bytes
+      ) {
+        throw Error('The projected provider response is too large.');
+      }
       if (!safeOutputValidator.validate(output).valid) {
         throw Error('The provider metadata changed unexpectedly.');
       }

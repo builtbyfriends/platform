@@ -105,11 +105,10 @@ beforeAll(async () => {
 afterAll(teardownEnv);
 afterEach(() => vi.restoreAllMocks());
 afterEach(async () => {
-  const managed = (await cloudflareOpenApiIndex()).find(
-    (entry) => entry.operationId === 'r2-get-bucket-public-policy',
-  );
-  if (managed) {
-    await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(managed));
+  for (const entry of await cloudflareOpenApiIndex()) {
+    if (['r2-get-bucket-public-policy', 'r2-get-bucket-cors-policy'].includes(entry.operationId)) {
+      await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
+    }
   }
 });
 beforeEach(async () => {
@@ -258,7 +257,11 @@ async function managedDomainResource() {
     new URL('../fixtures/cloudflare-openapi/r2-managed-domain-get.json.gz', import.meta.url),
   );
   await env.STATIC_ASSETS_R2.put(key, asset);
-  const data = { bucketId: 'c'.repeat(32), domain: 'pub-' + 'c'.repeat(32) + '.r2.dev', enabled: false };
+  const data = {
+    bucketId: 'c'.repeat(32),
+    domain: 'pub-' + 'c'.repeat(32) + '.r2.dev',
+    enabled: false,
+  };
   metadata.provider.mockImplementation(async (url) =>
     Response.json({
       success: true,
@@ -284,12 +287,149 @@ async function managedDomainResource() {
   return { metadata, entry, key, asset, data, body, descriptor, operations, list };
 }
 
+async function corsResource() {
+  const fixture = await managedDomainResource();
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (candidate) => candidate.operationId === 'r2-get-bucket-cors-policy',
+  );
+  if (!entry) {
+    throw Error('Missing pinned CORS operation');
+  }
+  await env.STATIC_ASSETS_R2.put(
+    cloudflareOpenApiKey(entry),
+    await readFile(new URL('../fixtures/cloudflare-openapi/r2-cors-get.json.gz', import.meta.url)),
+  );
+  const rules = [
+    { allowed: { methods: ['GET'], origins: ['https://example.test'] }, maxAgeSeconds: 0 },
+  ];
+  fixture.metadata.provider.mockImplementation(async () =>
+    Response.json({
+      success: true,
+      errors: [],
+      messages: [],
+      result: { rules, privateToken: 'private' },
+    }),
+  );
+  const operations = await fixture.list();
+  const descriptor = operations.find((operation) => operation.id === entry.operationId);
+  if (!descriptor) {
+    throw Error('CORS operation was not registered');
+  }
+  return {
+    fixture,
+    rules,
+    operations,
+    descriptor,
+    body: { ...fixture.body, operation: descriptor.id, version: descriptor.version },
+  };
+}
+
+describe('structured provider operations', () => {
+  it('discovers and executes pinned nested data beside the other resource operations', async () => {
+    const { fixture, rules, operations, descriptor, body } = await corsResource();
+    expect(operations).toHaveLength(5);
+    expect(operations.find((operation) => operation.id === fixture.descriptor.id)).toEqual(
+      fixture.descriptor,
+    );
+    expect(operations.find((operation) => operation.id === fixture.metadata.descriptor.id)).toEqual(
+      fixture.metadata.descriptor,
+    );
+    expect(descriptor.outputSchema).toMatchObject({
+      properties: { data: { properties: { rules: { type: 'array', maxItems: 200 } } } },
+    });
+    const response = await call('resources.invoke', body);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        appId: project.id,
+        resourceId: body.resourceId,
+        action: descriptor.id,
+        kind: 'provider-read',
+        data: { name: 'My resource', rules },
+      },
+    });
+    expect(String(fixture.metadata.provider.mock.calls[0][0])).toBe(
+      `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/owned-bucket/cors`,
+    );
+  });
+
+  it('rejects pagination, scope and effect overrides without making a provider request', async () => {
+    const { fixture, body } = await corsResource();
+    for (const [request, status] of [
+      [{ ...body, input: { query: { cursor: 'fake-page', limit: 10 } } }, 400],
+      [{ ...body, input: { path: { bucket_name: 'foreign' } } }, 400],
+      [{ ...body, input: { headers: { 'cf-r2-jurisdiction': 'default' } } }, 400],
+      [{ ...body, expectedEffect: 'write' }, 400],
+      [{ ...body, version: fixture.descriptor.version }, 409],
+    ] as const) {
+      expect((await call('resources.invoke', request)).status).toBe(status);
+    }
+    expect(fixture.metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it.each(['bucket', 'jurisdiction', 'owner'] as const)(
+    'discards nested data after the selected %s changes',
+    async (change) => {
+      const { fixture, rules, body } = await corsResource();
+      fixture.metadata.provider.mockImplementationOnce(async () => {
+        if (change === 'owner') {
+          await env.db
+            .update(projects)
+            .set({ proxy_token_gen: 99 })
+            .where(eq(projects.id, project.id));
+        } else {
+          await env.db
+            .update(resources)
+            .set(
+              change === 'bucket'
+                ? { cf_id: 'foreign' }
+                : { metadata: { jurisdiction: 'default' } },
+            )
+            .where(eq(resources.id, body.resourceId));
+        }
+        return Response.json({ success: true, errors: [], messages: [], result: { rules } });
+      });
+      const response = await call('resources.invoke', body);
+      expect(response.status).toBe(409);
+      expect(JSON.stringify(await response.json())).not.toContain('example.test');
+    },
+  );
+
+  it('returns a bounded safe failure for a provider result above the supported item limit', async () => {
+    const { fixture, rules, body } = await corsResource();
+    fixture.metadata.provider.mockImplementationOnce(async () =>
+      Response.json({
+        success: true,
+        errors: [],
+        messages: [],
+        result: { rules: Array.from({ length: 201 }, () => rules[0]) },
+      }),
+    );
+    const response = await call('resources.invoke', body);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'PROVIDER_UNAVAILABLE',
+      message: 'Could not load this resource. Try again.',
+    });
+  });
+});
+
 describe('schema-backed provider operations', () => {
-  it('discovers distinct R2 reads from only two pinned artifacts and routes each to its own handler', async () => {
+  it('discovers distinct R2 reads from available pinned artifacts and routes each to its own handler', async () => {
     const fixture = await managedDomainResource();
     const get = vi.spyOn(env.STATIC_ASSETS_R2, 'get');
     const operations = await fixture.list();
-    expect(get.mock.calls.map(([key]) => key)).toEqual([fixture.metadata.key, fixture.key]);
+    const cors = (await cloudflareOpenApiIndex()).find(
+      (entry) => entry.operationId === 'r2-get-bucket-cors-policy',
+    );
+    if (!cors) {
+      throw Error('Missing pinned CORS operation');
+    }
+    expect(get.mock.calls.map(([key]) => key)).toEqual([
+      fixture.metadata.key,
+      fixture.key,
+      cloudflareOpenApiKey(cors),
+    ]);
     expect(operations).toEqual(fixture.operations);
     expect(operations).toHaveLength(4);
     expect(operations.find((entry) => entry.id === fixture.metadata.entry.operationId)).toEqual(

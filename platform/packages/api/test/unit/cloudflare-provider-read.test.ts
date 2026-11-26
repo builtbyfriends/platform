@@ -109,6 +109,7 @@ describe('schema-driven Cloudflare resource reads', () => {
     expect(cloudflareProviderReadSelections('r2')).toEqual([
       { method: 'GET', path: fixture.operations.r2.path },
       { method: 'GET', path: managedDomainArtifact.path },
+      { method: 'GET', path: '/accounts/{account_id}/r2/buckets/{bucket_name}/cors' },
     ]);
   });
 
@@ -347,8 +348,11 @@ describe('schema-driven Cloudflare resource reads', () => {
     expect(prepareCloudflareProviderRead(artifact, 'd1')).toBeNull();
     expect(prepareCloudflareProviderRead({ ...artifact, method: 'DELETE' }, 'r2')).toBeNull();
     expect(
-      prepareCloudflareProviderRead({ ...artifact, path: artifact.path + '/cors' }, 'r2'),
+      prepareCloudflareProviderRead({ ...artifact, path: artifact.path + '/unregistered' }, 'r2'),
     ).toBeNull();
+    expect(() =>
+      prepareCloudflareProviderRead({ ...artifact, path: artifact.path + '/cors' }, 'r2'),
+    ).toThrow();
     expect(
       prepareCloudflareProviderRead({ ...artifact, path: 'https://foreign.test/' }, 'r2'),
     ).toBeNull();
