@@ -131,8 +131,6 @@ jobs:
     env:
       PLATFORM_SOURCE_REVISION: ${{ github.sha }}
       RELEASE_TAG: ${{ needs.release-tag.outputs.tag }}
-      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      NPM_CONFIG_USERCONFIG: /tmp/github-packages.npmrc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,11 +148,18 @@ jobs:
       - run: vp run build
 
       - run: npm install -g npm@11
+      # Decision: the install reads with PACKAGES_TOKEN. With the workflow's token in NODE_AUTH_TOKEN for the
+      # whole job, the install got a 403 on Realtime, which this repository's token can't read. So only the
+      # publish steps get the workflow's token, in a config of their own.
       - name: Sign in to GitHub Packages
+        env:
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/github-packages.npmrc
         run: echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
       - name: Publish packages
         env:
           RELEASE_NPM_TAG: ${{ steps.release.outputs.npm-tag }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/github-packages.npmrc
         run: vp pm publish -r --tag "$RELEASE_NPM_TAG" --no-git-checks
 
   tag-release:
