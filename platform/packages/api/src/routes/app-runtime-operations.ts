@@ -1,10 +1,10 @@
 import { type } from 'arktype';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
 import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
-import { ownedResourceCaller } from './app-runtime-resource-owner.ts';
+import { ownedReferenceCaller } from './app-runtime-resource-owner.ts';
+import { runtimeResourceReferences } from './app-runtime-resource-reference.ts';
 import type { ResolveProject } from './app-runtime.ts';
 
 const identifier = type('string > 0').atMostLength(200);
@@ -33,13 +33,13 @@ async function ownedResource(
   if (!project) {
     return null;
   }
-  const resource = (await getProjectResources(context.get('db'), project.id)).find(
+  const resource = (await runtimeResourceReferences(context, project.id)).find(
     (entry) => entry.id === body.resourceId,
   );
   if (!resource) {
     return null;
   }
-  return ownedResourceCaller(context, project, resource, body.owner, resolve);
+  return ownedReferenceCaller(context, project, resource, body.owner, resolve);
 }
 
 export function appRuntimeOperationRoutes(resolve: ResolveProject) {
@@ -58,6 +58,22 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       const caller = await ownedResource(context, body, resolve);
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
+      }
+      if ('reference' in caller) {
+        if (!(await caller.stillAuthorized())) {
+          return context.json({ error: 'resource_changed' }, 409);
+        }
+        return context.json({
+          data: {
+            appId: caller.project.id,
+            resourceId: caller.reference.id,
+            checkedAt: Date.now(),
+            available: false,
+            reason: 'Schema-backed operations are not registered for this resource yet.',
+            coverage: 'registered-operations',
+            operations: [],
+          },
+        });
       }
       const { reason, operations } = await resourceOperationsFor(
         caller.resource.type,
@@ -99,6 +115,11 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       const caller = await ownedResource(context, body, resolve);
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
+      }
+      if ('reference' in caller) {
+        return (await caller.stillAuthorized())
+          ? context.json({ error: 'operation_unavailable' }, 404)
+          : context.json({ error: 'resource_changed' }, 409);
       }
       const { operations, registry, registryNames } = await resourceOperationsFor(
         caller.resource.type,

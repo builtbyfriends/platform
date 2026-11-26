@@ -5,6 +5,7 @@ import { resourceActions } from './app-runtime-actions.ts';
 import { databaseBrowseCapabilities } from './app-runtime-database.ts';
 import { fileTransfers } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
+import type { RuntimeResourceReference } from './app-runtime-resource-reference.ts';
 
 const kinds = {
   r2: 'files',
@@ -15,6 +16,18 @@ const kinds = {
   container: 'other',
   'durable-object': 'other',
 } as const satisfies { [Type in Resource['type']]: string };
+
+export function referenceCapabilities(
+  context: Context<ApiEnv>,
+  project: Project,
+  reference: RuntimeResourceReference,
+  filesActive: boolean,
+  current: Project = project,
+) {
+  return reference.source === 'resources'
+    ? resourceCapabilities(context, project, reference.resource, filesActive, current)
+    : { id: reference.id, name: reference.name, kind: 'other', browse: null, actions: [] };
+}
 
 export function resourceCapabilities(
   context: Context<ApiEnv>,

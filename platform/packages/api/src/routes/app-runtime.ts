@@ -11,13 +11,17 @@ import { deploymentLogs } from '../operator/deployment-operations.ts';
 import type { Project, Resource } from '../types.ts';
 import { actionInput, executeResourceAction } from './app-runtime-actions.ts';
 import { observeResourceBindings } from './app-runtime-bindings.ts';
-import { resourceCapabilities } from './app-runtime-capabilities.ts';
+import { referenceCapabilities } from './app-runtime-capabilities.ts';
 import { appRuntimeCatalogRoutes } from './app-runtime-catalog.ts';
 import { databaseInspect, validDatabaseFilter, validDatabaseSort } from './app-runtime-database.ts';
 import type { DatabaseFilter, DatabaseSort } from './app-runtime-database.ts';
 import { appRuntimeFileRoutes, fileOwnerActive } from './app-runtime-files.ts';
 import { keyEditorAvailable } from './app-runtime-kv.ts';
 import { appRuntimeOperationRoutes } from './app-runtime-operations.ts';
+import {
+  runtimeResourceReferences,
+  sameResourceReference,
+} from './app-runtime-resource-reference.ts';
 import { proxyRead } from './app-runtime-storage-read.ts';
 
 export type RuntimeOwner = { group: string } | { person: string };
@@ -197,6 +201,7 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
       return context.json({ error: 'unknown_project' }, 404);
     }
     const resources = await getProjectResources(context.get('db'), project.id);
+    const references = await runtimeResourceReferences(context, project.id, resources);
     const filesActive = await fileOwnerActive(context.get('db'), project);
     const topology =
       body.includeBindings === true
@@ -207,6 +212,16 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
     const current = await resolveProject(context, project.id, owner);
     if (!current || current.user_id !== project.user_id) {
       return context.json({ error: 'unknown_project' }, 404);
+    }
+    const fresh = await runtimeResourceReferences(context, project.id);
+    if (
+      references.some(
+        (entry) =>
+          entry.source === 'project-access' &&
+          !fresh.some((value) => sameResourceReference(value, entry)),
+      )
+    ) {
+      return context.json({ error: 'resource_changed' }, 409);
     }
     if (
       topology?.status === 'verified' &&
@@ -222,8 +237,8 @@ export function appRuntimeRoutes(resolve: ResolveProject) {
         appId: project.id,
         available: true,
         ...(topology && { topology }),
-        resources: resources.map((resource) =>
-          resourceCapabilities(context, project, resource, filesActive, current),
+        resources: references.map((reference) =>
+          referenceCapabilities(context, project, reference, filesActive, current),
         ),
       },
     });

@@ -23,7 +23,14 @@ import {
 } from '../../src/infrastructure/cloudflare-openapi.ts';
 import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
 import { appRuntimeCatalogRoutes } from '../../src/routes/app-runtime-catalog.ts';
-import { deployments, projects, resources } from '../../src/schema.ts';
+import { appRuntimeOperationRoutes } from '../../src/routes/app-runtime-operations.ts';
+import {
+  deployments,
+  platformSettings,
+  projects,
+  projectZeroTrust,
+  resources,
+} from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -910,5 +917,314 @@ it('allows API-derived product names that are absent from the CLI', async () => 
         expect.objectContaining({ product: 'api_gateway', execution: 'discovery-only' }),
       ],
     },
+  });
+});
+
+describe('project Access ownership references', () => {
+  const applicationId = 'private-project-access-id';
+  const inventorySchema = type({
+    data: { resources: type({ id: 'string', name: 'string', kind: 'string' }).array() },
+  });
+  const configuration = () => ({
+    version: 1,
+    revision: 1,
+    enabled: true,
+    protectNewProjects: true,
+    accountId: env.CF_ACCOUNT_ID,
+    teamDomain: 'https://company.cloudflareaccess.com',
+    identityProviderIds: ['private-idp'],
+    policyIds: ['private-policy'],
+    credential: { ciphertext: 'private-encrypted-token', iv: 'unused', keyVersion: 'v1' },
+    wildcardApplicationName: 'private-installation-access',
+    wildcardApplication: {
+      id: 'private-wildcard-id',
+      name: 'private-installation-access',
+      audience: 'private-audience',
+      destinations: ['*.example.com'],
+    },
+    operation: null,
+    lastError: null,
+    updatedAt: new Date().toISOString(),
+  });
+  const route = (path: string, body: object) => {
+    const original = request(body);
+    return app.fetch(new Request('https://platform.test/app-billing/' + path, original), env);
+  };
+  async function seed() {
+    await env.db.insert(platformSettings).values({
+      key: 'zeroTrust.configuration',
+      value: configuration(),
+    });
+    await env.db.insert(projectZeroTrust).values({
+      project_id: project.id,
+      desired_protected: true,
+      effective_protected: true,
+      status: 'ready',
+      protected_application_id: applicationId,
+      protected_application_name: 'private-project-access-name',
+      protected_application_audience: 'private-project-audience',
+      reconciled_operation: 'private-reconcile-generation',
+    });
+  }
+  async function inventory() {
+    const response = await route('projects.resources', {
+      project: project.id,
+      owner: { person: 'person' },
+    });
+    expect(response.status).toBe(200);
+    return inventorySchema.assert(await response.json()).data.resources;
+  }
+  async function selected() {
+    const resource = (await inventory()).find((entry) => entry.name === 'Project access');
+    expect(resource).toBeDefined();
+    if (!resource) {
+      throw Error('Missing project access inventory reference');
+    }
+    return { ...input(), resourceId: resource.id };
+  }
+
+  it('discovers a new owned family with opaque identity and no invented executable operations', async () => {
+    await seed();
+    const body = await selected();
+    expect(body.resourceId).toMatch(/^ref_[a-f0-9]{64}$/);
+    const response = await call(body);
+    expect(response.status).toBe(200);
+    const discovery = await read(response);
+    expect(discovery.data.scope).toMatchObject({ resourceId: body.resourceId, product: 'access' });
+    expect(discovery.data.operations.length).toBeGreaterThan(0);
+    expect(discovery.data.operations.every((entry) => entry.execution === 'discovery-only')).toBe(
+      true,
+    );
+    expect(discovery.data.capabilities).toEqual([
+      expect.objectContaining({ id: body.resourceId, kind: 'other', actions: [] }),
+    ]);
+    const publicData = JSON.stringify({ inventory: await inventory(), discovery });
+    for (const privateValue of [
+      applicationId,
+      'private-project-access-name',
+      'private-audience',
+      'private-policy',
+      'private-idp',
+      'private-encrypted-token',
+      'private-reconcile-generation',
+    ]) {
+      expect(publicData).not.toContain(privateValue);
+    }
+    const selection = { project: body.project, owner: body.owner, resourceId: body.resourceId };
+    const installed = await route('projects.resourceOperations', selection);
+    expect(installed.status).toBe(200);
+    expect(await installed.json()).toMatchObject({ data: { available: false, operations: [] } });
+    const invoked = await route('resources.invoke', {
+      ...selection,
+      operation: discovery.data.operations[0].id,
+      version: 'a'.repeat(64),
+      expectedEffect: 'read',
+      input: {},
+    });
+    expect(invoked.status).toBe(404);
+    expect(await invoked.json()).toEqual({ error: 'operation_unavailable' });
+    expect((await call({ ...body, project: foreign.id })).status).toBe(404);
+    expect((await call({ ...body, resourceId: applicationId })).status).toBe(404);
+  });
+
+  it('keeps saved reference identity stable across a provider replacement, scoped to the installation', async () => {
+    await seed();
+    const body = await selected();
+    await env.db
+      .update(projectZeroTrust)
+      .set({ protected_application_id: 'replacement-id' })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    expect((await selected()).resourceId).toBe(body.resourceId);
+    const prior = env.PLATFORM_INSTALLATION_ID;
+    env.PLATFORM_INSTALLATION_ID = 'different-installation';
+    try {
+      expect((await selected()).resourceId).not.toBe(body.resourceId);
+      expect((await call(body)).status).toBe(404);
+    } finally {
+      env.PLATFORM_INSTALLATION_ID = prior;
+    }
+  });
+
+  it('exposes the separately owned public application without its provider identity', async () => {
+    await seed();
+    await env.db
+      .update(projectZeroTrust)
+      .set({
+        bypass_application_id: 'private-bypass-id',
+        bypass_application_name: 'private-bypass-name',
+      })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    const applications = (await inventory()).filter((entry) => entry.id.startsWith('ref_'));
+    expect(applications.map((entry) => entry.name)).toEqual(['Project access', 'Public access']);
+    expect(new Set(applications.map((entry) => entry.id)).size).toBe(2);
+    expect(JSON.stringify(applications)).not.toContain('private-bypass');
+  });
+
+  it.each(['projects.resourceOperations', 'resources.invoke'])(
+    'rechecks late revocation at %s',
+    async (path) => {
+      await seed();
+      const body = await selected();
+      const [owned] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+      let resolutions = 0;
+      const boundary = new Hono<ApiEnv>()
+        .use('*', async (context, next) => {
+          context.set('db', env.db);
+          await next();
+        })
+        .route(
+          '/app-billing',
+          appRuntimeOperationRoutes(async () => {
+            if (++resolutions === 2) {
+              await env.db
+                .delete(projectZeroTrust)
+                .where(eq(projectZeroTrust.project_id, project.id));
+            }
+            return owned;
+          }),
+        );
+      const response = await boundary.fetch(
+        new Request(
+          'https://platform.test/app-billing/' + path,
+          request({
+            project: body.project,
+            owner: body.owner,
+            resourceId: body.resourceId,
+            ...(path === 'resources.invoke'
+              ? {
+                  operation: 'unregistered-access-read',
+                  version: 'a'.repeat(64),
+                  expectedEffect: 'read',
+                  input: {},
+                }
+              : {}),
+          }),
+        ),
+        env,
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'resource_changed' });
+    },
+  );
+
+  it.each(['reconciling', 'error'] as const)('withholds %s project records', async (status) => {
+    await seed();
+    const body = await selected();
+    await env.db
+      .update(projectZeroTrust)
+      .set({ status })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    expect((await inventory()).some((entry) => entry.id === body.resourceId)).toBe(false);
+    expect((await call(body)).status).toBe(404);
+  });
+
+  it('withholds unreconciled, missing and ambiguous project ownership', async () => {
+    await seed();
+    const body = await selected();
+    await env.db
+      .update(projectZeroTrust)
+      .set({ reconciled_operation: null })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    expect((await call(body)).status).toBe(404);
+    await env.db
+      .update(projectZeroTrust)
+      .set({ reconciled_operation: 'settled' })
+      .where(eq(projectZeroTrust.project_id, project.id));
+    await env.db
+      .insert(projectZeroTrust)
+      .values({ project_id: foreign.id, protected_application_id: applicationId });
+    expect((await call(body)).status).toBe(404);
+    await env.db.delete(projectZeroTrust).where(eq(projectZeroTrust.project_id, foreign.id));
+    await env.db.delete(projectZeroTrust).where(eq(projectZeroTrust.project_id, project.id));
+    expect((await call(body)).status).toBe(404);
+  });
+
+  it('does not turn shared installation applications or duplicate local roles into project resources', async () => {
+    await seed();
+    const body = await selected();
+    for (const protected_application_id of ['private-wildcard-id', applicationId]) {
+      await env.db
+        .update(projectZeroTrust)
+        .set({
+          protected_application_id,
+          bypass_application_id: protected_application_id === applicationId ? applicationId : null,
+          bypass_application_name: 'private-bypass-name',
+        })
+        .where(eq(projectZeroTrust.project_id, project.id));
+      expect((await call(body)).status).toBe(404);
+    }
+  });
+
+  it.each(['application', 'generation', 'configuration', 'revocation'] as const)(
+    'rejects late %s changes without publishing a stale capability',
+    async (change) => {
+      await seed();
+      const body = await selected();
+      const [owned] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+      let resolutions = 0;
+      const boundary = new Hono<ApiEnv>()
+        .use('*', async (context, next) => {
+          context.set('db', env.db);
+          await next();
+        })
+        .route(
+          '/app-billing',
+          appRuntimeCatalogRoutes(async () => {
+            if (++resolutions === 2) {
+              if (change === 'configuration') {
+                await env.db
+                  .update(platformSettings)
+                  .set({ value: { ...configuration(), revision: 2 } })
+                  .where(eq(platformSettings.key, 'zeroTrust.configuration'));
+              } else if (change === 'revocation') {
+                await env.db
+                  .delete(projectZeroTrust)
+                  .where(eq(projectZeroTrust.project_id, project.id));
+              } else {
+                await env.db
+                  .update(projectZeroTrust)
+                  .set(
+                    change === 'application'
+                      ? { protected_application_id: 'replacement-application' }
+                      : { reconciled_operation: 'replacement-generation' },
+                  )
+                  .where(eq(projectZeroTrust.project_id, project.id));
+              }
+            }
+            return owned;
+          }),
+        );
+      const response = await boundary.fetch(request(body), env);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'resource_changed' });
+    },
+  );
+
+  it('withholds disabled, malformed and reconciling installation configuration', async () => {
+    await seed();
+    const body = await selected();
+    for (const value of [
+      { ...configuration(), enabled: false },
+      { ...configuration(), lastError: 'configuration failed' },
+      {
+        ...configuration(),
+        operation: {
+          id: 'pending-operation',
+          kind: 'reconcile',
+          phase: 'projects',
+          owner: null,
+          leaseExpiresAt: null,
+          startedAt: new Date().toISOString(),
+          existingProjects: null,
+        },
+      },
+      { version: 'invalid' },
+    ]) {
+      await env.db
+        .update(platformSettings)
+        .set({ value })
+        .where(eq(platformSettings.key, 'zeroTrust.configuration'));
+      expect((await call(body)).status).toBe(404);
+    }
   });
 });

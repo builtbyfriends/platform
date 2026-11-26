@@ -1,7 +1,6 @@
 import { type } from 'arktype';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
 import { catalogPage, cloudflareCatalog } from '../infrastructure/cloudflare-catalog.ts';
 import {
@@ -12,21 +11,17 @@ import {
   providerPolicySelections,
   resourceOperationsFor,
 } from '../infrastructure/resource-operations.ts';
-import type { Project, Resource } from '../types.ts';
-import { resourceCapabilities } from './app-runtime-capabilities.ts';
+import type { Project } from '../types.ts';
+import { referenceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
-import { ownedResourceCaller, sameResourceIdentity } from './app-runtime-resource-owner.ts';
+import { ownedResourceCaller } from './app-runtime-resource-owner.ts';
+import {
+  referenceProduct,
+  runtimeResourceReferences,
+  sameResourceReference,
+  type RuntimeResourceReference,
+} from './app-runtime-resource-reference.ts';
 import type { ResolveProject } from './app-runtime.ts';
-
-const products = {
-  d1: 'd1',
-  kv: 'kv',
-  r2: 'r2',
-  queue: 'queues',
-  hyperdrive: 'hyperdrive',
-  container: 'containers',
-  'durable-object': 'durable-objects',
-} satisfies { [Type in Resource['type']]: string };
 
 const identifier = type('string > 0').atMostLength(200);
 
@@ -50,10 +45,10 @@ const requestSchema = type({
 }).onUndeclaredKey('reject');
 
 function selectResources(
-  resources: ReadonlyArray<Resource>,
+  resources: ReadonlyArray<RuntimeResourceReference>,
   request: typeof requestSchema.infer,
 ):
-  | { resources: ReadonlyArray<Resource>; product: string | null }
+  | { resources: ReadonlyArray<RuntimeResourceReference>; product: string | null }
   | { error: 'unknown_resource' | 'resource_product_mismatch'; status: 400 | 404 } {
   const selected =
     request.resourceId === undefined
@@ -64,7 +59,7 @@ function selectResources(
     return { error: 'unknown_resource', status: 404 };
   }
 
-  const resourceProduct = request.resourceId === undefined ? null : products[selected[0].type];
+  const resourceProduct = request.resourceId === undefined ? null : referenceProduct(selected[0]);
 
   if (request.product !== undefined && resourceProduct && request.product !== resourceProduct) {
     return { error: 'resource_product_mismatch', status: 400 };
@@ -101,7 +96,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         return context.json({ error: 'unknown_project' }, 404);
       }
 
-      const resources = await getProjectResources(context.get('db'), project.id);
+      const resources = await runtimeResourceReferences(context, project.id);
 
       const selection = selectResources(resources, body);
 
@@ -147,21 +142,21 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
       }
 
       const caller =
-        !schema && body.resourceId && filesActive
-          ? ownedResourceCaller(context, project, selected[0], owner, resolve)
+        !schema && body.resourceId && filesActive && selected[0].source === 'resources'
+          ? ownedResourceCaller(context, project, selected[0].resource, owner, resolve)
           : null;
       const registered = caller
         ? await resourceOperationsFor(caller.resource.type, context.env, caller)
         : null;
       const providerIndex = registered ? await cloudflareOpenApiIndex() : [];
       const current = await resolve(context, project.id, owner);
-      const fresh = await getProjectResources(context.get('db'), project.id);
+      const fresh = await runtimeResourceReferences(context, project.id);
 
       if (!sameProject(current, project)) {
         return context.json({ error: 'unknown_project' }, 404);
       }
 
-      if (selected.some((entry) => !fresh.some((value) => sameResourceIdentity(value, entry)))) {
+      if (selected.some((entry) => !fresh.some((value) => sameResourceReference(value, entry)))) {
         return context.json({ error: 'resource_changed' }, 409);
       }
 
@@ -203,7 +198,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
           body.cursor,
         );
 
-        const capable = selected.filter((entry) => !product || products[entry.type] === product);
+        const capable = selected.filter((entry) => !product || referenceProduct(entry) === product);
 
         return context.json({
           data: {
@@ -237,7 +232,8 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
                       ? 'resource_not_selected'
                       : !currentFilesActive
                         ? 'resource_not_active'
-                        : !providerPolicySelections(selected[0].type).some(
+                        : selected[0].source !== 'resources' ||
+                            !providerPolicySelections(selected[0].resource.type).some(
                               (policy) =>
                                 policy.method === operation.httpMethod &&
                                 policy.path === operation.path,
@@ -253,7 +249,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
             capabilitiesTruncated: capable.length > 50,
             capabilities: capable
               .slice(0, 50)
-              .map((entry) => resourceCapabilities(context, current, entry, currentFilesActive)),
+              .map((entry) => referenceCapabilities(context, current, entry, currentFilesActive)),
           },
         });
       } catch {
