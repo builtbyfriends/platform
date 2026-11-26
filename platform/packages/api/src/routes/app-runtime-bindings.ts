@@ -123,6 +123,7 @@ export async function observeResourceBindings(
   project: Project,
   resources: ReadonlyArray<Resource>,
   resolve: () => Promise<Project | null>,
+  durableResourceId?: string,
 ): Promise<ResourceTopology> {
   const result: ResourceTopology = {
     status: 'unavailable',
@@ -217,7 +218,11 @@ export async function observeResourceBindings(
     }
     const durableConnections: ResourceTopology['connections'] = [];
     for (const resource of resources) {
-      if (isStatic || resource.type !== 'durable-object') {
+      if (
+        isStatic ||
+        resource.type !== 'durable-object' ||
+        (durableResourceId !== undefined && resource.id !== durableResourceId)
+      ) {
         continue;
       }
       const candidate = await within(
@@ -312,7 +317,7 @@ export async function resolveOwnedDurableObjectNamespace(
   if (!current || resourceIdentity([current]) !== resourceIdentity([resource])) {
     return null;
   }
-  const observed = await observeResourceBindings(env, db, project, resources, resolve);
+  const observed = await observeResourceBindings(env, db, project, resources, resolve, resource.id);
   return observed.status === 'verified' &&
     observed.connections.some((connection) => connection.resourceId === resource.id) &&
     typeof resource.metadata.namespaceId === 'string'

@@ -2662,6 +2662,87 @@ describe('deployment binding observations', () => {
     expect(JSON.stringify(await observed())).not.toContain(fixture.resource.cf_id);
   });
 
+  it('proves only the selected managed host when another owned host is unavailable', async () => {
+    const fixture = await managedDurableObject();
+    const otherNamespaceId = 'b'.repeat(32);
+    const otherWorkerName = await durableObjectWorkerName(project.id, 'Inbox');
+    await env.db.insert(resources).values({
+      id: 'res_inbox',
+      project_id: project.id,
+      type: 'durable-object',
+      cf_id: otherWorkerName,
+      binding_name: 'Inbox',
+      metadata: { namespaceId: otherNamespaceId, dispatchNamespace: 'platform-users' },
+    });
+    await env.db
+      .update(deployments)
+      .set({
+        manifest: JSON.stringify({
+          durableObjects: {
+            bindings: [
+              { bindingName: 'ROOMS', className: 'Room', storage: 'sqlite' },
+              { bindingName: 'INBOX', className: 'Inbox', storage: 'sqlite' },
+            ],
+            runtime: {
+              protocol: 1,
+              namespaces: { Room: fixture.namespaceId, Inbox: otherNamespaceId },
+            },
+          },
+        }),
+      })
+      .where(eq(deployments.id, fixture.deployment.id));
+    fixture.appBindings.push({
+      name: 'INBOX',
+      type: 'durable_object_namespace',
+      namespace_id: otherNamespaceId,
+    });
+    fixture.fetcher.mockImplementation(async (url) => {
+      if (url.endsWith('/scripts/' + otherWorkerName + '/bindings')) {
+        throw Error('Unrelated managed host is unavailable');
+      }
+      return Response.json({
+        success: true,
+        result: url.endsWith('/scripts/' + fixture.resource.cf_id + '/bindings')
+          ? fixture.host
+          : fixture.appBindings,
+      });
+    });
+    expect(await fixture.resolveNamespace()).toBe(fixture.namespaceId);
+    expect(fixture.fetcher.mock.calls.map(([url]) => url.split('/scripts/')[1])).toEqual([
+      'user-' + project.slug + '-' + fixture.deployment.id + '/bindings',
+      fixture.resource.cf_id + '/bindings',
+    ]);
+    expect(await observed()).toMatchObject({ status: 'unavailable', connections: [] });
+    expect(
+      fixture.fetcher.mock.calls.some(([url]) =>
+        url.endsWith('/scripts/' + otherWorkerName + '/bindings'),
+      ),
+    ).toBe(true);
+  });
+
+  it.each(['worker', 'namespace'])(
+    'rejects a selected namespace with duplicate %s inventory',
+    async (duplicate) => {
+      const fixture = await managedDurableObject();
+      await env.db.insert(resources).values({
+        id: 'res_alias',
+        project_id: project.id,
+        type: 'durable-object',
+        cf_id:
+          duplicate === 'worker'
+            ? fixture.resource.cf_id
+            : await durableObjectWorkerName(project.id, 'Alias'),
+        binding_name: 'Alias',
+        metadata: {
+          namespaceId: duplicate === 'namespace' ? fixture.namespaceId : 'b'.repeat(32),
+          dispatchNamespace: 'platform-users',
+        },
+      });
+      expect(await fixture.resolveNamespace()).toBeNull();
+      expect(fixture.fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(['foreign-app', 'foreign-host', 'duplicate-host', 'stale-release', 'missing-namespace'])(
     'keeps Durable Object reads unavailable for %s evidence',
     async (failure) => {
@@ -2704,7 +2785,7 @@ describe('deployment binding observations', () => {
     },
   );
 
-  it.each(['namespace', 'dispatch', 'manifest'])(
+  it.each(['namespace', 'dispatch', 'manifest', 'owner', 'route', 'inventory'])(
     'discards namespace proof when %s changes during host inspection',
     async (change) => {
       const fixture = await managedDurableObject();
@@ -2715,6 +2796,18 @@ describe('deployment binding observations', () => {
               .update(deployments)
               .set({ manifest: '{}' })
               .where(eq(deployments.id, fixture.deployment.id));
+          } else if (change === 'owner') {
+            await env.db
+              .update(projects)
+              .set({ user_id: (await createTestUser(env.db, 'new-owner')).id })
+              .where(eq(projects.id, project.id));
+          } else if (change === 'route') {
+            await env.ROUTING.put(
+              fixture.key,
+              JSON.stringify({ ...fixture.route, version: 'changed' }),
+            );
+          } else if (change === 'inventory') {
+            await env.db.insert(resources).values({ ...fixture.resource, id: 'res_late_alias' });
           } else {
             await env.db
               .update(resources)
