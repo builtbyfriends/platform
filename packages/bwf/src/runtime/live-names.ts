@@ -17,6 +17,10 @@ export function topicInstanceName(streamId: string, topicKey: string): string {
   return `live:${streamId}:topic:${topicKey}`;
 }
 
+export function ownerInstanceName(streamId: string, ownerKey: string): string {
+  return `live:${streamId}:owner:${ownerKey}`;
+}
+
 export function internalUrl(path: string): string {
   return `https://platform.live${path}`;
 }

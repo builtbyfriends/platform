@@ -1,6 +1,7 @@
 import {
   connectionInstanceName,
   internalUrl,
+  ownerInstanceName,
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
@@ -54,12 +55,39 @@ type DeliveryResponse = {
   stale: Array<number>;
 };
 
-type RevokeRequest = {
-  streamId: string;
-  connectionId: string;
+type RevokeFilter = {
   topic?: string;
   topicPrefix?: string;
   reason?: string;
+};
+
+type RevokeRequest = RevokeFilter & {
+  streamId: string;
+  connectionId: string;
+};
+
+type OwnerRevokeRequest = RevokeFilter & {
+  streamId: string;
+  owner: string;
+  limits: Pick<LiveLimits, 'deliveryAttemptTimeoutMs'>;
+};
+
+type RevokeResponse = {
+  revoked: number;
+  open: boolean;
+};
+
+type OwnerRow = {
+  connectionId: string;
+  generation: number;
+  registeredAt: number;
+};
+
+type OwnerRegisterRequest = {
+  streamId: string;
+  owner: string;
+  connectionId: string;
+  generation: number;
 };
 
 type StaleCheckRequest = {
@@ -111,6 +139,8 @@ export type LiveDurableObjectClass = {
 };
 
 const GENERATION_KEY = 'connection:generation';
+const OWNER_ROW_PREFIX = 'own:';
+const OWNER_ROW_GRACE_MS = 60_000;
 const TOPIC_PRUNE_ALARM_DELAY_MS = 60_000;
 const LIVE_FANOUT_CONCURRENCY = 6;
 const textEncoder = new TextEncoder();
@@ -138,6 +168,15 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       }
       if (pathname === '/revoke') {
         return this.revoke((await request.json()) as RevokeRequest);
+      }
+      if (pathname === '/owner-revoke') {
+        return this.ownerRevoke((await request.json()) as OwnerRevokeRequest);
+      }
+      if (pathname === '/owner-register') {
+        return this.ownerRegister((await request.json()) as OwnerRegisterRequest);
+      }
+      if (pathname === '/owner-unregister') {
+        return this.ownerUnregister((await request.json()) as OwnerRegisterRequest);
       }
       if (pathname === '/deliver') {
         return this.deliver((await request.json()) as DeliveryRequest);
@@ -189,6 +228,28 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
 
       const generation = ((await this.state.storage.get<number>(GENERATION_KEY)) ?? 0) + 1;
       await this.state.storage.put(GENERATION_KEY, generation);
+      const previousOwner = previous?.owner ?? null;
+      if (previous && previousOwner !== null && previousOwner !== message.owner) {
+        await this.unregisterOwner({ ...message, owner: previousOwner }, previous.generation).catch(
+          () => {},
+        );
+      }
+      if (message.owner !== null) {
+        const response = await (
+          await this.ownerStub(message.streamId, message.owner)
+        ).fetch(internalUrl('/owner-register'), {
+          method: 'POST',
+          body: JSON.stringify({
+            streamId: message.streamId,
+            owner: message.owner,
+            connectionId: message.connectionId,
+            generation,
+          } satisfies OwnerRegisterRequest),
+        });
+        if (!response.ok) {
+          return new Response('live: could not register the connection owner.', { status: 500 });
+        }
+      }
       const abort = new AbortController();
 
       return eventStream(
@@ -226,6 +287,9 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
                 this.unregisterTopic(message.streamId, message.connectionId, sub),
               ),
             );
+            if (message.owner !== null) {
+              await this.unregisterOwner(message, generation).catch(() => {});
+            }
           }
         },
         { signal: abort.signal, keepAlive: { intervalMs: 15_000, comment: 'keep-alive' } },
@@ -324,10 +388,100 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       } satisfies LiveControlResponse);
     }
 
+    private async unregisterOwner(message: ConnectRequest, generation: number): Promise<void> {
+      if (message.owner === null) {
+        return;
+      }
+      const stub = await this.ownerStub(message.streamId, message.owner);
+      await stub.fetch(internalUrl('/owner-unregister'), {
+        method: 'POST',
+        body: JSON.stringify({
+          streamId: message.streamId,
+          owner: message.owner,
+          connectionId: message.connectionId,
+          generation,
+        } satisfies OwnerRegisterRequest),
+      });
+    }
+
+    private async ownerRegister(message: OwnerRegisterRequest): Promise<Response> {
+      const row: OwnerRow = {
+        connectionId: message.connectionId,
+        generation: message.generation,
+        registeredAt: Date.now(),
+      };
+      await this.state.storage.put(ownerRowKey(message.connectionId), row);
+      return Response.json({ ok: true });
+    }
+
+    private async ownerUnregister(message: OwnerRegisterRequest): Promise<Response> {
+      const key = ownerRowKey(message.connectionId);
+      const row = await this.state.storage.get<OwnerRow>(key);
+      if (row && row.generation <= message.generation) {
+        await this.state.storage.delete(key);
+      }
+      return Response.json({ ok: true });
+    }
+
+    private async ownerRevoke(message: OwnerRevokeRequest): Promise<Response> {
+      const rows = await this.state.storage.list<OwnerRow>({ prefix: OWNER_ROW_PREFIX });
+      const entries = [...rows];
+      let revoked = 0;
+      let failed = 0;
+      const gone: Array<string> = [];
+      for (let offset = 0; offset < entries.length; offset += LIVE_FANOUT_CONCURRENCY) {
+        const batch = entries.slice(offset, offset + LIVE_FANOUT_CONCURRENCY);
+        const responses = await Promise.all(
+          batch.map(([, row]) =>
+            fetchWithTimeout(
+              this.connectionStub(message.streamId, row.connectionId),
+              internalUrl('/revoke'),
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  streamId: message.streamId,
+                  connectionId: row.connectionId,
+                  topic: message.topic,
+                  topicPrefix: message.topicPrefix,
+                  reason: message.reason,
+                } satisfies RevokeRequest),
+              },
+              message.limits.deliveryAttemptTimeoutMs,
+            ),
+          ),
+        );
+        for (const [index, response] of responses.entries()) {
+          if (!response?.ok) {
+            failed++;
+            continue;
+          }
+          const result = (await response.json()) as RevokeResponse;
+          revoked += result.revoked;
+          const [key, row] = batch[index];
+          if (!result.open && Date.now() - row.registeredAt > OWNER_ROW_GRACE_MS) {
+            gone.push(key);
+          }
+        }
+      }
+      if (gone.length > 0) {
+        await this.state.storage.delete(gone);
+      }
+      if (failed > 0) {
+        return new Response(
+          `live: ${failed} of ${entries.length} connections did not answer. Call revoke() again.`,
+          { status: 504 },
+        );
+      }
+      return Response.json({
+        revoked,
+        open: entries.length > gone.length,
+      } satisfies RevokeResponse);
+    }
+
     private async revoke(message: RevokeRequest): Promise<Response> {
       const connection = this.connection;
       if (!connection) {
-        return Response.json({ revoked: 0 });
+        return Response.json({ revoked: 0, open: false } satisfies RevokeResponse);
       }
       const matched = [...connection.subscriptions.values()].filter((subscription) =>
         revokeMatches(subscription.topic, message),
@@ -356,7 +510,7 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
           )
           .catch(() => {});
       }
-      return Response.json({ revoked: matched.length });
+      return Response.json({ revoked: matched.length, open: true } satisfies RevokeResponse);
     }
 
     private async deliver(message: DeliveryRequest): Promise<Response> {
@@ -618,6 +772,12 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       return binding.get(binding.idFromName(topicInstanceName(streamId, topicKey)));
     }
 
+    private async ownerStub(streamId: string, owner: string): Promise<DurableObjectStub> {
+      const binding = this.liveNamespace();
+      const ownerKey = await topicDigest(streamId, owner);
+      return binding.get(binding.idFromName(ownerInstanceName(streamId, ownerKey)));
+    }
+
     private connectionStub(streamId: string, connectionId: string): DurableObjectStub {
       const binding = this.liveNamespace();
       return binding.get(binding.idFromName(connectionInstanceName(streamId, connectionId)));
@@ -658,6 +818,10 @@ function activeSubscriptionCount(connection: ActiveConnection): number {
     }
   }
   return count;
+}
+
+function ownerRowKey(connectionId: string): string {
+  return `${OWNER_ROW_PREFIX}${connectionId}`;
 }
 
 function revokeMatches(

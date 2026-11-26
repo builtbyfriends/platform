@@ -157,15 +157,28 @@ export const live = defineLiveStream({
 
 ```ts
 const { revoked } = await live.revoke({
-  connectionId,
+  owner: `user:${userId}`,
   topicPrefix: `project:${projectId}:`,
   reason: 'You were removed from this project',
 });
 ```
 
-`connectionId` is the `connection.id` that `onConnect` and `onSubscribe` receive, so an app that needs to find a person's connections later keeps it when it allows the subscription. `topic` ends the subscriptions to one topic, `topicPrefix` ends every topic that starts with the text, and with neither the connection loses all of its subscriptions. `revoke()` resolves with how many ended, and with `0` when the connection is closed.
+Name who it applies to with one of two keys:
 
-After `revoke()` resolves, the next `publish()` doesn't reach those subscriptions. Other connections on the same topic still get it. The window gets a `revoked` signal, and `subscribe()` takes an `onRevoked` handler for it:
+- `owner` is the owner `identifyConnection` (or the `owner` option) gave, so you don't keep a list of a person's open windows. It reaches every open connection of that owner.
+- `connectionId` is the `connection.id` that `onConnect` and `onSubscribe` receive. It reaches one connection.
+
+`topic` ends the subscriptions to one topic, `topicPrefix` ends every topic that starts with the text, and with neither the connection loses all of its subscriptions. `revoke()` resolves with how many subscriptions ended, and with `0` when no connection is open.
+
+After `revoke()` resolves, the next `publish()` doesn't reach those subscriptions. Other connections on the same topic still get it. A new `subscribe()` goes through `onSubscribe` again, and your answer decides.
+
+To find a person's connections, bwf keeps one small record per open connection for each owner. A connection adds its record when it opens and removes it when it closes. That costs two extra calls per connection, one on open and one on close, and one stored row per open connection. A connection can't open when its record can't be written: the request fails with `500`, and the window tries again. A connection that dies without closing leaves its record until the next `revoke()` for that owner finds it gone, at least a minute later, and removes it. Connections without an owner (anonymous streams) have no record, so only `connectionId` reaches them.
+
+A `revoke()` by owner asks each of the owner's connections in turn, with the stream's `deliveryAttemptTimeoutMs` as the wait for each. When a connection doesn't answer, `revoke()` still ends the others, then throws. Treat a throw as "call it again": the connections that already ended have nothing left to end, so a second call finishes the rest.
+
+### What the window does
+
+The window gets a `revoked` signal for each subscription that ended. `subscribe()` takes an `onRevoked` handler for it, with the `reason` you passed:
 
 ```ts
 await live.subscribe({
@@ -176,7 +189,9 @@ await live.subscribe({
 });
 ```
 
-The helper drops a revoked subscription, so it isn't sent again when the stream reopens. A new `subscribe()` goes through `onSubscribe` again, and your answer decides. A preview has its own live objects, so `revoke()` in a preview ends subscriptions on that preview only.
+The helper drops a revoked subscription, so it isn't sent again when the stream reopens. If the reason only means "check again", call `subscribe()` again with the same `id` from the handler. That asks `onSubscribe` for the current answer: it accepts when the person still has access, and rejects with a `LiveStreamError` when they don't, which the window can show.
+
+A preview has its own live objects, so `revoke()` in a preview ends subscriptions on that preview only.
 
 ## Limits
 

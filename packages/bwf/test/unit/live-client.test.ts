@@ -392,6 +392,29 @@ describe('connectLiveStream', () => {
     expect(body).not.toContain('"id":"project"');
   });
 
+  it('lets the window subscribe again from onRevoked', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ackAll(init));
+    const live = openLive(fetchMock);
+    const subscribed = live.subscribe({
+      id: 'project',
+      topic: 'project:7',
+      onRevoked: () => {
+        void live.subscribe({ id: 'project', topic: 'project:7' });
+      },
+    });
+    const source = await emitOpen();
+    await subscribed;
+    const before = fetchMock.mock.calls.length;
+
+    source.emit('revoked', JSON.stringify({ subscriptionId: 'project', topic: 'project:7' }));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchMock.mock.calls.length).toBe(before + 1);
+    expect(String(fetchMock.mock.lastCall?.[1]?.body)).toContain('"kind":"subscribe"');
+  });
+
   it('reconnects and resubscribes active subscriptions with lastEventId', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ackAll(init));
