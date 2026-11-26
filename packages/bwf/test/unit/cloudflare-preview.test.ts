@@ -22,9 +22,7 @@ import {
   readPreviewUrl,
   removePreviewDatabase,
 } from '../../src/cli/cloudflare-preview.ts';
-import { tryEnablePreviewLogs } from '../../src/cli/deploy-cloudflare-preview.ts';
 import { healthCheckEnv, runHealthCheck } from '../../src/cli/deploy-health-check.ts';
-import { log } from '../../src/cli/deploy-helpers.ts';
 
 const roots: Array<string> = [];
 
@@ -263,16 +261,10 @@ describe('deploy --preview and --remove-preview', () => {
     );
   });
 
-  it('reads --secrets-file for a preview only', () => {
-    expect(
-      parseDeployArgs(['--platform', 'cloudflare', '--preview', 'pr-7', '--secrets-file', 's.env']),
-    ).toMatchObject({ secretsFile: 's.env' });
-    expect(() => parseDeployArgs(['--platform', 'cloudflare', '--secrets-file', 's.env'])).toThrow(
-      '--secrets-file is used with --preview',
-    );
+  it('no longer takes --secrets-file', () => {
     expect(() =>
-      parseDeployArgs(['--platform', 'cloudflare', '--preview', 'pr-7', '--secrets-file']),
-    ).toThrow('--secrets-file requires a file path');
+      parseDeployArgs(['--platform', 'cloudflare', '--preview', 'pr-7', '--secrets-file', 's.env']),
+    ).toThrow("Unknown option '--secrets-file'");
   });
 
   it('asks for the Cloudflare platform, one flag at a time, and a usable name', () => {
@@ -316,26 +308,5 @@ describe('the health check command', () => {
       ok: false,
       detail: 'exited with code 4',
     });
-  });
-});
-
-describe('turning on preview logs', () => {
-  const context = {
-    accountId: 'account',
-    apiBaseUrl: 'https://api.example.test',
-    configPath: '/app/wrangler.json',
-    workerName: 'my-worker',
-    runWrangler: () => {
-      throw new Error('Cloudflare did not turn on logs (HTTP 400).');
-    },
-  };
-
-  it('warns and returns when Cloudflare refuses, so the deploy goes on to the health check', async () => {
-    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
-    await expect(tryEnablePreviewLogs(context, 'pr-12')).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('could not turn on logs for preview pr-12'),
-    );
-    warn.mockRestore();
   });
 });

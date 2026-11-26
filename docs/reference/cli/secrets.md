@@ -8,16 +8,18 @@ outline: deep
 ## `bwf secret list` {#platform-secret-list}
 
 ```
-bwf secret list [--project <name>]
+bwf secret list [--project <name>] [--preview]
 ```
 
 List production secret names for the saved target. Secret values are never printed. Direct Cloudflare targets query the Worker named in `bwf.config.ts`; `--project` is hosted-only.
 
+`--preview` works on a direct Cloudflare target. It lists or changes the secrets in the Worker's preview Base instead of the live Worker, and takes no `--project`. Cloudflare copies the Base into each new [preview](./deploy.md#previews). A preview that exists keeps the secrets it had.
+
 ## `bwf secret put` {#platform-secret-put}
 
 ```
-bwf secret put <name> [--project <name>]
-bwf secret put <name=value> [--project <name>]
+bwf secret put <name> [--project <name>] [--preview]
+bwf secret put <name=value> [--project <name>] [--preview]
 ```
 
 Value input modes:
@@ -31,7 +33,7 @@ On a direct Cloudflare target, the value is stored as an encrypted Worker secret
 ## `bwf secret sync` {#platform-secret-sync}
 
 ```
-bwf secret sync <file> [--project <name>] [--yes]
+bwf secret sync <file> [--project <name>] [--yes] [--preview]
 ```
 
 Upload production server values from a dotenv file stored outside your project. Include only keys declared in `env.ts`; leave out local development credentials and public `VITE_*` values.
@@ -47,7 +49,7 @@ Existing remote secrets absent from the file are kept. Every entry must be a ser
 ## `bwf secret delete` {#platform-secret-delete}
 
 ```
-bwf secret delete <name> [--project <name>]
+bwf secret delete <name> [--project <name>] [--preview]
 ```
 
 Secret commands use the platform saved in `.bwf/project.json`. Hosted project resolution follows the same order as deploy (`--project`, env var, linked project). Direct Cloudflare targets reject `--project` and use the pinned root Cloudflare config.

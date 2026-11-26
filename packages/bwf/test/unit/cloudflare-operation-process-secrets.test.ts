@@ -337,32 +337,33 @@ it('rejects bulk secret values that are not strings', async () => {
   expect(apiCalls).toHaveLength(0);
 });
 
-const previewOperation: CloudflareOperation = {
-  type: 'preview.secrets',
-  preview: 'pr-12',
+const WORKER = '/workers/workers/my-worker';
+
+const baseSecretsOperation: CloudflareOperation = {
+  type: 'preview.base.secrets',
   configPath: '',
   workerName: 'my-worker',
 };
 
-const PREVIEW_DEPLOYMENT = '/workers/workers/my-worker/previews/pr-12/deployments/latest';
-
-it("patches a preview's latest deployment with secret_text values", async () => {
+it("sets secret_text values in the Worker's preview Base", async () => {
   const { result, apiCalls, apiHeaders, cfCalls } = await runSecretScenario({
-    operation: previewOperation,
+    operation: baseSecretsOperation,
     input: JSON.stringify({ ONE: 'first-value', TWO: 'second-value' }),
     cf: {},
     api: (method, path) =>
-      method === 'PATCH' && path === PREVIEW_DEPLOYMENT ? success : { status: 404, body: {} },
+      method === 'PATCH' && path === WORKER ? success : { status: 404, body: {} },
   });
   expect(result.status, result.stderr).toBe(0);
   expect(apiCalls).toEqual([
     {
       method: 'PATCH',
-      path: PREVIEW_DEPLOYMENT,
+      path: WORKER,
       body: {
-        env: {
-          ONE: { type: 'secret_text', text: 'first-value' },
-          TWO: { type: 'secret_text', text: 'second-value' },
+        previews_base_config: {
+          env: {
+            ONE: { type: 'secret_text', text: 'first-value' },
+            TWO: { type: 'secret_text', text: 'second-value' },
+          },
         },
       },
     },
@@ -371,15 +372,28 @@ it("patches a preview's latest deployment with secret_text values", async () => 
   expect(cfCalls).toHaveLength(0);
 });
 
-it('keeps secret values out of the output of a preview secrets call, on success and on failure', async () => {
+it('removes a secret from the preview Base with a null', async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: { ...baseSecretsOperation, remove: 'ONE' },
+    input: '',
+    cf: {},
+    api: () => success,
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls).toEqual([
+    { method: 'PATCH', path: WORKER, body: { previews_base_config: { env: { ONE: null } } } },
+  ]);
+});
+
+it('keeps secret values out of the output of a Base secrets call, on success and on failure', async () => {
   const succeeded = await runSecretScenario({
-    operation: previewOperation,
+    operation: baseSecretsOperation,
     input: JSON.stringify({ ONE: 'first-value' }),
     cf: {},
     api: () => success,
   });
   const failed = await runSecretScenario({
-    operation: previewOperation,
+    operation: baseSecretsOperation,
     input: JSON.stringify({ ONE: 'first-value' }),
     cf: {},
     api: () => ({
@@ -394,9 +408,9 @@ it('keeps secret values out of the output of a preview secrets call, on success 
   }
 });
 
-it('rejects preview secret values that are not strings', async () => {
+it('rejects Base secret values that are not strings', async () => {
   const { result, apiCalls } = await runSecretScenario({
-    operation: previewOperation,
+    operation: baseSecretsOperation,
     input: JSON.stringify({ ONE: 1 }),
     cf: {},
   });
@@ -405,128 +419,98 @@ it('rejects preview secret values that are not strings', async () => {
   expect(apiCalls).toHaveLength(0);
 });
 
-const logsOperation: CloudflareOperation = {
-  type: 'preview.logs',
-  preview: 'pr-12',
+const baseOperation: CloudflareOperation = {
+  type: 'preview.base',
+  ensureLogs: true,
   configPath: '',
   workerName: 'my-worker',
 };
 
-const PREVIEW = '/workers/workers/my-worker/previews/pr-12';
+const LOGS_ON = {
+  observability: {
+    enabled: true,
+    logs: { enabled: true, invocation_logs: true, persist: true },
+  },
+};
 
-it('turns on logs for a preview that has observability off', async () => {
-  const { result, apiCalls, apiHeaders } = await runSecretScenario({
-    operation: logsOperation,
-    input: '',
-    cf: {},
-    api: (method, path) => {
-      if (method === 'GET' && path === PREVIEW) {
-        return {
-          status: 200,
-          body: { success: true, result: { observability: { enabled: false } } },
-        };
-      }
-      return method === 'PATCH' && path === PREVIEW ? success : { status: 404, body: {} };
-    },
-  });
-  expect(result.status, result.stderr).toBe(0);
-  expect(apiCalls).toEqual([
-    { method: 'GET', path: PREVIEW, body: undefined },
-    {
-      method: 'PATCH',
-      path: PREVIEW,
-      body: {
-        observability: {
-          enabled: true,
-          logs: { enabled: true, invocation_logs: true, persist: true },
-        },
-      },
-    },
-  ]);
-  expect(apiHeaders[1]?.['content-type']).toBe('application/merge-patch+json');
-});
+type PreviewsBase = {
+  env?: Record<string, { type: 'secret_text' }>;
+  observability?: { enabled: boolean };
+};
 
-it.each([
-  ['observability is on and logs are off', { enabled: true, logs: { enabled: false } }],
-  ['only observability is on', { enabled: true }],
-])('turns logs on when %s', async (_name, observability) => {
+function workerReply(base: PreviewsBase): ApiReply {
+  return { status: 200, body: { success: true, result: { previews_base_config: base } } };
+}
+
+it('turns on logs in a Base that has no observability, and lists the secret names', async () => {
   const { result, apiCalls } = await runSecretScenario({
-    operation: logsOperation,
+    operation: baseOperation,
     input: '',
     cf: {},
     api: (method) =>
       method === 'GET'
-        ? { status: 200, body: { success: true, result: { observability } } }
+        ? workerReply({ env: { B: { type: 'secret_text' }, A: { type: 'secret_text' } } })
         : success,
   });
   expect(result.status, result.stderr).toBe(0);
-  expect(apiCalls.map((call) => call.method)).toEqual(['GET', 'PATCH']);
+  expect(apiCalls).toEqual([
+    { method: 'GET', path: WORKER, body: undefined },
+    { method: 'PATCH', path: WORKER, body: { previews_base_config: LOGS_ON } },
+  ]);
+  expect(result.data).toEqual({ secrets: ['A', 'B'], logsTurnedOn: true });
 });
 
-it('creates a missing preview with logs on, so its first deployment has them', async () => {
+it("leaves the Base's own observability settings alone", async () => {
   const { result, apiCalls } = await runSecretScenario({
-    operation: logsOperation,
+    operation: baseOperation,
     input: '',
     cf: {},
-    api: (method) =>
-      method === 'GET' ? { status: 404, body: { success: false, errors: [] } } : success,
-  });
-  expect(result.status, result.stderr).toBe(0);
-  expect(apiCalls.map((call) => call.method)).toEqual(['GET', 'POST']);
-  expect(apiCalls[1]?.body).toEqual({
-    name: 'pr-12',
-    observability: { enabled: true, logs: { enabled: true, invocation_logs: true, persist: true } },
-  });
-});
-
-it('fails when Cloudflare refuses to create the preview', async () => {
-  const { result } = await runSecretScenario({
-    operation: logsOperation,
-    input: '',
-    cf: {},
-    api: (method) =>
-      method === 'GET'
-        ? { status: 404, body: { success: false, errors: [] } }
-        : {
-            status: 400,
-            body: { success: false, errors: [{ code: 1000, message: 'Not valid.' }] },
-          },
-  });
-  expect(result.status).toBe(1);
-  expect(result.stderr).toContain('create preview pr-12 with logs on');
-  expect(result.stderr).toContain('HTTP 400');
-});
-
-it("leaves a preview's own observability settings alone when they are already on", async () => {
-  const { result, apiCalls } = await runSecretScenario({
-    operation: logsOperation,
-    input: '',
-    cf: {},
-    api: () => ({
-      status: 200,
-      body: {
-        success: true,
-        result: { observability: { enabled: true, logs: { enabled: true } } },
-      },
-    }),
+    api: () => workerReply({ observability: { enabled: false } }),
   });
   expect(result.status, result.stderr).toBe(0);
   expect(apiCalls.map((call) => call.method)).toEqual(['GET']);
+  expect(result.data).toEqual({ secrets: [], logsTurnedOn: false });
 });
 
-it('fails when Cloudflare refuses to change the preview logs', async () => {
+it('reads a Worker with no Base, and changes nothing when logs are not asked for', async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: { ...baseOperation, ensureLogs: false },
+    input: '',
+    cf: {},
+    api: () => ({ status: 200, body: { success: true, result: {} } }),
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls.map((call) => call.method)).toEqual(['GET']);
+  expect(result.data).toEqual({ secrets: [], logsTurnedOn: false });
+});
+
+it('fails when Cloudflare cannot read the Worker', async () => {
   const { result } = await runSecretScenario({
-    operation: logsOperation,
+    operation: baseOperation,
+    input: '',
+    cf: {},
+    api: () => ({
+      status: 404,
+      body: { success: false, errors: [{ code: 10_007, message: 'x' }] },
+    }),
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('could not read the Worker (HTTP 404)');
+});
+
+it('fails when Cloudflare refuses to turn on logs in the Base', async () => {
+  const { result } = await runSecretScenario({
+    operation: baseOperation,
     input: '',
     cf: {},
     api: (method) =>
       method === 'GET'
-        ? { status: 200, body: { success: true, result: {} } }
+        ? workerReply({})
         : {
             status: 400,
             body: { success: false, errors: [{ code: 1000, message: 'Not valid.' }] },
           },
   });
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain('turn on logs for preview pr-12');
+  expect(result.stderr).toContain('turn on logs in the preview Base');
 });

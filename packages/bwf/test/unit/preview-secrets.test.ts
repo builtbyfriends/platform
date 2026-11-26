@@ -1,29 +1,34 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { CloudflareOperation } from '@builtbyfriends/deploy-cloudflare';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it } from 'vite-plus/test';
 import type { CloudflareOperationContext } from '../../src/cli/cloudflare-operations.ts';
 import {
-  applyPreviewSecrets,
-  collectPreviewSecrets,
-  liveSecretsFailureMessage,
-  missingPreviewSecretsMessage,
+  missingFromBaseMessage,
+  previewBaseFailureMessage,
+  readPreviewBase,
 } from '../../src/cli/preview-secrets.ts';
 
-type Call = { operation: CloudflareOperation; input: string | undefined };
-
-function contextWith(liveSecrets: Array<string>) {
-  const calls: Array<Call> = [];
+function contextWith(options: {
+  live: Array<string>;
+  base: Array<string>;
+  logsTurnedOn?: boolean;
+}) {
+  const calls: Array<CloudflareOperation> = [];
 
   const context: CloudflareOperationContext = {
     accountId: 'account',
     apiBaseUrl: 'https://api.example.test',
     configPath: '/app/wrangler.json',
     workerName: 'my-worker',
-    runWrangler: (operation, options) => {
-      calls.push({ operation, input: options.input });
-      const data = liveSecrets.map((name) => ({ name, type: 'secret_text' }));
+    runWrangler: (operation) => {
+      calls.push(operation);
+
+      if (operation.type === 'preview.base') {
+        const data = { secrets: options.base, logsTurnedOn: options.logsTurnedOn ?? false };
+
+        return { stdout: '', stderr: '', status: 0, data };
+      }
+
+      const data = options.live.map((name) => ({ name, type: 'secret_text' }));
 
       return { stdout: '', stderr: '', status: 0, data };
     },
@@ -32,124 +37,58 @@ function contextWith(liveSecrets: Array<string>) {
   return { context, calls };
 }
 
-let directory: string;
-
-beforeEach(() => {
-  directory = mkdtempSync(join(tmpdir(), 'bwf-preview-secrets-'));
-});
-
-afterEach(() => {
-  rmSync(directory, { recursive: true, force: true });
-});
-
-describe('collectPreviewSecrets', () => {
-  it('takes each live secret from the environment, then from the file', async () => {
-    const file = join(directory, 'secrets.env');
-    writeFileSync(file, 'FROM_FILE=file-value\nBOTH=file-both\n');
-    const { context } = contextWith(['BOTH', 'FROM_ENV', 'FROM_FILE']);
-
-    const collected = await collectPreviewSecrets(context, {
-      secretsFile: file,
-      env: { BOTH: 'env-both', FROM_ENV: 'env-value' },
+describe('readPreviewBase', () => {
+  it('names the live secrets the Base lacks, and asks for logs in the Base', async () => {
+    const { context, calls } = contextWith({
+      live: ['KEPT', 'LACKING', 'ALSO_LACKING'],
+      base: ['KEPT', 'ONLY_IN_BASE'],
+      logsTurnedOn: true,
     });
 
-    expect(collected.missing).toEqual([]);
-    expect(collected.values).toEqual({
-      BOTH: 'env-both',
-      FROM_ENV: 'env-value',
-      FROM_FILE: 'file-value',
-    });
+    const state = await readPreviewBase(context);
+
+    expect(state.missingFromBase).toEqual(['ALSO_LACKING', 'LACKING']);
+    expect(state.base.logsTurnedOn).toBe(true);
+    expect(calls.find((call) => call.type === 'preview.base')).toMatchObject({ ensureLogs: true });
   });
 
-  it('names every live secret it has no value for, and skips values for secrets the live app lacks', async () => {
-    const { context } = contextWith(['HAVE', 'NO_VALUE', 'EMPTY']);
+  it('finds nothing missing when the Base holds each live secret', async () => {
+    const { context } = contextWith({ live: ['ONE', 'TWO'], base: ['TWO', 'ONE'] });
 
-    const collected = await collectPreviewSecrets(context, {
-      env: { HAVE: 'a-value', EMPTY: '', NOT_LIVE: 'ignored' },
-    });
-
-    expect(collected.missing).toEqual(['EMPTY', 'NO_VALUE']);
-    expect(collected.values).toEqual({ HAVE: 'a-value' });
+    await expect(readPreviewBase(context)).resolves.toMatchObject({ missingFromBase: [] });
   });
 });
 
-describe('the missing secrets message', () => {
-  it('names the secrets and what to do, and holds no value', async () => {
-    const { context } = contextWith(['NO_VALUE', 'HAVE']);
-    const collected = await collectPreviewSecrets(context, { env: { HAVE: 'hidden-value' } });
-    const message = missingPreviewSecretsMessage(collected.missing);
+describe('the missing from Base message', () => {
+  it('names the secret and the command, and says how a preview picks it up', () => {
+    const message = missingFromBaseMessage(['OPENAI_KEY']);
 
-    expect(message).toContain('NO_VALUE');
-    expect(message).toContain('--secrets-file');
-    expect(message).toContain('Nothing was deployed');
-    expect(message).not.toContain('hidden-value');
+    expect(message).toContain('OPENAI_KEY');
+    expect(message).toContain('bwf secret put OPENAI_KEY --preview');
+    expect(message).toContain('remove it and deploy it again');
+  });
+
+  it('uses the plural for several secrets', () => {
+    const message = missingFromBaseMessage(['A_KEY', 'B_KEY']);
+
+    expect(message).toContain('secrets that the preview Base lacks');
+    expect(message).toContain('A_KEY, B_KEY');
+    expect(message).toContain('Set each one once');
   });
 });
 
-describe('applyPreviewSecrets', () => {
-  it('sends the values on stdin, never in the operation', async () => {
-    const { context, calls } = contextWith(['ONE']);
-    const secrets = await collectPreviewSecrets(context, { env: { ONE: 'secret-one' } });
-    calls.length = 0;
+describe('previewBaseFailureMessage', () => {
+  it('tells an app without a deployed Worker to deploy first', () => {
+    const message = previewBaseFailureMessage(new Error('[10007] This Worker does not exist.'));
 
-    await applyPreviewSecrets(context, 'pr-3', secrets);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.operation).toMatchObject({ type: 'preview.secrets', preview: 'pr-3' });
-    expect(JSON.stringify(calls[0]?.operation)).not.toContain('secret-one');
-    expect(JSON.parse(calls[0]?.input ?? '{}')).toEqual({ ONE: 'secret-one' });
-  });
-
-  it('makes no call when the live app has no secrets', async () => {
-    const { context, calls } = contextWith([]);
-    const secrets = await collectPreviewSecrets(context, { env: {} });
-    calls.length = 0;
-
-    await applyPreviewSecrets(context, 'pr-3', secrets);
-
-    expect(calls).toEqual([]);
-  });
-});
-
-describe('liveSecretsFailureMessage', () => {
-  it('tells an app without a deployed Worker to deploy first', async () => {
-    const context: CloudflareOperationContext = {
-      accountId: 'account',
-      apiBaseUrl: 'https://api.example.test',
-      configPath: '/app/wrangler.json',
-      workerName: 'my-worker',
-      runWrangler: () => ({
-        stdout: '',
-        stderr: '[10007] This Worker does not exist on your account.',
-        status: 1,
-      }),
-    };
-
-    const failure = await collectPreviewSecrets(context, { env: {} }).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    if (!(failure instanceof Error)) {
-      throw new Error('Expected the secret list to fail.');
-    }
-
-    const message = liveSecretsFailureMessage(failure);
     expect(message).toContain('no deployed Worker yet');
     expect(message).toContain('bwf deploy --platform cloudflare');
     expect(message).toContain('Nothing was deployed');
   });
 
-  it('does not send a person to deploy for a failure without code 10007', () => {
-    const message = liveSecretsFailureMessage(new Error('This account does not exist'));
-
-    expect(message).toContain("could not read the live app's secrets");
-    expect(message).not.toContain('no deployed Worker');
-  });
-
   it('keeps the reason for any other failure', () => {
-    expect(liveSecretsFailureMessage(new Error('socket hang up'))).toBe(
-      "deploy: could not read the live app's secrets: socket hang up",
+    expect(previewBaseFailureMessage(new Error('socket hang up'))).toBe(
+      "deploy: could not read the app's preview settings: socket hang up",
     );
   });
 });

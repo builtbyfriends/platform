@@ -28,6 +28,30 @@ describe('parseSecretArgs', () => {
     });
   });
 
+  it('reads --preview for each action', () => {
+    expect(parseSecretArgs(['put', 'API_KEY', '--preview'])).toMatchObject({
+      action: 'put',
+      name: 'API_KEY',
+      preview: true,
+    });
+    expect(parseSecretArgs(['list', '--preview'])).toMatchObject({ action: 'list', preview: true });
+    expect(parseSecretArgs(['delete', 'API_KEY', '--preview'])).toMatchObject({ preview: true });
+    expect(parseSecretArgs(['sync', '.env', '--preview', '--yes'])).toMatchObject({
+      action: 'sync',
+      preview: true,
+    });
+    expect(parseSecretArgs(['put', 'API_KEY'])).not.toHaveProperty('preview');
+  });
+
+  it('refuses --preview with --project, and twice', () => {
+    expect(() => parseSecretArgs(['put', 'API_KEY', '--preview', '--project', 'app'])).toThrow(
+      '--preview changes the preview Base',
+    );
+    expect(() => parseSecretArgs(['put', 'API_KEY', '--preview', '--preview'])).toThrow(
+      '--preview can only be specified once',
+    );
+  });
+
   it('errors on extra delete positional value', () => {
     expect(() => parseSecretArgs(['delete', 'API_KEY', 'extra'])).toThrow(
       'secret: Usage: bwf secret delete <name> [--project <name>].',

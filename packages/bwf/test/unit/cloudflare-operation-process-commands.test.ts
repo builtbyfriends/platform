@@ -20,7 +20,7 @@ function installedCfCommands(): Set<string> {
 
 // Decision: This reads only `runCf([...])` calls whose words are all string literals. A call that builds its
 // words at run time is not checked, and neither are operations that call the Workers REST API
-// instead of cf, such as `preview.secrets`.
+// instead of cf, such as `preview.base`.
 function commandsRunBy(source: string): Array<string> {
   const found = new Set<string>();
 
