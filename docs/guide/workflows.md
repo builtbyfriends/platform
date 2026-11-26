@@ -64,4 +64,4 @@ Workflows work on the Workers Free plan.
 
 ## Previews
 
-A [preview](/reference/cli/deploy#previews) uses the Workflow of the deployed app. An instance a preview starts runs in the live Workflow, and the live app can see it by its id.
+A [preview](/reference/cli/deploy#previews) has no binding to a Workflow. Cloudflare doesn't make a Workflow for a preview, and a binding would start instances in the deployed app's Workflow. Code that reads the binding fails in a preview. Test a Workflow in a deployed app, or locally.
