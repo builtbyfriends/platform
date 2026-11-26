@@ -1,0 +1,108 @@
+name: Snapshot
+
+# Decision: a fix in this repository takes about 45 minutes to reach an app that pins a release (the pull request,
+# the release checks, the publish, then the app's pin). A snapshot publishes a pull request's packages in about
+# a minute under the `snapshot` tag, so an app's branch can pin one exact version and try the fix before it merges.
+# A snapshot version always has -snap. in it, so no range an app writes for a release (^1.13.8) can pick one.
+# Zack chose this on 2026-11-26, and Head of Code set the design. A snapshot is kept for 30 days (see the clean-up job below).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - '.github/workflows/snapshot.yml'
+      - '.github/scripts/snapshot-version.ts'
+  workflow_dispatch:
+    inputs:
+      label:
+        description: A short name for the snapshot (letters and digits), when you run it by hand.
+        required: true
+        type: string
+  schedule:
+    - cron: '17 4 * * *'
+
+permissions: {}
+
+concurrency:
+  group: snapshot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    name: Publish a snapshot
+    # Decision: a pull request from a fork can't read the packages token, and its code shouldn't hold a token that can publish.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    env:
+      SNAPSHOT_CHANGE: ${{ github.event.pull_request.number || inputs.label }}
+      SNAPSHOT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PLATFORM_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
+      - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
+        with:
+          node-version-file: .node-version
+          cache: true
+      - name: Name the snapshot
+        id: snapshot
+        run: node .github/scripts/snapshot-version.ts
+      - run: vp run build
+      - run: npm install -g npm@11
+      - name: Sign in to GitHub Packages
+        env:
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/github-packages.npmrc
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
+      - name: Publish packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/github-packages.npmrc
+        run: vp pm publish -r --tag "${{ steps.snapshot.outputs.npm-tag }}" --no-git-checks
+      - name: Say which version to pin
+        env:
+          VERSION: ${{ steps.snapshot.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "Snapshot \`@builtbyfriends/bwf@$VERSION\` is published. Pin it exactly in a branch to try this change."
+            echo "The same version is on every package in this repository."
+          } | tee -a "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/comment.md"
+          if [ -n "$NUMBER" ]; then
+            gh pr comment "$NUMBER" --edit-last --create-if-none --body-file "$RUNNER_TEMP/comment.md"
+          fi
+
+  clean-up:
+    name: Remove old snapshots
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    env:
+      GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+    steps:
+      # Decision: a snapshot lives for 30 days. A branch that still needs one pins a newer snapshot by then. Versions with
+      # -snap. in them are the only ones this job deletes, and it needs a token that can delete packages.
+      - name: Delete snapshot versions older than 30 days
+        run: |
+          cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          for package in bwf edge platform create-bwf deploy-core deploy-cloudflare; do
+            gh api --paginate --slurp "orgs/${GITHUB_REPOSITORY%%/*}/packages/npm/$package/versions?per_page=100" \
+              --jq "flatten | map(select(.name | contains(\"-snap.\")) | select(.created_at < \"$cutoff\") | .id) | .[]" \
+              | while read -r id; do
+                  gh api -X DELETE "orgs/${GITHUB_REPOSITORY%%/*}/packages/npm/$package/versions/$id" || true
+                done
+          done

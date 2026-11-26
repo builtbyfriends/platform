@@ -84,8 +84,35 @@ jobs:
       - name: Validate package versions and release channel
         run: node .github/scripts/release-policy.ts
 
+  # Decision: Head of Code asked on 2026-11-26 to stop running the release checks again when the pull request already passed
+  # them: a release took 7 to 12 minutes, and the publish itself took 1. The merged pull request's checks count when
+  # every one of them passed and the files at its head are the same files as this commit. A push that comes from no
+  # merged pull request, a head with different files from main, a failed lookup and a tag push still run the full checks. The push to main
+  # still runs ci.yml for the Windows tests, and it doesn't hold the publish.
+  reuse-checks:
+    name: Reuse the pull request's checks
+    needs: [release-tag, validate-release]
+    if: needs.release-tag.outputs.tag != '' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      reuse: ${{ steps.reuse.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/reuse-pr-checks.ts
+
   ci:
-    needs: validate-release
+    needs: [validate-release, reuse-checks]
+    if: ${{ !cancelled() && needs.validate-release.result == 'success' && needs.reuse-checks.outputs.reuse != 'true' }}
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -96,7 +123,8 @@ jobs:
       PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
   platform-ci:
-    needs: [release-tag, validate-release]
+    needs: [release-tag, validate-release, reuse-checks]
+    if: ${{ !cancelled() && needs.validate-release.result == 'success' && needs.reuse-checks.outputs.reuse != 'true' }}
     uses: ./.github/workflows/platform-ci.yml
     with:
       require-schema-compat: ${{ needs.release-tag.outputs.production == 'true' }}
@@ -108,7 +136,8 @@ jobs:
 
   prepublish-test:
     name: Prepublish Test
-    needs: validate-release
+    needs: [validate-release, reuse-checks]
+    if: ${{ !cancelled() && needs.validate-release.result == 'success' && needs.reuse-checks.outputs.reuse != 'true' }}
     uses: ./.github/workflows/prepublish-test.yml
     with:
       suite: full
@@ -122,7 +151,11 @@ jobs:
   # Decision: Zack moved our packages from npm to GitHub Packages on 2026-11-25. Each package's
   # publishConfig names the registry, and the workflow's own token publishes, so nothing is stored.
   publish:
-    needs: [release-tag, ci, platform-ci, prepublish-test]
+    needs: [release-tag, reuse-checks, ci, platform-ci, prepublish-test]
+    if: >-
+      !cancelled() && needs.release-tag.outputs.tag != '' && (
+      needs.reuse-checks.outputs.reuse == 'true' ||
+      (needs.ci.result == 'success' && needs.platform-ci.result == 'success' && needs.prepublish-test.result == 'success'))
     runs-on: ubuntu-latest
     environment: Release
     permissions:
