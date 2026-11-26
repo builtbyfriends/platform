@@ -4,7 +4,7 @@ import type { PreviewBuild } from './cf-build-output.ts';
 import type { CfCommand } from './cf-version-api.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 
-const PREVIEW_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+export { isPreviewName } from './preview-name.ts';
 
 const DatabaseEntry = type({ name: 'string', uuid: 'string' });
 const DatabaseList = DatabaseEntry.array().or({ result: DatabaseEntry.array() });
@@ -12,10 +12,6 @@ const CreatedDatabase = type({ uuid: 'string' });
 const D1Binding = type({ type: "'d1'", 'name?': 'string', 'id?': 'string' });
 const PreviewDeployOutput = type({ preview_urls: 'string[]' });
 const Json = type('string.json.parse');
-
-export function isPreviewName(name: string): boolean {
-  return PREVIEW_NAME.test(name);
-}
 
 /** A preview's copy of a database. The word "preview" keeps it from matching a database a person named themselves. */
 export function previewDatabaseName(databaseName: string, preview: string): string {
