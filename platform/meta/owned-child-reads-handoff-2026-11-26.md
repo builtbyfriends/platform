@@ -35,3 +35,12 @@ Containers need separate work: the `container` resource type includes historical
 Crowded's reconciliation already keeps unknown inventory kinds as generic Resource nodes. The runtime feeds it the opaque ID and safe label, with no new product-specific frontend switch. Observed deployment connections remain separate from ownership-only inventory.
 
 Continuation verification: 465 tests pass across eight runtime/provider files, including the real Workerd D1 cases with host loopback access; API typecheck, touched type-aware lint and diff whitespace checks pass. The affected selector lists 273/725 files. That broad selection and the full suite were not run. The whole-repository typecheck was attempted but stops in unrelated `playground/pg-api-test` because its generated `.bwf/tsconfig.json` and `@schema` are missing. Do not mark the whole check or native acceptance passed.
+
+
+## Checked zero-traffic candidate — 2026-11-26 18:10 UTC
+
+Runtime source5a81b0b3cd40ce846e279c53cf982d581f660054 is backed up on origin/codex/owned-child-details. The clean-source API bundle is4,112,003bytes, SHA256 `510995809d0a5a19a2d474dc0bf473195313d3c6d5a70bfebbc4665efea8684d`. Uploaded candidate `801cbe58-93c7-4c90-87d2-5649d4088e70` is inactive. Shared traffic remains on approveda521d6aa/deployment8814cb64. No activation is claimed.
+
+Fresh preparation checks: all14 provider descriptors load identically in cold/warm Workerd; the12 existing descriptor identities/effects/versions match the approved baseline. The two child reads have the expected descriptors. All14 immutable R2 schema objects pass compressed/inflated size, SHA256 and operation-identity readback. Candidate and active source bytes were checked after upload; all63 inherited bindings and compatibility settings are preserved, with no migrations or traffic change. Live baseline health isok and six unauthenticated resource/catalog routes still return401. These baseline checks don't establish authenticated candidate execution.
+
+The earlier465 tests and API types/touched lint apply to unchanged runtime source. Whole-repository checks retain the unrelated generated playground limit recorded above. Preparation receipts are in `/tmp/infra-provider-owned-child-candidate`; binding settings and credentials aren't copied into this document. Candidate activation retains the owner's exact-version boundary. Native child selection and saved generated-detail acceptance remain required after activation.

@@ -1,6 +1,6 @@
 # Runtime resource ownership and operation coverage — 2026-11-26
 
-This is a source coverage ledger, not a live acceptance receipt. The shared Platform deployment is unchanged. The child reads in `166c8301` and the Access reference slice described here have not been activated.
+This is a source coverage ledger, not a live acceptance receipt. The shared Platform deployment is unchanged. Checked source5a81b0b3 is backed up remotely and uploaded as inactive candidate801cbe58; see the owned-child handoff for its exact artifact and verification receipt. The child reads in `166c8301` and the Access reference slice described here have not been activated.
 
 ## Ownership boundary
 
