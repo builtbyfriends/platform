@@ -8,7 +8,6 @@ import { getApiUrl, getToken, getTokenSource } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
 import { maybeLinkCloudflareDeploy } from './cloudflare-link.ts';
 import { withRecordedReadinessAccessOrigin } from './cloudflare-readiness.ts';
-import { runCloudflarePreview } from './deploy-cloudflare-preview.ts';
 import { runCloudflareDeploy } from './deploy-cloudflare.ts';
 import {
   log,
@@ -113,6 +112,9 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
       );
     }
     if (options.preview !== undefined || options.removePreview !== undefined) {
+      // Decision: The preview code loads arktype, which adds about 250 ms to every bwf start, so only a preview command loads it.
+      const { runCloudflarePreview } = await import('./deploy-cloudflare-preview.ts');
+
       return runCloudflarePreview(root, options, cliLog);
     }
     return runCloudflareDeploy(root, options, cliLog);

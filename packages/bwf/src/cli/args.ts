@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { isPreviewName } from './cloudflare-preview.ts';
 import type { RunDeployOptions } from './deploy-types.ts';
+import { isPreviewName } from './preview-name.ts';
 
 export function parseDeployArgs(
   args: Array<string>,
