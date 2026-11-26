@@ -33,6 +33,7 @@
     "@builtbyfriends/realtime": "^0.1.0",
     "@builtbyfriends/realtime-http": "^0.1.0",
     "@builtbyfriends/realtime-mcp": "^0.1.0",
+    "@cfworker/json-schema": "^4.1.6",
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "catalog:",
     "@modelcontextprotocol/server": "^2.4.0",

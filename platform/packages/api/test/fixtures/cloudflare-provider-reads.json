@@ -1,0 +1,1450 @@
+{
+  "source": "cloudflare/api-schemas",
+  "revision": "9a5e4d44bd74d90fa9e4822142b8eb67e4ba3c70",
+  "operations": {
+    "d1": {
+      "operationId": "d1-get-database",
+      "method": "GET",
+      "path": "/accounts/{account_id}/d1/database/{database_id}",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "description": "Welcome to Cloudflare's API documentation site. We are experimenting with an updated version of our API documentation - check out [developers.cloudflare.com/api-next/](https://developers.cloudflare.com/api-next/) to test out the new experience.\n\nTo get started using Cloudflare's products and services via the API, refer to [how to interact with Cloudflare](https://developers.cloudflare.com/fundamentals/basic-tasks/interact-with-cloudflare/), which covers using tools like [Terraform](https://developers.cloudflare.com/terraform/#cloudflare-terraform) and the [official SDKs](https://developers.cloudflare.com/fundamentals/api/reference/sdks/) to maintain your Cloudflare resources.\n\nUsing the Cloudflare API requires authentication so that Cloudflare knows who is making requests and what permissions you have. Create an API token to grant access to the API to perform actions. You can also authenticate with [API keys](https://developers.cloudflare.com/fundamentals/api/get-started/keys/), but these keys have [several limitations](https://developers.cloudflare.com/fundamentals/api/get-started/keys/#limitations) that make them less secure than API tokens. Whenever possible, use API tokens to interact with the Cloudflare API.\n\nTo create an API token, from the Cloudflare dashboard, go to My Profile > API Tokens and select Create Token. For more information on how to create and troubleshoot API tokens, refer to\nour [API fundamentals](https://developers.cloudflare.com/fundamentals/api/).\n\nFor information regarding rate limits, refer to our [API Rate Limits](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/limits/#api-rate-limits).\n\nTotally new to Cloudflare? [Start here](https://developers.cloudflare.com/fundamentals/get-started/).",
+          "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://opensource.org/licenses/BSD-3-Clause"
+          },
+          "title": "Cloudflare API",
+          "version": "4.0.0"
+        },
+        "servers": [
+          {
+            "description": "Client API",
+            "url": "https://api.cloudflare.com/client/v4"
+          }
+        ],
+        "externalDocs": {
+          "description": "Cloudflare Radar Documentation",
+          "url": "https://developers.cloudflare.com/radar/"
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": []
+          },
+          {
+            "api_token": []
+          },
+          {
+            "user_service_key": []
+          }
+        ],
+        "paths": {
+          "/accounts/{account_id}/d1/database/{database_id}": {
+            "get": {
+              "operationId": "d1-get-database",
+              "summary": "Get D1 Database",
+              "description": "Get details for a specific D1 database.",
+              "parameters": [
+                {
+                  "name": "account_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/d1_account-identifier"
+                  }
+                },
+                {
+                  "name": "database_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/d1_database-identifier"
+                      },
+                      {
+                        "$ref": "#/components/schemas/d1_database-name"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "fields",
+                  "in": "query",
+                  "description": "Comma-separated list of fields to include in the response. When omitted,\nall fields are returned.\n",
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "uuid",
+                        "name",
+                        "created_at",
+                        "version",
+                        "jurisdiction",
+                        "num_tables",
+                        "file_size",
+                        "running_in_region",
+                        "read_replication"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "example": "uuid,name,version",
+                  "explode": false,
+                  "style": "form"
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Database details response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/d1_api-response-common"
+                          },
+                          {
+                            "properties": {
+                              "result": {
+                                "$ref": "#/components/schemas/d1_database-details-response"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "4XX": {
+                  "description": "Database details response failure",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/d1_api-response-common-failure"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "api_token": []
+                },
+                {
+                  "api_email": [],
+                  "api_key": []
+                }
+              ],
+              "tags": ["D1"],
+              "x-api-token-group": [
+                "D1 Metadata Read",
+                "AI Search Index Engine",
+                "D1 Read",
+                "D1 Write"
+              ],
+              "x-fern-availability": "generally-available",
+              "x-fern-sdk-group-name": "d1",
+              "x-fern-sdk-method-name": "get",
+              "x-forge-availability": "generally-available",
+              "x-forge-epilogue": "This command acts on remote D1 Databases.",
+              "x-forge-group-name": "d1",
+              "x-forge-method-name": "get",
+              "x-forge-oauth-scopes": ["d1.metadata_read", "d1.read", "d1.write", "ai-search.index"]
+            }
+          }
+        },
+        "components": {
+          "securitySchemes": {
+            "api_email": {
+              "in": "header",
+              "name": "X-Auth-Email",
+              "type": "apiKey"
+            },
+            "api_key": {
+              "in": "header",
+              "name": "X-Auth-Key",
+              "type": "apiKey"
+            },
+            "api_token": {
+              "scheme": "bearer",
+              "type": "http"
+            },
+            "user_service_key": {
+              "in": "header",
+              "name": "X-Auth-User-Service-Key",
+              "type": "apiKey"
+            }
+          },
+          "schemas": {
+            "d1_account-identifier": {
+              "description": "Account identifier tag.",
+              "type": "string",
+              "example": "023e105f4ecef8ad9ca31a8372d0c353",
+              "maxLength": 32,
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "d1_database-identifier": {
+              "description": "D1 database identifier (UUID).",
+              "type": "string",
+              "example": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "d1_database-name": {
+              "description": "D1 database name.",
+              "type": "string",
+              "example": "my-database",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+              "x-auditable": true
+            },
+            "d1_api-response-common": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/d1_messages"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/d1_messages"
+                },
+                "success": {
+                  "description": "Whether the API call was successful",
+                  "type": "boolean",
+                  "example": true,
+                  "enum": [true]
+                }
+              },
+              "required": ["success", "errors", "messages", "result"]
+            },
+            "d1_database-details-response": {
+              "description": "The details of the D1 database.",
+              "type": "object",
+              "properties": {
+                "created_at": {
+                  "$ref": "#/components/schemas/d1_created-at"
+                },
+                "file_size": {
+                  "$ref": "#/components/schemas/d1_file-size"
+                },
+                "jurisdiction": {
+                  "$ref": "#/components/schemas/d1_jurisdiction-nullable"
+                },
+                "name": {
+                  "$ref": "#/components/schemas/d1_database-name"
+                },
+                "num_tables": {
+                  "$ref": "#/components/schemas/d1_table-count"
+                },
+                "read_replication": {
+                  "$ref": "#/components/schemas/d1_read-replication-details-for-response"
+                },
+                "uuid": {
+                  "$ref": "#/components/schemas/d1_database-identifier"
+                },
+                "version": {
+                  "$ref": "#/components/schemas/d1_database-version"
+                }
+              }
+            },
+            "d1_api-response-common-failure": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "example": [
+                    {
+                      "code": 7003,
+                      "message": "No route for the URI"
+                    }
+                  ],
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/d1_messages"
+                    }
+                  ],
+                  "minLength": 1
+                },
+                "messages": {
+                  "example": [],
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/d1_messages"
+                    }
+                  ]
+                },
+                "result": {
+                  "type": "object",
+                  "enum": [null],
+                  "nullable": true
+                },
+                "success": {
+                  "description": "Whether the API call was successful",
+                  "type": "boolean",
+                  "example": false,
+                  "enum": [false]
+                }
+              },
+              "required": ["success", "errors", "messages", "result"]
+            },
+            "d1_messages": {
+              "type": "array",
+              "items": {
+                "properties": {
+                  "code": {
+                    "type": "integer",
+                    "minimum": 1000
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": ["code", "message"],
+                "type": "object",
+                "uniqueItems": true
+              },
+              "example": []
+            },
+            "d1_created-at": {
+              "description": "Specifies the timestamp the resource was created as an ISO8601 string.",
+              "type": "string",
+              "format": "date-time",
+              "example": "2022-11-15T18:25:44.442097Z",
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "d1_file-size": {
+              "description": "The D1 database's size, in bytes.",
+              "type": "number",
+              "example": 12,
+              "x-auditable": true
+            },
+            "d1_jurisdiction-nullable": {
+              "description": "Specify the location to restrict the D1 database to run and store data. If this option is present, the location hint is ignored.",
+              "type": "string",
+              "example": "eu",
+              "enum": ["eu", "fedramp", "us"],
+              "nullable": true,
+              "x-auditable": true
+            },
+            "d1_table-count": {
+              "description": "The number of tables in the D1 database. This count is no longer accurate and should not be relied upon.",
+              "type": "number",
+              "example": 12,
+              "deprecated": true,
+              "x-auditable": true
+            },
+            "d1_read-replication-details-for-response": {
+              "description": "Configuration for D1 read replication.",
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "description": "The read replication mode for the database. Mode 'auto' denotes that D1 creates replicas and automatically places them around the world. Mode 'disabled' denotes that no database replicas are used.",
+                  "type": "string",
+                  "example": "auto",
+                  "enum": ["auto", "disabled"],
+                  "x-auditable": true
+                }
+              },
+              "required": ["mode"]
+            },
+            "d1_database-version": {
+              "type": "string",
+              "example": "production",
+              "pattern": "^(alpha|beta|production)$",
+              "x-auditable": true
+            }
+          }
+        }
+      }
+    },
+    "r2": {
+      "operationId": "r2-get-bucket",
+      "method": "GET",
+      "path": "/accounts/{account_id}/r2/buckets/{bucket_name}",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "description": "Welcome to Cloudflare's API documentation site. We are experimenting with an updated version of our API documentation - check out [developers.cloudflare.com/api-next/](https://developers.cloudflare.com/api-next/) to test out the new experience.\n\nTo get started using Cloudflare's products and services via the API, refer to [how to interact with Cloudflare](https://developers.cloudflare.com/fundamentals/basic-tasks/interact-with-cloudflare/), which covers using tools like [Terraform](https://developers.cloudflare.com/terraform/#cloudflare-terraform) and the [official SDKs](https://developers.cloudflare.com/fundamentals/api/reference/sdks/) to maintain your Cloudflare resources.\n\nUsing the Cloudflare API requires authentication so that Cloudflare knows who is making requests and what permissions you have. Create an API token to grant access to the API to perform actions. You can also authenticate with [API keys](https://developers.cloudflare.com/fundamentals/api/get-started/keys/), but these keys have [several limitations](https://developers.cloudflare.com/fundamentals/api/get-started/keys/#limitations) that make them less secure than API tokens. Whenever possible, use API tokens to interact with the Cloudflare API.\n\nTo create an API token, from the Cloudflare dashboard, go to My Profile > API Tokens and select Create Token. For more information on how to create and troubleshoot API tokens, refer to\nour [API fundamentals](https://developers.cloudflare.com/fundamentals/api/).\n\nFor information regarding rate limits, refer to our [API Rate Limits](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/limits/#api-rate-limits).\n\nTotally new to Cloudflare? [Start here](https://developers.cloudflare.com/fundamentals/get-started/).",
+          "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://opensource.org/licenses/BSD-3-Clause"
+          },
+          "title": "Cloudflare API",
+          "version": "4.0.0"
+        },
+        "servers": [
+          {
+            "description": "Client API",
+            "url": "https://api.cloudflare.com/client/v4"
+          }
+        ],
+        "externalDocs": {
+          "description": "Cloudflare Radar Documentation",
+          "url": "https://developers.cloudflare.com/radar/"
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": []
+          },
+          {
+            "api_token": []
+          },
+          {
+            "user_service_key": []
+          }
+        ],
+        "paths": {
+          "/accounts/{account_id}/r2/buckets/{bucket_name}": {
+            "get": {
+              "operationId": "r2-get-bucket",
+              "summary": "Get Bucket",
+              "description": "Gets properties of an existing R2 bucket.",
+              "parameters": [
+                {
+                  "name": "account_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/r2_account_identifier"
+                  }
+                },
+                {
+                  "name": "bucket_name",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/r2_bucket_name"
+                  }
+                },
+                {
+                  "$ref": "#/components/parameters/r2_cf-r2-jurisdiction"
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Get Bucket response.",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/r2_v4_response"
+                          },
+                          {
+                            "properties": {
+                              "result": {
+                                "$ref": "#/components/schemas/r2_bucket"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "4XX": {
+                  "description": "Get Bucket response failure.",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/r2_v4_response_failure"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "api_token": []
+                }
+              ],
+              "tags": ["R2 Bucket"],
+              "x-cfPermissionsRequired": {
+                "enum": ["com.cloudflare.edge.r2.bucket.read"]
+              },
+              "x-fern-availability": "generally-available",
+              "x-fern-sdk-group-name": "r2.buckets",
+              "x-fern-sdk-method-name": "get",
+              "x-forge-availability": "generally-available",
+              "x-forge-group-name": "r2.buckets",
+              "x-forge-method-name": "get"
+            }
+          }
+        },
+        "components": {
+          "securitySchemes": {
+            "api_email": {
+              "in": "header",
+              "name": "X-Auth-Email",
+              "type": "apiKey"
+            },
+            "api_key": {
+              "in": "header",
+              "name": "X-Auth-Key",
+              "type": "apiKey"
+            },
+            "api_token": {
+              "scheme": "bearer",
+              "type": "http"
+            },
+            "user_service_key": {
+              "in": "header",
+              "name": "X-Auth-User-Service-Key",
+              "type": "apiKey"
+            }
+          },
+          "schemas": {
+            "r2_account_identifier": {
+              "description": "Cloudflare account ID that owns the R2 resource.",
+              "type": "string",
+              "example": "023e105f4ecef8ad9ca31a8372d0c353",
+              "maxLength": 32
+            },
+            "r2_bucket_name": {
+              "description": "Name of the bucket.",
+              "type": "string",
+              "example": "example-bucket",
+              "maxLength": 64,
+              "minLength": 3,
+              "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]",
+              "x-auditable": true
+            },
+            "r2_v4_response": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/r2_errors"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/r2_messages"
+                },
+                "result": {
+                  "type": "object"
+                },
+                "success": {
+                  "description": "Whether the API call was successful.",
+                  "type": "boolean",
+                  "enum": [true]
+                }
+              },
+              "required": ["success", "errors", "messages", "result"]
+            },
+            "r2_bucket": {
+              "description": "A single R2 bucket.",
+              "type": "object",
+              "properties": {
+                "creation_date": {
+                  "description": "Creation timestamp.",
+                  "type": "string"
+                },
+                "jurisdiction": {
+                  "$ref": "#/components/schemas/r2_jurisdiction"
+                },
+                "location": {
+                  "$ref": "#/components/schemas/r2_bucket_location"
+                },
+                "name": {
+                  "$ref": "#/components/schemas/r2_bucket_name"
+                },
+                "storage_class": {
+                  "$ref": "#/components/schemas/r2_storage_class"
+                }
+              }
+            },
+            "r2_v4_response_failure": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/r2_errors"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/r2_messages"
+                },
+                "result": {
+                  "type": "object",
+                  "enum": [null],
+                  "nullable": true
+                },
+                "success": {
+                  "description": "Whether the API call was successful.",
+                  "type": "boolean",
+                  "example": false,
+                  "enum": [false]
+                }
+              },
+              "required": ["success", "errors", "messages", "result"]
+            },
+            "r2_errors": {
+              "type": "array",
+              "items": {
+                "properties": {
+                  "code": {
+                    "type": "integer",
+                    "minimum": 1000
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": ["code", "message"],
+                "type": "object",
+                "uniqueItems": true
+              }
+            },
+            "r2_messages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "r2_jurisdiction": {
+              "description": "Jurisdiction where objects in this bucket are guaranteed to be stored.",
+              "type": "string",
+              "default": "default",
+              "enum": ["default", "eu", "us", "fedramp", "fedramp-high"],
+              "x-auditable": true,
+              "x-stainless-param": "jurisdiction"
+            },
+            "r2_bucket_location": {
+              "description": "Location of the bucket.",
+              "type": "string",
+              "enum": ["apac", "eeur", "enam", "weur", "wnam", "oc"],
+              "x-auditable": true,
+              "x-stainless-terraform-configurability": "computed_optional"
+            },
+            "r2_storage_class": {
+              "description": "Storage class for newly uploaded objects, unless specified otherwise.",
+              "type": "string",
+              "default": "Standard",
+              "enum": ["Standard", "InfrequentAccess"],
+              "x-auditable": true
+            }
+          },
+          "parameters": {
+            "r2_cf-r2-jurisdiction": {
+              "description": "Jurisdiction where objects in this bucket are guaranteed to be stored.",
+              "in": "header",
+              "name": "cf-r2-jurisdiction",
+              "schema": {
+                "type": "string",
+                "default": "default",
+                "enum": ["default", "eu", "us", "fedramp", "fedramp-high"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "kv": {
+      "operationId": "workers-kv-namespace-get-a-namespace",
+      "method": "GET",
+      "path": "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "description": "Welcome to Cloudflare's API documentation site. We are experimenting with an updated version of our API documentation - check out [developers.cloudflare.com/api-next/](https://developers.cloudflare.com/api-next/) to test out the new experience.\n\nTo get started using Cloudflare's products and services via the API, refer to [how to interact with Cloudflare](https://developers.cloudflare.com/fundamentals/basic-tasks/interact-with-cloudflare/), which covers using tools like [Terraform](https://developers.cloudflare.com/terraform/#cloudflare-terraform) and the [official SDKs](https://developers.cloudflare.com/fundamentals/api/reference/sdks/) to maintain your Cloudflare resources.\n\nUsing the Cloudflare API requires authentication so that Cloudflare knows who is making requests and what permissions you have. Create an API token to grant access to the API to perform actions. You can also authenticate with [API keys](https://developers.cloudflare.com/fundamentals/api/get-started/keys/), but these keys have [several limitations](https://developers.cloudflare.com/fundamentals/api/get-started/keys/#limitations) that make them less secure than API tokens. Whenever possible, use API tokens to interact with the Cloudflare API.\n\nTo create an API token, from the Cloudflare dashboard, go to My Profile > API Tokens and select Create Token. For more information on how to create and troubleshoot API tokens, refer to\nour [API fundamentals](https://developers.cloudflare.com/fundamentals/api/).\n\nFor information regarding rate limits, refer to our [API Rate Limits](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/limits/#api-rate-limits).\n\nTotally new to Cloudflare? [Start here](https://developers.cloudflare.com/fundamentals/get-started/).",
+          "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://opensource.org/licenses/BSD-3-Clause"
+          },
+          "title": "Cloudflare API",
+          "version": "4.0.0"
+        },
+        "servers": [
+          {
+            "description": "Client API",
+            "url": "https://api.cloudflare.com/client/v4"
+          }
+        ],
+        "externalDocs": {
+          "description": "Cloudflare Radar Documentation",
+          "url": "https://developers.cloudflare.com/radar/"
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": []
+          },
+          {
+            "api_token": []
+          },
+          {
+            "user_service_key": []
+          }
+        ],
+        "paths": {
+          "/accounts/{account_id}/storage/kv/namespaces/{namespace_id}": {
+            "get": {
+              "operationId": "workers-kv-namespace-get-a-namespace",
+              "summary": "Get a namespace",
+              "description": "Returns the Workers KV namespace for the specified account and namespace ID.",
+              "parameters": [
+                {
+                  "name": "namespace_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/workers-kv_namespace_identifier"
+                  }
+                },
+                {
+                  "name": "account_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/workers-kv_identifier"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Get a Namespace response.",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/workers-kv_api-response-common"
+                          },
+                          {
+                            "properties": {
+                              "result": {
+                                "$ref": "#/components/schemas/workers-kv_namespace"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "4XX": {
+                  "description": "Get a Namespace response failure.",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/workers-kv_api-response-common-failure"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "api_token": []
+                },
+                {
+                  "api_email": [],
+                  "api_key": []
+                }
+              ],
+              "tags": ["Workers KV Namespace"],
+              "x-api-token-group": [
+                "Workers KV Storage Metadata Read",
+                "Workers KV Storage Write",
+                "Workers KV Storage Read"
+              ],
+              "x-fern-availability": "generally-available",
+              "x-fern-sdk-group-name": "kv.namespaces",
+              "x-fern-sdk-method-name": "get",
+              "x-forge-availability": "generally-available",
+              "x-forge-group-name": "kv.namespaces",
+              "x-forge-method-name": "get",
+              "x-forge-oauth-scopes": [
+                "workers-kv-storage.metadata_read",
+                "workers-kv-storage.read",
+                "workers-kv-storage.write"
+              ]
+            }
+          }
+        },
+        "components": {
+          "securitySchemes": {
+            "api_email": {
+              "in": "header",
+              "name": "X-Auth-Email",
+              "type": "apiKey"
+            },
+            "api_key": {
+              "in": "header",
+              "name": "X-Auth-Key",
+              "type": "apiKey"
+            },
+            "api_token": {
+              "scheme": "bearer",
+              "type": "http"
+            },
+            "user_service_key": {
+              "in": "header",
+              "name": "X-Auth-User-Service-Key",
+              "type": "apiKey"
+            }
+          },
+          "schemas": {
+            "workers-kv_namespace_identifier": {
+              "description": "ID of the Workers KV namespace.",
+              "type": "string",
+              "example": "0f2ac74b498b48028cb68387c421e279",
+              "maxLength": 32,
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "workers-kv_identifier": {
+              "description": "ID of the Cloudflare account that owns the Workers KV namespaces.",
+              "type": "string",
+              "example": "023e105f4ecef8ad9ca31a8372d0c353",
+              "maxLength": 32,
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "workers-kv_api-response-common": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/workers-kv_messages"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/workers-kv_messages"
+                },
+                "success": {
+                  "description": "Whether the API call was successful.",
+                  "type": "boolean",
+                  "example": true,
+                  "enum": [true]
+                }
+              },
+              "required": ["success", "errors", "messages"]
+            },
+            "workers-kv_namespace": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/workers-kv_namespace_identifier"
+                },
+                "jurisdiction": {
+                  "$ref": "#/components/schemas/workers-kv_jurisdiction"
+                },
+                "mode": {
+                  "$ref": "#/components/schemas/workers-kv_namespace_mode"
+                },
+                "supports_url_encoding": {
+                  "description": "True if keys written on the URL will be URL-decoded before storing. For example, if set to \"true\", a key written on the URL as \"%3F\" will be stored as \"?\".",
+                  "type": "boolean",
+                  "example": true,
+                  "readOnly": true,
+                  "x-auditable": true
+                },
+                "title": {
+                  "$ref": "#/components/schemas/workers-kv_namespace_title"
+                }
+              },
+              "required": ["id", "title"]
+            },
+            "workers-kv_api-response-common-failure": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "example": [
+                    {
+                      "code": 7003,
+                      "message": "No route for the URI"
+                    }
+                  ],
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers-kv_messages"
+                    }
+                  ],
+                  "minLength": 1
+                },
+                "messages": {
+                  "example": [],
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/workers-kv_messages"
+                    }
+                  ]
+                },
+                "result": {
+                  "type": "object",
+                  "nullable": true,
+                  "x-stainless-empty-object": true
+                },
+                "success": {
+                  "description": "Whether the API call was successful.",
+                  "type": "boolean",
+                  "example": false,
+                  "enum": [false]
+                }
+              },
+              "required": ["success", "errors", "messages", "result"]
+            },
+            "workers-kv_messages": {
+              "type": "array",
+              "items": {
+                "properties": {
+                  "code": {
+                    "type": "integer",
+                    "minimum": 1000
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": ["code", "message"],
+                "type": "object"
+              },
+              "example": [],
+              "uniqueItems": true
+            },
+            "workers-kv_jurisdiction": {
+              "description": "Specify the jurisdiction to restrict the KV namespace to durably store data within. Can only be set at namespace creation time.",
+              "type": "string",
+              "example": "eu",
+              "enum": ["eu", "fedramp", "us"],
+              "x-auditable": true
+            },
+            "workers-kv_namespace_mode": {
+              "description": "The mode of the Workers KV namespace. Specify `instant` when creating a namespace to create a KV Instant namespace. Omit this field when creating a namespace to create a classic namespace. Currently, `instant` is the only supported explicit value.",
+              "type": "string",
+              "example": "instant",
+              "enum": ["instant"]
+            },
+            "workers-kv_namespace_title": {
+              "description": "Human-readable string name for a Workers KV namespace.",
+              "type": "string",
+              "example": "My Own Namespace",
+              "maxLength": 512,
+              "x-auditable": true
+            }
+          }
+        }
+      }
+    },
+    "queue": {
+      "operationId": "queues-get",
+      "method": "GET",
+      "path": "/accounts/{account_id}/queues/{queue_id}",
+      "document": {
+        "openapi": "3.0.3",
+        "info": {
+          "description": "Welcome to Cloudflare's API documentation site. We are experimenting with an updated version of our API documentation - check out [developers.cloudflare.com/api-next/](https://developers.cloudflare.com/api-next/) to test out the new experience.\n\nTo get started using Cloudflare's products and services via the API, refer to [how to interact with Cloudflare](https://developers.cloudflare.com/fundamentals/basic-tasks/interact-with-cloudflare/), which covers using tools like [Terraform](https://developers.cloudflare.com/terraform/#cloudflare-terraform) and the [official SDKs](https://developers.cloudflare.com/fundamentals/api/reference/sdks/) to maintain your Cloudflare resources.\n\nUsing the Cloudflare API requires authentication so that Cloudflare knows who is making requests and what permissions you have. Create an API token to grant access to the API to perform actions. You can also authenticate with [API keys](https://developers.cloudflare.com/fundamentals/api/get-started/keys/), but these keys have [several limitations](https://developers.cloudflare.com/fundamentals/api/get-started/keys/#limitations) that make them less secure than API tokens. Whenever possible, use API tokens to interact with the Cloudflare API.\n\nTo create an API token, from the Cloudflare dashboard, go to My Profile > API Tokens and select Create Token. For more information on how to create and troubleshoot API tokens, refer to\nour [API fundamentals](https://developers.cloudflare.com/fundamentals/api/).\n\nFor information regarding rate limits, refer to our [API Rate Limits](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/platform/limits/#api-rate-limits).\n\nTotally new to Cloudflare? [Start here](https://developers.cloudflare.com/fundamentals/get-started/).",
+          "license": {
+            "name": "BSD-3-Clause",
+            "url": "https://opensource.org/licenses/BSD-3-Clause"
+          },
+          "title": "Cloudflare API",
+          "version": "4.0.0"
+        },
+        "servers": [
+          {
+            "description": "Client API",
+            "url": "https://api.cloudflare.com/client/v4"
+          }
+        ],
+        "externalDocs": {
+          "description": "Cloudflare Radar Documentation",
+          "url": "https://developers.cloudflare.com/radar/"
+        },
+        "security": [
+          {
+            "api_email": [],
+            "api_key": []
+          },
+          {
+            "api_token": []
+          },
+          {
+            "user_service_key": []
+          }
+        ],
+        "paths": {
+          "/accounts/{account_id}/queues/{queue_id}": {
+            "get": {
+              "operationId": "queues-get",
+              "summary": "Get Queue",
+              "description": "Returns details about a specific Queue.",
+              "parameters": [
+                {
+                  "name": "queue_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/mq_identifier"
+                  }
+                },
+                {
+                  "name": "account_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "$ref": "#/components/schemas/mq_identifier"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Details of the requested Queue",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/mq_api-v4-success"
+                          },
+                          {
+                            "properties": {
+                              "result": {
+                                "$ref": "#/components/schemas/mq_queue"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "4XX": {
+                  "description": "Failure response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/mq_api-v4-failure"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "api_email": [],
+                  "api_key": [],
+                  "api_token": []
+                }
+              ],
+              "tags": ["Queue"],
+              "x-api-token-group": [
+                "Workers Metadata Read-Only",
+                "Workers Editor",
+                "Workers Content Read-Only",
+                "Workers Admin",
+                "Queues Metadata Read",
+                "Queues Write",
+                "Queues Read",
+                "Workers Scripts Write",
+                "Workers Scripts Read"
+              ],
+              "x-cfPermissionsRequired": {
+                "enum": ["com.cloudflare.edge.worker.queue.read"]
+              },
+              "x-fern-availability": "generally-available",
+              "x-fern-sdk-group-name": "queues",
+              "x-fern-sdk-method-name": "get",
+              "x-forge-availability": "generally-available",
+              "x-forge-group-name": "queues",
+              "x-forge-method-name": "get",
+              "x-forge-oauth-scopes": [
+                "queues.metadata_read",
+                "queues.read",
+                "queues.write",
+                "workers-scripts.read",
+                "workers-scripts.write",
+                "workers-scripts.content_read",
+                "workers-scripts.metadata_read",
+                "workers-scripts.edit",
+                "workers-scripts.admin"
+              ]
+            }
+          }
+        },
+        "components": {
+          "securitySchemes": {
+            "api_email": {
+              "in": "header",
+              "name": "X-Auth-Email",
+              "type": "apiKey"
+            },
+            "api_key": {
+              "in": "header",
+              "name": "X-Auth-Key",
+              "type": "apiKey"
+            },
+            "api_token": {
+              "scheme": "bearer",
+              "type": "http"
+            },
+            "user_service_key": {
+              "in": "header",
+              "name": "X-Auth-User-Service-Key",
+              "type": "apiKey"
+            }
+          },
+          "schemas": {
+            "mq_identifier": {
+              "description": "A Resource identifier.",
+              "type": "string",
+              "example": "023e105f4ecef8ad9ca31a8372d0c353",
+              "maxLength": 32,
+              "readOnly": true,
+              "x-auditable": true
+            },
+            "mq_api-v4-success": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/mq_api-v4-error"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/mq_api-v4-message"
+                },
+                "success": {
+                  "description": "Indicates if the API call was successful or not.",
+                  "type": "boolean",
+                  "enum": [true],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_queue": {
+              "type": "object",
+              "properties": {
+                "consumers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/mq_consumer-response"
+                  },
+                  "readOnly": true
+                },
+                "consumers_total_count": {
+                  "type": "number",
+                  "readOnly": true
+                },
+                "created_on": {
+                  "type": "string",
+                  "readOnly": true,
+                  "x-auditable": true
+                },
+                "jurisdiction": {
+                  "$ref": "#/components/schemas/mq_jurisdiction"
+                },
+                "modified_on": {
+                  "type": "string",
+                  "readOnly": true,
+                  "x-auditable": true
+                },
+                "producers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/mq_producer"
+                  },
+                  "readOnly": true
+                },
+                "producers_total_count": {
+                  "type": "number",
+                  "readOnly": true,
+                  "x-auditable": true
+                },
+                "queue_id": {
+                  "type": "string",
+                  "readOnly": true,
+                  "x-auditable": true
+                },
+                "queue_name": {
+                  "$ref": "#/components/schemas/mq_queue-name"
+                },
+                "settings": {
+                  "$ref": "#/components/schemas/mq_queue-settings"
+                }
+              }
+            },
+            "mq_api-v4-failure": {
+              "type": "object",
+              "properties": {
+                "errors": {
+                  "$ref": "#/components/schemas/mq_api-v4-error"
+                },
+                "messages": {
+                  "$ref": "#/components/schemas/mq_api-v4-message"
+                },
+                "success": {
+                  "description": "Indicates if the API call was successful or not.",
+                  "type": "boolean",
+                  "example": false,
+                  "enum": [false],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_api-v4-error": {
+              "type": "array",
+              "items": {
+                "properties": {
+                  "code": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "x-auditable": true
+                  },
+                  "message": {
+                    "type": "string",
+                    "x-auditable": true
+                  }
+                },
+                "required": ["code", "message"],
+                "type": "object",
+                "uniqueItems": true
+              },
+              "example": [
+                {
+                  "code": 7003,
+                  "message": "No route for the URI"
+                }
+              ],
+              "minLength": 1
+            },
+            "mq_api-v4-message": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "x-auditable": true
+              },
+              "example": []
+            },
+            "mq_consumer-response": {
+              "description": "Response body representing a consumer",
+              "type": "object",
+              "discriminator": {
+                "mapping": {
+                  "http_pull": "#/components/schemas/mq_http-consumer-response",
+                  "worker": "#/components/schemas/mq_worker-consumer-response"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/mq_worker-consumer-response"
+                },
+                {
+                  "$ref": "#/components/schemas/mq_http-consumer-response"
+                }
+              ]
+            },
+            "mq_jurisdiction": {
+              "type": "string",
+              "example": "eu",
+              "enum": ["eu", "us", "fedramp"],
+              "x-auditable": true
+            },
+            "mq_producer": {
+              "type": "object",
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/mq_worker-producer"
+                },
+                {
+                  "$ref": "#/components/schemas/mq_r2-producer"
+                }
+              ]
+            },
+            "mq_queue-name": {
+              "type": "string",
+              "example": "example-queue",
+              "x-auditable": true
+            },
+            "mq_queue-settings": {
+              "type": "object",
+              "properties": {
+                "delivery_delay": {
+                  "description": "Number of seconds to delay delivery of all messages to consumers.",
+                  "type": "number",
+                  "example": 5,
+                  "x-auditable": true
+                },
+                "delivery_paused": {
+                  "description": "Indicates if message delivery to consumers is currently paused.",
+                  "type": "boolean",
+                  "example": true,
+                  "x-auditable": true
+                },
+                "message_retention_period": {
+                  "description": "Number of seconds after which an unconsumed message will be delayed.",
+                  "type": "number",
+                  "example": 345600,
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_worker-producer": {
+              "type": "object",
+              "properties": {
+                "script": {
+                  "type": "string",
+                  "x-auditable": true
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["worker"],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_r2-producer": {
+              "type": "object",
+              "properties": {
+                "bucket_name": {
+                  "type": "string",
+                  "x-auditable": true
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["r2_bucket"],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_http-consumer-response": {
+              "type": "object",
+              "properties": {
+                "consumer_id": {
+                  "$ref": "#/components/schemas/mq_identifier"
+                },
+                "created_on": {
+                  "type": "string",
+                  "format": "date-time",
+                  "x-auditable": true
+                },
+                "dead_letter_queue": {
+                  "description": "Name of the dead letter queue, or empty string if not configured",
+                  "type": "string",
+                  "x-auditable": true
+                },
+                "queue_name": {
+                  "$ref": "#/components/schemas/mq_queue-name"
+                },
+                "settings": {
+                  "type": "object",
+                  "properties": {
+                    "batch_size": {
+                      "$ref": "#/components/schemas/mq_batch-size"
+                    },
+                    "max_retries": {
+                      "$ref": "#/components/schemas/mq_max-retries"
+                    },
+                    "retry_delay": {
+                      "$ref": "#/components/schemas/mq_retry-delay"
+                    },
+                    "visibility_timeout_ms": {
+                      "$ref": "#/components/schemas/mq_visibility-timeout"
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["http_pull"],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_worker-consumer-response": {
+              "type": "object",
+              "properties": {
+                "consumer_id": {
+                  "$ref": "#/components/schemas/mq_identifier"
+                },
+                "created_on": {
+                  "type": "string",
+                  "format": "date-time",
+                  "x-auditable": true
+                },
+                "dead_letter_queue": {
+                  "description": "Name of the dead letter queue, or empty string if not configured",
+                  "type": "string",
+                  "x-auditable": true
+                },
+                "queue_name": {
+                  "$ref": "#/components/schemas/mq_queue-name"
+                },
+                "script_name": {
+                  "$ref": "#/components/schemas/mq_script-name"
+                },
+                "settings": {
+                  "type": "object",
+                  "properties": {
+                    "batch_size": {
+                      "$ref": "#/components/schemas/mq_batch-size"
+                    },
+                    "max_concurrency": {
+                      "$ref": "#/components/schemas/mq_max-concurrency"
+                    },
+                    "max_retries": {
+                      "$ref": "#/components/schemas/mq_max-retries"
+                    },
+                    "max_wait_time_ms": {
+                      "$ref": "#/components/schemas/mq_max-wait-time"
+                    },
+                    "retry_delay": {
+                      "$ref": "#/components/schemas/mq_retry-delay"
+                    }
+                  }
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["worker"],
+                  "x-auditable": true
+                }
+              }
+            },
+            "mq_script-name": {
+              "description": "Name of a Worker",
+              "type": "string",
+              "example": "my-consumer-worker",
+              "x-auditable": true
+            },
+            "mq_batch-size": {
+              "description": "The maximum number of messages to include in a batch.",
+              "type": "number",
+              "example": 50,
+              "x-auditable": true
+            },
+            "mq_max-concurrency": {
+              "description": "Maximum number of concurrent consumers that may consume from this Queue. Set to `null` to automatically opt in to the platform's maximum (recommended).",
+              "type": "number",
+              "example": 10,
+              "x-auditable": true
+            },
+            "mq_max-retries": {
+              "description": "The maximum number of retries",
+              "type": "number",
+              "example": 3,
+              "x-auditable": true
+            },
+            "mq_max-wait-time": {
+              "description": "The number of milliseconds to wait for a batch to fill up before attempting to deliver it",
+              "type": "number",
+              "example": 5000,
+              "x-auditable": true
+            },
+            "mq_retry-delay": {
+              "description": "The number of seconds to delay before making the message available for another attempt.",
+              "type": "number",
+              "example": 10,
+              "x-auditable": true
+            },
+            "mq_visibility-timeout": {
+              "description": "The number of milliseconds that a message is exclusively leased. After the timeout, the message becomes available for another attempt.",
+              "type": "number",
+              "example": 6000,
+              "x-auditable": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

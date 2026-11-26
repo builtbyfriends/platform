@@ -1,0 +1,528 @@
+import { isRecord } from '@builtbyfriends/deploy-core';
+import { Validator, type Schema } from '@cfworker/json-schema';
+import type { ApiEnv } from '../env.ts';
+import type { Resource } from '../types.ts';
+import type { ResourceCaller } from './resource-operations.ts';
+
+export type CloudflareReadArtifact = {
+  operationId: string;
+  method: string;
+  path: string;
+  document: unknown;
+};
+
+const policies = [
+  {
+    type: 'd1',
+    path: '/accounts/{account_id}/d1/database/{database_id}',
+    parameter: 'database_id',
+    identity: 'uuid',
+    // Decision: The provider's UUID/name oneOf overlaps for UUID strings. Owned resources use the UUID branch, not caller-selected names.
+    parameterAlternative: 0,
+    fields: [
+      'created_at',
+      'file_size',
+      'num_tables',
+      'jurisdiction',
+      'version',
+      'read_replication/mode',
+    ],
+  },
+  {
+    type: 'r2',
+    path: '/accounts/{account_id}/r2/buckets/{bucket_name}',
+    parameter: 'bucket_name',
+    identity: 'name',
+    fields: ['creation_date', 'jurisdiction', 'location', 'storage_class'],
+  },
+  {
+    type: 'kv',
+    path: '/accounts/{account_id}/storage/kv/namespaces/{namespace_id}',
+    parameter: 'namespace_id',
+    identity: 'id',
+    fields: ['jurisdiction', 'mode', 'supports_url_encoding'],
+  },
+  {
+    type: 'queue',
+    path: '/accounts/{account_id}/queues/{queue_id}',
+    parameter: 'queue_id',
+    identity: 'queue_id',
+    // Decision: Queue consumers/producers can contain other resource identities and credentials; only audited scalar metadata leaves this adapter.
+    fields: [
+      'created_on',
+      'modified_on',
+      'jurisdiction',
+      'consumers_total_count',
+      'producers_total_count',
+      'settings/delivery_delay',
+      'settings/delivery_paused',
+      'settings/message_retention_period',
+    ],
+  },
+] satisfies Array<{
+  type: Resource['type'];
+  path: string;
+  parameter: string;
+  identity: string;
+  parameterAlternative?: number;
+  fields: Array<string>;
+}>;
+
+function record(value: unknown) {
+  if (!isRecord(value)) {
+    throw Error('Invalid provider operation schema.');
+  }
+  return value;
+}
+
+function resolve(document: CloudflareReadArtifact['document'], value: unknown) {
+  let current = record(value);
+  const seen = new Set<string>();
+  while (typeof current.$ref === 'string') {
+    const reference = current.$ref;
+    if (!reference.startsWith('#/components/') || seen.has(reference)) {
+      throw Error('Unsupported provider schema reference.');
+    }
+    seen.add(reference);
+    let target = document;
+    for (const key of decodeURIComponent(reference.slice(2)).split('/')) {
+      const name = key.replace(/~1/g, '/').replace(/~0/g, '~');
+      const parent = record(target);
+      if (!Object.hasOwn(parent, name)) {
+        throw Error('Missing provider schema reference.');
+      }
+      target = parent[name];
+    }
+    current = record(target);
+  }
+  return current;
+}
+
+function normalize(
+  value: unknown,
+  document: unknown,
+  direction: 'input' | 'output',
+  depth = 0,
+): Schema {
+  if (typeof value === 'boolean') {
+    return value ? {} : { not: {} };
+  }
+  if (depth > 64) {
+    throw Error('Provider schema is too deeply nested.');
+  }
+  const original = record(value);
+  const annotations = resolve(document, original);
+  // Decision: Read-only annotations also occur on required URL identities. They constrain request bodies, not the parameters accepted by these GET operations.
+  if (direction === 'output' && annotations.writeOnly === true) {
+    return { not: {} };
+  }
+  const schema: Schema = { ...original };
+  if (schema.$ref && !schema.$ref.startsWith('#/components/schemas/')) {
+    throw Error('Unsupported provider schema reference.');
+  }
+  delete schema.nullable;
+  if (original.nullable === true && typeof schema.type === 'string') {
+    schema.type = [schema.type, 'null'];
+    if (schema.enum && !schema.enum.includes(null)) {
+      schema.enum = [...schema.enum, null];
+    }
+  }
+  for (const key of ['exclusiveMinimum', 'exclusiveMaximum'] as const) {
+    const bound = key === 'exclusiveMinimum' ? 'minimum' : 'maximum';
+    if (schema[key] === true) {
+      if (typeof schema[bound] !== 'number') {
+        throw Error('Invalid exclusive provider schema bound.');
+      }
+      schema[key] = schema[bound];
+      delete schema[bound];
+    } else if (schema[key] === false) {
+      delete schema[key];
+    }
+  }
+  if (original.properties !== undefined) {
+    const properties = record(original.properties);
+    schema.properties = Object.fromEntries(
+      Object.entries(properties).map(([name, child]) => [
+        name,
+        normalize(child, document, direction, depth + 1),
+      ]),
+    );
+    if (schema.required) {
+      schema.required = schema.required.filter((name) => {
+        const property = properties[name];
+        if (!isRecord(property)) {
+          return true;
+        }
+        const resolved = resolve(document, property);
+        return direction === 'input' || resolved.writeOnly !== true;
+      });
+    }
+  }
+  for (const key of ['allOf', 'anyOf', 'oneOf'] as const) {
+    if (original[key] !== undefined) {
+      if (!Array.isArray(original[key])) {
+        throw Error('Invalid provider schema alternatives.');
+      }
+      schema[key] = original[key].map((child) => normalize(child, document, direction, depth + 1));
+    }
+  }
+  for (const key of ['items', 'additionalProperties', 'not'] as const) {
+    if (original[key] !== undefined) {
+      schema[key] = normalize(original[key], document, direction, depth + 1);
+    }
+  }
+  return schema;
+}
+
+function validationSchema(
+  schema: unknown,
+  document: unknown,
+  direction: 'input' | 'output',
+): Schema {
+  const components = record(record(document).components);
+  const schemas = record(components.schemas ?? {});
+  return {
+    ...normalize(schema, document, direction),
+    components: {
+      schemas: Object.fromEntries(
+        Object.entries(schemas).map(([key, value]) => [key, normalize(value, document, direction)]),
+      ),
+    },
+  };
+}
+
+function scalar(value: unknown): value is string | number | boolean | null {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  );
+}
+
+function fieldSchema(value: unknown, path: Array<string>, document: unknown): Schema | undefined {
+  const schema = resolve(document, value);
+  if (path.length === 0) {
+    return normalize(schema, document, 'output');
+  }
+  const properties = schema.properties;
+  if (isRecord(properties) && Object.hasOwn(properties, path[0])) {
+    const child = fieldSchema(properties[path[0]], path.slice(1), document);
+    if (child) {
+      return child;
+    }
+  }
+  if (Array.isArray(schema.allOf)) {
+    for (const branch of schema.allOf) {
+      const child = fieldSchema(branch, path, document);
+      if (child) {
+        return child;
+      }
+    }
+  }
+  return undefined;
+}
+
+async function boundedJson(response: Response) {
+  const limit = 256 * 1024;
+  if (!response.body) {
+    throw Error('The provider returned no data.');
+  }
+  const reader = response.body.getReader();
+  const chunks: Array<Uint8Array> = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read().catch(() => {
+        throw Error('The provider response could not be read.');
+      });
+      if (done) {
+        break;
+      }
+      length += value.byteLength;
+      if (length > limit) {
+        throw Error('The provider response is too large.');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const output: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return output;
+  } catch {
+    throw Error('The provider returned invalid JSON.');
+  }
+}
+
+export function cloudflareProviderReadSelection(resourceType: Resource['type']) {
+  const policy = policies.find((entry) => entry.type === resourceType);
+  return policy ? { method: 'GET' as const, path: policy.path } : null;
+}
+
+export function prepareCloudflareProviderRead(
+  artifact: CloudflareReadArtifact,
+  resourceType: Resource['type'],
+) {
+  const policy = policies.find(
+    (entry) => entry.type === resourceType && entry.path === artifact.path,
+  );
+  if (!policy || artifact.method !== 'GET') {
+    return null;
+  }
+  const document = record(artifact.document);
+  if (document.openapi !== '3.0.3') {
+    throw Error('Unsupported provider schema version.');
+  }
+  const item = record(record(document.paths)[artifact.path]);
+  const operation = record(item.get);
+  if (operation.operationId !== artifact.operationId || operation.requestBody) {
+    throw Error('Provider operation schema does not match the selection.');
+  }
+  const parameters = new Map<string, ReturnType<typeof record>>();
+  for (const list of [item.parameters ?? [], operation.parameters ?? []]) {
+    if (!Array.isArray(list)) {
+      throw Error('Invalid provider parameters.');
+    }
+    for (const value of list) {
+      const parameter = { ...resolve(document, value) };
+      if (
+        typeof parameter.name !== 'string' ||
+        !['path', 'query', 'header'].includes(String(parameter.in))
+      ) {
+        throw Error('Unsupported provider parameter.');
+      }
+      if (parameter.in === 'path' && !['account_id', policy.parameter].includes(parameter.name)) {
+        throw Error('Unowned provider path parameter.');
+      }
+      if (parameter.in === 'header' && parameter.name !== 'cf-r2-jurisdiction') {
+        throw Error('Unsupported provider request header.');
+      }
+      if (
+        parameter.in === 'path' &&
+        parameter.name === policy.parameter &&
+        policy.parameterAlternative !== undefined
+      ) {
+        const alternatives = record(parameter.schema).oneOf;
+        if (!Array.isArray(alternatives) || !alternatives[policy.parameterAlternative]) {
+          throw Error('The provider identity policy no longer matches its schema.');
+        }
+        parameter.schema = alternatives[policy.parameterAlternative];
+      }
+      parameters.set(`${parameter.in}:${parameter.name}`, parameter);
+    }
+  }
+  const fields = (location: string): Schema => {
+    const entries = [...parameters.values()].filter((entry) => entry.in === location);
+    return {
+      type: 'object',
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        entries.map((entry) => [String(entry.name), record(entry.schema)]),
+      ),
+      required: entries
+        .filter((entry) => entry.required === true)
+        .map((entry) => String(entry.name)),
+    };
+  };
+  const inputSchema = validationSchema(
+    { type: 'object', additionalProperties: false, properties: { query: fields('query') } },
+    document,
+    'input',
+  );
+  const inputValidator = new Validator(inputSchema, '7');
+  const pathValidator = new Validator(validationSchema(fields('path'), document, 'input'), '7');
+  const headerValidator = new Validator(validationSchema(fields('header'), document, 'input'), '7');
+  const response = resolve(document, record(operation.responses)['200']);
+  const responseSchema = record(record(response.content)['application/json']).schema;
+  const outputValidator = new Validator(validationSchema(responseSchema, document, 'output'), '7');
+  const properties: { [field: string]: Schema } = { name: { type: 'string' } };
+  for (const field of policy.fields) {
+    const schema = fieldSchema(responseSchema, ['result', ...field.split('/')], document);
+    if (!schema) {
+      throw Error('The provider metadata policy no longer matches its schema.');
+    }
+    properties[field.replaceAll('/', '_')] = schema;
+  }
+  const outputSchema: Schema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['appId', 'resourceId', 'action', 'kind', 'data'],
+    properties: {
+      appId: { type: 'string' },
+      resourceId: { type: 'string' },
+      action: { type: 'string', const: artifact.operationId },
+      kind: { type: 'string', const: 'provider-read' },
+      data: { type: 'object', additionalProperties: false, required: ['name'], properties },
+    },
+  };
+  const safeOutputValidator = new Validator(outputSchema, '7');
+  const descriptor = {
+    id: artifact.operationId,
+    effect: 'read' as const,
+    title:
+      typeof operation.summary === 'string' ? operation.summary.slice(0, 200) : 'Resource details',
+    description:
+      typeof operation.description === 'string'
+        ? operation.description.slice(0, 2000)
+        : 'Read metadata for this resource.',
+    inputSchema,
+    outputSchema,
+  };
+  const versionSource = JSON.stringify({
+    adapterVersion: 1,
+    document,
+    policy,
+    inputSchema,
+    outputSchema,
+  });
+
+  return {
+    id: artifact.operationId,
+    effect: 'read' as const,
+    inputSchema,
+    outputSchema,
+    async describe() {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(versionSource));
+      const version = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+      return { ...descriptor, version };
+    },
+    async read(
+      bindings: Pick<ApiEnv['Bindings'], 'CF_ACCOUNT_ID' | 'CF_API_TOKEN'>,
+      caller: Omit<ResourceCaller, 'project'> & { project: Pick<ResourceCaller['project'], 'id'> },
+      input: unknown,
+      fetcher: typeof fetch = fetch,
+    ) {
+      const { resource, project, stillAuthorized } = caller;
+      if (
+        resource.type !== policy.type ||
+        resource.project_id !== project.id ||
+        !bindings.CF_API_TOKEN ||
+        !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
+        !resource.cf_id ||
+        /[\\/?#\p{Cc}]/u.test(resource.cf_id) ||
+        ['.', '..'].includes(resource.cf_id)
+      ) {
+        throw Error('This provider resource is not connected.');
+      }
+      const selected = record(input);
+      const query = selected.query === undefined ? {} : selected.query;
+      if (!inputValidator.validate({ ...selected, query }).valid) {
+        throw Error('Check the operation input fields.');
+      }
+      const queryValues = record(query);
+      const headers = parameters.has('header:cf-r2-jurisdiction')
+        ? { 'cf-r2-jurisdiction': resource.metadata.jurisdiction ?? 'default' }
+        : {};
+      const path = { account_id: bindings.CF_ACCOUNT_ID, [policy.parameter]: resource.cf_id };
+      if (!pathValidator.validate(path).valid || !headerValidator.validate(headers).valid) {
+        throw Error('The provider resource identity is invalid.');
+      }
+      const url = new URL(
+        `https://api.cloudflare.com/client/v4${policy.path.replace('{account_id}', encodeURIComponent(bindings.CF_ACCOUNT_ID)).replace(`{${policy.parameter}}`, encodeURIComponent(resource.cf_id))}`,
+      );
+      const requestHeaders = new Headers({
+        Authorization: `Bearer ${bindings.CF_API_TOKEN}`,
+        Accept: 'application/json',
+      });
+      for (const parameter of parameters.values()) {
+        if (parameter.in === 'path') {
+          continue;
+        }
+        const values = parameter.in === 'query' ? queryValues : record(headers);
+        let value = values[String(parameter.name)];
+        if (value === undefined) {
+          continue;
+        }
+        if (parameter.name === 'fields' && Array.isArray(value)) {
+          value = [...new Set([...value, policy.identity])];
+        }
+        if (Array.isArray(value) && parameter.in === 'query' && value.every(scalar)) {
+          if (parameter.style !== undefined && parameter.style !== 'form') {
+            throw Error('Unsupported provider query serialization.');
+          }
+          if (parameter.explode === false) {
+            url.searchParams.set(String(parameter.name), value.join(','));
+          } else {
+            for (const item of value) {
+              url.searchParams.append(String(parameter.name), String(item));
+            }
+          }
+        } else if (scalar(value)) {
+          if (parameter.in === 'query') {
+            url.searchParams.set(String(parameter.name), String(value));
+          } else {
+            requestHeaders.set(String(parameter.name), String(value));
+          }
+        } else {
+          throw Error('Unsupported provider parameter value.');
+        }
+      }
+      if (!(await stillAuthorized())) {
+        throw Error('This resource changed. Refresh before continuing.');
+      }
+      const result = await fetcher(url, {
+        method: 'GET',
+        headers: requestHeaders,
+        redirect: 'error',
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => {
+        throw Error('The provider could not return this resource.');
+      });
+      if (
+        result.status !== 200 ||
+        !/^application\/json(?:;|$)/i.test(result.headers.get('content-type') ?? '')
+      ) {
+        await result.body?.cancel();
+        throw Error('The provider could not return this resource.');
+      }
+      const envelope = await boundedJson(result);
+      if (!outputValidator.validate(envelope).valid) {
+        throw Error('The provider returned an unexpected resource response.');
+      }
+      const returned = record(envelope);
+      const data = record(returned.result);
+      if (returned.success !== true || data[policy.identity] !== resource.cf_id) {
+        throw Error('The provider returned a different resource.');
+      }
+      if (!(await stillAuthorized())) {
+        throw Error('This resource changed. Refresh before continuing.');
+      }
+      const values: { [field: string]: string | number | boolean | null } = {
+        name: resource.binding_name,
+      };
+      for (const field of policy.fields) {
+        let value: unknown = data;
+        for (const key of field.split('/')) {
+          value = isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+        }
+        if (value !== undefined) {
+          if (!scalar(value)) {
+            throw Error('The provider metadata changed unexpectedly.');
+          }
+          values[field.replaceAll('/', '_')] = value;
+        }
+      }
+      const output = {
+        appId: project.id,
+        resourceId: resource.id,
+        action: artifact.operationId,
+        kind: 'provider-read' as const,
+        data: values,
+      };
+      if (!safeOutputValidator.validate(output).valid) {
+        throw Error('The provider metadata changed unexpectedly.');
+      }
+      return output;
+    },
+  };
+}
