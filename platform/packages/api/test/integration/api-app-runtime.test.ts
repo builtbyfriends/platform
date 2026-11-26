@@ -13,7 +13,9 @@ import {
 } from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
-import { projects, resources, users } from '../../src/schema.ts';
+import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
+import { resolveOwnedDurableObjectNamespace } from '../../src/routes/app-runtime-bindings.ts';
+import { deployments, projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -2565,6 +2567,174 @@ describe('deployment binding observations', () => {
     }
     return value.data.topology;
   };
+
+  async function managedDurableObject() {
+    const servingApp = await serving();
+    const namespaceId = 'a'.repeat(32);
+    const workerName = await durableObjectWorkerName(project.id, 'Room');
+    const [resource] = await env.db
+      .insert(resources)
+      .values({
+        id: 'res_rooms',
+        project_id: project.id,
+        type: 'durable-object',
+        cf_id: workerName,
+        binding_name: 'Room',
+        metadata: { namespaceId, dispatchNamespace: 'platform-users' },
+      })
+      .returning();
+    const manifest = {
+      durableObjects: {
+        bindings: [{ bindingName: 'ROOMS', className: 'Room', storage: 'sqlite' }],
+        runtime: { protocol: 1, namespaces: { Room: namespaceId } },
+      },
+    };
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify(manifest) })
+      .where(eq(deployments.id, servingApp.deployment.id));
+    const host: Array<unknown> = [
+      {
+        name: '__PLATFORM_DURABLE_OWNER',
+        type: 'plain_text',
+        text: JSON.stringify({
+          protocol: 1,
+          projectId: project.id,
+          dispatchNamespace: 'platform-users',
+          className: 'Room',
+        }),
+      },
+      { name: '__PLATFORM_DURABLE_DEPLOYMENT', type: 'plain_text', text: servingApp.deployment.id },
+      {
+        name: 'SELF',
+        type: 'durable_object_namespace',
+        class_name: 'Room',
+        namespace_id: namespaceId,
+      },
+    ];
+    const appBindings: Array<unknown> = [
+      ...providerBindings(),
+      { name: 'ROOMS', type: 'durable_object_namespace', namespace_id: namespaceId },
+    ];
+    const fetcher = vi.fn(async (url: string) => {
+      expect(url.startsWith('https://api.cloudflare.com/client/v4/accounts/')).toBe(true);
+      if (url.endsWith('/scripts/' + workerName + '/bindings')) {
+        return Response.json({ success: true, result: host });
+      }
+      expect(
+        url.endsWith(
+          '/scripts/user-' + project.slug + '-' + servingApp.deployment.id + '/bindings',
+        ),
+      ).toBe(true);
+      return Response.json({ success: true, result: appBindings });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const resolve = async () =>
+      (await env.db.select().from(projects).where(eq(projects.id, project.id)))[0] ?? null;
+    const current = await resolve();
+    if (!current) {
+      throw Error('Missing test project');
+    }
+    return {
+      ...servingApp,
+      resource,
+      namespaceId,
+      host,
+      appBindings,
+      fetcher,
+      resolveNamespace: () =>
+        resolveOwnedDurableObjectNamespace(env, env.db, current, resource, resolve),
+    };
+  }
+
+  it('proves the managed namespace using deployed bindings while keeping provider IDs private', async () => {
+    const fixture = await managedDurableObject();
+    expect(await fixture.resolveNamespace()).toBe(fixture.namespaceId);
+    expect(await observed()).toMatchObject({
+      status: 'verified',
+      connections: [
+        { resourceId: 'res_database' },
+        { resourceId: 'res_files' },
+        { resourceId: 'res_rooms' },
+      ],
+    });
+    expect(JSON.stringify(await observed())).not.toContain(fixture.namespaceId);
+    expect(JSON.stringify(await observed())).not.toContain(fixture.resource.cf_id);
+  });
+
+  it.each(['foreign-app', 'foreign-host', 'duplicate-host', 'stale-release', 'missing-namespace'])(
+    'keeps Durable Object reads unavailable for %s evidence',
+    async (failure) => {
+      const fixture = await managedDurableObject();
+      if (failure === 'foreign-app') {
+        fixture.appBindings[5] = {
+          name: 'ROOMS',
+          type: 'durable_object_namespace',
+          namespace_id: 'b'.repeat(32),
+        };
+      }
+      if (failure === 'foreign-host') {
+        fixture.host[0] = { name: '__PLATFORM_DURABLE_OWNER', type: 'plain_text', text: 'foreign' };
+      }
+      if (failure === 'duplicate-host') {
+        fixture.host.push({
+          name: 'ALIAS',
+          type: 'durable_object_namespace',
+          class_name: 'Room',
+          namespace_id: fixture.namespaceId,
+        });
+      }
+      if (failure === 'stale-release') {
+        fixture.host[1] = {
+          name: '__PLATFORM_DURABLE_DEPLOYMENT',
+          type: 'plain_text',
+          text: 'old-deployment',
+        };
+      }
+      if (failure === 'missing-namespace') {
+        await env.db
+          .update(resources)
+          .set({ metadata: { dispatchNamespace: 'platform-users' } })
+          .where(eq(resources.id, fixture.resource.id));
+      }
+      expect(await fixture.resolveNamespace()).toBeNull();
+      expect(await observed()).toMatchObject({
+        connections: [{ resourceId: 'res_database' }, { resourceId: 'res_files' }],
+      });
+    },
+  );
+
+  it.each(['namespace', 'dispatch', 'manifest'])(
+    'discards namespace proof when %s changes during host inspection',
+    async (change) => {
+      const fixture = await managedDurableObject();
+      fixture.fetcher.mockImplementation(async (url) => {
+        if (url.endsWith('/scripts/' + fixture.resource.cf_id + '/bindings')) {
+          if (change === 'manifest') {
+            await env.db
+              .update(deployments)
+              .set({ manifest: '{}' })
+              .where(eq(deployments.id, fixture.deployment.id));
+          } else {
+            await env.db
+              .update(resources)
+              .set({
+                metadata: {
+                  ...fixture.resource.metadata,
+                  ...(change === 'namespace'
+                    ? { namespaceId: 'b'.repeat(32) }
+                    : { dispatchNamespace: 'foreign' }),
+                },
+              })
+              .where(eq(resources.id, fixture.resource.id));
+          }
+          return Response.json({ success: true, result: fixture.host });
+        }
+        return Response.json({ success: true, result: fixture.appBindings });
+      });
+      expect(await fixture.resolveNamespace()).toBeNull();
+    },
+  );
 
   it('reads bindings only when requested and returns owned resource identities, not provider values', async () => {
     const { deployment } = await serving();

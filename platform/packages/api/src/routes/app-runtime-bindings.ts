@@ -4,6 +4,11 @@ import type { Db } from '../db/client.ts';
 import { getDeployment } from '../db/deployments.ts';
 import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
+import {
+  managedDurableObjectCandidate,
+  managedDurableObjectHostMatches,
+  type ObservedBinding,
+} from '../infrastructure/durable-object-ownership.ts';
 import { getProjectDeploymentWorkerName } from '../naming.ts';
 import { CF_API_BASE } from '../provisioning/cloudflare-api.ts';
 import { projectRouteKey } from '../routing.ts';
@@ -17,12 +22,16 @@ export type ResourceTopology = {
   unboundResourceIds: Array<string>;
 };
 
-type Binding = { name: string; type: string; providerId?: string };
+type Binding = ObservedBinding;
+type BindingObservationEnv = Pick<
+  ApiEnv['Bindings'],
+  'CF_ACCOUNT_ID' | 'CF_API_TOKEN' | 'DISPATCH_NAMESPACE' | 'ROUTING'
+>;
 const bindingTypes = { d1: 'd1', r2: 'r2_bucket', kv: 'kv_namespace' };
 const identifier = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 300;
 
-function bindings(value: unknown, projectId: string): Array<Binding> {
+function bindings(value: unknown, projectId?: string): Array<Binding> {
   if (
     !isRecord(value) ||
     value.success !== true ||
@@ -33,6 +42,7 @@ function bindings(value: unknown, projectId: string): Array<Binding> {
   }
   // Decision: Empty dispatch binding responses can mean a missing script; the injected marker also verifies ownership.
   if (
+    projectId !== undefined &&
     !value.result.some(
       (item: unknown) =>
         isRecord(item) &&
@@ -73,26 +83,42 @@ function bindings(value: unknown, projectId: string): Array<Binding> {
     ) {
       throw new Error('Conflicting binding identity');
     }
-    return { name: item.name, type: item.type, ...(identifier(providerId) && { providerId }) };
+    return {
+      name: item.name,
+      type: item.type,
+      ...(identifier(providerId) && { providerId }),
+      ...(item.type === 'plain_text' &&
+        (item.name === '__PLATFORM_DURABLE_OWNER' ||
+          item.name === '__PLATFORM_DURABLE_DEPLOYMENT') && { text: item.text }),
+      ...(item.type === 'durable_object_namespace' && {
+        class_name: item.class_name,
+        script_name: item.script_name,
+        namespace_id: item.namespace_id,
+        dispatch_namespace: item.dispatch_namespace,
+        environment: item.environment,
+      }),
+    };
   });
 }
 
 function resourceIdentity(items: ReadonlyArray<Resource>): string {
   return JSON.stringify(
-    items
-      .map(({ id, project_id, type, cf_id, binding_name }) => [
+    [...items]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map(({ id, project_id, type, cf_id, binding_name, metadata }) => [
         id,
         project_id,
         type,
         cf_id,
         binding_name,
-      ])
-      .sort((a, b) => a[0].localeCompare(b[0])),
+        metadata.namespaceId,
+        metadata.dispatchNamespace,
+      ]),
   );
 }
 
 export async function observeResourceBindings(
-  env: ApiEnv['Bindings'],
+  env: BindingObservationEnv,
   db: Db,
   project: Project,
   resources: ReadonlyArray<Resource>,
@@ -117,6 +143,44 @@ export async function observeResourceBindings(
     }, 6000);
   });
   const within = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, deadline]);
+  const readBindings = async (workerName: string, ownerProjectId?: string) => {
+    const namespace = env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
+    const url = `${CF_API_BASE}/${encodeURIComponent(env.CF_ACCOUNT_ID)}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}/scripts/${encodeURIComponent(workerName)}/bindings`;
+    const response = await within(
+      fetch(url, {
+        headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
+        signal: controller.signal,
+        redirect: 'error',
+      }),
+    );
+    if (!response.ok || !response.body) {
+      if (response.body) {
+        await within(response.body.cancel());
+      }
+      throw new Error('Bindings unavailable');
+    }
+    let size = 0;
+    let text = '';
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await within(reader.read());
+        if (done) {
+          break;
+        }
+        size += value.byteLength;
+        if (size > 1_000_000) {
+          throw new Error('Binding response too large');
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      return bindings(JSON.parse(text + decoder.decode()), ownerProjectId);
+    } finally {
+      await within(reader.cancel()).catch(() => undefined);
+      reader.releaseLock();
+    }
+  };
   try {
     const deployment = await within(getDeployment(db, project.active_deployment_id));
     if (deployment?.project_id !== project.id) {
@@ -149,45 +213,38 @@ export async function observeResourceBindings(
       ) {
         return result;
       }
-      const namespace = env.DISPATCH_NAMESPACE ?? DEFAULT_DISPATCH_NAMESPACE;
-      const url = `${CF_API_BASE}/${encodeURIComponent(env.CF_ACCOUNT_ID)}/workers/dispatch/namespaces/${encodeURIComponent(namespace)}/scripts/${encodeURIComponent(workerName)}/bindings`;
-      const response = await within(
-        fetch(url, {
-          headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
-          signal: controller.signal,
-          redirect: 'error',
-        }),
-      );
-      if (!response.ok || !response.body) {
-        if (response.body) {
-          await within(response.body.cancel());
-        }
-        return result;
+      observed = await readBindings(workerName, project.id);
+    }
+    const durableConnections: ResourceTopology['connections'] = [];
+    for (const resource of resources) {
+      if (isStatic || resource.type !== 'durable-object') {
+        continue;
       }
-      let size = 0;
-      let text = '';
-      const decoder = new TextDecoder();
-      const reader = response.body.getReader();
-      try {
-        for (;;) {
-          const { value, done } = await within(reader.read());
-          if (done) {
-            break;
-          }
-          size += value.byteLength;
-          if (size > 1_000_000) {
-            throw new Error('Binding response too large');
-          }
-          text += decoder.decode(value, { stream: true });
-        }
-        observed = bindings(JSON.parse(text + decoder.decode()), project.id);
-      } finally {
-        await within(reader.cancel()).catch(() => undefined);
-        reader.releaseLock();
+      const candidate = await within(
+        managedDurableObjectCandidate(
+          env,
+          project.id,
+          resource,
+          resources,
+          deployment.manifest,
+          observed,
+        ),
+      );
+      if (!candidate) {
+        continue;
+      }
+      const host = await readBindings(candidate.workerName);
+      if (managedDurableObjectHostMatches(env, project.id, deployment.id, resource, host)) {
+        durableConnections.push({ resourceId: resource.id, relation: 'access' });
       }
     }
-    const [current, freshResources, freshRoute] = await within(
-      Promise.all([resolve(), getProjectResources(db, project.id), env.ROUTING.get(routeKey)]),
+    const [current, freshResources, freshRoute, freshDeployment] = await within(
+      Promise.all([
+        resolve(),
+        getProjectResources(db, project.id),
+        env.ROUTING.get(routeKey),
+        getDeployment(db, deployment.id),
+      ]),
     );
     if (
       !current ||
@@ -199,10 +256,13 @@ export async function observeResourceBindings(
       current.preview_expires_at !== project.preview_expires_at ||
       current.status !== project.status ||
       freshRoute !== routeText ||
+      freshDeployment?.project_id !== project.id ||
+      freshDeployment.manifest !== deployment.manifest ||
       resourceIdentity(freshResources) !== resourceIdentity(resources)
     ) {
       return result;
     }
+    result.connections.push(...durableConnections);
     for (const resource of resources) {
       if (resource.project_id !== project.id || !(resource.type in bindingTypes)) {
         continue;
@@ -235,4 +295,27 @@ export async function observeResourceBindings(
     clearTimeout(timer);
     controller.abort();
   }
+}
+
+export async function resolveOwnedDurableObjectNamespace(
+  env: BindingObservationEnv,
+  db: Db,
+  project: Project,
+  resource: Resource,
+  resolve: () => Promise<Project | null>,
+): Promise<string | null> {
+  if (resource.type !== 'durable-object' || resource.project_id !== project.id) {
+    return null;
+  }
+  const resources = await getProjectResources(db, project.id);
+  const current = resources.find((item) => item.id === resource.id);
+  if (!current || resourceIdentity([current]) !== resourceIdentity([resource])) {
+    return null;
+  }
+  const observed = await observeResourceBindings(env, db, project, resources, resolve);
+  return observed.status === 'verified' &&
+    observed.connections.some((connection) => connection.resourceId === resource.id) &&
+    typeof resource.metadata.namespaceId === 'string'
+    ? resource.metadata.namespaceId
+    : null;
 }
