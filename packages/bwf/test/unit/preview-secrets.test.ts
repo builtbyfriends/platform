@@ -140,6 +140,13 @@ describe('liveSecretsFailureMessage', () => {
     expect(message).toContain('Nothing was deployed');
   });
 
+  it('does not send a person to deploy for a failure without code 10007', () => {
+    const message = liveSecretsFailureMessage(new Error('This account does not exist'));
+
+    expect(message).toContain("could not read the live app's secrets");
+    expect(message).not.toContain('no deployed Worker');
+  });
+
   it('keeps the reason for any other failure', () => {
     expect(liveSecretsFailureMessage(new Error('socket hang up'))).toBe(
       "deploy: could not read the live app's secrets: socket hang up",

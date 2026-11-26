@@ -43,7 +43,7 @@ export async function collectPreviewSecrets(
 
 /** The message for a failed read of the live app's secrets. A Worker that isn't deployed yet gets the next step. */
 export function liveSecretsFailureMessage(error: Error): string {
-  if (/\b10007\b|does not exist/i.test(error.message)) {
+  if (/\b10007\b/.test(error.message)) {
     return 'deploy: the app has no deployed Worker yet, so a preview has no live secrets to copy and nothing to preview against. Run `bwf deploy --platform cloudflare` once, then run the preview again. Nothing was deployed.';
   }
 
