@@ -4616,6 +4616,23 @@ describe('platform installer', () => {
     ).toBe(false);
   });
 
+  it('says that application traffic stays paused, and how to resume it, when a run fails after pausing it', async () => {
+    const { install, routingValues } = await appAccessInstall({
+      appAccess: 'custom',
+      failAppAccess: true,
+    });
+    const failure = await install().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain('app access not ready');
+    expect(message).toContain('Application traffic is still paused');
+    expect(message).toMatch(/bwf platform repair \S+/);
+  });
+
   it('records a rejected app access token before deploying any Worker', async () => {
     const { deployed, directory, install } = await appAccessInstall({
       appAccess: 'custom',

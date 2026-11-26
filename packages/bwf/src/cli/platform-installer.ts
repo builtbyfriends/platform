@@ -19,7 +19,7 @@ import {
 } from '@builtbyfriends/platform/installer';
 import { join } from 'pathslash';
 import { ensurePlatformAccessToken } from './cf-access.ts';
-import { getErrorMessage } from './output.ts';
+import { cliCommandName, getErrorMessage } from './output.ts';
 import { publishInstallationAiLogging } from './platform-ai-logging-projection.ts';
 import {
   initializeInstalledAppAccess,
@@ -216,6 +216,12 @@ async function recoverFailedPlatformInstallation(
     } catch {
       // Decision: Preserve the original failure when a terminal state cannot transition.
     }
+  }
+  if (workerTrafficGuarded) {
+    failure = new Error(
+      `${failure.message} Application traffic is still paused. Run \`${dependencies.healthCheckResumeCommand ?? `${cliCommandName()} platform repair ${manifest.id}`}\` to finish the work and resume it.`,
+      { cause: failure.cause ?? error },
+    );
   }
   return failure;
 }
