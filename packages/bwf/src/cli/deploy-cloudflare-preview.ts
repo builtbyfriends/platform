@@ -209,6 +209,7 @@ async function deployPreview(run: PreviewRun): Promise<void> {
     exit: run.exit,
     atomic: false,
     skipMigrations: true,
+    preview: true,
     source: run.source,
     preflight: run.preflight,
   });
