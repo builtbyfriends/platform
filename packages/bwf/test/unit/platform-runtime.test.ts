@@ -167,6 +167,7 @@ describe('platform runtime manifest', () => {
       compatibilityDate: '2026-02-24',
       compatibilityFlags: ['nodejs_compat'],
       modules: true,
+      modulesRoot: runtimeDirectory,
       scriptPath: join(runtimeDirectory, runtime.artifacts.api.path),
       assets: { directory: join(runtimeDirectory, 'api', 'assets') },
     });
@@ -209,6 +210,7 @@ describe('platform runtime manifest', () => {
           compatibilityDate: '2026-02-24',
           compatibilityFlags: name === 'proxy' || name === 'emailGateway' ? ['nodejs_compat'] : [],
           modules: true,
+          modulesRoot: runtimeDirectory,
           scriptPath: join(runtimeDirectory, runtime.artifacts[name]!.path),
         }),
       );
