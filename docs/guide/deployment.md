@@ -135,3 +135,24 @@ Team platforms return a structured HTTP 429 to API and Pages action requests whe
 To customize it, add `public/usage-limit.html` for request limits or `public/execution-limit.html` for execution limits. Use standalone HTML with inline CSS and data-URL images. Scripts, external assets, and form submissions are disabled. Missing custom pages use the built-in page.
 
 Responses are not cached. A streaming response that has already started cannot be replaced with an error page; handle stream failures in your UI.
+
+## Try a bwf change before it releases {#snapshots}
+
+A bwf release takes a pull request, a round of checks and a publish. To try a change in your app before then, use a snapshot. Each pull request in the bwf repository that changes `packages/` publishes one in about a minute, and the pull request gets a comment with the version. It looks like this:
+
+```text
+1.13.10-snap.133.ga1b2c3d
+```
+
+The first part is the next release after the version the pull request starts from, so a snapshot of a fix made after 1.13.9 reads `1.13.10-snap...` (a prerelease sorts below its own release, so naming the released 1.13.9 would sort below it and confuse a range). A pull request that bumps the version itself, as a release pull request does, uses the version it bumps to. `snap` marks it as a snapshot, `133` is the pull request, and `g` followed by seven characters is the commit. Every bwf package in the repository gets the same version, and it's published under the `snapshot` tag.
+
+In a branch of your app, pin that exact version, install, and deploy the branch's preview:
+
+```sh
+npm install --save-exact @builtbyfriends/bwf@1.13.10-snap.133.ga1b2c3d
+bwf deploy --platform cloudflare --preview pr-12
+```
+
+Use the exact version, not the `snapshot` tag. A new commit on the pull request publishes a new snapshot, so move the pin when you want it. A range such as `^1.13.8` never picks a snapshot up.
+
+Before the branch merges, move the pin back to a release. A snapshot is for trying a change, and it's removed 30 days after it's published. To publish a snapshot of a branch with no pull request, run the Snapshot workflow by hand and give it a short label.
