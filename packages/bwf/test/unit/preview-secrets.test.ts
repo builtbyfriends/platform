@@ -7,6 +7,7 @@ import type { CloudflareOperationContext } from '../../src/cli/cloudflare-operat
 import {
   applyPreviewSecrets,
   collectPreviewSecrets,
+  liveSecretsFailureMessage,
   missingPreviewSecretsMessage,
 } from '../../src/cli/preview-secrets.ts';
 
@@ -107,5 +108,41 @@ describe('applyPreviewSecrets', () => {
     await applyPreviewSecrets(context, 'pr-3', secrets);
 
     expect(calls).toEqual([]);
+  });
+});
+
+describe('liveSecretsFailureMessage', () => {
+  it('tells an app without a deployed Worker to deploy first', async () => {
+    const context: CloudflareOperationContext = {
+      accountId: 'account',
+      apiBaseUrl: 'https://api.example.test',
+      configPath: '/app/wrangler.json',
+      workerName: 'my-worker',
+      runWrangler: () => ({
+        stdout: '',
+        stderr: '[10007] This Worker does not exist on your account.',
+        status: 1,
+      }),
+    };
+
+    const failure = await collectPreviewSecrets(context, { env: {} }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    if (!(failure instanceof Error)) {
+      throw new Error('Expected the secret list to fail.');
+    }
+
+    const message = liveSecretsFailureMessage(failure);
+    expect(message).toContain('no deployed Worker yet');
+    expect(message).toContain('bwf deploy --platform cloudflare');
+    expect(message).toContain('Nothing was deployed');
+  });
+
+  it('keeps the reason for any other failure', () => {
+    expect(liveSecretsFailureMessage(new Error('socket hang up'))).toBe(
+      "deploy: could not read the live app's secrets: socket hang up",
+    );
   });
 });

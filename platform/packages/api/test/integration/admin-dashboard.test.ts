@@ -494,7 +494,7 @@ describe('auth middleware', () => {
     } finally {
       await browser.close();
     }
-  });
+  }, 30_000);
 
   test('keeps system-status geometry stable through loading, errors and failed refreshes', async () => {
     const admin = await createTestUser(

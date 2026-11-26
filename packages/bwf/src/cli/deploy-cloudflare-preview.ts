@@ -35,6 +35,7 @@ import { getErrorMessage, note } from './output.ts';
 import {
   applyPreviewSecrets,
   collectPreviewSecrets,
+  liveSecretsFailureMessage,
   missingPreviewSecretsMessage,
 } from './preview-secrets.ts';
 import type { PreviewSecretValues } from './preview-secrets.ts';
@@ -218,7 +219,7 @@ async function deployPreview(run: PreviewRun): Promise<void> {
       env: process.env,
     });
   } catch (error) {
-    log.error(`deploy: could not read the live app's secrets: ${getErrorMessage(error)}`);
+    log.error(liveSecretsFailureMessage(error instanceof Error ? error : new Error(String(error))));
 
     return run.exit(1);
   }
