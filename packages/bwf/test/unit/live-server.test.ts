@@ -57,6 +57,134 @@ describe('live Durable Object runtime', () => {
     }
   });
 
+  describe('revoke', () => {
+    async function open(
+      harness: ReturnType<typeof createHarness>,
+      stream: ReturnType<typeof defineLiveStream>,
+      connectionId: string,
+      subscriptions: Array<{ id: string; topic: string }>,
+    ) {
+      const response = await stream.connect(
+        liveContext(harness.env, `https://platform.live/live?connectionId=${connectionId}`),
+      );
+      const reader = response.body!.getReader();
+      await readFrame(reader);
+      const control = await stream.control(
+        liveContext(harness.env, 'https://platform.live/live', {
+          connectionId,
+          operations: subscriptions.map((entry) => ({ kind: 'subscribe', ...entry })),
+        }),
+      );
+      expect(control.status).toBe(200);
+      return reader;
+    }
+
+    it('ends one topic on a connection, tells the window, and leaves other callers and topics alone', async () => {
+      const harness = createHarness();
+      const asked: Array<string> = [];
+      const stream = defineLiveStream({
+        id: `revoke-${crypto.randomUUID()}`,
+        allowAnonymousControl: true,
+        onSubscribe: ({ topic }) => {
+          asked.push(topic);
+        },
+      });
+      const publisher = stream.withEnv(harness.env);
+      const removed = await open(harness, stream, 'connection-removed-01', [
+        { id: 'project', topic: 'project:7' },
+        { id: 'other', topic: 'other:1' },
+      ]);
+      const staying = await open(harness, stream, 'connection-staying-001', [
+        { id: 'project', topic: 'project:7' },
+      ]);
+
+      await publisher.publish('project:7', { n: 1 });
+      expect(parseData(await readFrame(removed))).toMatchObject({ topic: 'project:7' });
+      expect(parseData(await readFrame(staying))).toMatchObject({ topic: 'project:7' });
+
+      await expect(
+        publisher.revoke({
+          connectionId: 'connection-removed-01',
+          topic: 'project:7',
+          reason: 'Removed from the project',
+        }),
+      ).resolves.toEqual({ revoked: 1 });
+      expect(parseData(await readFrame(removed))).toEqual({
+        subscriptionId: 'project',
+        topic: 'project:7',
+        reason: 'Removed from the project',
+      });
+
+      await publisher.publish('project:7', { n: 2 });
+      await publisher.publish('other:1', { n: 3 });
+      expect(parseData(await readFrame(removed))).toMatchObject({
+        topic: 'other:1',
+        data: { n: 3 },
+      });
+      expect(parseData(await readFrame(staying))).toMatchObject({
+        topic: 'project:7',
+        data: { n: 2 },
+      });
+
+      asked.length = 0;
+      const again = await stream.control(
+        liveContext(harness.env, 'https://platform.live/live', {
+          connectionId: 'connection-removed-01',
+          operations: [{ kind: 'subscribe', id: 'project', topic: 'project:7' }],
+        }),
+      );
+      expect(again.status).toBe(200);
+      expect(asked).toEqual(['project:7']);
+      await removed.cancel();
+      await staying.cancel();
+    });
+
+    it('ends every subscription that matches a topic prefix, or all of them with no filter', async () => {
+      const harness = createHarness();
+      const stream = defineLiveStream({
+        id: `revoke-prefix-${crypto.randomUUID()}`,
+        allowAnonymousControl: true,
+      });
+      const publisher = stream.withEnv(harness.env);
+      const reader = await open(harness, stream, 'connection-prefix-0001', [
+        { id: 'a', topic: 'project:7:tasks' },
+        { id: 'b', topic: 'project:7:files' },
+        { id: 'c', topic: 'project:8:tasks' },
+      ]);
+
+      await expect(
+        publisher.revoke({ connectionId: 'connection-prefix-0001', topicPrefix: 'project:7:' }),
+      ).resolves.toEqual({ revoked: 2 });
+      await readFrame(reader);
+      await readFrame(reader);
+      await publisher.publish('project:7:tasks', { n: 1 });
+      await publisher.publish('project:8:tasks', { n: 2 });
+      expect(parseData(await readFrame(reader))).toMatchObject({ topic: 'project:8:tasks' });
+
+      await expect(publisher.revoke({ connectionId: 'connection-prefix-0001' })).resolves.toEqual({
+        revoked: 1,
+      });
+      await reader.cancel();
+    });
+
+    it('answers 0 for a connection that is closed or unknown, and checks its input', async () => {
+      const harness = createHarness();
+      const stream = defineLiveStream({
+        id: `revoke-none-${crypto.randomUUID()}`,
+        allowAnonymousControl: true,
+      });
+      const publisher = stream.withEnv(harness.env);
+
+      await expect(publisher.revoke({ connectionId: 'connection-unknown-001' })).resolves.toEqual({
+        revoked: 0,
+      });
+      await expect(publisher.revoke({ connectionId: 'short' })).rejects.toThrow('connectionId');
+      await expect(
+        publisher.revoke({ connectionId: 'connection-unknown-001', topic: '' }),
+      ).rejects.toThrow('topic');
+    });
+  });
+
   it('rejects invalid live limits before registering the stream id', () => {
     const id = `limits-${crypto.randomUUID()}`;
 

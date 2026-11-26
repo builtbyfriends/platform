@@ -361,6 +361,37 @@ describe('connectLiveStream', () => {
     expect(String(fetchMock.mock.calls[2][1]?.body)).toContain('"topic":"post:14"');
   });
 
+  it('tells the window when the app ends a subscription and does not send it again after a reconnect', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ackAll(init));
+    const revoked = vi.fn();
+    const live = openLive(fetchMock, { retryDelay: 25 });
+    const kept = live.subscribe({ id: 'kept', topic: 'other:1' });
+    const ended = live.subscribe({ id: 'project', topic: 'project:7', onRevoked: revoked });
+    const firstSource = await emitOpen();
+    await Promise.all([kept, ended]);
+
+    firstSource.emit(
+      'revoked',
+      JSON.stringify({ subscriptionId: 'project', topic: 'project:7', reason: 'Removed' }),
+    );
+    expect(revoked).toHaveBeenCalledWith({
+      subscriptionId: 'project',
+      topic: 'project:7',
+      reason: 'Removed',
+    });
+
+    firstSource.emit('error', new Event('error'));
+    await vi.advanceTimersByTimeAsync(25);
+    MockEventSource.instances[1].emit('open', new Event('open'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const body = String(fetchMock.mock.lastCall?.[1]?.body);
+    expect(body).toContain('"id":"kept"');
+    expect(body).not.toContain('"id":"project"');
+  });
+
   it('reconnects and resubscribes active subscriptions with lastEventId', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ackAll(init));

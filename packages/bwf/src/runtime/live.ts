@@ -102,6 +102,22 @@ export type LivePublishOptions = {
   eventId?: string;
 };
 
+export type LiveRevokeTarget = {
+  /** The connection to end subscriptions on: the `connection.id` an `onConnect` or `onSubscribe` hook receives. */
+  connectionId: string;
+  /** Only subscriptions to exactly this topic. */
+  topic?: string;
+  /** Only subscriptions to a topic that starts with this text. With `topic` too, both have to match. */
+  topicPrefix?: string;
+  /** Sent to the window with the `revoked` signal, for it to show. */
+  reason?: string;
+};
+
+export type LiveRevokeResult = {
+  /** How many subscriptions ended. It is 0 when the connection is closed or nothing matched. */
+  revoked: number;
+};
+
 export type LiveConnectOptions = {
   owner?: string | null;
   user?: unknown;
@@ -150,7 +166,14 @@ export type LiveStream = {
   connect(ctx: CloudContext, options?: LiveConnectOptions): Promise<Response>;
   control(ctx: CloudContext, options?: LiveControlOptions): Promise<Response>;
   publish(topic: string, data: unknown, options?: LivePublishOptions): Promise<void>;
-  withEnv(env: unknown): Pick<LiveStream, 'publish'>;
+  /**
+   * Ends a connection's subscriptions, for an app whose answer to "may this caller read this topic?" changed
+   * after `onSubscribe` said yes. With no `topic` or `topicPrefix`, every subscription on the connection ends.
+   * The window gets a `revoked` signal for each, the next publish doesn't reach it, and a new subscribe goes
+   * through `onSubscribe` again. Other connections on the same topic are not touched.
+   */
+  revoke(target: LiveRevokeTarget): Promise<LiveRevokeResult>;
+  withEnv(env: unknown): Pick<LiveStream, 'publish' | 'revoke'>;
 };
 
 let liveBindingName = 'BWF_LIVE';
@@ -252,6 +275,36 @@ export function defineLiveStream(options: LiveStreamOptions): LiveStream {
       }
       throw new Error(body || response.statusText);
     }
+  }
+
+  async function revokeWithEnv(env: unknown, target: LiveRevokeTarget): Promise<LiveRevokeResult> {
+    const binding = getLiveBinding(env);
+    const connectionId = assertConnectionId(target.connectionId);
+    for (const [name, value] of [
+      ['topic', target.topic],
+      ['topicPrefix', target.topicPrefix],
+      ['reason', target.reason],
+    ] as const) {
+      assertOptionalString(name, value);
+    }
+    if (target.topic !== undefined) {
+      assertTopic(target.topic);
+    }
+    const id = binding.idFromName(connectionInstanceName(streamId, connectionId));
+    const response = await binding.get(id).fetch(internalUrl('/revoke'), {
+      method: 'POST',
+      body: JSON.stringify({
+        streamId,
+        connectionId,
+        topic: target.topic,
+        topicPrefix: target.topicPrefix,
+        reason: target.reason,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error((await response.text()) || response.statusText);
+    }
+    return (await response.json()) as LiveRevokeResult;
   }
 
   return {
@@ -377,10 +430,25 @@ export function defineLiveStream(options: LiveStreamOptions): LiveStream {
       return publishWithEnv(env, topic, data, publishOptions);
     },
 
+    revoke(target) {
+      let env: unknown;
+      try {
+        env = getRawRuntimeEnv();
+      } catch {
+        throw new Error(
+          'live: revoke() was called outside a bwf server runtime context. Pass an explicit env with stream.withEnv(env).revoke(...).',
+        );
+      }
+      return revokeWithEnv(env, target);
+    },
+
     withEnv(env) {
       return {
         publish(topic, data, publishOptions) {
           return publishWithEnv(env, topic, data, publishOptions);
+        },
+        revoke(target) {
+          return revokeWithEnv(env, target);
         },
       };
     },

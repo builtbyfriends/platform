@@ -54,6 +54,14 @@ type DeliveryResponse = {
   stale: Array<number>;
 };
 
+type RevokeRequest = {
+  streamId: string;
+  connectionId: string;
+  topic?: string;
+  topicPrefix?: string;
+  reason?: string;
+};
+
 type StaleCheckRequest = {
   subscriptions: Array<SubscriberRow>;
 };
@@ -127,6 +135,9 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       }
       if (pathname === '/control') {
         return this.control((await request.json()) as ControlRequest);
+      }
+      if (pathname === '/revoke') {
+        return this.revoke((await request.json()) as RevokeRequest);
       }
       if (pathname === '/deliver') {
         return this.deliver((await request.json()) as DeliveryRequest);
@@ -311,6 +322,41 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
         connectionId: message.connectionId,
         results,
       } satisfies LiveControlResponse);
+    }
+
+    private async revoke(message: RevokeRequest): Promise<Response> {
+      const connection = this.connection;
+      if (!connection) {
+        return Response.json({ revoked: 0 });
+      }
+      const matched = [...connection.subscriptions.values()].filter((subscription) =>
+        revokeMatches(subscription.topic, message),
+      );
+      for (const subscription of matched) {
+        subscription.active = false;
+        connection.subscriptions.delete(subscription.id);
+      }
+      await Promise.all(
+        matched.map((subscription) =>
+          this.unregisterTopic(message.streamId, message.connectionId, subscription),
+        ),
+      );
+      for (const subscription of matched) {
+        connection.writeChain = connection.writeChain
+          .catch(() => {})
+          .then(() =>
+            connection.stream.send({
+              event: 'revoked',
+              data: {
+                subscriptionId: subscription.id,
+                topic: subscription.topic,
+                ...(message.reason !== undefined && { reason: message.reason }),
+              },
+            }),
+          )
+          .catch(() => {});
+      }
+      return Response.json({ revoked: matched.length });
     }
 
     private async deliver(message: DeliveryRequest): Promise<Response> {
@@ -612,6 +658,16 @@ function activeSubscriptionCount(connection: ActiveConnection): number {
     }
   }
   return count;
+}
+
+function revokeMatches(
+  topic: string,
+  message: Pick<RevokeRequest, 'topic' | 'topicPrefix'>,
+): boolean {
+  if (message.topic !== undefined && topic !== message.topic) {
+    return false;
+  }
+  return message.topicPrefix === undefined || topic.startsWith(message.topicPrefix);
 }
 
 function isStaleSubscriber(row: SubscriberRow, connection: ActiveConnection): boolean {
