@@ -4,8 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
 import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
-import { resolveOwnedDurableObjectNamespace } from './app-runtime-bindings.ts';
-import { fileOwnerActive } from './app-runtime-files.ts';
+import { ownedResourceCaller } from './app-runtime-resource-owner.ts';
 import type { ResolveProject } from './app-runtime.ts';
 
 const identifier = type('string > 0').atMostLength(200);
@@ -40,52 +39,7 @@ async function ownedResource(
   if (!resource) {
     return null;
   }
-  const stillAuthorized = async () => {
-    const current = await resolve(context, project.id, body.owner);
-    if (
-      !current ||
-      current.user_id !== project.user_id ||
-      current.proxy_token_gen !== project.proxy_token_gen ||
-      current.active_deployment_id !== project.active_deployment_id ||
-      !(await fileOwnerActive(context.get('db'), current))
-    ) {
-      return false;
-    }
-    const fresh = (await getProjectResources(context.get('db'), current.id)).find(
-      (entry) => entry.id === resource.id,
-    );
-    return (
-      !!fresh &&
-      fresh.type === resource.type &&
-      fresh.cf_id === resource.cf_id &&
-      fresh.binding_name === resource.binding_name &&
-      fresh.metadata.jurisdiction === resource.metadata.jurisdiction &&
-      fresh.metadata.namespaceId === resource.metadata.namespaceId &&
-      fresh.metadata.dispatchNamespace === resource.metadata.dispatchNamespace
-    );
-  };
-  let namespace: string | undefined;
-  const resolveProviderIdentity =
-    resource.type === 'durable-object'
-      ? async () => {
-          if (!(await stillAuthorized())) {
-            return null;
-          }
-          const current = await resolveOwnedDurableObjectNamespace(
-            context.env,
-            context.get('db'),
-            project,
-            resource,
-            () => resolve(context, project.id, body.owner),
-          );
-          if (!current || (namespace !== undefined && namespace !== current)) {
-            return null;
-          }
-          namespace = current;
-          return current;
-        }
-      : undefined;
-  return { project, resource, stillAuthorized, resolveProviderIdentity };
+  return ownedResourceCaller(context, project, resource, body.owner, resolve);
 }
 
 export function appRuntimeOperationRoutes(resolve: ResolveProject) {

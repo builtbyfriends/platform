@@ -2,7 +2,16 @@ import { readFile } from 'node:fs/promises';
 import { type } from 'arktype';
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import type { ApiEnv } from '../../src/env.ts';
 import app from '../../src/index.ts';
@@ -12,8 +21,9 @@ import {
   cloudflareOpenApiKey,
   cloudflareOperationSchema,
 } from '../../src/infrastructure/cloudflare-openapi.ts';
+import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
 import { appRuntimeCatalogRoutes } from '../../src/routes/app-runtime-catalog.ts';
-import { projects, resources } from '../../src/schema.ts';
+import { deployments, projects, resources } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
@@ -82,6 +92,7 @@ beforeAll(async () => {
 });
 
 afterAll(teardownEnv);
+afterEach(() => vi.restoreAllMocks());
 
 beforeEach(async () => {
   env.CF_ACCOUNT_ID = 'test-account-id';
@@ -520,5 +531,279 @@ describe('owned operation discovery', () => {
       .set({ preview_expires_at: new Date(Date.now() - 1000).toISOString() })
       .where(eq(projects.id, project.id));
     expect((await call()).status).toBe(404);
+  });
+});
+
+describe('Durable Object discovery ownership', () => {
+  const catalogSchema = type({
+    data: {
+      operations: type({
+        id: 'string',
+        execution: 'string',
+        'registeredOperation?': {
+          id: 'string',
+          version: 'string',
+          effect: 'string',
+          resourceId: 'string',
+        },
+      }).array(),
+    },
+  });
+  async function managed() {
+    env.CF_ACCOUNT_ID = 'a'.repeat(32);
+    const path = '/accounts/{account_id}/workers/durable_objects/namespaces/{id}/objects';
+    const schema = (await cloudflareOpenApiIndex()).find(
+      (entry) => entry.method === 'GET' && entry.path === path,
+    );
+    const operation = (await cloudflareCatalog()).operations.find(
+      (entry) => entry.httpMethod === 'GET' && entry.path === path,
+    );
+    if (!schema || !operation) {
+      throw Error('Missing pinned Durable Object operation');
+    }
+    await env.STATIC_ASSETS_R2.put(
+      cloudflareOpenApiKey(schema),
+      await readFile(
+        new URL('../fixtures/cloudflare-openapi/durable-object-get.json.gz', import.meta.url),
+      ),
+    );
+    const namespaceId = 'b'.repeat(32);
+    const [current] = await env.db.select().from(projects).where(eq(projects.id, project.id));
+    const deploymentId = current.active_deployment_id;
+    if (!deploymentId) {
+      throw Error('Missing active test deployment');
+    }
+    const hostName = await durableObjectWorkerName(project.id, 'Room');
+    const manifest = {
+      durableObjects: {
+        bindings: [{ bindingName: 'ROOMS', className: 'Room', storage: 'sqlite' }],
+        runtime: { protocol: 1, namespaces: { Room: namespaceId } },
+      },
+    };
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify(manifest) })
+      .where(eq(deployments.id, deploymentId));
+    const route = {
+      projectId: project.id,
+      userId: current.user_id,
+      version: deploymentId,
+      workerName: 'user-' + current.slug + '-' + deploymentId,
+    };
+    await env.ROUTING.put(current.slug, JSON.stringify(route));
+    await env.db
+      .insert(resources)
+      .values({
+        id: 'res_rooms',
+        project_id: project.id,
+        type: 'durable-object',
+        cf_id: hostName,
+        binding_name: 'Room',
+        metadata: { namespaceId, dispatchNamespace: 'platform-users' },
+      });
+    const appBindings: Array<unknown> = [
+      { name: '__PROJECT_ID', type: 'plain_text', text: project.id },
+      { name: 'ROOMS', type: 'durable_object_namespace', namespace_id: namespaceId },
+    ];
+    const hostBindings: Array<unknown> = [
+      {
+        name: '__PLATFORM_DURABLE_OWNER',
+        type: 'plain_text',
+        text: JSON.stringify({
+          protocol: 1,
+          projectId: project.id,
+          dispatchNamespace: 'platform-users',
+          className: 'Room',
+        }),
+      },
+      { name: '__PLATFORM_DURABLE_DEPLOYMENT', type: 'plain_text', text: deploymentId },
+      {
+        name: 'SELF',
+        type: 'durable_object_namespace',
+        class_name: 'Room',
+        namespace_id: namespaceId,
+      },
+    ];
+    const host = vi.fn(async () => Response.json({ success: true, result: hostBindings }));
+    const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      expect(
+        url.startsWith('https://api.cloudflare.com/client/v4/accounts/' + env.CF_ACCOUNT_ID),
+      ).toBe(true);
+      if (url.endsWith('/scripts/' + route.workerName + '/bindings')) {
+        return Response.json({ success: true, result: appBindings });
+      }
+      expect(url.endsWith('/scripts/' + hostName + '/bindings')).toBe(true);
+      return host();
+    });
+    const body = { ...input(), resourceId: 'res_rooms', limit: 50 };
+    return {
+      body,
+      namespaceId,
+      hostName,
+      schema,
+      operation,
+      host,
+      provider,
+      hostBindings,
+      appBindings,
+      deploymentId,
+    };
+  }
+
+  it('advertises the same proven namespace operation and version as executable resource discovery', async () => {
+    const fixture = await managed();
+    const response = await call(fixture.body);
+    expect(response.status).toBe(200);
+    const catalog = catalogSchema.assert(await response.json());
+    const entry = catalog.data.operations.find((item) => item.id === fixture.operation.id);
+    expect(entry).toMatchObject({
+      execution: 'registered',
+      registeredOperation: {
+        id: fixture.schema.operationId,
+        effect: 'read',
+        resourceId: 'res_rooms',
+      },
+    });
+    expect(fixture.host).toHaveBeenCalledTimes(2);
+    const descriptors = await app.fetch(
+      new Request('https://platform.test/app-billing/projects.resourceOperations', {
+        method: 'POST',
+        headers: request(input()).headers,
+        body: JSON.stringify({
+          project: project.id,
+          owner: { person: 'person' },
+          resourceId: 'res_rooms',
+        }),
+      }),
+      env,
+      createMockExecutionContext(),
+    );
+    expect(descriptors.status).toBe(200);
+    expect(await descriptors.json()).toMatchObject({
+      data: {
+        operations: [
+          { id: fixture.schema.operationId, version: entry?.registeredOperation?.version },
+        ],
+      },
+    });
+    expect(JSON.stringify(catalog)).not.toContain(fixture.namespaceId);
+    expect(JSON.stringify(catalog)).not.toContain(fixture.hostName);
+    const calls = fixture.provider.mock.calls.length;
+    const full = await call({ ...fixture.body, operationId: fixture.operation.id });
+    expect(full.status).toBe(200);
+    expect(await full.json()).toMatchObject({
+      data: { execution: 'discovery-only', operationId: fixture.schema.operationId },
+    });
+    const broad = await read(
+      await call({
+        project: project.id,
+        owner: { person: 'person' },
+        product: 'durable-objects',
+        limit: 50,
+      }),
+    );
+    expect(broad.data.operations.every((entry) => entry.execution === 'discovery-only')).toBe(true);
+    expect(fixture.provider).toHaveBeenCalledTimes(calls);
+  });
+
+  it.each(['stale-release', 'ambiguous-host', 'ambiguous-app', 'foreign-owner', 'missing-schema'])(
+    'keeps %s evidence discovery-only',
+    async (failure) => {
+      const fixture = await managed();
+      if (failure === 'stale-release') {
+        fixture.hostBindings[1] = {
+          name: '__PLATFORM_DURABLE_DEPLOYMENT',
+          type: 'plain_text',
+          text: 'old-release',
+        };
+      }
+      if (failure === 'ambiguous-host') {
+        fixture.hostBindings.push({
+          name: 'ALIAS',
+          type: 'durable_object_namespace',
+          class_name: 'Room',
+          namespace_id: fixture.namespaceId,
+        });
+      }
+      if (failure === 'ambiguous-app') {
+        fixture.appBindings.push({
+          name: 'ALIAS',
+          type: 'durable_object_namespace',
+          namespace_id: fixture.namespaceId,
+        });
+      }
+      if (failure === 'foreign-owner') {
+        fixture.hostBindings[0] = {
+          name: '__PLATFORM_DURABLE_OWNER',
+          type: 'plain_text',
+          text: 'foreign-project',
+        };
+      }
+      if (failure === 'missing-schema') {
+        await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(fixture.schema));
+      }
+      const response = await call(fixture.body);
+      expect(response.status).toBe(200);
+      expect(
+        (await read(response)).data.operations.every(
+          (entry) => entry.execution === 'discovery-only',
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each(['namespace', 'dispatch', 'manifest', 'host-release', 'host-ambiguity'])(
+    'discards a registered hint when %s changes during final ownership verification',
+    async (change) => {
+      const fixture = await managed();
+      fixture.host.mockImplementation(async () => {
+        if (fixture.host.mock.calls.length === 2) {
+          if (change === 'namespace' || change === 'dispatch') {
+            await env.db
+              .update(resources)
+              .set({
+                metadata: {
+                  namespaceId: change === 'namespace' ? 'c'.repeat(32) : fixture.namespaceId,
+                  dispatchNamespace: change === 'dispatch' ? 'other' : 'platform-users',
+                },
+              })
+              .where(eq(resources.id, 'res_rooms'));
+          }
+          if (change === 'manifest') {
+            await env.db
+              .update(deployments)
+              .set({ manifest: '{}' })
+              .where(eq(deployments.id, fixture.deploymentId));
+          }
+          if (change === 'host-release') {
+            fixture.hostBindings[1] = {
+              name: '__PLATFORM_DURABLE_DEPLOYMENT',
+              type: 'plain_text',
+              text: 'changed-release',
+            };
+          }
+          if (change === 'host-ambiguity') {
+            fixture.hostBindings.push({
+              name: 'ALIAS',
+              type: 'durable_object_namespace',
+              class_name: 'Room',
+              namespace_id: fixture.namespaceId,
+            });
+          }
+        }
+        return Response.json({ success: true, result: fixture.hostBindings });
+      });
+      const response = await call(fixture.body);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'resource_changed' });
+    },
+  );
+
+  it('does not accept a caller namespace override or a foreign owned-resource selection', async () => {
+    const fixture = await managed();
+    expect((await call({ ...fixture.body, namespaceId: fixture.namespaceId })).status).toBe(400);
+    expect((await call({ ...fixture.body, resourceId: 'res_foreign' })).status).toBe(404);
+    expect(fixture.provider).not.toHaveBeenCalled();
   });
 });

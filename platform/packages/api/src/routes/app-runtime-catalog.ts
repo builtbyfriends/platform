@@ -12,6 +12,7 @@ import { resourceOperationsFor } from '../infrastructure/resource-operations.ts'
 import type { Project, Resource } from '../types.ts';
 import { resourceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
+import { ownedResourceCaller, sameResourceIdentity } from './app-runtime-resource-owner.ts';
 import type { ResolveProject } from './app-runtime.ts';
 
 const products = {
@@ -139,10 +140,13 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         }
       }
 
-      const registered =
+      const caller =
         !schema && body.resourceId && filesActive
-          ? await resourceOperationsFor(selected[0].type, context.env)
+          ? ownedResourceCaller(context, project, selected[0], owner, resolve)
           : null;
+      const registered = caller
+        ? await resourceOperationsFor(caller.resource.type, context.env, caller)
+        : null;
       const providerIndex = registered ? await cloudflareOpenApiIndex() : [];
       const current = await resolve(context, project.id, owner);
       const fresh = await getProjectResources(context.get('db'), project.id);
@@ -151,19 +155,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         return context.json({ error: 'unknown_project' }, 404);
       }
 
-      if (
-        selected.some(
-          (entry) =>
-            !fresh.some(
-              (value) =>
-                value.id === entry.id &&
-                value.cf_id === entry.cf_id &&
-                value.type === entry.type &&
-                value.binding_name === entry.binding_name &&
-                value.metadata.jurisdiction === entry.metadata.jurisdiction,
-            ),
-        )
-      ) {
+      if (selected.some((entry) => !fresh.some((value) => sameResourceIdentity(value, entry)))) {
         return context.json({ error: 'resource_changed' }, 409);
       }
 
@@ -180,6 +172,16 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
       }
 
       const currentFilesActive = filesActive && (await fileOwnerActive(context.get('db'), current));
+      if (
+        caller &&
+        (!(await caller.stillAuthorized()) ||
+          (registered &&
+            registered.operations.length > 0 &&
+            caller.resolveProviderIdentity &&
+            !(await caller.resolveProviderIdentity())))
+      ) {
+        return context.json({ error: 'resource_changed' }, 409);
+      }
 
       try {
         const page = catalogPage(
