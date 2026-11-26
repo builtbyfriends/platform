@@ -1951,6 +1951,75 @@ describe('Cloudflare version activation', () => {
     expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
   });
 
+  describe('after a secret change', () => {
+    const OLDER = '44444444-4444-4444-8444-444444444444';
+    const MIDDLE = '55555555-5555-4555-8555-555555555555';
+    const preserving = {
+      preserveRoutes: true,
+      preserveWorkersDev: true,
+      preservePreviewUrls: true,
+      crons: ['0 * * * *'],
+    };
+    const released = encodeCloudflareVersionMessage(
+      [],
+      triggersWith({ workers_dev: false, preview_urls: true, routes: [], crons: [] }),
+    );
+
+    function afterSecretRunner(versions: Array<Record<string, unknown>>) {
+      const base = runner({ versions: ok(JSON.stringify(versions)) });
+      return operationFixture((args: Array<string>) => {
+        if (args[0] === 'versions' && args[1] === 'view') {
+          return ok(
+            JSON.stringify({
+              id: args[2],
+              annotations: { 'workers/triggered_by': 'secret' },
+              resources: {
+                bindings: [
+                  { name: 'API_TOKEN', type: 'secret_text' },
+                  { name: 'DB', type: 'd1' },
+                ],
+                script: { handlers: ['fetch'] },
+                script_runtime: { usage_model: 'standard' },
+              },
+            }),
+          );
+        }
+        return base(args);
+      });
+    }
+
+    const deployAfter = (runWrangler: ReturnType<typeof afterSecretRunner>) =>
+      activateCloudflareVersion({
+        runWrangler,
+        workerName: 'my-worker',
+        verifyUploader: () => true,
+        message: encodeCloudflareVersionMessage([], triggersWith(preserving)),
+        fetch: async () => Response.json({ ready: true }),
+      });
+
+    it('uses the bwf release it came from, through one or more secret versions', async () => {
+      const runWrangler = afterSecretRunner([
+        { id: OLDER, number: 1, annotations: { 'workers/message': released } },
+        { id: MIDDLE, number: 2, annotations: { 'workers/triggered_by': 'secret' } },
+        { id: CURRENT, number: 3, annotations: { 'workers/triggered_by': 'secret' } },
+      ]);
+      await expect(deployAfter(runWrangler)).resolves.toMatchObject({ ok: true });
+    });
+
+    it('still stops when another kind of change sits between the release and now', async () => {
+      const runWrangler = afterSecretRunner([
+        { id: OLDER, number: 1, annotations: { 'workers/message': released } },
+        { id: MIDDLE, number: 2, annotations: { 'workers/triggered_by': 'dashboard' } },
+        { id: CURRENT, number: 3, annotations: { 'workers/triggered_by': 'secret' } },
+      ]);
+      await expect(deployAfter(runWrangler)).resolves.toMatchObject({
+        ok: false,
+        reason: 'traffic-preservation-unavailable',
+      });
+      expect(runWrangler.mock.calls.some(([args]) => args[1] === 'upload')).toBe(false);
+    });
+  });
+
   it('uses the last published traffic values while adding an ordinary cron', async () => {
     let applied: Record<string, unknown> | undefined;
     const base = runner();

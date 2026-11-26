@@ -1090,6 +1090,21 @@ async function activateCloudflareVersionWithSecretsFile(
     }
     return await isBwfSecretDraftPlaceholderVersion(options, previousVersionId);
   }
+  if (
+    desiredMetadata?.schema === 2 &&
+    previousVersionId &&
+    previousVersion &&
+    previousVersion.message === null &&
+    !previousVersion.isSecretOnlyDraft &&
+    !previousVersion.draftUnknown
+  ) {
+    previousVersion =
+      (await readSecretChangePredecessor(
+        options,
+        previousVersionId,
+        inheritanceBaseline?.map((version) => version.inspection),
+      )) ?? previousVersion;
+  }
   const previousMetadata = desiredMetadata?.schema === 2 ? previousVersion?.metadata : null;
   const continuesOpaqueTriggerPreservation =
     !options.preserveTriggers &&
@@ -1974,6 +1989,56 @@ async function readCloudflareVersionInspection(
     return null;
   }
   return null;
+}
+
+function isSecretChangeEntry(entry: unknown): boolean {
+  if (!isRecord(entry) || !isRecord(entry.annotations)) {
+    return false;
+  }
+  const keys = Object.keys(entry.annotations);
+  return keys.length === 1 && entry.annotations['workers/triggered_by'] === 'secret';
+}
+
+// Decision: A secret sync or put makes a version that only changes secrets, and Cloudflare gives it no
+// message. Deploy safety needs the message of the bwf release it came from, so follow the chain
+// of secret-only versions back to the nearest older version. Any other kind of change, such as a
+// dashboard edit, has other annotations and ends the walk, so it still stops the deploy.
+async function readSecretChangePredecessor(
+  options: Pick<
+    Parameters<typeof activateCloudflareVersion>[0],
+    'configPath' | 'runWrangler' | 'workerName'
+  >,
+  versionId: string,
+  knownVersions?: ReadonlyArray<unknown>,
+): Promise<CloudflareVersionInspection | null> {
+  const recent = knownVersions
+    ? knownVersions.flatMap((entry) =>
+        isRecord(entry) && typeof entry.id === 'string' && typeof entry.number === 'number'
+          ? [{ id: entry.id, number: entry.number, inspection: entry }]
+          : [],
+      )
+    : await readRecentCloudflareVersionIds(options);
+  if (!recent) {
+    return null;
+  }
+  const ordered = [...recent].sort((left, right) => left.number - right.number);
+  let index = ordered.findIndex((version) => version.id === versionId);
+  if (index < 0 || !isSecretChangeEntry(ordered[index]?.inspection)) {
+    return null;
+  }
+  while (index > 0 && isSecretChangeEntry(ordered[index]?.inspection)) {
+    index -= 1;
+  }
+  const source = ordered[index];
+  if (!source || isSecretChangeEntry(source.inspection)) {
+    return null;
+  }
+  const inspection = await readCloudflareVersionInspection(
+    options,
+    source.id,
+    ordered.map((version) => version.inspection),
+  );
+  return inspection?.metadata ? inspection : null;
 }
 
 /**
