@@ -1112,9 +1112,9 @@ async function secrets(): Promise<Result> {
       const patch = Object.fromEntries(
         Object.entries(texts).map(([name, text]) => [name, { type: 'secret_text', text }]),
       );
-      return withSecretFile(JSON.stringify({ secrets: patch }), (path) =>
+      return withSecretFile(JSON.stringify(patch), (path) =>
         apply(texts, () =>
-          runCf(['workers', 'secrets', 'bulk', '--worker', worker, '--file', path]),
+          runCf(['workers', 'secrets', 'bulk-edit', '--worker', worker, '--secrets', '@' + path]),
         ),
       );
     }
