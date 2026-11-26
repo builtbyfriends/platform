@@ -54,7 +54,9 @@ const policies: Array<{
   fields: Array<string>;
   structured?: { fields: { [key: string]: ReadFields } };
   collection?: {
-    defaultLimit: number;
+    defaultLimit?: number;
+    pagination?: 'none';
+    path?: Array<string>;
     maxItems: number;
     recordIdentity: Schema;
     identityMaxBytes?: number;
@@ -116,6 +118,19 @@ const policies: Array<{
     responseOwnership: 'selected-resource',
     fields: [],
     structured: corsFields,
+  },
+  {
+    type: 'r2',
+    path: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom',
+    parameter: 'bucket_name',
+    identity: 'domain',
+    fields: ['domain', 'enabled', 'minTLS', 'status/ownership', 'status/ssl'],
+    collection: {
+      pagination: 'none',
+      path: ['domains'],
+      maxItems: 200,
+      recordIdentity: { type: 'string', minLength: 1, maxLength: 253, pattern: '^[a-zA-Z0-9.-]+$' },
+    },
   },
   {
     type: 'kv',
@@ -181,6 +196,29 @@ const policies: Array<{
       'settings/delivery_paused',
       'settings/message_retention_period',
     ],
+  },
+  {
+    type: 'queue',
+    path: '/accounts/{account_id}/queues/{queue_id}/consumers',
+    parameter: 'queue_id',
+    identity: 'consumer_id',
+    identityPattern: '^[a-fA-F0-9]{32}$',
+    fields: [
+      'consumer_id',
+      'type',
+      'created_on',
+      'settings/batch_size',
+      'settings/max_retries',
+      'settings/retry_delay',
+      'settings/max_concurrency',
+      'settings/max_wait_time_ms',
+      'settings/visibility_timeout_ms',
+    ],
+    collection: {
+      pagination: 'none',
+      maxItems: 200,
+      recordIdentity: { type: 'string', pattern: '^[a-fA-F0-9]{32}$' },
+    },
   },
 ];
 
@@ -339,6 +377,9 @@ function scalar(value: unknown): value is string | number | boolean | null {
 
 function fieldSchema(value: unknown, path: Array<string>, document: unknown): Schema | undefined {
   const schema = resolve(document, value);
+  if (schema.writeOnly === true) {
+    throw Error('The provider projection includes a private field.');
+  }
   if (path.length === 0) {
     return normalize(schema, document, 'output');
   }
@@ -357,6 +398,17 @@ function fieldSchema(value: unknown, path: Array<string>, document: unknown): Sc
       const child = fieldSchema(branch, path, document);
       if (child) {
         return child;
+      }
+    }
+  }
+  for (const kind of ['oneOf', 'anyOf'] as const) {
+    if (Array.isArray(schema[kind])) {
+      const choices = schema[kind].flatMap((branch) => {
+        const child = fieldSchema(branch, path, document);
+        return child ? [child] : [];
+      });
+      if (choices.length) {
+        return { anyOf: choices };
       }
     }
   }
@@ -559,7 +611,14 @@ export function prepareCloudflareProviderRead(
       parameters.set(`${parameter.in}:${parameter.name}`, parameter);
     }
   }
-  if (policy.collection) {
+  const completeCollection = policy.collection?.pagination === 'none';
+  if (
+    completeCollection &&
+    [...parameters.values()].some((parameter) => parameter.in === 'query')
+  ) {
+    throw Error('The complete collection contains an unapproved query parameter.');
+  }
+  if (policy.collection && !completeCollection) {
     const approved = new Set(['limit', 'cursor', ...Object.keys(policy.collection.query ?? {})]);
     if (
       [...parameters.values()].some(
@@ -637,7 +696,11 @@ export function prepareCloudflareProviderRead(
   for (const field of policy.fields) {
     const schema = fieldSchema(
       responseSchema,
-      ['result', ...(policy.collection ? ['*'] : []), ...field.split('/')],
+      [
+        'result',
+        ...(policy.collection ? [...(policy.collection.path ?? []), '*'] : []),
+        ...field.split('/'),
+      ],
       document,
     );
     if (!schema) {
@@ -672,14 +735,20 @@ export function prepareCloudflareProviderRead(
             additionalProperties: false,
             required: ['limit', 'count', 'nextCursor', 'hasMore'],
             properties: {
-              limit: { type: 'integer', minimum: 10, maximum: policy.collection.maxItems },
+              limit: completeCollection
+                ? { type: 'null' }
+                : { type: 'integer', minimum: 10, maximum: policy.collection.maxItems },
               count: { type: 'integer', minimum: 0, maximum: policy.collection.maxItems },
-              nextCursor: { type: ['string', 'null'], minLength: 1, maxLength: 2048 },
-              hasMore: {
-                type: ['boolean', 'null'],
-                description:
-                  'Null when the provider omitted its continuation cursor; completeness is unknown.',
-              },
+              nextCursor: completeCollection
+                ? { type: 'null' }
+                : { type: ['string', 'null'], minLength: 1, maxLength: 2048 },
+              hasMore: completeCollection
+                ? { type: 'boolean', const: false }
+                : {
+                    type: ['boolean', 'null'],
+                    description:
+                      'Null when the provider omitted its continuation cursor; completeness is unknown.',
+                  },
             },
           },
         },
@@ -773,7 +842,9 @@ export function prepareCloudflareProviderRead(
         }
       }
       const queryValues = record({
-        ...(policy.collection ? { limit: policy.collection.defaultLimit } : {}),
+        ...(policy.collection && !completeCollection
+          ? { limit: policy.collection.defaultLimit }
+          : {}),
         ...record(query),
       });
       const headers = parameters.has('header:cf-r2-jurisdiction')
@@ -882,15 +953,18 @@ export function prepareCloudflareProviderRead(
         return values;
       };
       const collectionData = () => {
-        const rows = returned.result;
-        if (
-          !Array.isArray(rows) ||
-          typeof queryValues.limit !== 'number' ||
-          rows.length > queryValues.limit
-        ) {
+        let rows = returned.result;
+        for (const key of policy.collection?.path ?? []) {
+          rows = record(rows)[key];
+        }
+        const limit = completeCollection ? policy.collection?.maxItems : queryValues.limit;
+        if (!Array.isArray(rows) || typeof limit !== 'number' || rows.length > limit) {
           throw Error('The provider returned an invalid result page.');
         }
         const info = returned.result_info === undefined ? {} : record(returned.result_info);
+        if (completeCollection && returned.result_info !== undefined) {
+          throw Error('The complete collection returned unexpected pagination.');
+        }
         const cursor = info.cursor;
         if (
           (cursor !== undefined &&
@@ -921,10 +995,10 @@ export function prepareCloudflareProviderRead(
           name: resource.binding_name,
           records,
           pagination: {
-            limit: queryValues.limit,
+            limit: completeCollection ? null : queryValues.limit,
             count: records.length,
             nextCursor: cursor || null,
-            hasMore: cursor === undefined ? null : cursor !== '',
+            hasMore: completeCollection ? false : cursor === undefined ? null : cursor !== '',
           },
         };
       };

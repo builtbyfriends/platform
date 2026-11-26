@@ -110,6 +110,7 @@ describe('schema-driven Cloudflare resource reads', () => {
       { method: 'GET', path: fixture.operations.r2.path },
       { method: 'GET', path: managedDomainArtifact.path },
       { method: 'GET', path: '/accounts/{account_id}/r2/buckets/{bucket_name}/cors' },
+      { method: 'GET', path: '/accounts/{account_id}/r2/buckets/{bucket_name}/domains/custom' },
     ]);
   });
 

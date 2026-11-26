@@ -112,6 +112,8 @@ afterEach(async () => {
         'r2-get-bucket-cors-policy',
         'r2-put-bucket-cors-policy',
         "workers-kv-namespace-list-a-namespace'-s-keys",
+        'queues-list-consumers',
+        'r2-list-custom-domains',
       ].includes(entry.operationId)
     ) {
       await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
@@ -571,6 +573,11 @@ describe('schema-backed provider operations', () => {
       fixture.metadata.key,
       fixture.key,
       cloudflareOpenApiKey(cors),
+      cloudflareOpenApiKey(
+        (await cloudflareOpenApiIndex()).find(
+          (entry) => entry.operationId === 'r2-list-custom-domains',
+        )!,
+      ),
       cloudflareOpenApiKey(
         (await cloudflareOpenApiIndex()).find(
           (entry) => entry.operationId === 'r2-put-bucket-cors-policy',
@@ -1698,5 +1705,163 @@ describe('owned Durable Object instance operations', () => {
       ).status,
     ).toBe(400);
     expect(fixture.read).not.toHaveBeenCalled();
+  });
+});
+
+describe.each([
+  {
+    kind: 'queue',
+    id: 'queues-list-consumers',
+    file: 'queue-consumers-get',
+    records: [
+      {
+        consumer_id: 'c'.repeat(32),
+        type: 'worker',
+        settings: { max_retries: 3 },
+        script_name: 'private-worker',
+      },
+    ],
+    expected: [{ consumer_id: 'c'.repeat(32), type: 'worker', settings_max_retries: 3 }],
+  },
+  {
+    kind: 'r2',
+    id: 'r2-list-custom-domains',
+    file: 'r2-custom-domains-get',
+    records: [
+      {
+        domain: 'files.example.com',
+        enabled: false,
+        status: { ownership: 'active', ssl: 'pending' },
+        zoneId: 'private-zone',
+      },
+    ],
+    expected: [
+      {
+        domain: 'files.example.com',
+        enabled: false,
+        status_ownership: 'active',
+        status_ssl: 'pending',
+      },
+    ],
+  },
+] as const)('registered $kind complete child collections', (fixture) => {
+  async function setupCollection() {
+    const metadata = await providerResource(fixture.kind);
+    const entry = (await cloudflareOpenApiIndex()).find((item) => item.operationId === fixture.id);
+    if (!entry) {
+      throw Error('Missing pinned child collection');
+    }
+    const key = cloudflareOpenApiKey(entry);
+    const bytes = await readFile(
+      new URL(`../fixtures/cloudflare-openapi/${fixture.file}.json.gz`, import.meta.url),
+    );
+    await env.STATIC_ASSETS_R2.put(key, bytes);
+    const selection = { ...scope(), resourceId: metadata.body.resourceId };
+    const list = async () => {
+      const response = await call('projects.resourceOperations', selection);
+      expect(response.status).toBe(200);
+      return catalogSchema.assert(await response.json()).data.operations;
+    };
+    const descriptor = (await list()).find((item) => item.id === fixture.id);
+    if (!descriptor) {
+      throw Error('Missing registered child collection');
+    }
+    const body = {
+      ...selection,
+      operation: descriptor.id,
+      version: descriptor.version,
+      expectedEffect: 'read',
+      input: {},
+    };
+    const envelope = {
+      success: true,
+      errors: [],
+      messages: [],
+      result: fixture.kind === 'r2' ? { domains: fixture.records } : fixture.records,
+    };
+    metadata.provider.mockImplementation(async () => Response.json(envelope));
+    return { metadata, key, bytes, list, body, envelope };
+  }
+
+  it('registers independent complete-list descriptors and reads only the owned parent', async () => {
+    const { metadata, list, body } = await setupCollection();
+    expect(await list()).toEqual(
+      expect.arrayContaining([
+        metadata.descriptor,
+        expect.objectContaining({ id: fixture.id, effect: 'read' }),
+      ]),
+    );
+    const response = await call('resources.invoke', body);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result).toMatchObject({
+      data: {
+        kind: 'provider-read',
+        action: fixture.id,
+        data: {
+          records: fixture.expected,
+          pagination: { limit: null, count: 1, nextCursor: null, hasMore: false },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private-');
+    const url = new URL(String(metadata.provider.mock.calls[0][0]));
+    expect(url.pathname).toBe(
+      `/client/v4/accounts/${env.CF_ACCOUNT_ID}/${fixture.kind === 'r2' ? `r2/buckets/${metadata.cfId}/domains/custom` : `queues/${metadata.cfId}/consumers`}`,
+    );
+    expect(url.search).toBe('');
+    expect(proxy).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale versions, effects, pagination and cross-tenant selections before access', async () => {
+    const { metadata, body } = await setupCollection();
+    for (const [change, status] of [
+      [{ version: '0'.repeat(64) }, 409],
+      [{ expectedEffect: 'write' }, 400],
+      [{ resourceId: 'res_foreign' }, 404],
+      [{ owner: { person: 'someone-else' } }, 404],
+      [{ input: { query: { limit: 10 } } }, 400],
+      [{ input: { account_id: 'other' } }, 400],
+    ] as const) {
+      expect((await call('resources.invoke', { ...body, ...change })).status).toBe(status);
+    }
+    expect(metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing metadata usable when the collection artifact is missing or corrupt', async () => {
+    const { metadata, key, bytes, list, body } = await setupCollection();
+    for (const mode of ['missing', 'corrupt']) {
+      if (mode === 'missing') {
+        await env.STATIC_ASSETS_R2.delete(key);
+      } else {
+        await env.STATIC_ASSETS_R2.put(key, new Uint8Array(bytes.length));
+      }
+      expect(await list()).toEqual(expect.arrayContaining([metadata.descriptor]));
+      expect((await list()).some((item) => item.id === fixture.id)).toBe(false);
+      expect((await call('resources.invoke', body)).status).toBe(404);
+    }
+    expect(metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('withholds child data after ownership changes and hides provider diagnostics', async () => {
+    const { metadata, body, envelope } = await setupCollection();
+    metadata.provider.mockResolvedValueOnce(
+      Response.json({ message: 'private-provider-error' }, { status: 403 }),
+    );
+    const failed = await call('resources.invoke', body);
+    expect(failed.status).toBe(502);
+    expect(JSON.stringify(await failed.json())).not.toContain('private-');
+    metadata.provider.mockImplementationOnce(async () => {
+      await env.db
+        .update(resources)
+        .set({ cf_id: 'changed-resource' })
+        .where(eq(resources.id, body.resourceId));
+      return Response.json(envelope);
+    });
+    const changed = await call('resources.invoke', body);
+    expect(changed.status).toBe(409);
+    expect(JSON.stringify(await changed.json())).not.toContain(
+      fixture.kind === 'r2' ? 'files.example.com' : 'c'.repeat(32),
+    );
   });
 });
