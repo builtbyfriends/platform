@@ -15,6 +15,7 @@ import type { CfCommand } from '../../src/cli/cf-version-api.ts';
 import {
   d1BindingsOf,
   ensurePreviewDatabase,
+  assertNotDeclared,
   isPreviewName,
   previewBuild,
   previewDatabaseName,
@@ -58,7 +59,17 @@ describe('preview names and databases', () => {
   });
 
   it("names a preview's copy of a database after the preview", () => {
-    expect(previewDatabaseName('app-index', 'pr-7')).toBe('app-index-pr-7');
+    expect(previewDatabaseName('app-index', 'pr-7')).toBe('app-index-preview-pr-7');
+  });
+
+  it("refuses a copy's name that the app declares as a database of its own", () => {
+    const declared = ['app', 'app-preview-staging'];
+
+    expect(() => assertNotDeclared(previewDatabaseName('app', 'staging'), declared)).toThrow(
+      /also a database this app declares/,
+    );
+    expect(() => assertNotDeclared(previewDatabaseName('app', 'pr-7'), declared)).not.toThrow();
+    expect(previewDatabaseName('app', 'staging')).not.toBe('app-staging');
   });
 
   it('reads the address from what cf prints, whatever comes before the JSON', () => {

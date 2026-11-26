@@ -189,6 +189,17 @@ export async function publishCloudflareWorker(input: {
     execution.workersDevSubdomain === undefined
       ? execution.previewUrl
       : `https://${workerName}.${execution.workersDevSubdomain}.workers.dev`;
+  if (input.healthCheck !== undefined && healthUrl === undefined) {
+    log.error(
+      [
+        'deploy: the health check did not run, because the deploy has no workers.dev or preview address to give it. The new version is live.',
+        'Turn on the workers.dev address, or remove deploy.cloudflare.healthCheck. To go back to the version before it, run `bwf project rollback --platform cloudflare`.',
+      ].join('\n'),
+    );
+
+    return exit(1);
+  }
+
   if (input.healthCheck !== undefined && healthUrl !== undefined) {
     log.step(`Running the health check against ${healthUrl}`);
     const health = await runHealthCheck(input.healthCheck, healthUrl, root);

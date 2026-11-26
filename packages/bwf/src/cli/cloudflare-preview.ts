@@ -1,57 +1,86 @@
+import { type } from 'arktype';
+import type { Type } from 'arktype';
 import type { PreviewBuild } from './cf-build-output.ts';
 import type { CfCommand } from './cf-version-api.ts';
 import { isCleanCloudflareExit } from './cloudflare-process.ts';
 
 const PREVIEW_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
+const DatabaseEntry = type({ name: 'string', uuid: 'string' });
+const DatabaseList = DatabaseEntry.array().or({ result: DatabaseEntry.array() });
+const CreatedDatabase = type({ uuid: 'string' });
+const D1Binding = type({ type: "'d1'", 'name?': 'string', 'id?': 'string' });
+const PreviewDeployOutput = type({ preview_urls: 'string[]' });
+const Json = type('string.json.parse');
+
 export function isPreviewName(name: string): boolean {
   return PREVIEW_NAME.test(name);
 }
 
-/** A preview's copy of a database: the same name with the preview's name after it. */
+/** A preview's copy of a database. The word "preview" keeps it from matching a database a person named themselves. */
 export function previewDatabaseName(databaseName: string, preview: string): string {
-  return `${databaseName}-${preview}`;
+  return `${databaseName}-preview-${preview}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
+/** Stop before a preview would reuse, migrate or delete a database the app declares as its own. */
+export function assertNotDeclared(copy: string, declared: ReadonlyArray<string>): void {
+  if (declared.includes(copy)) {
+    throw new Error(
+      `The preview's database name ${copy} is also a database this app declares. Rename one of them so a preview never touches the app's own data.`,
+    );
   }
 }
 
-async function runJson(runCf: CfCommand, args: Array<string>, cwd: string): Promise<unknown> {
+function parseWith<S extends Type>(schema: S, text: string): S['infer'] | undefined {
+  const json = Json(text);
+
+  if (json instanceof type.errors) {
+    return undefined;
+  }
+
+  const parsed = schema(json);
+
+  return parsed instanceof type.errors ? undefined : parsed;
+}
+
+async function runCfJson<S extends Type>(
+  runCf: CfCommand,
+  args: Array<string>,
+  cwd: string,
+  schema: S,
+): Promise<S['infer'] | undefined> {
   const result = await runCf(args, { cwd, capture: true });
 
   if (!isCleanCloudflareExit(result)) {
     const detail = (result.stderr || result.stdout).trim().split('\n').slice(-3).join(' ');
+
     throw new Error(`cf ${args.slice(0, 2).join(' ')} failed${detail ? `: ${detail}` : '.'}`);
   }
 
-  return result.data ?? parseJson(result.stdout);
+  if (result.data !== undefined) {
+    const parsed = schema(result.data);
+
+    return parsed instanceof type.errors ? undefined : parsed;
+  }
+
+  return parseWith(schema, result.stdout);
+}
+
+async function runCfQuiet(runCf: CfCommand, args: Array<string>, cwd: string): Promise<void> {
+  const result = await runCf(args, { cwd, capture: true });
+
+  if (!isCleanCloudflareExit(result)) {
+    const detail = (result.stderr || result.stdout).trim().split('\n').slice(-3).join(' ');
+
+    throw new Error(`cf ${args.slice(0, 2).join(' ')} failed${detail ? `: ${detail}` : '.'}`);
+  }
 }
 
 async function findDatabase(runCf: CfCommand, name: string, cwd: string): Promise<string | null> {
-  const found = await runJson(runCf, ['d1', 'list', '--name', name], cwd);
+  const found = await runCfJson(runCf, ['d1', 'list', '--name', name], cwd, DatabaseList);
+  const list = Array.isArray(found) ? found : (found?.result ?? []);
 
-  const list = Array.isArray(found)
-    ? found
-    : isRecord(found) && Array.isArray(found.result)
-      ? found.result
-      : [];
-
-  for (const entry of list) {
-    if (isRecord(entry) && entry.name === name && typeof entry.uuid === 'string') {
-      return entry.uuid;
-    }
-  }
-
-  return null;
+  return list.find((entry) => entry.name === name)?.uuid ?? null;
 }
 
 /**
@@ -68,16 +97,17 @@ export async function ensurePreviewDatabase(input: {
   let id = await findDatabase(runCf, name, cwd);
 
   if (id === null) {
-    const created = await runJson(runCf, ['d1', 'create', '--name', name], cwd);
-    id = isRecord(created) && typeof created.uuid === 'string' ? created.uuid : null;
+    const created = await runCfJson(runCf, ['d1', 'create', '--name', name], cwd, CreatedDatabase);
 
-    if (id === null) {
+    if (created === undefined) {
       throw new Error(`cf d1 create did not return an id for ${name}.`);
     }
+
+    id = created.uuid;
   }
 
   if (input.migrationsDir !== undefined) {
-    await runJson(runCf, ['d1', 'migrations', 'apply', id, '--dir', input.migrationsDir], cwd);
+    await runCfQuiet(runCf, ['d1', 'migrations', 'apply', id, '--dir', input.migrationsDir], cwd);
   }
 
   return id;
@@ -95,15 +125,9 @@ export async function removePreviewDatabase(input: {
     return false;
   }
 
-  await runJson(input.runCf, ['d1', 'delete', id, '--force'], input.cwd);
+  await runCfQuiet(input.runCf, ['d1', 'delete', id, '--force'], input.cwd);
 
   return true;
-}
-
-type D1Binding = { type: 'd1'; name?: string; id?: string };
-
-function isD1Binding(value: unknown): value is D1Binding {
-  return isRecord(value) && value.type === 'd1';
 }
 
 /** The D1 databases a built Worker binds, by binding name. */
@@ -113,8 +137,10 @@ export function d1BindingsOf(config: {
   const bindings: Array<{ binding: string; databaseName: string }> = [];
 
   for (const [binding, value] of Object.entries(config.env ?? {})) {
-    if (isD1Binding(value) && typeof value.name === 'string') {
-      bindings.push({ binding, databaseName: value.name });
+    const parsed = D1Binding(value);
+
+    if (!(parsed instanceof type.errors) && parsed.name !== undefined) {
+      bindings.push({ binding, databaseName: parsed.name });
     }
   }
 
@@ -128,12 +154,18 @@ export function previewBuild(input: {
 }): PreviewBuild {
   return {
     async rewriteWorker(config) {
-      const env: Record<string, unknown> = { ...config.env };
+      const swapped = new Map<string, { name: string; id: string }>();
 
       for (const { binding, databaseName } of d1BindingsOf(config)) {
-        const copy = await input.databaseFor(binding, databaseName);
-        env[binding] = { ...(env[binding] as D1Binding), name: copy.name, id: copy.id };
+        swapped.set(binding, await input.databaseFor(binding, databaseName));
       }
+
+      const env = Object.fromEntries(
+        Object.entries(config.env ?? {}).map(([binding, value]) => [
+          binding,
+          swapped.has(binding) ? { ...value, ...swapped.get(binding) } : value,
+        ]),
+      );
 
       return { ...config, env };
     },
@@ -142,8 +174,7 @@ export function previewBuild(input: {
 
 /** The preview's address in the JSON `cf previews deploy` prints. */
 export function readPreviewUrl(output: string): string | undefined {
-  const body = parseJson(output.slice(Math.max(0, output.indexOf('{'))));
-  const urls = isRecord(body) ? body.preview_urls : undefined;
+  const body = parseWith(PreviewDeployOutput, output.slice(Math.max(0, output.indexOf('{'))));
 
-  return Array.isArray(urls) && typeof urls[0] === 'string' ? urls[0] : undefined;
+  return body?.preview_urls[0];
 }

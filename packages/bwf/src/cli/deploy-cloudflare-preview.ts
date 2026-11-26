@@ -1,4 +1,5 @@
 import { parseRootWranglerConfig } from '@builtbyfriends/deploy-cloudflare';
+import { type } from 'arktype';
 import { dirname, resolve } from 'pathslash';
 import { readConfig } from '../config.ts';
 import type { BwfConfig } from '../config.ts';
@@ -8,6 +9,7 @@ import { createCfCommand } from './cf-version-runner.ts';
 import { createCloudflareChildReporter, observeCfCommand } from './cloudflare-child-report.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
 import {
+  assertNotDeclared,
   ensurePreviewDatabase,
   previewBuild,
   previewDatabaseName,
@@ -32,6 +34,9 @@ import { getErrorMessage, note } from './output.ts';
 
 const CF_TIMEOUT_MS = 300_000;
 
+const PREVIEW_SHARES =
+  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues, secrets, Workflows and containers are the live app's, so a preview reads and writes the live data there.";
+
 type PreviewRun = {
   root: string;
   name: string;
@@ -50,22 +55,30 @@ function lastLines(text: string, count: number): string {
   return text.trim().split('\n').slice(-count).join('\n');
 }
 
+const DeclaredDatabase = type({
+  binding: 'string',
+  database_name: 'string',
+  'migrations_dir?': 'string',
+});
+
 /** The D1 databases the root config declares, each with the folder its migrations come from. */
 function declaredDatabases(source: CloudflareDeploySource): Array<D1Entry> {
-  const entries = parseRootWranglerConfig(source.configPath).d1_databases;
+  const entries = DeclaredDatabase.array()(parseRootWranglerConfig(source.configPath).d1_databases);
   const found: Array<D1Entry> = [];
 
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    const { binding, database_name: databaseName, migrations_dir: dir } = entry ?? {};
+  for (const entry of entries instanceof type.errors ? [] : entries) {
+    const own = entry.migrations_dir
+      ? resolve(dirname(source.configPath), entry.migrations_dir)
+      : undefined;
 
-    if (typeof binding !== 'string' || typeof databaseName !== 'string') {
-      continue;
-    }
+    const appDatabase =
+      source.desired.d1?.binding === entry.binding ? source.migrationsDir : undefined;
 
-    const own = typeof dir === 'string' ? resolve(dirname(source.configPath), dir) : undefined;
-    const appDatabase = source.desired.d1?.binding === binding ? source.migrationsDir : undefined;
-
-    found.push({ binding, databaseName, migrationsDir: own ?? appDatabase });
+    found.push({
+      binding: entry.binding,
+      databaseName: entry.database_name,
+      migrationsDir: own ?? appDatabase,
+    });
   }
 
   return found;
@@ -91,10 +104,17 @@ async function removePreview(run: PreviewRun): Promise<void> {
     );
   }
 
-  for (const { databaseName } of declaredDatabases(source)) {
+  const declared = declaredDatabases(source);
+
+  for (const { databaseName } of declared) {
     const copy = previewDatabaseName(databaseName, name);
 
     try {
+      assertNotDeclared(
+        copy,
+        declared.map((entry) => entry.databaseName),
+      );
+
       const removed = await removePreviewDatabase({ runCf, cwd: run.root, name: copy });
 
       log.info(removed ? `Deleted database ${copy}.` : `No database ${copy} to delete.`);
@@ -120,6 +140,11 @@ async function stagePreviewOutput(run: PreviewRun, generatedConfigPath: string) 
     databaseFor: async (binding, databaseName) => {
       const copy = previewDatabaseName(databaseName, name);
       const own = databases.find((entry) => entry.binding === binding);
+
+      assertNotDeclared(
+        copy,
+        databases.map((entry) => entry.databaseName),
+      );
 
       log.step(`Preparing database ${copy}...`);
 
@@ -175,6 +200,7 @@ async function deployPreview(run: PreviewRun): Promise<void> {
   const { root, name, runCf } = run;
 
   removeDeployPointer(root);
+  log.info(PREVIEW_SHARES);
 
   const build = await buildCloudflareWorker({
     root,

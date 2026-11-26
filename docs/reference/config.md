@@ -334,7 +334,7 @@ A command to run once a deploy or a preview is ready. It checks what the app doe
 deploy: { cloudflare: { healthCheck: 'node scripts/health.mjs' } },
 ```
 
-The command runs in the project folder with the address in `BWF_DEPLOY_URL`, and without your Cloudflare credentials. It passes when it exits with 0. On `bwf deploy --platform cloudflare`, the new version is already live when it runs, so a failure fails the deploy and prints `bwf project rollback --platform cloudflare`. On a preview, a failure fails the command and prints the `--remove-preview` command. The check stops after three minutes.
+The command runs in the project folder with the address in `BWF_DEPLOY_URL`, and without your Cloudflare credentials. It passes when it exits with 0. On `bwf deploy --platform cloudflare`, the new version is already live when it runs, so a failure fails the deploy and prints `bwf project rollback --platform cloudflare`. On a preview, a failure fails the command and prints the `--remove-preview` command. The check stops after three minutes. If the deploy has no workers.dev or preview address to give it, the deploy fails and says so, since a check that doesn't run would pass nothing.
 
 ### `routing`
 
