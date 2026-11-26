@@ -157,7 +157,7 @@ beforeEach(async () => {
   env.CF_API_TOKEN = 'test-cf-token';
 });
 
-async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue') {
+async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue' | 'hyperdrive') {
   const selected = cloudflareProviderReadSelection(kind);
   const entry = (await cloudflareOpenApiIndex()).find(
     (candidate) => candidate.method === selected?.method && candidate.path === selected.path,
@@ -209,7 +209,21 @@ async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue') {
         ? { uuid: cfId, name: 'private-name', num_tables: 3 }
         : kind === 'kv'
           ? { id: cfId, title: 'private-name', supports_url_encoding: true }
-          : { queue_id: cfId, queue_name: 'private-name', consumers_total_count: 2 };
+          : kind === 'hyperdrive'
+            ? {
+                id: cfId,
+                name: 'private-name',
+                origin: {
+                  host: 'private-database.example.com',
+                  port: 5432,
+                  scheme: 'postgres',
+                  user: 'private-user',
+                  database: 'private-database',
+                },
+                caching: { disabled: false, max_age: 120, stale_while_revalidate: 30 },
+                origin_connection_limit: 20,
+              }
+            : { queue_id: cfId, queue_name: 'private-name', consumers_total_count: 2 };
   const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
     Response.json({
       success: true,
@@ -222,7 +236,7 @@ async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue') {
 }
 
 describe('schema-backed provider operations', () => {
-  it.each(['d1', 'r2', 'kv', 'queue'] as const)(
+  it.each(['d1', 'r2', 'kv', 'queue', 'hyperdrive'] as const)(
     'discovers and invokes the pinned %s operation through the same registry',
     async (kind) => {
       const { body, provider, entry, cfId } = await providerResource(kind);
@@ -264,27 +278,50 @@ describe('schema-backed provider operations', () => {
     expect(provider).not.toHaveBeenCalled();
   });
 
-  it('stops advertising and invoking when credentials or the verified schema are unavailable', async () => {
-    const { body, key, asset, provider } = await providerResource('kv');
-    const unavailable = async () => {
-      const response = await call('projects.resourceOperations', {
-        ...scope(),
-        resourceId: body.resourceId,
-      });
-      expect(await response.json()).toMatchObject({ data: { available: false, operations: [] } });
-      expect((await call('resources.invoke', body)).status).toBe(404);
-    };
-    env.CF_API_TOKEN = '';
-    await unavailable();
-    env.CF_API_TOKEN = 'test-cf-token';
-    env.CF_ACCOUNT_ID = 'invalid';
-    await unavailable();
-    env.CF_ACCOUNT_ID = 'a'.repeat(32);
-    await env.STATIC_ASSETS_R2.delete(key);
-    await unavailable();
-    await env.STATIC_ASSETS_R2.put(key, new Uint8Array(asset.byteLength));
-    await unavailable();
+  it.each(['kv', 'hyperdrive'] as const)(
+    'stops advertising and invoking %s when credentials or the verified schema are unavailable',
+    async (kind) => {
+      const { body, key, asset, provider } = await providerResource(kind);
+      const unavailable = async () => {
+        const response = await call('projects.resourceOperations', {
+          ...scope(),
+          resourceId: body.resourceId,
+        });
+        expect(await response.json()).toMatchObject({ data: { available: false, operations: [] } });
+        expect((await call('resources.invoke', body)).status).toBe(404);
+      };
+      env.CF_API_TOKEN = '';
+      await unavailable();
+      env.CF_API_TOKEN = 'test-cf-token';
+      env.CF_ACCOUNT_ID = 'invalid';
+      await unavailable();
+      env.CF_ACCOUNT_ID = 'a'.repeat(32);
+      await env.STATIC_ASSETS_R2.delete(key);
+      await unavailable();
+      await env.STATIC_ASSETS_R2.put(key, new Uint8Array(asset.byteLength));
+      await unavailable();
+      expect(provider).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps Hyperdrive reads owned and does not expose origin configuration or provider permission errors', async () => {
+    const { body, provider } = await providerResource('hyperdrive');
+    for (const changed of [{ resourceId: 'res_foreign' }, { owner: { person: 'someone-else' } }]) {
+      expect((await call('resources.invoke', { ...body, ...changed })).status).toBe(404);
+    }
     expect(provider).not.toHaveBeenCalled();
+    const response = await call('resources.invoke', body);
+    expect(await response.json()).toMatchObject({
+      data: {
+        data: { caching_disabled: false, caching_max_age: 120, origin_connection_limit: 20 },
+      },
+    });
+    provider.mockResolvedValueOnce(
+      Response.json({ errors: [{ message: 'private-permission-diagnostic' }] }, { status: 403 }),
+    );
+    const denied = await call('resources.invoke', body);
+    expect(denied.status).toBe(502);
+    expect(JSON.stringify(await denied.json())).not.toContain('private-');
   });
 
   it('rechecks ownership metadata after the provider response before exposing data', async () => {

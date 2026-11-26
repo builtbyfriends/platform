@@ -43,6 +43,23 @@ const policies = [
     fields: ['jurisdiction', 'mode', 'supports_url_encoding'],
   },
   {
+    type: 'hyperdrive',
+    path: '/accounts/{account_id}/hyperdrive/configs/{hyperdrive_id}',
+    parameter: 'hyperdrive_id',
+    identity: 'id',
+    // Decision: Origin, integration and certificate identities contain connection details; expose operational settings without these provider identities or credentials.
+    fields: [
+      'created_on',
+      'modified_on',
+      'restarted_on',
+      'origin_connection_limit',
+      'caching/disabled',
+      'caching/max_age',
+      'caching/stale_while_revalidate',
+      'mtls/sslmode',
+    ],
+  },
+  {
     type: 'queue',
     path: '/accounts/{account_id}/queues/{queue_id}',
     parameter: 'queue_id',
@@ -147,16 +164,11 @@ function normalize(
         normalize(child, document, direction, depth + 1),
       ]),
     );
-    if (schema.required) {
-      schema.required = schema.required.filter((name) => {
-        const property = properties[name];
-        if (!isRecord(property)) {
-          return true;
-        }
-        const resolved = resolve(document, property);
-        return direction === 'input' || resolved.writeOnly !== true;
-      });
-    }
+  }
+  if (schema.required && direction === 'output') {
+    schema.required = schema.required.filter(
+      (name) => !writeOnlyProperty(original, name, document),
+    );
   }
   for (const key of ['allOf', 'anyOf', 'oneOf'] as const) {
     if (original[key] !== undefined) {
@@ -172,6 +184,32 @@ function normalize(
     }
   }
   return schema;
+}
+
+function writeOnlyProperty(
+  value: unknown,
+  name: string,
+  document: unknown,
+  seen = new Set<unknown>(),
+  depth = 0,
+): boolean {
+  if (depth > 64) {
+    throw Error('Provider schema is too deeply nested.');
+  }
+  const schema = resolve(document, value);
+  if (seen.has(schema)) {
+    return false;
+  }
+  seen.add(schema);
+  if (isRecord(schema.properties) && Object.hasOwn(schema.properties, name)) {
+    if (resolve(document, schema.properties[name]).writeOnly === true) {
+      return true;
+    }
+  }
+  return (
+    Array.isArray(schema.allOf) &&
+    schema.allOf.some((branch) => writeOnlyProperty(branch, name, document, seen, depth + 1))
+  );
 }
 
 function validationSchema(

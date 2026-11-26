@@ -229,7 +229,8 @@ describe('schema-driven Cloudflare resource reads', () => {
 
   it('rejects mismatched scopes, account selection, arbitrary paths and writes without requests', async () => {
     const { artifact, caller, prepare, fetcher, read } = setup('r2');
-    expect(cloudflareProviderReadSelection('hyperdrive')).toBeNull();
+    expect(cloudflareProviderReadSelection('durable-object')).toBeNull();
+    expect(cloudflareProviderReadSelection('container')).toBeNull();
     expect(prepareCloudflareProviderRead(artifact, 'd1')).toBeNull();
     expect(prepareCloudflareProviderRead({ ...artifact, method: 'DELETE' }, 'r2')).toBeNull();
     expect(
