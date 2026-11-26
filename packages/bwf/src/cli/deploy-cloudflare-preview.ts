@@ -207,6 +207,19 @@ async function checkPreviewHealth(run: PreviewRun, url: string): Promise<void> {
   log.info('Health check passed.');
 }
 
+export async function tryEnablePreviewLogs(
+  context: Parameters<typeof enableCloudflarePreviewLogs>[0],
+  name: string,
+): Promise<void> {
+  try {
+    await enableCloudflarePreviewLogs(context, name);
+  } catch (error) {
+    log.warn(
+      `deploy: preview ${name} deployed, but bwf could not turn on its logs: ${getErrorMessage(error)}`,
+    );
+  }
+}
+
 async function deployPreview(run: PreviewRun): Promise<void> {
   const { root, name, runCf } = run;
 
@@ -293,13 +306,7 @@ async function deployPreview(run: PreviewRun): Promise<void> {
     return run.exit(1);
   }
 
-  try {
-    await enableCloudflarePreviewLogs(context, name);
-  } catch (error) {
-    log.warn(
-      `deploy: preview ${name} deployed, but bwf could not turn on its logs: ${getErrorMessage(error)}`,
-    );
-  }
+  await tryEnablePreviewLogs(context, name);
 
   note(`Preview ${name}`, url);
   await checkPreviewHealth(run, url);

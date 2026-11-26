@@ -446,6 +446,23 @@ it('turns on logs for a preview that has observability off', async () => {
   expect(apiHeaders[1]?.['content-type']).toBe('application/merge-patch+json');
 });
 
+it.each([
+  ['observability is on and logs are off', { enabled: true, logs: { enabled: false } }],
+  ['only observability is on', { enabled: true }],
+])('turns logs on when %s', async (_name, observability) => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: (method) =>
+      method === 'GET'
+        ? { status: 200, body: { success: true, result: { observability } } }
+        : success,
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls.map((call) => call.method)).toEqual(['GET', 'PATCH']);
+});
+
 it("leaves a preview's own observability settings alone when they are already on", async () => {
   const { result, apiCalls } = await runSecretScenario({
     operation: logsOperation,
@@ -453,7 +470,10 @@ it("leaves a preview's own observability settings alone when they are already on
     cf: {},
     api: () => ({
       status: 200,
-      body: { success: true, result: { observability: { enabled: true } } },
+      body: {
+        success: true,
+        result: { observability: { enabled: true, logs: { enabled: true } } },
+      },
     }),
   });
   expect(result.status, result.stderr).toBe(0);
