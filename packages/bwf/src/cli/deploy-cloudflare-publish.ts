@@ -21,6 +21,7 @@ import {
 } from './deploy-cloudflare-helpers.ts';
 import type { CloudflareMigration } from './deploy-cloudflare-migrate.ts';
 import type { CloudflareDeploySource, CloudflarePreflight } from './deploy-cloudflare-preflight.ts';
+import { runHealthCheck } from './deploy-health-check.ts';
 import { log } from './deploy-helpers.ts';
 import { formatCloudflareSandboxUnavailable, BETTER_AUTH_SECRET_NAME } from './deploy-resources.ts';
 import { formatDeploySummary } from './deploy-summary.ts';
@@ -37,6 +38,8 @@ export async function publishCloudflareWorker(input: {
   readonly cliLog: CliLogger;
   readonly reporter: CloudflareChildReporter;
   readonly atomic: boolean;
+  /** `deploy.cloudflare.healthCheck`: a command to run once the new version is live. */
+  readonly healthCheck?: string;
   readonly initialCloudflareCandidate: CloudflareCandidateReceipt | null;
   readonly source: CloudflareDeploySource;
   readonly preflight: CloudflarePreflight;
@@ -182,4 +185,22 @@ export async function publishCloudflareWorker(input: {
     }),
     execution.previewUrl,
   );
+  const healthUrl =
+    execution.workersDevSubdomain === undefined
+      ? execution.previewUrl
+      : `https://${workerName}.${execution.workersDevSubdomain}.workers.dev`;
+  if (input.healthCheck !== undefined && healthUrl !== undefined) {
+    log.step(`Running the health check against ${healthUrl}`);
+    const health = await runHealthCheck(input.healthCheck, healthUrl, root);
+    if (!health.ok) {
+      log.error(
+        [
+          `deploy: the health check ${health.detail}. The new version is live.`,
+          'To go back to the version before it, run `bwf project rollback --platform cloudflare`.',
+        ].join('\n'),
+      );
+      return exit(1);
+    }
+    log.info('Health check passed.');
+  }
 }

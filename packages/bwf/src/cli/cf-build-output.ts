@@ -149,12 +149,21 @@ function stagePackageContext(directory: string, projectRoot: string): void {
   }
 }
 
+/** What turns a production build into a Worker Preview build: its own context, and a hook that swaps resources. */
+export interface PreviewBuild {
+  /** Called with each staged Worker config; return the config to upload. */
+  rewriteWorker: <T extends { env?: object }>(config: T) => Promise<T> | T;
+}
+
+const PREVIEW_CONTEXT = { isPreview: true, mode: 'preview' } as const;
+
 /** Create a disposable cf Build Output tree from an existing Cloudflare Worker build. */
 export async function prepareCfBuildOutput(
   workerDirectory: string,
   accountId?: string,
   mode?: string,
   projectRoot: string = workerDirectory,
+  preview?: PreviewBuild,
 ): Promise<CfBuildOutput | null> {
   const source = resolve(workerDirectory);
   const hasNativeOutput = existsSync(getRootConfigPath(source));
@@ -197,6 +206,7 @@ export async function prepareCfBuildOutput(
         accountId,
         mode ?? built.rootConfig.buildContext.mode,
         projectRoot,
+        preview,
       );
       if (!prepared) {
         return null;
@@ -205,7 +215,7 @@ export async function prepareCfBuildOutput(
       try {
         // Decision: Stage native Workers through the same manifest and path checks as ordinary native output before
         // combining them with deferred Containers.
-        native = await prepareNativeBuildOutput(source, accountId, mode, projectRoot);
+        native = await prepareNativeBuildOutput(source, accountId, mode, projectRoot, preview);
         if (!native) {
           await prepared.dispose();
           return null;
@@ -231,7 +241,7 @@ export async function prepareCfBuildOutput(
         await native?.dispose();
       }
     }
-    return prepareNativeBuildOutput(source, accountId, mode, projectRoot);
+    return prepareNativeBuildOutput(source, accountId, mode, projectRoot, preview);
   }
   if (!existsSync(join(source, 'wrangler.json'))) {
     throw new Error(
@@ -286,11 +296,11 @@ export async function prepareCfBuildOutput(
     await writeRootConfig({
       root: directory,
       settings: typeof configuredAccountId === 'string' ? { accountId: configuredAccountId } : {},
-      buildContext: { isPreview: false, mode: mode ?? 'production' },
+      buildContext: preview ? PREVIEW_CONTEXT : { isPreview: false, mode: mode ?? 'production' },
     });
     await writeWorkerConfig({
       root: directory,
-      config: config.worker,
+      config: preview ? await preview.rewriteWorker(config.worker) : config.worker,
       manifest: { type: 'complete', mainModule: main, modules },
     });
     for (const container of config.containers ?? []) {
@@ -346,6 +356,7 @@ async function prepareNativeBuildOutput(
   accountId?: string,
   mode?: string,
   projectRoot: string = source,
+  preview?: PreviewBuild,
 ): Promise<CfBuildOutput | null> {
   const built = await readBuildOutput(source);
   if (
@@ -368,10 +379,12 @@ async function prepareNativeBuildOutput(
         accountId: accountId ?? built.rootConfig.settings?.accountId,
         complianceRegion: built.rootConfig.settings?.complianceRegion,
       },
-      buildContext: {
-        ...built.rootConfig.buildContext,
-        mode: built.rootConfig.buildContext.mode ?? 'production',
-      },
+      buildContext: preview
+        ? PREVIEW_CONTEXT
+        : {
+            ...built.rootConfig.buildContext,
+            mode: built.rootConfig.buildContext.mode ?? 'production',
+          },
       producer: built.rootConfig.producer,
     });
     for (const [name, worker] of Object.entries(built.workers)) {
@@ -384,7 +397,10 @@ async function prepareNativeBuildOutput(
       }
       const configPath = getWorkerConfigPath(directory, name);
       mkdirSync(dirname(configPath), { recursive: true });
-      writeFileSync(configPath, JSON.stringify(worker.config));
+      writeFileSync(
+        configPath,
+        JSON.stringify(preview ? await preview.rewriteWorker(worker.config) : worker.config),
+      );
       if (worker.bundleDir && worker.config.manifest) {
         const bundle = getWorkerBundleDir(directory, name);
         for (const module of Object.keys(worker.config.manifest.modules)) {

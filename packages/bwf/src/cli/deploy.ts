@@ -8,6 +8,7 @@ import { getApiUrl, getToken, getTokenSource } from './auth.ts';
 import { isExpiredTokenError, PlatformClient } from './client.ts';
 import { maybeLinkCloudflareDeploy } from './cloudflare-link.ts';
 import { withRecordedReadinessAccessOrigin } from './cloudflare-readiness.ts';
+import { runCloudflarePreview } from './deploy-cloudflare-preview.ts';
 import { runCloudflareDeploy } from './deploy-cloudflare.ts';
 import {
   log,
@@ -110,6 +111,9 @@ const cloudflareDeployTarget: RunDeployTargetAdapter = {
       log.step(
         'Migrated project configuration to bwf.config.ts. Commit bwf.config.ts and bwf.lock.json.',
       );
+    }
+    if (options.preview !== undefined || options.removePreview !== undefined) {
+      return runCloudflarePreview(root, options, cliLog);
     }
     return runCloudflareDeploy(root, options, cliLog);
   },

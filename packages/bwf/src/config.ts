@@ -106,7 +106,11 @@ type EmailConfig = {
 
 /** Deployment choices owned by bwf rather than passed to the Worker config. */
 type DeployConfig = {
-  cloudflare?: { mode?: 'staged' | 'atomic' };
+  cloudflare?: {
+    mode?: 'staged' | 'atomic';
+    /** A command to run after a deploy or a preview is ready. It gets the address in `BWF_DEPLOY_URL` and passes when it exits 0. */
+    healthCheck?: string;
+  };
 };
 
 /** Cloudflare Worker configuration passed through to the native deploy artifact. */
@@ -796,11 +800,20 @@ function validateConfigObject(obj: unknown): BwfConfig {
       }
       const cloudflareDeploy = deploy.cloudflare;
       for (const key of Object.keys(cloudflareDeploy)) {
-        if (key !== 'mode') {
+        if (key !== 'mode' && key !== 'healthCheck') {
           throw new Error(
-            `config: Unknown key 'deploy.cloudflare.${key}' in ${CONFIG_FILE}. Valid: mode.`,
+            `config: Unknown key 'deploy.cloudflare.${key}' in ${CONFIG_FILE}. Valid: mode, healthCheck.`,
           );
         }
+      }
+      if (
+        cloudflareDeploy.healthCheck !== undefined &&
+        (typeof cloudflareDeploy.healthCheck !== 'string' ||
+          cloudflareDeploy.healthCheck.trim() === '')
+      ) {
+        throw new Error(
+          `config: "deploy.cloudflare.healthCheck" in ${CONFIG_FILE} must be a command to run.`,
+        );
       }
       if (
         cloudflareDeploy.mode !== undefined &&

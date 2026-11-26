@@ -79,6 +79,17 @@ If your platform supports managed GitHub builds, the GitHub App can deploy on pu
 
 If CI runs typechecking before deploy, run `bwf prepare` after installing dependencies to generate the `.bwf/` types.
 
+## Previews for pull requests {#previews}
+
+On Cloudflare, give each pull request its own copy of the app. A preview has its own Durable Objects and its own D1 databases, so testing it doesn't touch the deployed app's data:
+
+```sh
+bwf deploy --platform cloudflare --preview pr-12
+bwf deploy --platform cloudflare --remove-preview pr-12
+```
+
+The first command prints the preview's address. The second deletes the preview and its D1 copies, so run it when the pull request closes. To check what the app does, not only that it starts, set [`deploy.cloudflare.healthCheck`](../reference/config.md#deploy-cloudflare-healthcheck). See [Previews](../reference/cli/deploy.md#previews) for what a preview shares with the deployed app.
+
 ## Deploy to a team platform
 
 Use the API URL from your administrator. In a new or unlinked app:
@@ -113,7 +124,7 @@ bwf project logs
 bwf project rollback
 ```
 
-Cloudflare logs use a live tail; team platforms retain log history. Before rolling back, check that the earlier code works with your current database schema. See [Project commands](../reference/cli/project.md).
+Cloudflare logs use a live tail; team platforms retain log history. Before rolling back, check that the earlier code works with your current database schema. On Cloudflare, a rollback can't go back past a deploy that added a Durable Object class (Cloudflare error 100402); fix forward from there. See [Project commands](../reference/cli/project.md).
 
 ## Usage and execution limit pages
 

@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { defineDurableState } from '../../src/runtime/durable.ts';
 import { getRuntimeRequestResource, withRuntimeEnv } from '../../src/runtime/env.ts';
 
+const workerExports = vi.hoisted((): Record<string, unknown> => ({}));
+
 vi.mock('cloudflare:workers', () => ({
+  exports: workerExports,
   DurableObject: class {
     constructor(
       readonly ctx: DurableObjectState,
@@ -214,5 +217,24 @@ describe('defineDurableState', () => {
 
     expect(result).toBe(stub);
     expect(await result.increment(1)).toBe(1);
+  });
+
+  it("takes the Worker's own export in a preview, and the env binding when there is none", () => {
+    const Counter = defineDurableState({ name: 'counter', initialState: 0, methods: {} });
+    const exported = {
+      idFromName: () => ({}),
+      get: () => 'export',
+    } as unknown as DurableObjectNamespace;
+    const bound = { idFromName: () => ({}), get: () => 'env' } as unknown as DurableObjectNamespace;
+    Counter.__bind('COUNTER', 'counter', 'CounterDurableObject');
+
+    expect(withRuntimeEnv({ COUNTER: bound }, () => Counter.get('global'))).toBe('env');
+    workerExports.CounterDurableObject = exported;
+
+    try {
+      expect(withRuntimeEnv({ COUNTER: bound }, () => Counter.get('global'))).toBe('export');
+    } finally {
+      delete workerExports.CounterDurableObject;
+    }
   });
 });
