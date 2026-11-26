@@ -21,7 +21,7 @@ type ApiReply = { status: number; body: unknown };
 type CfCall = { label: string; file?: string };
 
 // Decision: Replaces cf with replies scripted by command prefix, served in call order. Each call logs the
-// contents of its `--file` argument, because cf reads that scratch file before it's deleted.
+// contents of its `--file` or `--secrets @file` argument, because cf reads that scratch file before it's deleted.
 const SCRIPTED_CF = `import child from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -32,9 +32,11 @@ child.spawnSync = (binary, args, options) => {
   }
   const label = args.slice(1).join(' ');
   const fileIndex = args.indexOf('--file');
+  const secretsIndex = args.indexOf('--secrets');
+  const filePath = fileIndex >= 0 ? args[fileIndex + 1] : secretsIndex >= 0 ? args[secretsIndex + 1].replace(/^@/, '') : undefined;
   const log = process.env.BWF_TEST_CALL_LOG;
   const calls = existsSync(log) ? JSON.parse(readFileSync(log, 'utf8')) : [];
-  calls.push({ label, ...(fileIndex >= 0 ? { file: readFileSync(args[fileIndex + 1], 'utf8') } : {}) });
+  calls.push({ label, ...(filePath ? { file: readFileSync(filePath, 'utf8') } : {}) });
   writeFileSync(log, JSON.stringify(calls));
   const script = JSON.parse(readFileSync(process.env.BWF_TEST_CF_SCRIPT, 'utf8'));
   const prefix = Object.keys(script).find((key) => label.startsWith(key));
@@ -131,22 +133,20 @@ function workersApi(replies: { create: ApiReply; upload?: ApiReply }) {
   };
 }
 
-it('wraps Workers secrets bulk payload in a secrets object', async () => {
+it('sends the bulk secrets as a patch map to cf workers secrets bulk-edit', async () => {
   const { result, cfCalls } = await runSecretScenario({
     operation: bulkOperation,
     input: JSON.stringify({ ONE: 'first', TWO: 'second' }),
-    cf: { 'workers secrets bulk': [ok] },
+    cf: { 'workers secrets bulk-edit': [ok] },
   });
   expect(result.status, result.stderr).toBe(0);
   expect(cfCalls).toHaveLength(1);
   expect(cfCalls[0].label).toMatch(
-    /^workers secrets bulk --worker my-worker --file \S+body\.json$/,
+    /^workers secrets bulk-edit --worker my-worker --secrets @\S+body\.json$/,
   );
   expect(JSON.parse(cfCalls[0].file!)).toEqual({
-    secrets: {
-      ONE: { type: 'secret_text', text: 'first' },
-      TWO: { type: 'secret_text', text: 'second' },
-    },
+    ONE: { type: 'secret_text', text: 'first' },
+    TWO: { type: 'secret_text', text: 'second' },
   });
 });
 
@@ -220,7 +220,7 @@ it('fails with the recovery steps for bulk secrets on a Worker without a deploym
   const { result, apiCalls } = await runSecretScenario({
     operation: bulkOperation,
     input: JSON.stringify({ ONE: 'first' }),
-    cf: { 'workers secrets bulk': [missing, missing] },
+    cf: { 'workers secrets bulk-edit': [missing, missing] },
     api: workersApi({ create: exists, upload: success }),
   });
   expect(result.status).toBe(1);
@@ -279,7 +279,7 @@ it('returns a non-zero status when the placeholder deploy fails after Worker 100
   const { result, apiCalls } = await runSecretScenario({
     operation: bulkOperation,
     input: JSON.stringify({ ONE: 'first' }),
-    cf: { 'workers secrets bulk': [missing] },
+    cf: { 'workers secrets bulk-edit': [missing] },
     api: workersApi({
       create: success,
       upload: {
@@ -301,7 +301,7 @@ it('deploys every bulk secret with the placeholder', async () => {
   const { result, apiCalls } = await runSecretScenario({
     operation: bulkOperation,
     input: JSON.stringify({ ONE: 'first', TWO: 'second' }),
-    cf: { 'workers secrets bulk': [missing] },
+    cf: { 'workers secrets bulk-edit': [missing] },
     api: workersApi({ create: success, upload: success }),
   });
   expect(result.status, result.stderr).toBe(0);
@@ -315,11 +315,13 @@ it('sets bulk secrets on a Worker deployed after the 10007 without deploying the
   const { result, cfCalls, apiCalls } = await runSecretScenario({
     operation: bulkOperation,
     input: JSON.stringify({ ONE: 'first' }),
-    cf: { 'workers secrets bulk': [missing, ok] },
+    cf: { 'workers secrets bulk-edit': [missing, ok] },
     api: workersApi({ create: exists }),
   });
   expect(result.status, result.stderr).toBe(0);
-  expect(cfCalls.filter((call) => call.label.startsWith('workers secrets bulk'))).toHaveLength(2);
+  expect(cfCalls.filter((call) => call.label.startsWith('workers secrets bulk-edit'))).toHaveLength(
+    2,
+  );
   expect(apiCalls.some(isUpload)).toBe(false);
 });
 
