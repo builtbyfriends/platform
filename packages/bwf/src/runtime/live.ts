@@ -8,6 +8,7 @@ import {
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
+import { ownNamespace } from './own-namespace.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -153,6 +154,7 @@ export type LiveStream = {
 };
 
 let liveBindingName = 'BWF_LIVE';
+let liveClassName: string | undefined;
 // Decision: Only the worker entry compiled by the Vite dev server turns this on. Builds
 // never call the setter, so production clients get a fixed internal error.
 let liveDev = false;
@@ -167,8 +169,13 @@ const DEFAULT_LIMITS: LiveLimits = {
 };
 const MAX_SUBSCRIPTIONS_PER_TOPIC = 256;
 
-export function __setLiveBindingName(name: string): void {
+export function __setLiveBindingName(name: string, className?: string): void {
   liveBindingName = assertBindingName(name);
+  liveClassName = className;
+}
+
+export function __getLiveClassName(): string | undefined {
+  return liveClassName;
 }
 
 export function __getLiveBindingName(): string {
@@ -503,9 +510,11 @@ function getLiveBinding(env: unknown): DurableObjectNamespace {
   if (typeof env !== 'object' || env === null) {
     throw new Error('live: Cloudflare env is unavailable.');
   }
-  const binding = (env as Record<string, unknown>)[liveBindingName] as
-    | DurableObjectNamespace
-    | undefined;
+  const binding = ownNamespace<DurableObjectNamespace>(
+    env as Record<string, unknown>,
+    liveBindingName,
+    liveClassName,
+  );
   if (!binding) {
     throw new Error(`live: Missing Durable Object binding "${liveBindingName}".`);
   }

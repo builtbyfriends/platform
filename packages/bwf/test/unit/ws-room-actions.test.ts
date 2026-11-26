@@ -8,7 +8,9 @@ import {
 import { defineRoom, defineWebSocket } from '../../src/runtime/ws.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
-vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
+const workerExports = vi.hoisted((): Record<string, unknown> => ({}));
+
+vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, exports: workerExports }));
 
 const schema: StandardSchemaV1 = {
   '~standard': { version: 1, vendor: 'test', validate: (value) => ({ value }) },
@@ -121,6 +123,19 @@ describe('server-side room actions', () => {
     expect(() => getRoomLoose('/relay/:accountId', { params: {}, env })).toThrow(
       'Missing route param "accountId"',
     );
+  });
+
+  it('reaches the room through the Worker exports when a preview has no env binding', async () => {
+    __registerWebSocketRoutes([route]);
+    const { env } = createEnv(async () => null);
+    workerExports[route.className] = env.RELAY_WS;
+    try {
+      await expect(
+        getRoomLoose('/relay/:accountId', { params: { accountId: 'a' }, env: {} }).actions.sync(),
+      ).resolves.toBeNull();
+    } finally {
+      Reflect.deleteProperty(workerExports, route.className);
+    }
   });
 
   it('needs a runtime env or an explicit one', () => {

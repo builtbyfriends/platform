@@ -8,6 +8,7 @@ import type {
 import { getRawRuntimeEnv } from './env-raw.ts';
 import { requireRuntimeBinding } from './env.ts';
 import { UsageLimit } from './limits.ts';
+import { ownNamespace } from './own-namespace.ts';
 import {
   SandboxContainer,
   SANDBOX_PORT_HEADER,
@@ -74,8 +75,10 @@ export class SandboxUnavailableError extends Error {
   }
 }
 let sandboxBindingName = DEFAULT_SANDBOX_BINDING;
-export function __setSandboxBindingName(bindingName: string): void {
+let sandboxClassName: string | undefined;
+export function __setSandboxBindingName(bindingName: string, className?: string): void {
   sandboxBindingName = bindingName;
+  sandboxClassName = className;
 }
 
 function rethrowSandboxError(error: unknown): never {
@@ -295,8 +298,13 @@ export async function getSandbox(
       'This deployment has no managed Sandbox controller. Redeploy this application.',
     );
   }
-  const stub =
-    requireRuntimeBinding<DurableObjectNamespace<BwfPlatformSandbox>>(binding).getByName(id);
+  const namespace =
+    binding === sandboxBindingName
+      ? ownNamespace<DurableObjectNamespace<BwfPlatformSandbox>>(env, binding, sandboxClassName)
+      : undefined;
+  const stub = (
+    namespace ?? requireRuntimeBinding<DurableObjectNamespace<BwfPlatformSandbox>>(binding)
+  ).getByName(id);
   await stub.configure(sandboxOptions);
   return client(stub, (request) => stub.fetch(request));
 }

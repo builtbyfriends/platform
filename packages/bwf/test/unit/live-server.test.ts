@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vite-plus/test';
 import type { CloudContext } from '../../src/runtime/handler.ts';
 import { createLiveDurableObject } from '../../src/runtime/live-server.ts';
-import { __setLiveDev, defineLiveStream } from '../../src/runtime/live.ts';
+import { __setLiveBindingName, __setLiveDev, defineLiveStream } from '../../src/runtime/live.ts';
 import type { LiveLimits } from '../../src/runtime/live.ts';
+
+const workerExports = vi.hoisted((): Record<string, unknown> => ({}));
+vi.mock('cloudflare:workers', () => ({ exports: workerExports }));
 
 const LIMITS: LiveLimits = {
   maxSubscriptionsPerConnection: 256,
@@ -20,6 +23,38 @@ describe('live Durable Object runtime', () => {
     expect(() => defineLiveStream({ id, allowAnonymousControl: true })).toThrow(
       `live: duplicate stream id "${id}".`,
     );
+  });
+
+  it('reaches the live object through the Worker exports when a preview has no env binding', async () => {
+    const harness = createHarness();
+    workerExports.PlatformLiveStreamDurableObject = harness.env.BWF_LIVE;
+    Reflect.deleteProperty(harness.env, 'BWF_LIVE');
+    __setLiveBindingName('BWF_LIVE', 'PlatformLiveStreamDurableObject');
+    try {
+      const stream = defineLiveStream({
+        id: `preview-${crypto.randomUUID()}`,
+        allowAnonymousControl: true,
+      });
+      const connectionId = 'connection-preview-1';
+      const connectResponse = await stream.connect(
+        liveContext(harness.env, `https://platform.live/live?connectionId=${connectionId}`),
+      );
+      expect(connectResponse.status).toBe(200);
+      const reader = connectResponse.body!.getReader();
+      await readFrame(reader);
+
+      const controlResponse = await stream.control(
+        liveContext(harness.env, 'https://platform.live/live', {
+          connectionId,
+          operations: [{ kind: 'subscribe', id: 'card', topic: 'post:12' }],
+        }),
+      );
+      expect(controlResponse.status).toBe(200);
+      await reader.cancel();
+    } finally {
+      Reflect.deleteProperty(workerExports, 'PlatformLiveStreamDurableObject');
+      __setLiveBindingName('BWF_LIVE');
+    }
   });
 
   it('rejects invalid live limits before registering the stream id', () => {

@@ -931,8 +931,8 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const sandboxInstanceType = typeof sandbox === 'object' ? sandbox.instanceType : undefined;
   const sandboxExport = hasSandbox
     ? sandboxClassName === DEFAULT_SANDBOX_CLASS_NAME && !sandboxInstanceType
-      ? `export { __PlatformSandbox as SandboxV1 };\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
-      : `export class ${sandboxClassName} extends __PlatformSandbox {${sandboxInstanceType ? ` protected override instanceType = ${JSON.stringify(sandboxInstanceType)} as const; ` : ''}}\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)});\n`
+      ? `export { __PlatformSandbox as SandboxV1 };\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)}, ${JSON.stringify(sandboxClassName)});\n`
+      : `export class ${sandboxClassName} extends __PlatformSandbox {${sandboxInstanceType ? ` protected override instanceType = ${JSON.stringify(sandboxInstanceType)} as const; ` : ''}}\n__setSandboxBindingName(${JSON.stringify(sandboxBindingName)}, ${JSON.stringify(sandboxClassName)});\n`
     : '';
   const hasLive = live === true || typeof live === 'object';
   const liveBindingName = typeof live === 'object' ? (live.bindingName ?? 'BWF_LIVE') : 'BWF_LIVE';
@@ -948,8 +948,8 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
   const liveDevCall = liveDev ? '__setLiveDev(true);\n' : '';
   const liveExport = hasLive
     ? liveClassName === 'PlatformLiveStreamDurableObject'
-      ? `export { PlatformLiveStreamDurableObject };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n${liveDevCall}`
-      : `export { PlatformLiveStreamDurableObject as ${liveClassName} };\n__setLiveBindingName(${JSON.stringify(liveBindingName)});\n${liveDevCall}`
+      ? `export { PlatformLiveStreamDurableObject };\n__setLiveBindingName(${JSON.stringify(liveBindingName)}, ${JSON.stringify(liveClassName)});\n${liveDevCall}`
+      : `export { PlatformLiveStreamDurableObject as ${liveClassName} };\n__setLiveBindingName(${JSON.stringify(liveBindingName)}, ${JSON.stringify(liveClassName)});\n${liveDevCall}`
     : '';
   const durableObjectImports = durableObjects
     .map(

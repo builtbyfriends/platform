@@ -6,7 +6,9 @@ vi.mock('@cloudflare/sandbox', () => ({
   S3Mount: class {},
   S3Gateway: class {},
 }));
+const workerExports = vi.hoisted((): Record<string, unknown> => ({}));
 vi.mock('cloudflare:workers', () => ({
+  exports: workerExports,
   DurableObject: class {},
   RpcTarget: class {},
   WorkerEntrypoint: class {},

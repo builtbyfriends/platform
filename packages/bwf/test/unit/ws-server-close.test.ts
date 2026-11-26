@@ -7,7 +7,9 @@ import { defineRoom, defineWebSocket } from '../../src/runtime/ws.ts';
 import type { WebSocketBaseContext } from '../../src/runtime/ws.ts';
 import type { StandardSchemaV1 } from '../../src/standard-schema.ts';
 
-vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
+const workerExports = vi.hoisted((): Record<string, unknown> => ({}));
+
+vi.mock('cloudflare:workers', () => ({ DurableObject: class {}, exports: workerExports }));
 
 const schema: StandardSchemaV1 = {
   '~standard': { version: 1, vendor: 'test', validate: (value) => ({ value }) },

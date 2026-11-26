@@ -4,7 +4,7 @@ import {
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
-import { __getLiveBindingName } from './live.ts';
+import { __getLiveBindingName, __getLiveClassName } from './live.ts';
 import type {
   LiveClientEvent,
   LiveControlErrorCode,
@@ -13,6 +13,7 @@ import type {
   LiveControlResponse,
   LiveLimits,
 } from './live.ts';
+import { ownNamespace } from './own-namespace.ts';
 import { eventStream } from './sse.ts';
 import type { SseStream } from './sse.ts';
 
@@ -554,13 +555,25 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       await this.state.storage.setAlarm?.(Date.now() + TOPIC_PRUNE_ALARM_DELAY_MS);
     }
 
+    private liveNamespace(): DurableObjectNamespace {
+      const binding = ownNamespace<DurableObjectNamespace>(
+        this.env,
+        __getLiveBindingName(),
+        __getLiveClassName(),
+      );
+      if (!binding) {
+        throw new Error(`live: Missing Durable Object binding "${__getLiveBindingName()}".`);
+      }
+      return binding;
+    }
+
     private topicStub(streamId: string, topicKey: string): DurableObjectStub {
-      const binding = this.env[__getLiveBindingName()] as DurableObjectNamespace;
+      const binding = this.liveNamespace();
       return binding.get(binding.idFromName(topicInstanceName(streamId, topicKey)));
     }
 
     private connectionStub(streamId: string, connectionId: string): DurableObjectStub {
-      const binding = this.env[__getLiveBindingName()] as DurableObjectNamespace;
+      const binding = this.liveNamespace();
       return binding.get(binding.idFromName(connectionInstanceName(streamId, connectionId)));
     }
 

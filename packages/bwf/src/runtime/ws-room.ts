@@ -8,6 +8,7 @@
 import type { WebSocketRouteMap } from '@builtbyfriends/bwf/routes';
 import { getRawRuntimeEnv } from './env-raw.ts';
 import type { RuntimeEnv } from './env-raw.ts';
+import { ownNamespace } from './own-namespace.ts';
 import { buildWebSocketInstanceId, __getWebSocketRoute } from './ws-server.ts';
 import type { WebSocketRouteMeta } from './ws-server.ts';
 import type { RoomActionContext } from './ws.ts';
@@ -81,7 +82,11 @@ function resolveRoomBinding(
       );
     }
   }
-  const binding = env[route.bindingName] as DurableObjectNamespace<RoomActionTarget> | undefined;
+  const binding = ownNamespace<DurableObjectNamespace<RoomActionTarget>>(
+    env,
+    route.bindingName,
+    route.className,
+  );
   if (!binding) {
     throw new Error(`ws: Missing Durable Object binding "${route.bindingName}".`);
   }
