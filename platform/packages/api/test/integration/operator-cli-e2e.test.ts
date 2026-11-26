@@ -261,6 +261,7 @@ test('built CLI requires acknowledgement, exposes API validation, and honors rev
   expect(JSON.parse(revoked.stderr)).toMatchObject({ error: 'unauthorized', status: 401 });
 });
 
+// Decision: This test starts the built CLI several times, which takes longer than the 5 second default on a busy runner.
 test('built CLI manages plans and refreshes existing app limits against recorded usage', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'platform-plan-cli-'));
   try {
@@ -383,4 +384,4 @@ test('built CLI manages plans and refreshes existing app limits against recorded
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);
