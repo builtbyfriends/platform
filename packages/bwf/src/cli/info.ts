@@ -9,11 +9,12 @@ import {
   deriveWebSocketClassNameFromName,
   inferWebSocketResourceName,
 } from '../router/websocket.ts';
+import { inferWorkflowResourceName } from '../workflow/scan.ts';
 import type { InfoArgs } from './info-args.ts';
 
 type PersistentResourceInfo = {
   file: string;
-  definition: 'defineDurableState' | 'defineRoom' | 'defineWebSocket';
+  definition: 'defineDurableState' | 'defineRoom' | 'defineWebSocket' | 'defineWorkflow';
   name: string;
   nameSource: 'inferred' | 'explicit';
   className: string;
@@ -131,6 +132,14 @@ export function getProjectInfo(root: string): ProjectInfo {
       className: route.className,
       bindingName: route.bindingName,
       route: route.pattern,
+    })),
+    ...analysis.workflows.map((module) => ({
+      file: relative(root, module.filePath),
+      definition: 'defineWorkflow' as const,
+      name: module.name ?? inferWorkflowResourceName(module.filePath),
+      nameSource: module.name === undefined ? ('inferred' as const) : ('explicit' as const),
+      className: module.className,
+      bindingName: module.bindingName,
     })),
     ...analysis.durableObjects.map((module) => ({
       file: relative(root, module.filePath),

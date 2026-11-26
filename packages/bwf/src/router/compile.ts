@@ -863,6 +863,16 @@ export interface WorkerEntryOptions {
     filePath: string;
     name?: string;
   }>;
+  /**
+   * User-defined Workflow classes (`workflows/` directory). Each entry is imported from
+   * `filePath`, bound to `bindingName`, and re-exported as `className`.
+   */
+  workflows?: Array<{
+    bindingName: string;
+    className: string;
+    filePath: string;
+    name?: string;
+  }>;
 }
 
 /**
@@ -897,6 +907,7 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
     dev = false,
     notFound = 'none',
     durableObjects = [],
+    workflows = [],
   } = options;
   const remotePath = remote?.remotePath;
   const remoteBindingNames = JSON.stringify(remote?.bindingNames);
@@ -952,6 +963,18 @@ export function compileWorkerEntry(options: WorkerEntryOptions = {}): string {
         `__platformDurableObject${index}.__bind(${JSON.stringify(bindingName)}, ${name !== undefined ? JSON.stringify(name) : 'undefined'}, ${JSON.stringify(className)});\nconst ${className} = __platformDurableObject${index}.class;\nexport { ${className} };`,
     )
     .join('\n');
+  const workflowImports = workflows
+    .map(
+      ({ filePath }, index) =>
+        `\nimport __platformWorkflow${index} from ${JSON.stringify(filePath)};`,
+    )
+    .join('');
+  const workflowExports = workflows
+    .map(
+      ({ bindingName, className, name }, index) =>
+        `\n__platformWorkflow${index}.__bind(${JSON.stringify(bindingName)}, ${name !== undefined ? JSON.stringify(name) : 'undefined'});\nconst ${className} = __platformWorkflow${index}.class;\nexport { ${className} };`,
+    )
+    .join('');
   const runtimeEnvImport = `import { withRuntimeEnv } from ${JSON.stringify(runtimeEnvPath)};\n`;
   const remoteImport = remote
     ? `import { createRemoteEnv } from ${JSON.stringify(remote.remotePath)};\n`
@@ -1077,7 +1100,7 @@ ${envValidateCall}${remoteEnvSwap}  const userEnv = __filterInternalBindings(env
 `
     : '';
   return `${sandboxImport}${entryImport}${liveRuntimeImport}import app, { scheduled, __platformHandleInternalRoute, __withRawEnv${queueImport}${emailImport}${webSocketClasses.length > 0 ? `, ${webSocketClasses.join(', ')}` : ''}${liveRouteImport} } from 'virtual:platform-routes';
-${durableObjectImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
+${durableObjectImports}${workflowImports}\n${runtimeEnvImport}${emailProxyImport}${envSchemaImport}${remoteImport}${filterBindingsHelper}${assetHelper}
 ${fetchDeclaration}
 ${scheduledHandler}
 ${emailHandler}
@@ -1085,7 +1108,7 @@ ${emailReceiptHandler}
 ${queueFunction}${webSocketClasses.map((name) => `export { ${name} };`).join('\n')}
 ${liveExport}
 ${sandboxExport}
-${durableObjectExports}
+${durableObjectExports}${workflowExports}
 ${entryClass}`;
 }
 

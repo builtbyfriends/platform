@@ -161,6 +161,7 @@ export async function prepareDeployArtifact(
     dialect,
     webSockets: websockets,
     durableObjects: analysis.durableObjects,
+    workflows: analysis.workflows,
     ssr:
       scan.routes.length > 0 || scan.middleware.length > 0 || websockets.length > 0 || authEnabled,
     assetConfig: resolveAssetConfig({

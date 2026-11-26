@@ -208,6 +208,30 @@ export function bwfPlugin(options?: {
       );
     }
   }
+  const workflows = application.workflows;
+  for (const module of workflows) {
+    const collision =
+      websocketRoutes.find(
+        (route) => route.bindingName === module.bindingName || route.className === module.className,
+      )?.filePath ??
+      durableObjects.find(
+        (other) => other.bindingName === module.bindingName || other.className === module.className,
+      )?.filePath;
+    if (collision) {
+      throw new Error(
+        `workflow: workflows/${module.filePath.split('/').pop()} conflicts with '${collision}'. Rename one of the files.`,
+      );
+    }
+    if (
+      sandboxConfig &&
+      !isSandboxAttached(sandboxConfig) &&
+      (sandboxConfig.binding === module.bindingName || sandboxConfig.className === module.className)
+    ) {
+      throw new Error(
+        `workflow: workflows/${module.filePath.split('/').pop()} conflicts with the configured Sandbox binding or class. Rename the Workflow file.`,
+      );
+    }
+  }
   syncWranglerDurableObjects(root, durableObjects);
   const productionWebSocketRoutes = websocketRoutes.filter((route) =>
     isRouteEnabledForEnvironment(route, 'prod'),
@@ -220,10 +244,12 @@ export function bwfPlugin(options?: {
         reservedBindings: [
           ...websocketRoutes.map((route) => route.bindingName),
           ...durableObjects.map((module) => module.bindingName),
+          ...workflows.map((module) => module.bindingName),
         ],
         reservedClasses: [
           ...websocketRoutes.map((route) => route.className),
           ...durableObjects.map((module) => module.className),
+          ...workflows.map((module) => module.className),
           sandboxConfig?.className,
         ],
       })
@@ -300,6 +326,7 @@ export function bwfPlugin(options?: {
       devTriggerToken,
       queues,
       durableObjects,
+      workflows,
       sandboxConfig,
       shouldEmitLive,
       liveConfig,
@@ -638,6 +665,7 @@ export function bwfPlugin(options?: {
       return shouldEmitLive() ? liveConfig : undefined;
     },
     durableObjects,
+    workflows,
     websocketTombstones,
     onDevAssetRoutingPolicyChange: updateDevAssetRoutingPolicy,
     // Decision: Native builds of eligible apps let Cloudflare serve hashed build files directly.

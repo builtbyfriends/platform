@@ -38,6 +38,7 @@ import {
 } from './shared/version-metadata.ts';
 
 type DurableObjectBinding = { name: string; class_name: string };
+type WorkflowBinding = { binding: string; name: string; class_name: string };
 type DurableObjectMigration = {
   tag?: string;
   new_classes?: Array<string>;
@@ -83,6 +84,7 @@ export function mergeWorkerBindings(
     readonly devTriggerToken: string;
     readonly queues: ApplicationAnalysis['queues'];
     readonly durableObjects: ApplicationAnalysis['durableObjects'];
+    readonly workflows: ApplicationAnalysis['workflows'];
     readonly sandboxConfig: ReturnType<typeof resolveSandboxConfig> | undefined;
     readonly shouldEmitLive: () => boolean;
     readonly liveConfig: ReturnType<typeof resolveLiveBindingConfig> | undefined;
@@ -106,6 +108,7 @@ export function mergeWorkerBindings(
     devTriggerToken,
     queues,
     durableObjects,
+    workflows,
     sandboxConfig,
     shouldEmitLive,
     liveConfig,
@@ -345,6 +348,38 @@ export function mergeWorkerBindings(
     );
     if (planned.added) {
       result.migrations = planned.migrations;
+    }
+  }
+
+  if (workflows.length > 0) {
+    const existingWorkflows = (resolved as { workflows?: Array<WorkflowBinding> }).workflows ?? [];
+    for (const module of workflows) {
+      const conflict = existingWorkflows.find(
+        (workflow) =>
+          (workflow.binding === module.bindingName && workflow.class_name !== module.className) ||
+          (workflow.name === module.workflowName && workflow.class_name !== module.className),
+      );
+      if (conflict) {
+        throw new Error(
+          `workflow: '${conflict.binding}' is already configured for class '${conflict.class_name}', but workflows/ requires '${module.className}'.`,
+        );
+      }
+    }
+    const additions = workflows
+      .filter(
+        (module) =>
+          !existingWorkflows.some(
+            (workflow) =>
+              workflow.binding === module.bindingName && workflow.class_name === module.className,
+          ),
+      )
+      .map((module) => ({
+        binding: module.bindingName,
+        name: module.workflowName,
+        class_name: module.className,
+      }));
+    if (additions.length > 0) {
+      result.workflows = [...existingWorkflows, ...additions];
     }
   }
 
