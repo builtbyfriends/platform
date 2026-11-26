@@ -64,7 +64,9 @@ export function readResourceDefinition(
           ? new Set(['defineRoom', 'defineWebSocket'])
           : source === '@builtbyfriends/bwf/durable'
             ? new Set(['defineDurableState', 'defineDurableObject'])
-            : new Set<string>();
+            : source === '@builtbyfriends/bwf/workflow'
+              ? new Set(['defineWorkflow'])
+              : new Set<string>();
       for (const specifier of declaration.specifiers ?? []) {
         recordBindings(astChild(specifier, 'local'));
         if (isImportNamespaceSpecifier(specifier)) {

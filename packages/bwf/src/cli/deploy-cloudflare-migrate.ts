@@ -80,6 +80,11 @@ export async function migrateCloudflareWorker(input: {
     expectedDurableObjectBindings: expectedDurableObjectState.bindings,
     expectedMigrations: expectedDurableObjectState.migrations,
     expectedCrons,
+    authorizedWorkflowBindings: input.source.analysis?.workflows.map((module) => ({
+      binding: module.bindingName,
+      name: module.workflowName,
+      class_name: module.className,
+    })),
   };
 
   // Decision: Persistent Better Auth secret: adopted when present, otherwise generated once and verified, before

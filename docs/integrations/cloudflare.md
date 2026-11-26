@@ -54,6 +54,7 @@ This provides binding and Workers runtime types. For custom bindings in `bwf.con
 | `ASSETS`         | Static assets   | `c.env.ASSETS.fetch(request)`                    |
 | `QUEUE_*`        | Queues          | `defineQueue()` or `@builtbyfriends/bwf/queues`  |
 | Filename-derived | Durable Objects | A module in `durable-objects/`                   |
+| Filename-derived | Workflows       | A module in `workflows/`                         |
 
 Use [binding configuration](../reference/resource-inference.md#explicit-binding-overrides) when you need to enable, disable, or rename an inferred binding.
 

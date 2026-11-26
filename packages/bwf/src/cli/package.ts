@@ -457,7 +457,13 @@ export function buildBwfManifest(opts: {
   dialect?: 'sqlite' | 'postgresql' | 'mysql';
   webSockets?: Array<WebSocketRouteDefinition>;
   durableObjects?: ReadonlyArray<{ bindingName: string; className: string }>;
+  workflows?: ReadonlyArray<{ filePath: string }>;
 }): DeployManifest {
+  if (opts.workflows?.length) {
+    throw new Error(
+      'workflow: workflows/ is for native Cloudflare deploys. Deploy with `bwf deploy --platform cloudflare`, or remove workflows/ for this target.',
+    );
+  }
   const {
     bindings,
     migrations,

@@ -101,6 +101,7 @@ export default defineConfig({
       'src/runtime/db-pg.ts',
       'src/runtime/db-mysql.ts',
       'src/runtime/durable.ts',
+      'src/runtime/workflow.ts',
       'src/runtime/seed.ts',
       'src/runtime/drizzle-zod.ts',
       'src/runtime/drizzle-valibot.ts',

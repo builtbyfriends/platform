@@ -5341,6 +5341,42 @@ describe('verifyGeneratedDeployConfig', () => {
     expect(result.reason).toMatch(/injected/);
   });
 
+  it('accepts a workflows binding that bwf emits from workflows/, and no other injected one', () => {
+    const authorized = { binding: 'WELCOME', name: 'welcome', class_name: 'WelcomeWorkflow' };
+    const options = {
+      accountId: 'acc123',
+      workerName: 'myapp',
+      desired: { kvNamespaces: [], queues: [] },
+      passthroughIdentitySnapshot: snapshotPassthroughIdentities({}),
+      authorizedWorkflowBindings: [authorized],
+    };
+    const emitted = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      workflows: [authorized],
+    });
+    expect(verifyGeneratedDeployConfig(emitted, options).ok).toBe(true);
+
+    const injected = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      workflows: [
+        { binding: 'EVIL', name: 'evil', class_name: 'Evil', script_name: 'other-worker' },
+      ],
+    });
+    const result = verifyGeneratedDeployConfig(injected, options);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/workflows/);
+    expect(result.reason).toMatch(/injected/);
+
+    const retargeted = deployConfigProject({
+      account_id: 'acc123',
+      name: 'myapp',
+      workflows: [{ ...authorized, script_name: 'other-worker' }],
+    });
+    expect(verifyGeneratedDeployConfig(retargeted, options).ok).toBe(false);
+  });
+
   it('fails closed when the build injects a secrets_store_secrets or dispatch_namespaces entry', () => {
     for (const field of ['secrets_store_secrets', 'dispatch_namespaces'] as const) {
       const root = deployConfigProject({

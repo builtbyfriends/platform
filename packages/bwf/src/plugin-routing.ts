@@ -81,6 +81,12 @@ type RoutingPluginOptions = {
     filePath: string;
     name?: string;
   }>;
+  workflows?: Array<{
+    bindingName: string;
+    className: string;
+    filePath: string;
+    name?: string;
+  }>;
   /** Data-preserving exports for removed WebSocket Durable Object routes. */
   websocketTombstones?: Array<string>;
   onDevAssetRoutingPolicyChange?: (policy: AssetRoutingPolicy) => boolean;
@@ -582,6 +588,7 @@ export function routingPlugin(
         dev: compileOptions.dev,
         notFound: policy.assetConfig.not_found_handling ?? 'none',
         durableObjects: options.durableObjects,
+        workflows: options.workflows,
       }),
     );
   }
@@ -606,6 +613,7 @@ export function routingPlugin(
       sandbox: sandboxEntry,
       live: options.live,
       durableObjects: options.durableObjects,
+      workflows: options.workflows,
     }),
   );
 

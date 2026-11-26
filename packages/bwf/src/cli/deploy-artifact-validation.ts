@@ -166,6 +166,8 @@ export function verifyGeneratedDeployConfig(
     expectedMigrations?: Array<Record<string, unknown>>;
     /** Cron schedules the build should emit, derived from the source before the build. */
     expectedCrons?: Array<string>;
+    /** Workflow bindings bwf may emit from `workflows/`, besides the root's own. */
+    authorizedWorkflowBindings?: Array<Record<string, unknown>>;
   },
 ): DeployConfigCheck {
   const deployConfigPath = deployPointerPath(root);
@@ -308,6 +310,13 @@ export function verifyGeneratedDeployConfig(
       const pinned = passthrough.get(field) ?? new Map<string, Record<string, unknown>>();
       for (const { name, entry } of emittedEntries) {
         const pinnedEntry = pinned.get(name);
+        if (
+          pinnedEntry === undefined &&
+          field === 'workflows' &&
+          expected.authorizedWorkflowBindings?.some((authorized) => deepEqual(entry, authorized))
+        ) {
+          continue;
+        }
         if (pinnedEntry === undefined) {
           return {
             ok: false,

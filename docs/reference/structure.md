@@ -14,6 +14,7 @@ const items = [
   { name: "queues/", description: "Async queue consumers", link: "#queues" },
   { name: "email/", description: "Inbound email handlers", link: "#email" },
   { name: "durable-objects/", description: "Durable State modules", link: "#durable-objects" },
+  { name: "workflows/", description: "Cloudflare Workflows", link: "#workflows" },
   { name: "public/", description: "Static assets (served as-is)", link: "#public" },
   { name: ".bwf/", description: "Auto-generated (gitignored)", link: "#void" },
   { name: "vite.config.ts", description: "Vite config with bwfPlugin()", link: "#config-files" },
@@ -113,6 +114,10 @@ Generate schema with `bwf gen model` or write it by hand. Generate migrations wi
 ## `durable-objects/`
 
 [Durable State](/guide/durable-state) modules. Each file default-exports a `defineDurableState()` definition.
+
+## `workflows/`
+
+[Workflows](/guide/workflows). Each file default-exports a `defineWorkflow()` definition.
 
 ## `src/`
 

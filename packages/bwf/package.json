@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/bwf",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "Full-stack framework and deployment CLI for Cloudflare Workers, powered by Vite.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {
@@ -162,6 +162,11 @@
       "types": "./dist/runtime/durable.d.mts",
       "import": "./dist/runtime/durable.mjs",
       "require": "./dist/runtime/durable.mjs"
+    },
+    "./workflow": {
+      "types": "./dist/runtime/workflow.d.mts",
+      "import": "./dist/runtime/workflow.mjs",
+      "require": "./dist/runtime/workflow.mjs"
     },
     "./seed": {
       "types": "./dist/runtime/seed.d.mts",

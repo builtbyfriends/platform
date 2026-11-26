@@ -20,6 +20,7 @@ bwf automatically detects which Cloudflare resources your project uses by scanni
 | `QUEUE_*`        | `Queue`                    | `import { queues } from "@builtbyfriends/bwf/queues"`                                                                                        | `env.QUEUE_*`                                                                  |
 | `BWF_LIVE`       | `DurableObjectNamespace`   | `import { defineLiveStream } from "@builtbyfriends/bwf/live"`                                                                                | n/a                                                                            |
 | filename-derived | `DurableObjectNamespace`   | A default-exported `defineDurableState()` module in `durable-objects/`                                                                       | n/a                                                                            |
+| filename-derived | `Workflow`                 | A default-exported `defineWorkflow()` module in `workflows/`                                                                                 | `env.WELCOME` for `welcome.ts`                                                 |
 
 Auth detection also triggers when importing the `auth` specifier from `@builtbyfriends/bwf/client` or a framework-specific client subpath such as `@builtbyfriends/bwf/client/react` (but not when importing only `fetch`).
 
@@ -28,6 +29,8 @@ Static bracket access such as `c.env['KV']` and destructured properties such as
 use [explicit binding overrides](#explicit-binding-overrides).
 
 Durable state is inferred from files in `durable-objects/`. For example, `durable-objects/shopping-cart.ts` creates the `SHOPPING_CART` binding, exports `ShoppingCartDurableObject`, and records its migration. See [Durable State](../guide/durable-state.md).
+
+Workflows are inferred the same way from `workflows/`. `workflows/welcome.ts` creates the `WELCOME` binding and exports `WelcomeWorkflow`. See [Workflows](../guide/workflows.md).
 
 ## Scanned Directories
 
@@ -47,6 +50,7 @@ bwf apps scan these directories by default. With [`sourceDir`](./config.md#sourc
 Regardless of mode, these are always checked:
 
 - **Application source** in `src/` or your configured `sourceDir`, including resource and auth imports
+- **`workflows/`**, which is scanned for Cloudflare Workflow modules in native bwf apps
 - **`durable-objects/`**, which is scanned for typed Durable Object state modules in native bwf apps
 
 ## Custom Scan Directories

@@ -257,6 +257,7 @@ export async function runFullDeploy(
     dialect,
     webSockets,
     durableObjects: analysis.durableObjects,
+    workflows: analysis.workflows,
   });
   if (skipMigrations) {
     manifest.migrationMode = 'skip';
