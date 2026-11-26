@@ -1144,6 +1144,9 @@ async function readWorkerBase(): Promise<Json> {
     { headers: await apiHeaders(), redirect: 'error', signal: AbortSignal.timeout(30_000) },
   );
   const parsed: unknown = await response.json().catch(() => null);
+  if (response.status === 404) {
+    throw missingWorkerError();
+  }
   if (!response.ok || !isRecord(parsed)) {
     throw new Error(`Cloudflare could not read the Worker (HTTP ${response.status}).`);
   }
@@ -1152,12 +1155,21 @@ async function readWorkerBase(): Promise<Json> {
   return isRecord(base) ? base : {};
 }
 
+function missingWorkerError(): Error {
+  return new Error(
+    `Cloudflare has no Worker named ${workerName()} yet, so it has no preview Base (HTTP 404). Run bwf deploy --platform cloudflare once, then try again.`,
+  );
+}
+
 async function patchWorkerBase(change: Json, action: string): Promise<void> {
   const response = await postWorkersApi(
     previewBasePath(),
     { previews_base_config: change },
     'PATCH',
   );
+  if (response.status === 404) {
+    throw missingWorkerError();
+  }
   if (response.status < 200 || response.status >= 300) {
     throw workersApiFailure(action, response);
   }

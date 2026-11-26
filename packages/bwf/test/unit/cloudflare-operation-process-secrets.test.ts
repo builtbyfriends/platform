@@ -495,7 +495,8 @@ it('fails when Cloudflare cannot read the Worker', async () => {
     }),
   });
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain('could not read the Worker (HTTP 404)');
+  expect(result.stderr).toContain('has no Worker named my-worker yet');
+  expect(result.stderr).toContain('bwf deploy --platform cloudflare');
 });
 
 it('fails when Cloudflare refuses to turn on logs in the Base', async () => {
@@ -513,4 +514,21 @@ it('fails when Cloudflare refuses to turn on logs in the Base', async () => {
   });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain('turn on logs in the preview Base');
+});
+
+it('says the Worker is missing when a Base secret is set before the first deploy', async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: baseSecretsOperation,
+    input: JSON.stringify({ ONE: 'first-value' }),
+    cf: {},
+    api: () => ({
+      status: 404,
+      body: { success: false, errors: [{ code: 10_007, message: 'x' }] },
+    }),
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('has no Worker named my-worker yet');
+  expect(result.stderr).toContain('bwf deploy --platform cloudflare');
+  expect(result.stderr).not.toContain('first-value');
+  expect(apiCalls).toHaveLength(1);
 });

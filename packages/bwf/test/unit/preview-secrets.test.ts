@@ -86,6 +86,15 @@ describe('previewBaseFailureMessage', () => {
     expect(message).toContain('Nothing was deployed');
   });
 
+  it('tells a Base read of a missing Worker to deploy first', () => {
+    const message = previewBaseFailureMessage(
+      new Error('Cloudflare has no Worker named app yet, so it has no preview Base (HTTP 404).'),
+    );
+
+    expect(message).toContain('no deployed Worker yet');
+    expect(message).toContain('Nothing was deployed');
+  });
+
   it('keeps the reason for any other failure', () => {
     expect(previewBaseFailureMessage(new Error('socket hang up'))).toBe(
       "deploy: could not read the app's preview settings: socket hang up",

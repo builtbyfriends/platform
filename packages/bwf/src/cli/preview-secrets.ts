@@ -28,7 +28,7 @@ export async function readPreviewBase(
 
 /** The message for a failed read of the live app's settings. A Worker that isn't deployed yet gets the next step. */
 export function previewBaseFailureMessage(error: Error): string {
-  if (/\b10007\b/.test(error.message)) {
+  if (/\b10007\b|has no Worker named/.test(error.message)) {
     return 'deploy: the app has no deployed Worker yet, so a preview has nothing to preview against. Run `bwf deploy --platform cloudflare` once, then run the preview again. Nothing was deployed.';
   }
 
