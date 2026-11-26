@@ -11,6 +11,9 @@ const entrySchema = type({
   method: "'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE'",
   path: 'string > 0',
   sha256: digest,
+  'summary?': type('string').atMostLength(2000),
+  'tags?': type('string').atMostLength(200).array().atMostLength(30),
+  'deprecated?': 'boolean',
   bytes: type('number.integer')
     .atLeast(1)
     .atMost(1024 * 1024),

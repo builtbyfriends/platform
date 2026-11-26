@@ -274,13 +274,16 @@ export async function buildCloudflareCatalog({
 
 export async function writeCloudflareSnapshot(report, destination) {
   const entries = report.operations.map(
-    ({ operationId, method, path, sha256, bytes, gzipBytes }) => ({
+    ({ operationId, method, path, sha256, bytes, gzipBytes, summary, tags, deprecated }) => ({
       operationId,
       method,
       path,
       sha256,
       bytes,
       gzipBytes,
+      summary,
+      tags,
+      deprecated,
     }),
   );
   const index = JSON.stringify(entries);
@@ -289,6 +292,17 @@ export async function writeCloudflareSnapshot(report, destination) {
   const text = [
     '// Decision: Only the pinned index is bundled; complete operation documents are loaded individually from artifact storage.',
     'export const cloudflareOpenApiSource = ' + JSON.stringify(source, null, 2) + ' as const;',
+    'export const cloudflareOpenApiCoverage = ' +
+      JSON.stringify(
+        {
+          operations: report.coverage.operations,
+          extracted: report.coverage.extracted,
+          exclusions: report.exclusions,
+        },
+        null,
+        2,
+      ) +
+      ' as const;',
     'export const cloudflareOpenApiIndexSha256 = ' + JSON.stringify(sha256(index)) + ';',
     'export const cloudflareOpenApiIndexGzip = ' + JSON.stringify(gzip.toString('base64')) + ';',
     '',

@@ -12,7 +12,7 @@ The script writes:
 
 - `<sha256>.json.gz`: an operation document with its path parameters, request and response media, constraints, security schemes, and reachable components. References stay references, including cycles.
 - `index.json`: exact source revision and SHA-256, coverage counts, operation metadata, artifact hashes and compressed/uncompressed sizes, and excluded operations with reasons.
-- The optional TypeScript snapshot: source provenance and a gzip index containing only operation IDs, methods, paths, artifact hashes and sizes. It does not embed the operation schemas.
+- The optional TypeScript snapshot: source provenance and a gzip index containing operation IDs, methods, paths, summaries, tags, deprecation flags, artifact hashes and sizes. It does not embed the operation schemas.
 
 The source read is limited to 64 MiB and an extracted document to 1 MiB. Artifact filenames come from content hashes, not operation IDs or paths. Existing artifacts are not overwritten. An extraction failure is recorded and causes CLI exit status 1; inspect the exclusion report before accepting a snapshot. Duplicate operation IDs abort compilation.
 
@@ -43,3 +43,33 @@ Uploads run four at a time. Rate limits and transient failures receive up to fou
 Objects are stored as `application/gzip`, without an HTTP `Content-Encoding` setting. The runtime reader receives the compressed bytes and performs its own bounded verification. Publication success confirms the PUT responses; runtime retrieval should also be checked before activating a Worker that needs the new snapshot.
 
 Run mocked publication checks with `node scripts/publish-cloudflare-openapi.test.mjs`. These tests do not upload objects.
+
+## Discovery and coverage maintenance
+
+The authenticated `POST /app-billing/projects.capabilities` endpoint joins the pinned OpenAPI index to CLI commands by method and path. Operation IDs in list results are canonical OpenAPI IDs. Earlier CLI IDs remain accepted aliases for complete-schema lookup; they aren't executable registry IDs. Operations without CLI commands are included. Product groups use the CLI product when known and the first non-parameter API path segment after accounts/zones otherwise. These groups organize discovery; they aren't a list of supported resource kinds.
+
+Use `query` (up to 200 characters) and optional `method` to search summaries, tags, IDs, aliases, paths and commands, within a `product` or across products. Tokens match case-insensitively. Without a product, query or method the endpoint lists product groups. Pages contain at most 50 summaries and 32 KiB of operation metadata. Cursors pin the project, resource, normalized query, method, product and both artifact digests. A changed search or snapshot requires starting a new page sequence.
+
+A summary provides `schemaSha256`; pass it with `operationId` to fetch one complete document. A changed digest returns 409 `operation_schema_changed`. API-only entries don't invent CLI commands, field lists or request-body knowledge: fetch the full document before composing inputs. Field summaries can be truncated; they don't replace schema validation.
+
+A selected owned resource can provide a `registeredOperation` reference with its exact executable ID/version/effect. Discovery-only entries instead state `unavailableReason`: resource not selected, resource no longer active, policy not installed, installation not configured, provider identity unavailable, schema unavailable, or schema incompatible. Registration still isn't proof of successful execution on a target. Invocation rechecks ownership, version, effect, inputs and applicable provider limits. This catalog change doesn't alter executable descriptor IDs or version hashes.
+
+Generate an offline per-operation and per-family coverage report:
+
+```sh
+node scripts/check-cloudflare-catalog.mjs > /tmp/catalog-before.json
+```
+
+After compiling a proposed artifact update in an isolated branch, compare it with that report:
+
+```sh
+node scripts/check-cloudflare-catalog.mjs /tmp/catalog-before.json > /tmp/catalog-after.json
+```
+
+The checker verifies the pinned indexes, detects an effective installed CLI version/hash mismatch when the package is available, and fails if an installed provider policy has no pinned schema. Comparison reports added, removed and changed operations, including schema hashes and aliases; differences exit with status 1 for review. No artifact update, network request, publication or deployment occurs. Review the diff, affected operation tests and source exclusions before committing new pins. The publisher's dry-run separately verifies the complete artifact directory against the updated snapshot.
+
+The report distinguishes discovery, installed provider/proxy policies, target-dependent execution, and live/UI acceptance. Live and UI acceptance are `not-recorded`; tests and artifact counts don't become production acceptance. Existing test-session observations still need their deployment/operation versions attached in the project coverage record.
+
+Current baseline: effective `cf` 1.0.0-rc.2, 2,947 CLI aliases over 2,944 unique endpoints, 3,944 extracted OpenAPI operations from revision `9a5e4d44bd74d90fa9e4822142b8eb67e4ba3c70`, and 1,000 API-only entries. Four source operations are excluded because their referenced security schemes are missing; the generated report retains their reasons. Twelve provider policies and three proxy operations are installed in source. These counts don't claim broad Cloudflare product execution or live acceptance.
+
+Run `node scripts/check-cloudflare-catalog.test.mjs` for coverage/drift regressions. Changing catalog metadata alone must preserve saved executable versions; existing operation tests cover stale-version rejection.

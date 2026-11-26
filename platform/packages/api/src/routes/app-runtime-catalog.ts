@@ -8,7 +8,10 @@ import {
   cloudflareOpenApiIndex,
   cloudflareOperationSchema,
 } from '../infrastructure/cloudflare-openapi.ts';
-import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
+import {
+  providerPolicySelections,
+  resourceOperationsFor,
+} from '../infrastructure/resource-operations.ts';
 import type { Project, Resource } from '../types.ts';
 import { resourceCapabilities } from './app-runtime-capabilities.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
@@ -37,8 +40,11 @@ const requestSchema = type({
   'resourceId?': identifier,
   'product?': type('string > 0')
     .atMostLength(100)
-    .narrow((value) => /^[a-z][a-z0-9-]*$/.test(value)),
-  'cursor?': type('string > 0').atMostLength(2048),
+    .narrow((value) => /^[a-z][a-z0-9_-]*$/.test(value)),
+  'query?': type('string').atMostLength(200),
+  'method?': "'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE'",
+  'schemaSha256?': type('string').narrow((value) => /^[a-f0-9]{64}$/.test(value)),
+  'cursor?': type('string > 0').atMostLength(8192),
   'limit?': type('number.integer').atLeast(1).atMost(50),
   'operationId?': identifier,
 }).onUndeclaredKey('reject');
@@ -79,7 +85,7 @@ function sameProject(current: Project | null, previous: Project): current is Pro
 export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
   return new Hono<ApiEnv>().post(
     '/projects.capabilities',
-    bodyLimit({ maxSize: 8192 }),
+    bodyLimit({ maxSize: 16_384 }),
     async (context) => {
       const body = requestSchema(await context.req.json().catch(() => null));
 
@@ -107,10 +113,7 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
       const filesActive = await fileOwnerActive(context.get('db'), project);
       const catalog = await cloudflareCatalog();
 
-      if (
-        product &&
-        !catalog.operations.some((entry) => entry.command.startsWith(`cf ${product} `))
-      ) {
+      if (product && !catalog.operations.some((entry) => entry.product === product)) {
         return context.json({ error: 'unknown_product' }, 400);
       }
 
@@ -118,8 +121,8 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
       if (body.operationId) {
         const operation = catalog.operations.find(
           (entry) =>
-            entry.id === body.operationId &&
-            (!product || entry.command.startsWith(`cf ${product} `)),
+            (entry.id === body.operationId || entry.aliases.includes(body.operationId!)) &&
+            (!product || entry.product === product),
         );
         if (!operation) {
           return context.json({ error: 'unknown_operation' }, 404);
@@ -129,6 +132,9 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
         );
         if (!entry) {
           return context.json({ error: 'operation_schema_unavailable' }, 503);
+        }
+        if (body.schemaSha256 && body.schemaSha256 !== entry.sha256) {
+          return context.json({ error: 'operation_schema_changed' }, 409);
         }
         try {
           schema = await cloudflareOperationSchema(context.env.STATIC_ASSETS_R2, entry);
@@ -190,6 +196,8 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
             appId: project.id,
             resourceId: body.resourceId ?? null,
             product,
+            query: body.query,
+            method: body.method,
           },
           body.limit ?? 10,
           body.cursor,
@@ -223,7 +231,24 @@ export function appRuntimeCatalogRoutes(resolve: ResolveProject) {
                       resourceId: body.resourceId,
                     },
                   }
-                : operation;
+                : {
+                    ...operation,
+                    unavailableReason: !body.resourceId
+                      ? 'resource_not_selected'
+                      : !currentFilesActive
+                        ? 'resource_not_active'
+                        : !providerPolicySelections(selected[0].type).some(
+                              (policy) =>
+                                policy.method === operation.httpMethod &&
+                                policy.path === operation.path,
+                            )
+                          ? 'policy_not_installed'
+                          : (registered?.unavailable.find(
+                              (value) =>
+                                value.method === operation.httpMethod &&
+                                value.path === operation.path,
+                            )?.reason ?? 'schema_unavailable'),
+                  };
             }),
             capabilitiesTruncated: capable.length > 50,
             capabilities: capable

@@ -99,6 +99,9 @@ export async function validateCloudflareArtifacts(
       sha256: entry.sha256,
       bytes: entry.bytes,
       gzipBytes: entry.gzipBytes,
+      summary: entry.summary,
+      tags: entry.tags,
+      deprecated: entry.deprecated,
     });
   }
   if (hash(JSON.stringify(entries)) !== indexSha256) {

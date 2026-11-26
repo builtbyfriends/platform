@@ -204,6 +204,9 @@ test('writes digest-named gzip artifacts with exact source provenance and report
       'sha256',
       'bytes',
       'gzipBytes',
+      'summary',
+      'tags',
+      'deprecated',
     ]);
     assert.equal(pinned[0].sha256, report.operations[0].sha256);
     assert.equal(report.coverage.operations, 2);

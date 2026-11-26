@@ -277,7 +277,7 @@ async function providerOperation(
 ) {
   const artifact = await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, entry);
   if (!artifact) {
-    return null;
+    throw Error('schema_unavailable');
   }
   const writePolicy = cloudflareProviderWriteSelections(resourceType).find(
     (policy) => policy.operationId === entry.operationId,
@@ -290,6 +290,9 @@ async function providerOperation(
   const readArtifact = readEntry
     ? await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, readEntry)
     : null;
+  if (writePolicy && !readArtifact) {
+    throw Error('schema_unavailable');
+  }
   const adapter = writePolicy
     ? readArtifact && prepareCloudflareProviderWrite(artifact, readArtifact, resourceType)
     : prepareCloudflareProviderRead(artifact, resourceType);
@@ -363,40 +366,68 @@ async function providerOperation(
   return { procedure: operation, descriptor: { ...descriptor, version } };
 }
 
+export function providerPolicySelections(resourceType: Resource['type']) {
+  return [
+    ...cloudflareProviderReadSelections(resourceType),
+    ...cloudflareProviderWriteSelections(resourceType),
+  ];
+}
+
+type UnavailableOperation = {
+  method?: string;
+  path?: string;
+  id?: string;
+  reason:
+    | 'installation_not_configured'
+    | 'provider_identity_unavailable'
+    | 'schema_unavailable'
+    | 'schema_incompatible';
+};
 async function providerOperations(
   resourceType: Resource['type'],
   bindings: ApiEnv['Bindings'],
   caller?: ResourceCaller,
 ) {
-  const selections = [
-    ...cloudflareProviderReadSelections(resourceType),
-    ...cloudflareProviderWriteSelections(resourceType),
-  ];
-  if (
-    !selections.length ||
+  const selections = providerPolicySelections(resourceType);
+  const unavailable: Array<UnavailableOperation> = [];
+  const available: Array<NonNullable<Awaited<ReturnType<typeof providerOperation>>>> = [];
+  const reason =
     !bindings.CF_API_TOKEN ||
     !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
-    !bindings.STATIC_ASSETS_R2 ||
-    (resourceType === 'durable-object' && !(await caller?.resolveProviderIdentity?.()))
-  ) {
-    return [];
+    !bindings.STATIC_ASSETS_R2
+      ? 'installation_not_configured'
+      : resourceType === 'durable-object' &&
+          !(await caller?.resolveProviderIdentity?.().catch(() => null))
+        ? 'provider_identity_unavailable'
+        : null;
+  if (reason) {
+    return {
+      available,
+      unavailable: selections.map<UnavailableOperation>((selection) => ({ ...selection, reason })),
+    };
   }
-  const index = await cloudflareOpenApiIndex();
-  const available = [];
-  // Decision: Only the selected resource's explicit policies load schemas. Sequential preparation bounds transient memory; one broken artifact does not hide another operation.
+  const index = await cloudflareOpenApiIndex().catch(() => null);
+  // Decision: One unavailable artifact does not hide other installed policies, and diagnostics contain no provider response or credential.
   for (const selection of selections) {
-    const entry = index.find(
+    const entry = index?.find(
       (candidate) => candidate.method === selection.method && candidate.path === selection.path,
     );
     if (!entry) {
+      unavailable.push({ ...selection, reason: 'schema_unavailable' });
       continue;
     }
-    const operation = await providerOperation(resourceType, bindings, entry).catch(() => null);
-    if (operation) {
-      available.push(operation);
+    try {
+      const operation = await providerOperation(resourceType, bindings, entry);
+      if (operation) {
+        available.push(operation);
+      } else {
+        unavailable.push({ ...selection, reason: 'schema_incompatible' });
+      }
+    } catch {
+      unavailable.push({ ...selection, reason: 'schema_unavailable' });
     }
   }
-  return available;
+  return { available, unavailable };
 }
 
 export async function resourceOperationsFor(
@@ -407,12 +438,22 @@ export async function resourceOperationsFor(
   const registered = operationManifest.filter((entry) => entry.resourceType === resourceType);
   const available = registered.filter((entry) => !!bindings[entry.requires]);
   const names = new Set<string>(available.map((entry) => entry.procedure.name));
-  const providers = await providerOperations(resourceType, bindings, caller).catch(() => []);
+  const prepared = await providerOperations(resourceType, bindings, caller);
+  const providers = prepared.available;
   const operations = [
     ...(await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
     ...providers.map((provider) => provider.descriptor),
   ];
   return {
+    unavailable: [
+      ...prepared.unavailable,
+      ...registered
+        .filter((entry) => !bindings[entry.requires])
+        .map<UnavailableOperation>((entry) => ({
+          id: entry.procedure.name,
+          reason: 'installation_not_configured',
+        })),
+    ],
     reason: operations.length
       ? null
       : !registered.length &&
@@ -469,4 +510,31 @@ async function describeOperations() {
 let descriptors: ReturnType<typeof describeOperations> | undefined;
 function resourceOperationDescriptors() {
   return (descriptors ??= describeOperations());
+}
+
+export async function resourceOperationPolicyCoverage() {
+  const resourceTypes: Array<Resource['type']> = [
+    'd1',
+    'r2',
+    'kv',
+    'queue',
+    'hyperdrive',
+    'container',
+    'durable-object',
+  ];
+  const descriptors = await resourceOperationDescriptors();
+  return {
+    provider: resourceTypes.flatMap((resourceType) =>
+      providerPolicySelections(resourceType).map(({ method, path }) => ({
+        resourceType,
+        method,
+        path,
+      })),
+    ),
+    proxy: operationManifest.map((entry) => ({
+      resourceType: entry.resourceType,
+      id: entry.procedure.name,
+      version: descriptors.find((value) => value.id === entry.procedure.name)!.version,
+    })),
+  };
 }

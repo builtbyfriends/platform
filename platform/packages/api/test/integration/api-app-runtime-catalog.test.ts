@@ -64,7 +64,7 @@ const dataSchema = type({
     scope: { resourceId: 'string | null', product: 'string | null' },
     operations: type({
       id: 'string',
-      command: 'string',
+      'command?': 'string',
       execution: "'discovery-only' | 'registered'",
     }).array(),
     capabilities: type({ id: 'string', kind: 'string', actions: 'unknown[]' }).array(),
@@ -260,6 +260,12 @@ describe('owned operation discovery', () => {
         },
       },
     });
+    expect((await call({ ...body, schemaSha256: '0'.repeat(64) })).status).toBe(409);
+    const alias = operation.aliases[0];
+    expect(alias).toBeTruthy();
+    expect(
+      await (await call({ ...body, operationId: alias, schemaSha256: schema.sha256 })).json(),
+    ).toMatchObject({ data: { requestedOperationId: alias, operationId: schema.operationId } });
     expect((await call({ ...body, project: foreign.id })).status).toBe(404);
     expect((await call({ ...body, resourceId: 'res_files' })).status).toBe(404);
     expect((await call(body, false)).status).toBe(401);
@@ -296,9 +302,9 @@ describe('owned operation discovery', () => {
     expect(data.operations).toHaveLength(2);
     expect(
       data.operations.every(
-        (operation: { execution: string; command: string }) =>
+        (operation: { execution: string; command?: string }) =>
           operation.execution === 'discovery-only' &&
-          operation.command.startsWith('cf hyperdrive '),
+          operation.command?.startsWith('cf hyperdrive '),
       ),
     ).toBe(true);
     expect(JSON.stringify(data)).not.toContain('private-');
@@ -393,8 +399,8 @@ describe('owned operation discovery', () => {
 
     const { data } = await read(response);
     expect(response.status).toBe(200);
-    expect(data.scope).toEqual({ resourceId: null, product: 'vectorize' });
-    expect(data.operations).toHaveLength(14);
+    expect(data.scope).toMatchObject({ resourceId: null, product: 'vectorize' });
+    expect(data.operations).toHaveLength(24);
     expect(data.capabilities).toEqual([]);
     expect(data.products).toEqual([]);
     const inventory = await call({ project: project.id, owner: { person: 'person' } });
@@ -591,16 +597,14 @@ describe('Durable Object discovery ownership', () => {
       workerName: 'user-' + current.slug + '-' + deploymentId,
     };
     await env.ROUTING.put(current.slug, JSON.stringify(route));
-    await env.db
-      .insert(resources)
-      .values({
-        id: 'res_rooms',
-        project_id: project.id,
-        type: 'durable-object',
-        cf_id: hostName,
-        binding_name: 'Room',
-        metadata: { namespaceId, dispatchNamespace: 'platform-users' },
-      });
+    await env.db.insert(resources).values({
+      id: 'res_rooms',
+      project_id: project.id,
+      type: 'durable-object',
+      cf_id: hostName,
+      binding_name: 'Room',
+      metadata: { namespaceId, dispatchNamespace: 'platform-users' },
+    });
     const appBindings: Array<unknown> = [
       { name: '__PROJECT_ID', type: 'plain_text', text: project.id },
       { name: 'ROOMS', type: 'durable_object_namespace', namespace_id: namespaceId },
@@ -805,5 +809,106 @@ describe('Durable Object discovery ownership', () => {
     expect((await call({ ...fixture.body, namespaceId: fixture.namespaceId })).status).toBe(400);
     expect((await call({ ...fixture.body, resourceId: 'res_foreign' })).status).toBe(404);
     expect(fixture.provider).not.toHaveBeenCalled();
+  });
+});
+
+it('searches API-only summaries and reads their complete schemas without an executable policy', async () => {
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (value) => value.method === 'GET' && value.path === '/accounts/{account_id}/access/apps',
+  );
+  if (!entry) {
+    throw Error('Missing API-only fixture');
+  }
+  await env.STATIC_ASSETS_R2.put(
+    cloudflareOpenApiKey(entry),
+    await readFile(new URL('../fixtures/cloudflare-openapi/access-list.json.gz', import.meta.url)),
+  );
+  const body = {
+    project: project.id,
+    owner: { person: 'person' },
+    query: entry.operationId,
+    method: 'GET',
+    limit: 5,
+  };
+  const response = await call(body);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      operations: expect.arrayContaining([
+        expect.objectContaining({
+          id: entry.operationId,
+          execution: 'discovery-only',
+          unavailableReason: 'resource_not_selected',
+          aliases: [],
+        }),
+      ]),
+    },
+  });
+  expect(
+    await (
+      await call({ ...body, operationId: entry.operationId, schemaSha256: entry.sha256 })
+    ).json(),
+  ).toMatchObject({
+    data: { operationId: entry.operationId, sha256: entry.sha256, execution: 'discovery-only' },
+  });
+  expect(
+    (await call({ ...body, operationId: entry.operationId, resourceId: 'res_files' })).status,
+  ).toBe(404);
+});
+it('distinguishes absent policy, missing schema and missing installation configuration', async () => {
+  const body = { ...input(), resourceId: 'res_files', limit: 50 };
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (value) =>
+      value.method === 'GET' && value.path === '/accounts/{account_id}/r2/buckets/{bucket_name}',
+  );
+  if (!entry) {
+    throw Error('Missing R2 schema');
+  }
+  env.CF_ACCOUNT_ID = 'a'.repeat(32);
+  await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
+  expect(await (await call({ ...body, query: entry.operationId })).json()).toMatchObject({
+    data: {
+      operations: expect.arrayContaining([
+        expect.objectContaining({ id: entry.operationId, unavailableReason: 'schema_unavailable' }),
+      ]),
+    },
+  });
+  env.CF_API_TOKEN = '';
+  expect(await (await call({ ...body, query: entry.operationId })).json()).toMatchObject({
+    data: {
+      operations: expect.arrayContaining([
+        expect.objectContaining({
+          id: entry.operationId,
+          unavailableReason: 'installation_not_configured',
+        }),
+      ]),
+    },
+  });
+  expect(
+    await (await call({ ...body, method: 'DELETE', query: '/r2/buckets' })).json(),
+  ).toMatchObject({
+    data: {
+      operations: expect.arrayContaining([
+        expect.objectContaining({ unavailableReason: 'policy_not_installed' }),
+      ]),
+    },
+  });
+});
+
+it('allows API-derived product names that are absent from the CLI', async () => {
+  const response = await call({
+    project: project.id,
+    owner: { person: 'person' },
+    product: 'api_gateway',
+    limit: 1,
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: {
+      scope: { product: 'api_gateway' },
+      operations: [
+        expect.objectContaining({ product: 'api_gateway', execution: 'discovery-only' }),
+      ],
+    },
   });
 });
