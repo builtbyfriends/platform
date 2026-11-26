@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/platform",
-  "version": "1.10.2",
+  "version": "1.11.0",
   "description": "Packaged runtime and installation contracts for self-hosted bwf platforms.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {

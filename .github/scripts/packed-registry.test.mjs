@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path/posix';
 import { test } from 'node:test';
-import { inspectPackage, isReleaseCohortName } from './packed-registry.mjs';
+import { inspectPackage, isGithubPackagesName, isReleaseCohortName } from './packed-registry.mjs';
 
 function createPackage(t, overrides = {}, includeLicense = true) {
   const root = mkdtempSync(join(tmpdir(), 'platform-packed-metadata-'));
@@ -84,5 +84,24 @@ test("keeps this repository's release names inside the packed cohort", () => {
     '@cloudflare/workers-types',
   ]) {
     assert.equal(isReleaseCohortName(name), false, name);
+  }
+});
+
+test('reads the Realtime packages from GitHub Packages and the rest from npm', () => {
+  for (const name of [
+    '@builtbyfriends/realtime',
+    '@builtbyfriends/realtime-http',
+    '@builtbyfriends/realtime-mcp',
+  ]) {
+    assert.equal(isGithubPackagesName(name), true, name);
+  }
+  for (const name of [
+    '@builtbyfriends/bwf',
+    '@builtbyfriends/create-bwf',
+    'bwf',
+    'vite',
+    '@cloudflare/workers-types',
+  ]) {
+    assert.equal(isGithubPackagesName(name), false, name);
   }
 });

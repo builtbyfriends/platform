@@ -1,0 +1,18 @@
+name: Read our packages
+description: Sign in to GitHub Packages so installs can read the @builtbyfriends packages, such as Realtime.
+inputs:
+  token:
+    description: A token that can read the organization's packages (the PACKAGES_TOKEN secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    # Decision: pnpm ignores a ${NODE_AUTH_TOKEN} token in the project .npmrc, so the token goes into the
+    # user config, which the install inside setup-vp reads. The publish job points NPM_CONFIG_USERCONFIG
+    # elsewhere, so this writes there when it's set.
+    - shell: bash
+      env:
+        PACKAGES_TOKEN: ${{ inputs.token }}
+      run: |
+        : "${PACKAGES_TOKEN:?is empty. Set the PACKAGES_TOKEN secret, and pass it to a called workflow.}"
+        echo "//npm.pkg.github.com/:_authToken=${PACKAGES_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"

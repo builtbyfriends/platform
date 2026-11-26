@@ -9,6 +9,8 @@ on:
         required: true
       BWF_TOKEN_STAGING:
         required: true
+      PACKAGES_TOKEN:
+        required: false
   schedule:
     - cron: '0 0 * * *' # daily at 8am SGT (midnight UTC)
   workflow_dispatch:
@@ -55,6 +57,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
       - uses: voidzero-dev/setup-vp@1b32467adbe183473499fd9d5d372c3ed9641754 # v1.18.0
         with:
           cache: true

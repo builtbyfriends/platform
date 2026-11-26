@@ -12,6 +12,10 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      PACKAGES_TOKEN:
+        description: Reads the @builtbyfriends packages from GitHub Packages.
+        required: false
 
 permissions: {}
 
@@ -37,6 +41,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
       - uses: ./.github/actions/test-setup
       # Build every playground once per OS for complete build/type coverage.
       # Integration tests build their own selected fixtures in separate checkouts.
@@ -66,6 +73,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
       - uses: ./.github/actions/test-setup
         with:
           browser: ${{ matrix.shard != 'unit' }}
@@ -119,6 +129,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/packages-auth
+        with:
+          token: ${{ secrets.PACKAGES_TOKEN }}
       - uses: voidzero-dev/setup-vp@2dec1e33f4ab2c6d5bce1b0c4607961bb1a3f7a1 # v1.12.0
         with:
           node-version-file: .node-version
