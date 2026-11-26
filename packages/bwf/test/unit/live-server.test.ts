@@ -183,6 +183,109 @@ describe('live Durable Object runtime', () => {
         publisher.revoke({ connectionId: 'connection-unknown-001', topic: '' }),
       ).rejects.toThrow('topic');
     });
+    describe('by owner', () => {
+      async function openAs(
+        harness: ReturnType<typeof createHarness>,
+        stream: ReturnType<typeof defineLiveStream>,
+        owner: string,
+        connectionId: string,
+        subscriptions: Array<{ id: string; topic: string }>,
+      ) {
+        const response = await stream.connect(
+          liveContext(harness.env, `https://platform.live/live?connectionId=${connectionId}`),
+          { owner },
+        );
+        const reader = response.body!.getReader();
+        await readFrame(reader);
+        const control = await stream.control(
+          liveContext(harness.env, 'https://platform.live/live', {
+            connectionId,
+            operations: subscriptions.map((entry) => ({ kind: 'subscribe', ...entry })),
+          }),
+          { owner },
+        );
+        expect(control.status).toBe(200);
+        return reader;
+      }
+
+      it('ends a topic on every window of one owner and leaves another owner untouched', async () => {
+        const harness = createHarness();
+        const stream = defineLiveStream({ id: `revoke-owner-${crypto.randomUUID()}` });
+        const publisher = stream.withEnv(harness.env);
+        const first = await openAs(harness, stream, 'user:ana', 'connection-ana-000001', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+        const second = await openAs(harness, stream, 'user:ana', 'connection-ana-000002', [
+          { id: 'project', topic: 'project:7' },
+          { id: 'other', topic: 'other:1' },
+        ]);
+        const other = await openAs(harness, stream, 'user:ben', 'connection-ben-000001', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+
+        await expect(
+          publisher.revoke({ owner: 'user:ana', topic: 'project:7', reason: 'Removed' }),
+        ).resolves.toEqual({ revoked: 2 });
+        expect(parseData(await readFrame(first))).toMatchObject({ reason: 'Removed' });
+        expect(parseData(await readFrame(second))).toMatchObject({ reason: 'Removed' });
+
+        await publisher.publish('project:7', { n: 1 });
+        await publisher.publish('other:1', { n: 2 });
+        expect(parseData(await readFrame(second))).toMatchObject({ topic: 'other:1' });
+        expect(parseData(await readFrame(other))).toMatchObject({
+          topic: 'project:7',
+          data: { n: 1 },
+        });
+
+        await expect(
+          publisher.revoke({ owner: 'user:ana', topicPrefix: 'other:' }),
+        ).resolves.toEqual({
+          revoked: 1,
+        });
+        await first.cancel();
+        await second.cancel();
+        await other.cancel();
+      });
+
+      it('forgets a window that closed, and moves a connection id to its new owner', async () => {
+        const harness = createHarness();
+        const stream = defineLiveStream({ id: `revoke-owner-gone-${crypto.randomUUID()}` });
+        const publisher = stream.withEnv(harness.env);
+        const closed = await openAs(harness, stream, 'user:ana', 'connection-ana-000003', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+        await closed.cancel();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await expect(publisher.revoke({ owner: 'user:ana' })).resolves.toEqual({ revoked: 0 });
+
+        const moved = await openAs(harness, stream, 'user:ana', 'connection-move-000001', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+        const again = await openAs(harness, stream, 'user:ben', 'connection-move-000001', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+        await expect(publisher.revoke({ owner: 'user:ana' })).resolves.toEqual({ revoked: 0 });
+        await expect(publisher.revoke({ owner: 'user:ben' })).resolves.toEqual({ revoked: 1 });
+        await moved.cancel().catch(() => {});
+        await again.cancel();
+      });
+
+      it('needs exactly one of connectionId and owner', async () => {
+        const harness = createHarness();
+        const stream = defineLiveStream({ id: `revoke-owner-bad-${crypto.randomUUID()}` });
+        const publisher = stream.withEnv(harness.env);
+
+        await expect(
+          publisher.revoke({} as unknown as Parameters<typeof publisher.revoke>[0]),
+        ).rejects.toThrow('either a connectionId or an owner');
+        await expect(
+          publisher.revoke({
+            owner: 'user:ana',
+            connectionId: 'connection-ana-000001',
+          } as unknown as Parameters<typeof publisher.revoke>[0]),
+        ).rejects.toThrow('either a connectionId or an owner');
+      });
+    });
   });
 
   it('rejects invalid live limits before registering the stream id', () => {

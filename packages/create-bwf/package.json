@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/create-bwf",
-  "version": "1.13.7",
+  "version": "1.13.8",
   "description": "Create a full-stack bwf app for Cloudflare Workers.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {

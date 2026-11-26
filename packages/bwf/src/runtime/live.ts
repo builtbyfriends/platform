@@ -5,6 +5,7 @@ import type { CloudContext, CloudEnv } from './handler.ts';
 import {
   connectionInstanceName,
   internalUrl,
+  ownerInstanceName,
   topicDigest,
   topicInstanceName,
 } from './live-names.ts';
@@ -102,9 +103,7 @@ export type LivePublishOptions = {
   eventId?: string;
 };
 
-export type LiveRevokeTarget = {
-  /** The connection to end subscriptions on: the `connection.id` an `onConnect` or `onSubscribe` hook receives. */
-  connectionId: string;
+export type LiveRevokeFilter = {
   /** Only subscriptions to exactly this topic. */
   topic?: string;
   /** Only subscriptions to a topic that starts with this text. With `topic` too, both have to match. */
@@ -113,8 +112,22 @@ export type LiveRevokeTarget = {
   reason?: string;
 };
 
+export type LiveRevokeTarget = LiveRevokeFilter &
+  (
+    | {
+        /** The connection to end subscriptions on: the `connection.id` an `onConnect` or `onSubscribe` hook receives. */
+        connectionId: string;
+        owner?: never;
+      }
+    | {
+        /** The owner `identifyConnection` (or the `owner` option) gave: ends subscriptions on all of its open connections. */
+        owner: string;
+        connectionId?: never;
+      }
+  );
+
 export type LiveRevokeResult = {
-  /** How many subscriptions ended. It is 0 when the connection is closed or nothing matched. */
+  /** How many subscriptions ended. It is 0 when no connection is open or nothing matched. */
   revoked: number;
 };
 
@@ -279,7 +292,6 @@ export function defineLiveStream(options: LiveStreamOptions): LiveStream {
 
   async function revokeWithEnv(env: unknown, target: LiveRevokeTarget): Promise<LiveRevokeResult> {
     const binding = getLiveBinding(env);
-    const connectionId = assertConnectionId(target.connectionId);
     for (const [name, value] of [
       ['topic', target.topic],
       ['topicPrefix', target.topicPrefix],
@@ -290,21 +302,39 @@ export function defineLiveStream(options: LiveStreamOptions): LiveStream {
     if (target.topic !== undefined) {
       assertTopic(target.topic);
     }
-    const id = binding.idFromName(connectionInstanceName(streamId, connectionId));
-    const response = await binding.get(id).fetch(internalUrl('/revoke'), {
-      method: 'POST',
-      body: JSON.stringify({
-        streamId,
-        connectionId,
-        topic: target.topic,
-        topicPrefix: target.topicPrefix,
-        reason: target.reason,
-      }),
-    });
+    if ((target.connectionId === undefined) === (target.owner === undefined)) {
+      throw new Error('live: revoke() needs either a connectionId or an owner.');
+    }
+    const filter = { topic: target.topic, topicPrefix: target.topicPrefix, reason: target.reason };
+    let response: Response;
+    if (target.owner !== undefined) {
+      assertOwner(target.owner);
+      const ownerKey = await topicDigest(streamId, target.owner);
+      response = await binding
+        .get(binding.idFromName(ownerInstanceName(streamId, ownerKey)))
+        .fetch(internalUrl('/owner-revoke'), {
+          method: 'POST',
+          body: JSON.stringify({
+            streamId,
+            owner: target.owner,
+            ...filter,
+            limits: { deliveryAttemptTimeoutMs: limits.deliveryAttemptTimeoutMs },
+          }),
+        });
+    } else {
+      const connectionId = assertConnectionId(target.connectionId);
+      response = await binding
+        .get(binding.idFromName(connectionInstanceName(streamId, connectionId)))
+        .fetch(internalUrl('/revoke'), {
+          method: 'POST',
+          body: JSON.stringify({ streamId, connectionId, ...filter }),
+        });
+    }
     if (!response.ok) {
       throw new Error((await response.text()) || response.statusText);
     }
-    return (await response.json()) as LiveRevokeResult;
+    const { revoked } = (await response.json()) as LiveRevokeResult;
+    return { revoked };
   }
 
   return {
