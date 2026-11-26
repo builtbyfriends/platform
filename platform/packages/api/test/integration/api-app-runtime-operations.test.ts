@@ -106,7 +106,13 @@ afterAll(teardownEnv);
 afterEach(() => vi.restoreAllMocks());
 afterEach(async () => {
   for (const entry of await cloudflareOpenApiIndex()) {
-    if (['r2-get-bucket-public-policy', 'r2-get-bucket-cors-policy'].includes(entry.operationId)) {
+    if (
+      [
+        'r2-get-bucket-public-policy',
+        'r2-get-bucket-cors-policy',
+        'r2-put-bucket-cors-policy',
+      ].includes(entry.operationId)
+    ) {
       await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
     }
   }
@@ -324,6 +330,141 @@ async function corsResource() {
   };
 }
 
+async function corsWriteResource() {
+  const fixture = await corsResource();
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (candidate) => candidate.operationId === 'r2-put-bucket-cors-policy',
+  );
+  if (!entry) {
+    throw Error('Missing pinned CORS write');
+  }
+  await env.STATIC_ASSETS_R2.put(
+    cloudflareOpenApiKey(entry),
+    await readFile(new URL('../fixtures/cloudflare-openapi/r2-cors-put.json.gz', import.meta.url)),
+  );
+  const descriptor = (await fixture.fixture.list()).find(
+    (candidate) => candidate.id === entry.operationId,
+  );
+  if (!descriptor) {
+    throw Error('Missing CORS write descriptor');
+  }
+  const input = { body: { rules: [] }, expected: { rules: fixture.rules } };
+  const request = {
+    ...fixture.body,
+    operation: descriptor.id,
+    version: descriptor.version,
+    expectedEffect: 'write',
+    confirmation: 'reviewed',
+    input,
+  };
+  return { ...fixture, descriptor, request, provider: fixture.fixture.metadata.provider, entry };
+}
+
+describe('reviewed schema-backed configuration writes', () => {
+  it('discovers nested editable inputs and applies only the reviewed scoped replacement', async () => {
+    const { descriptor, request, provider, rules } = await corsWriteResource();
+    expect(descriptor.effect).toBe('write');
+    expect(descriptor.inputSchema).toMatchObject({
+      required: ['body', 'expected'],
+      properties: { body: { required: ['rules'] } },
+    });
+    provider
+      .mockResolvedValueOnce(
+        Response.json({ success: true, errors: [], messages: [], result: { rules } }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true, errors: [], messages: [], result: {} }))
+      .mockResolvedValueOnce(
+        Response.json({ success: true, errors: [], messages: [], result: { rules: [] } }),
+      );
+    const response = await call('resources.invoke', request);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { kind: 'provider-write', data: { name: 'My resource', rules: [] } },
+    });
+    expect(provider.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'PUT', 'GET']);
+    expect(String(provider.mock.calls[1][0])).toContain('/r2/buckets/owned-bucket/cors');
+    expect(JSON.parse(String(provider.mock.calls[1][1]?.body))).toEqual({ rules: [] });
+  });
+
+  it('rejects unreviewed, stale, cross-tenant, scope and input overrides before provider traffic', async () => {
+    const { request, provider } = await corsWriteResource();
+    for (const [change, status] of [
+      [{ confirmation: undefined }, 403],
+      [{ expectedEffect: 'read' }, 400],
+      [{ version: '0'.repeat(64) }, 409],
+      [{ resourceId: 'res_foreign' }, 404],
+      [{ owner: { person: 'stranger' } }, 404],
+      [{ input: { ...request.input, account_id: 'foreign' } }, 400],
+      [{ input: { ...request.input, headers: { 'cf-r2-jurisdiction': 'default' } } }, 400],
+      [{ input: { ...request.input, body: { rules: [], password: 'private' } } }, 400],
+      [{ input: { body: { rules: [] } } }, 400],
+    ] as const) {
+      expect((await call('resources.invoke', { ...request, ...change })).status).toBe(status);
+    }
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it('reports stale configuration as a conflict without submitting a replacement', async () => {
+    const { request, provider } = await corsWriteResource();
+    provider.mockResolvedValueOnce(
+      Response.json({ success: true, errors: [], messages: [], result: {} }),
+    );
+    const response = await call('resources.invoke', request);
+    expect(await response.json()).toMatchObject({ data: { kind: 'conflict' } });
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['bucket', 'jurisdiction', 'owner'] as const)(
+    'does not write when %s changes during preflight',
+    async (change) => {
+      const { request, provider, rules } = await corsWriteResource();
+      provider.mockImplementationOnce(async () => {
+        if (change === 'owner') {
+          await env.db
+            .update(projects)
+            .set({ proxy_token_gen: 99 })
+            .where(eq(projects.id, project.id));
+        } else {
+          await env.db
+            .update(resources)
+            .set(
+              change === 'bucket'
+                ? { cf_id: 'foreign' }
+                : { metadata: { jurisdiction: 'default' } },
+            )
+            .where(eq(resources.id, request.resourceId));
+        }
+        return Response.json({ success: true, errors: [], messages: [], result: { rules } });
+      });
+      const response = await call('resources.invoke', request);
+      expect(await response.json()).toMatchObject({ data: { kind: 'unavailable' } });
+      expect(provider).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('returns an unconfirmed receipt after transport failure without retrying the write', async () => {
+    const { request, provider, rules } = await corsWriteResource();
+    provider
+      .mockResolvedValueOnce(
+        Response.json({ success: true, errors: [], messages: [], result: { rules } }),
+      )
+      .mockRejectedValueOnce(Error('private diagnostic'));
+    const response = await call('resources.invoke', request);
+    const result = await response.json();
+    expect(result).toMatchObject({ data: { kind: 'unknown' } });
+    expect(JSON.stringify(result)).not.toContain('private diagnostic');
+    expect(provider).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides a damaged write artifact while keeping the independently verified read', async () => {
+    const { fixture, entry, descriptor } = await corsWriteResource();
+    await env.STATIC_ASSETS_R2.put(cloudflareOpenApiKey(entry), 'invalid');
+    const operations = await fixture.list();
+    expect(operations.some((operation) => operation.id === descriptor.id)).toBe(false);
+    expect(operations.some((operation) => operation.id === 'r2-get-bucket-cors-policy')).toBe(true);
+  });
+});
+
 describe('structured provider operations', () => {
   it('discovers and executes pinned nested data beside the other resource operations', async () => {
     const { fixture, rules, operations, descriptor, body } = await corsResource();
@@ -429,6 +570,11 @@ describe('schema-backed provider operations', () => {
       fixture.metadata.key,
       fixture.key,
       cloudflareOpenApiKey(cors),
+      cloudflareOpenApiKey(
+        (await cloudflareOpenApiIndex()).find(
+          (entry) => entry.operationId === 'r2-put-bucket-cors-policy',
+        )!,
+      ),
     ]);
     expect(operations).toEqual(fixture.operations);
     expect(operations).toHaveLength(4);

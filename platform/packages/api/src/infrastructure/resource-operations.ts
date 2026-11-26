@@ -19,6 +19,10 @@ import {
   cloudflareProviderReadSelections,
   prepareCloudflareProviderRead,
 } from './cloudflare-provider-read.ts';
+import {
+  cloudflareProviderWriteSelections,
+  prepareCloudflareProviderWrite,
+} from './cloudflare-provider-write.ts';
 import { queryDatabase } from './database-query.ts';
 import { DatabaseQueryError } from './database-select.ts';
 
@@ -275,7 +279,20 @@ async function providerOperation(
   if (!artifact) {
     return null;
   }
-  const adapter = prepareCloudflareProviderRead(artifact, resourceType);
+  const writePolicy = cloudflareProviderWriteSelections(resourceType).find(
+    (policy) => policy.operationId === entry.operationId,
+  );
+  const readEntry = writePolicy
+    ? (await cloudflareOpenApiIndex()).find(
+        (candidate) => candidate.operationId === writePolicy.readOperationId,
+      )
+    : undefined;
+  const readArtifact = readEntry
+    ? await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, readEntry)
+    : null;
+  const adapter = writePolicy
+    ? readArtifact && prepareCloudflareProviderWrite(artifact, readArtifact, resourceType)
+    : prepareCloudflareProviderRead(artifact, resourceType);
   if (!adapter) {
     return null;
   }
@@ -285,7 +302,7 @@ async function providerOperation(
     PROVIDER_UNAVAILABLE: { status: 502, message: 'Could not load this resource. Try again.' },
   } as const;
   // Decision: Provider IDs are not valid Realtime names. An injective hexadecimal encoding keeps handlers distinct and stable when another artifact is absent.
-  const registryName = `provider.read${Array.from(new TextEncoder().encode(adapter.id), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  const registryName = `provider.${adapter.effect}${Array.from(new TextEncoder().encode(adapter.id), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   const operation = procedure(registryName)
     .use(owned)
     .input(providerSchema(adapter.inputSchema))
@@ -294,10 +311,28 @@ async function providerOperation(
     .mcp({
       title: described.title,
       description: described.description,
-      effect: 'read',
-      idempotent: true,
+      effect: adapter.effect,
+      idempotent: adapter.effect === 'read',
     })
     .handler(async ({ env, input, fail }) => {
+      if ('write' in adapter) {
+        const uncertain = {
+          appId: env.caller.project.id,
+          resourceId: env.caller.resource.id,
+          action: adapter.id,
+          kind: 'unknown',
+          reason:
+            'The change could not be confirmed. Refresh the configuration before trying again.',
+        };
+        try {
+          const output = await adapter.write(env.bindings, env.caller, input);
+          return output.kind !== 'provider-write' || (await env.caller.stillAuthorized())
+            ? output
+            : uncertain;
+        } catch {
+          return uncertain;
+        }
+      }
       try {
         const output = await adapter.read(env.bindings, env.caller, input);
         if (!(await env.caller.stillAuthorized())) {
@@ -333,7 +368,10 @@ async function providerOperations(
   bindings: ApiEnv['Bindings'],
   caller?: ResourceCaller,
 ) {
-  const selections = cloudflareProviderReadSelections(resourceType);
+  const selections = [
+    ...cloudflareProviderReadSelections(resourceType),
+    ...cloudflareProviderWriteSelections(resourceType),
+  ];
   if (
     !selections.length ||
     !bindings.CF_API_TOKEN ||
@@ -377,7 +415,9 @@ export async function resourceOperationsFor(
   return {
     reason: operations.length
       ? null
-      : !registered.length && !cloudflareProviderReadSelections(resourceType).length
+      : !registered.length &&
+          !cloudflareProviderReadSelections(resourceType).length &&
+          !cloudflareProviderWriteSelections(resourceType).length
         ? 'Schema-backed operations are not registered for this resource yet.'
         : 'Resource operations are not connected on this installation.',
     operations,

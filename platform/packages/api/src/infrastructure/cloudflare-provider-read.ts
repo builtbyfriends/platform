@@ -11,9 +11,36 @@ export type CloudflareReadArtifact = {
   document: unknown;
 };
 
-type ReadFields = true | { fields: { [key: string]: ReadFields } } | { items: ReadFields };
+export type ReadFields = true | { fields: { [key: string]: ReadFields } } | { items: ReadFields };
 type ReadValue = string | number | boolean | null | Array<ReadValue> | { [key: string]: ReadValue };
-const projectionLimits = { depth: 8, items: 200, values: 4096, string: 16384, bytes: 128 * 1024 };
+export const projectionLimits = {
+  depth: 8,
+  items: 200,
+  values: 4096,
+  string: 16384,
+  bytes: 128 * 1024,
+};
+
+export const corsFields: Exclude<ReadFields, true> = {
+  fields: {
+    rules: {
+      items: {
+        fields: {
+          id: true,
+          allowed: {
+            fields: {
+              headers: { items: true },
+              methods: { items: true },
+              origins: { items: true },
+            },
+          },
+          exposeHeaders: { items: true },
+          maxAgeSeconds: true,
+        },
+      },
+    },
+  },
+};
 
 const policies: Array<{
   type: Resource['type'];
@@ -74,26 +101,7 @@ const policies: Array<{
     // Decision: Configuration responses omit bucket identity; the exact injected bucket path and fresh selected-resource checks prove ownership.
     responseOwnership: 'selected-resource',
     fields: [],
-    structured: {
-      fields: {
-        rules: {
-          items: {
-            fields: {
-              id: true,
-              allowed: {
-                fields: {
-                  headers: { items: true },
-                  methods: { items: true },
-                  origins: { items: true },
-                },
-              },
-              exposeHeaders: { items: true },
-              maxAgeSeconds: true,
-            },
-          },
-        },
-      },
-    },
+    structured: corsFields,
   },
   {
     type: 'kv',
@@ -145,7 +153,7 @@ function record(value: unknown) {
   return value;
 }
 
-function resolve(document: CloudflareReadArtifact['document'], value: unknown) {
+export function resolve(document: CloudflareReadArtifact['document'], value: unknown) {
   let current = record(value);
   const seen = new Set<string>();
   while (typeof current.$ref === 'string') {
@@ -265,7 +273,7 @@ function writeOnlyProperty(
   );
 }
 
-function validationSchema(
+export function validationSchema(
   schema: unknown,
   document: unknown,
   direction: 'input' | 'output',
@@ -317,12 +325,13 @@ function fieldSchema(value: unknown, path: Array<string>, document: unknown): Sc
   return undefined;
 }
 
-function structuredProjection(
+export function structuredProjection(
   source: Schema,
   selection: ReadFields,
   document: unknown,
   depth = 0,
   path: Array<string> = ['result'],
+  direction: 'input' | 'output' = 'output',
 ): { schema: Schema; project: (value: unknown, budget: { values: number }) => ReadValue } {
   if (depth > projectionLimits.depth) {
     throw Error('The provider projection is too deeply nested.');
@@ -332,7 +341,7 @@ function structuredProjection(
     throw Error('The provider projection no longer matches its schema.');
   }
   const resolved = resolve(document, selectedSchema);
-  if (resolved.writeOnly === true) {
+  if (resolved.writeOnly === true || (direction === 'input' && resolved.readOnly === true)) {
     throw Error('The provider projection includes a private field.');
   }
   const count = (budget: { values: number }) => {
@@ -346,7 +355,7 @@ function structuredProjection(
     }
     return {
       schema: {
-        allOf: [normalize(resolved, document, 'output'), { maxLength: projectionLimits.string }],
+        allOf: [normalize(resolved, document, direction), { maxLength: projectionLimits.string }],
       },
       project(value, budget) {
         count(budget);
@@ -364,7 +373,14 @@ function structuredProjection(
     if (resolved.type !== 'array') {
       throw Error('The provider projection requires an array.');
     }
-    const item = structuredProjection(source, selection.items, document, depth + 1, [...path, '*']);
+    const item = structuredProjection(
+      source,
+      selection.items,
+      document,
+      depth + 1,
+      [...path, '*'],
+      direction,
+    );
     return {
       schema: { type: 'array', maxItems: projectionLimits.items, items: item.schema },
       project(value, budget) {
@@ -382,7 +398,7 @@ function structuredProjection(
     }
     return [
       name,
-      structuredProjection(source, fields, document, depth + 1, [...path, name]),
+      structuredProjection(source, fields, document, depth + 1, [...path, name], direction),
     ] as const;
   });
   const required = Array.isArray(resolved.required)
@@ -407,7 +423,7 @@ function structuredProjection(
   };
 }
 
-async function boundedJson(response: Response) {
+export async function boundedJson(response: Response) {
   const limit = 256 * 1024;
   if (!response.body) {
     throw Error('The provider returned no data.');
@@ -455,6 +471,7 @@ export function cloudflareProviderReadSelections(resourceType: Resource['type'])
 export function prepareCloudflareProviderRead(
   artifact: CloudflareReadArtifact,
   resourceType: Resource['type'],
+  options?: { requireCompleteProjection: true },
 ) {
   const policy = policies.find(
     (entry) => entry.type === resourceType && entry.path === artifact.path,
@@ -553,6 +570,16 @@ export function prepareCloudflareProviderRead(
   const structured = policy.structured
     ? structuredProjection(record(responseSchema), policy.structured, document)
     : null;
+  const completeProjection =
+    options?.requireCompleteProjection && structured
+      ? new Validator(
+          { ...structured.schema, components: validationSchema({}, document, 'output').components },
+          '7',
+        )
+      : null;
+  if (options?.requireCompleteProjection && !completeProjection) {
+    throw Error('The configuration requires a complete structured response.');
+  }
   const properties: { [field: string]: Schema } = {};
   for (const field of policy.fields) {
     const schema = fieldSchema(
@@ -646,6 +673,7 @@ export function prepareCloudflareProviderRead(
     inputSchema,
     outputSchema,
     ...(structured ? { projectionVersion: 1, projectionLimits } : {}),
+    ...(options ? { options } : {}),
   });
 
   return {
@@ -761,6 +789,9 @@ export function prepareCloudflareProviderRead(
         throw Error('The provider returned an unexpected resource response.');
       }
       const returned = record(envelope);
+      if (completeProjection && !completeProjection.validate(returned.result).valid) {
+        throw Error('The configuration contains fields that cannot be safely replaced.');
+      }
       const resourceResult = policy.collection ? returned.result : record(returned.result);
       if (
         returned.success !== true ||
