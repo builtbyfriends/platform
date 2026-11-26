@@ -44,3 +44,10 @@ Runtime source5a81b0b3cd40ce846e279c53cf982d581f660054 is backed up on origin/co
 Fresh preparation checks: all14 provider descriptors load identically in cold/warm Workerd; the12 existing descriptor identities/effects/versions match the approved baseline. The two child reads have the expected descriptors. All14 immutable R2 schema objects pass compressed/inflated size, SHA256 and operation-identity readback. Candidate and active source bytes were checked after upload; all63 inherited bindings and compatibility settings are preserved, with no migrations or traffic change. Live baseline health isok and six unauthenticated resource/catalog routes still return401. These baseline checks don't establish authenticated candidate execution.
 
 The earlier465 tests and API types/touched lint apply to unchanged runtime source. Whole-repository checks retain the unrelated generated playground limit recorded above. Preparation receipts are in `/tmp/infra-provider-owned-child-candidate`; binding settings and credentials aren't copied into this document. Candidate activation retains the owner's exact-version boundary. Native child selection and saved generated-detail acceptance remain required after activation.
+
+
+## Approved activation — 2026-11-26 19:03 UTC
+
+Owner explicitly approved exact candidate `801cbe58-93c7-4c90-87d2-5649d4088e70`. Guarded activation succeeded at100%, deployment `34a623ea-6f8b-4053-b572-45dedd34834f`. Runtime source5a81b0b3 and SHA256510995809d0a5a19a2d474dc0bf473195313d3c6d5a70bfebbc4665efea8684d verified before/after. Previous versiona521d6aa/deployment8814cb64 matched the fence. All63bindings and configuration preserved; no migrations. Health200/ok and six app-billing protected routes returned401 without authentication. Receipt `/tmp/infra-provider-owned-child-candidate/activation-receipt.json`.
+
+This supersedes earlier inactive/source-only notes for this exact artifact. It does not include separate Access read source93571bcb, and it does not prove authenticated child execution or native generated-detail acceptance. Automatic review's earlier activation block was resolved by the exact user approval; no bypass was used.
