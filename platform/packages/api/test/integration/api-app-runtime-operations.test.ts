@@ -19,11 +19,13 @@ import {
   cloudflareOpenApiKey,
 } from '../../src/infrastructure/cloudflare-openapi.ts';
 import { cloudflareProviderReadSelection } from '../../src/infrastructure/cloudflare-provider-read.ts';
-import { projects, resources, users } from '../../src/schema.ts';
+import { durableObjectWorkerName } from '../../src/provisioning/durable-objects.ts';
+import { deployments, projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
   createMockExecutionContext,
   createTestProject,
+  createTestDeployment,
   createTestUser,
   setupEnv,
   teardownEnv,
@@ -845,5 +847,248 @@ describe('registered database SELECT queries', () => {
     } finally {
       database.close();
     }
+  });
+});
+
+describe('owned Durable Object instance operations', () => {
+  async function managed() {
+    const selected = cloudflareProviderReadSelection('durable-object');
+    const entry = (await cloudflareOpenApiIndex()).find(
+      (candidate) => candidate.method === selected?.method && candidate.path === selected.path,
+    );
+    if (!entry) {
+      throw Error('Missing pinned instance operation');
+    }
+    const key = cloudflareOpenApiKey(entry);
+    await env.STATIC_ASSETS_R2.put(
+      key,
+      await readFile(
+        new URL('../fixtures/cloudflare-openapi/durable-object-get.json.gz', import.meta.url),
+      ),
+    );
+    env.CF_ACCOUNT_ID = 'a'.repeat(32);
+    const namespaceId = 'b'.repeat(32);
+    const instanceId = 'c'.repeat(64);
+    const deployment = await createTestDeployment(env.db, project.id);
+    const [current] = await env.db
+      .update(projects)
+      .set({ active_deployment_id: deployment.id })
+      .where(eq(projects.id, project.id))
+      .returning();
+    const hostName = await durableObjectWorkerName(project.id, 'Room');
+    const manifest = {
+      durableObjects: {
+        bindings: [{ bindingName: 'ROOMS', className: 'Room', storage: 'sqlite' }],
+        runtime: { protocol: 1, namespaces: { Room: namespaceId } },
+      },
+    };
+    await env.db
+      .update(deployments)
+      .set({ manifest: JSON.stringify(manifest) })
+      .where(eq(deployments.id, deployment.id));
+    const route = {
+      projectId: project.id,
+      userId: ownerId,
+      version: deployment.id,
+      workerName: `user-${current.slug}-${deployment.id}`,
+    };
+    await env.ROUTING.put(current.slug, JSON.stringify(route));
+    await env.db.insert(resources).values({
+      id: 'res_rooms',
+      project_id: project.id,
+      type: 'durable-object',
+      cf_id: hostName,
+      binding_name: 'Room',
+      metadata: { namespaceId, dispatchNamespace: 'platform-users' },
+    });
+    const appBindings = [
+      { name: '__PROJECT_ID', type: 'plain_text', text: project.id },
+      { name: 'ROOMS', type: 'durable_object_namespace', namespace_id: namespaceId },
+    ];
+    const hostBindings = [
+      {
+        name: '__PLATFORM_DURABLE_OWNER',
+        type: 'plain_text',
+        text: JSON.stringify({
+          protocol: 1,
+          projectId: project.id,
+          dispatchNamespace: 'platform-users',
+          className: 'Room',
+        }),
+      },
+      { name: '__PLATFORM_DURABLE_DEPLOYMENT', type: 'plain_text', text: deployment.id },
+      {
+        name: 'SELF',
+        type: 'durable_object_namespace',
+        class_name: 'Room',
+        namespace_id: namespaceId,
+      },
+    ];
+    const read = vi.fn(async () =>
+      Response.json({
+        success: true,
+        errors: [],
+        messages: [],
+        result: [{ id: instanceId, hasStoredData: true }],
+        result_info: { count: 1, cursor: 'next-page' },
+      }),
+    );
+    const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/scripts/' + route.workerName + '/bindings')) {
+        return Response.json({ success: true, result: appBindings });
+      }
+      if (url.endsWith('/scripts/' + hostName + '/bindings')) {
+        return Response.json({ success: true, result: hostBindings });
+      }
+      expect(url).toContain(`/durable_objects/namespaces/${namespaceId}/objects?`);
+      expect(url).not.toContain(hostName);
+      return read();
+    });
+    const selection = { ...scope(), resourceId: 'res_rooms' };
+    const response = await call('projects.resourceOperations', selection);
+    expect(response.status).toBe(200);
+    const descriptor = catalogSchema.assert(await response.json()).data.operations[0];
+    expect(descriptor?.id).toBe(entry.operationId);
+    const body = {
+      ...selection,
+      operation: descriptor.id,
+      version: descriptor.version,
+      expectedEffect: 'read',
+      input: { query: { limit: 10 } },
+    };
+    return {
+      body,
+      selection,
+      key,
+      provider,
+      read,
+      hostBindings,
+      appBindings,
+      instanceId,
+      namespaceId,
+      route,
+      current,
+      deployment,
+    };
+  }
+
+  it('discovers, reads a bounded page, and rechecks live app and host ownership', async () => {
+    const fixture = await managed();
+    expect(fixture.read).not.toHaveBeenCalled();
+    fixture.provider.mockClear();
+    const response = await call('resources.invoke', fixture.body);
+    expect(response.status).toBe(200);
+    const value = await response.json();
+    expect(value).toMatchObject({
+      data: {
+        kind: 'provider-read',
+        data: {
+          records: [{ id: fixture.instanceId, hasStoredData: true }],
+          pagination: { limit: 10, nextCursor: 'next-page', hasMore: true },
+        },
+      },
+    });
+    expect(JSON.stringify(value)).not.toContain(fixture.namespaceId);
+    expect(fixture.read).toHaveBeenCalledTimes(1);
+    const urls = fixture.provider.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((url) => url.endsWith('/bindings'))).toHaveLength(6);
+    expect(urls.at(-1)).toContain('/bindings');
+    const next = await call('resources.invoke', {
+      ...fixture.body,
+      input: { query: { limit: 10, cursor: 'previous-page' } },
+    });
+    expect(next.status).toBe(200);
+    expect(
+      fixture.provider.mock.calls.some(([url]) => String(url).includes('cursor=previous-page')),
+    ).toBe(true);
+  });
+
+  it.each(['missing-host', 'changed-namespace', 'stale-release', 'missing-schema'])(
+    'withdraws catalog and refuses execution for %s evidence',
+    async (failure) => {
+      const fixture = await managed();
+      if (failure === 'missing-host') {
+        fixture.hostBindings.length = 0;
+      }
+      if (failure === 'changed-namespace') {
+        await env.db
+          .update(resources)
+          .set({ metadata: { namespaceId: 'd'.repeat(32), dispatchNamespace: 'platform-users' } })
+          .where(eq(resources.id, 'res_rooms'));
+      }
+      if (failure === 'stale-release') {
+        fixture.hostBindings[1].text = 'other-deployment';
+      }
+      if (failure === 'missing-schema') {
+        await env.STATIC_ASSETS_R2.delete(fixture.key);
+      }
+      const response = await call('projects.resourceOperations', fixture.selection);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ data: { available: false, operations: [] } });
+      expect((await call('resources.invoke', fixture.body)).status).toBe(404);
+      expect(fixture.read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['host', 'inventory', 'deployment', 'owner'])(
+    'discards instance data when %s changes during the provider read',
+    async (change) => {
+      const fixture = await managed();
+      fixture.read.mockImplementationOnce(async () => {
+        if (change === 'host') {
+          fixture.hostBindings[1].text = 'different-release';
+        }
+        if (change === 'inventory') {
+          await env.db
+            .update(resources)
+            .set({ metadata: { namespaceId: 'd'.repeat(32), dispatchNamespace: 'platform-users' } })
+            .where(eq(resources.id, 'res_rooms'));
+        }
+        if (change === 'deployment') {
+          await env.db
+            .update(deployments)
+            .set({ manifest: '{}' })
+            .where(eq(deployments.id, fixture.deployment.id));
+        }
+        if (change === 'owner') {
+          await env.db
+            .update(users)
+            .set({ suspended_reason: 'admin:test' })
+            .where(eq(users.id, ownerId));
+        }
+        return Response.json({
+          success: true,
+          errors: [],
+          messages: [],
+          result: [{ id: fixture.instanceId, hasStoredData: true }],
+          result_info: { count: 1, cursor: '' },
+        });
+      });
+      const response = await call('resources.invoke', fixture.body);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(await response.json())).not.toContain(fixture.instanceId);
+      expect(fixture.read).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects foreign owners and invalid query arguments without instance reads', async () => {
+    const fixture = await managed();
+    expect(
+      (await call('resources.invoke', { ...fixture.body, owner: { person: 'stranger' } })).status,
+    ).toBe(404);
+    expect(
+      (await call('resources.invoke', { ...fixture.body, input: { query: { limit: 10000 } } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await call('resources.invoke', {
+          ...fixture.body,
+          input: { namespace: fixture.namespaceId },
+        })
+      ).status,
+    ).toBe(400);
+    expect(fixture.read).not.toHaveBeenCalled();
   });
 });

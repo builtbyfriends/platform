@@ -11,7 +11,23 @@ export type CloudflareReadArtifact = {
   document: unknown;
 };
 
-const policies = [
+const policies: Array<{
+  type: Resource['type'];
+  path: string;
+  parameter: string;
+  identity: string;
+  parameterAlternative?: number;
+  fields: Array<string>;
+  collection?: { defaultLimit: number; maxItems: number };
+}> = [
+  {
+    type: 'durable-object',
+    path: '/accounts/{account_id}/workers/durable_objects/namespaces/{id}/objects',
+    parameter: 'id',
+    identity: 'id',
+    fields: ['id', 'hasStoredData'],
+    collection: { defaultLimit: 50, maxItems: 200 },
+  },
   {
     type: 'd1',
     path: '/accounts/{account_id}/d1/database/{database_id}',
@@ -76,14 +92,7 @@ const policies = [
       'settings/message_retention_period',
     ],
   },
-] satisfies Array<{
-  type: Resource['type'];
-  path: string;
-  parameter: string;
-  identity: string;
-  parameterAlternative?: number;
-  fields: Array<string>;
-}>;
+];
 
 function record(value: unknown) {
   if (!isRecord(value)) {
@@ -243,6 +252,9 @@ function fieldSchema(value: unknown, path: Array<string>, document: unknown): Sc
   if (path.length === 0) {
     return normalize(schema, document, 'output');
   }
+  if (path[0] === '*' && schema.type === 'array') {
+    return fieldSchema(schema.items, path.slice(1), document);
+  }
   const properties = schema.properties;
   if (isRecord(properties) && Object.hasOwn(properties, path[0])) {
     const child = fieldSchema(properties[path[0]], path.slice(1), document);
@@ -357,6 +369,28 @@ export function prepareCloudflareProviderRead(
       parameters.set(`${parameter.in}:${parameter.name}`, parameter);
     }
   }
+  if (policy.collection) {
+    const limit = parameters.get('query:limit');
+    const cursor = parameters.get('query:cursor');
+    if (!limit || !cursor) {
+      throw Error('The provider pagination policy no longer matches its schema.');
+    }
+    limit.schema = {
+      allOf: [limit.schema, { type: 'integer', minimum: 10, maximum: policy.collection.maxItems }],
+      default: policy.collection.defaultLimit,
+    };
+    cursor.schema = {
+      allOf: [
+        cursor.schema,
+        {
+          type: 'string',
+          minLength: 1,
+          maxLength: 2048,
+          pattern: '^[^\\u0000-\\u001f\\u007f-\\u009f]*$',
+        },
+      ],
+    };
+  }
   const fields = (location: string): Schema => {
     const entries = [...parameters.values()].filter((entry) => entry.in === location);
     return {
@@ -381,14 +415,66 @@ export function prepareCloudflareProviderRead(
   const response = resolve(document, record(operation.responses)['200']);
   const responseSchema = record(record(response.content)['application/json']).schema;
   const outputValidator = new Validator(validationSchema(responseSchema, document, 'output'), '7');
-  const properties: { [field: string]: Schema } = { name: { type: 'string' } };
+  const properties: { [field: string]: Schema } = {};
   for (const field of policy.fields) {
-    const schema = fieldSchema(responseSchema, ['result', ...field.split('/')], document);
+    const schema = fieldSchema(
+      responseSchema,
+      ['result', ...(policy.collection ? ['*'] : []), ...field.split('/')],
+      document,
+    );
     if (!schema) {
       throw Error('The provider metadata policy no longer matches its schema.');
     }
     properties[field.replaceAll('/', '_')] = schema;
   }
+  const dataSchema: Schema = policy.collection
+    ? {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'records', 'pagination'],
+        properties: {
+          name: { type: 'string' },
+          records: {
+            type: 'array',
+            maxItems: policy.collection.maxItems,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: [policy.identity],
+              properties: {
+                ...properties,
+                [policy.identity]: {
+                  allOf: [
+                    properties[policy.identity],
+                    { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
+                  ],
+                },
+              },
+            },
+          },
+          pagination: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['limit', 'count', 'nextCursor', 'hasMore'],
+            properties: {
+              limit: { type: 'integer', minimum: 10, maximum: policy.collection.maxItems },
+              count: { type: 'integer', minimum: 0, maximum: policy.collection.maxItems },
+              nextCursor: { type: ['string', 'null'], minLength: 1, maxLength: 2048 },
+              hasMore: {
+                type: ['boolean', 'null'],
+                description:
+                  'Null when the provider omitted its continuation cursor; completeness is unknown.',
+              },
+            },
+          },
+        },
+      }
+    : {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name'],
+        properties: { name: { type: 'string' }, ...properties },
+      };
   const outputSchema: Schema = {
     type: 'object',
     additionalProperties: false,
@@ -398,7 +484,7 @@ export function prepareCloudflareProviderRead(
       resourceId: { type: 'string' },
       action: { type: 'string', const: artifact.operationId },
       kind: { type: 'string', const: 'provider-read' },
-      data: { type: 'object', additionalProperties: false, required: ['name'], properties },
+      data: dataSchema,
     },
   };
   const safeOutputValidator = new Validator(outputSchema, '7');
@@ -441,14 +527,18 @@ export function prepareCloudflareProviderRead(
       fetcher: typeof fetch = fetch,
     ) {
       const { resource, project, stillAuthorized } = caller;
+      const providerIdentity = policy.collection
+        ? await caller.resolveProviderIdentity?.()
+        : resource.cf_id;
       if (
         resource.type !== policy.type ||
         resource.project_id !== project.id ||
         !bindings.CF_API_TOKEN ||
         !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
-        !resource.cf_id ||
-        /[\\/?#\p{Cc}]/u.test(resource.cf_id) ||
-        ['.', '..'].includes(resource.cf_id)
+        !providerIdentity ||
+        /[\\/?#\p{Cc}]/u.test(providerIdentity) ||
+        ['.', '..'].includes(providerIdentity) ||
+        (policy.collection && !/^[a-f0-9]{32}$/i.test(providerIdentity))
       ) {
         throw Error('This provider resource is not connected.');
       }
@@ -457,16 +547,19 @@ export function prepareCloudflareProviderRead(
       if (!inputValidator.validate({ ...selected, query }).valid) {
         throw Error('Check the operation input fields.');
       }
-      const queryValues = record(query);
+      const queryValues = record({
+        ...(policy.collection ? { limit: policy.collection.defaultLimit } : {}),
+        ...record(query),
+      });
       const headers = parameters.has('header:cf-r2-jurisdiction')
         ? { 'cf-r2-jurisdiction': resource.metadata.jurisdiction ?? 'default' }
         : {};
-      const path = { account_id: bindings.CF_ACCOUNT_ID, [policy.parameter]: resource.cf_id };
+      const path = { account_id: bindings.CF_ACCOUNT_ID, [policy.parameter]: providerIdentity };
       if (!pathValidator.validate(path).valid || !headerValidator.validate(headers).valid) {
         throw Error('The provider resource identity is invalid.');
       }
       const url = new URL(
-        `https://api.cloudflare.com/client/v4${policy.path.replace('{account_id}', encodeURIComponent(bindings.CF_ACCOUNT_ID)).replace(`{${policy.parameter}}`, encodeURIComponent(resource.cf_id))}`,
+        `https://api.cloudflare.com/client/v4${policy.path.replace('{account_id}', encodeURIComponent(bindings.CF_ACCOUNT_ID)).replace(`{${policy.parameter}}`, encodeURIComponent(providerIdentity))}`,
       );
       const requestHeaders = new Headers({
         Authorization: `Bearer ${bindings.CF_API_TOKEN}`,
@@ -528,34 +621,76 @@ export function prepareCloudflareProviderRead(
         throw Error('The provider returned an unexpected resource response.');
       }
       const returned = record(envelope);
-      const data = record(returned.result);
-      if (returned.success !== true || data[policy.identity] !== resource.cf_id) {
+      if (
+        returned.success !== true ||
+        (!policy.collection && record(returned.result)[policy.identity] !== providerIdentity)
+      ) {
         throw Error('The provider returned a different resource.');
       }
-      if (!(await stillAuthorized())) {
+      if (
+        !(await stillAuthorized()) ||
+        (policy.collection && (await caller.resolveProviderIdentity?.()) !== providerIdentity)
+      ) {
         throw Error('This resource changed. Refresh before continuing.');
       }
-      const values: { [field: string]: string | number | boolean | null } = {
-        name: resource.binding_name,
-      };
-      for (const field of policy.fields) {
-        let value: unknown = data;
-        for (const key of field.split('/')) {
-          value = isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
-        }
-        if (value !== undefined) {
-          if (!scalar(value)) {
-            throw Error('The provider metadata changed unexpectedly.');
+      const projectFields = (data: unknown) => {
+        const values: { [field: string]: string | number | boolean | null } = {};
+        for (const field of policy.fields) {
+          let value: unknown = data;
+          for (const key of field.split('/')) {
+            value = isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
           }
-          values[field.replaceAll('/', '_')] = value;
+          if (value !== undefined) {
+            if (!scalar(value)) {
+              throw Error('The provider metadata changed unexpectedly.');
+            }
+            values[field.replaceAll('/', '_')] = value;
+          }
         }
-      }
+        return values;
+      };
+      const collectionData = () => {
+        const rows = returned.result;
+        if (
+          !Array.isArray(rows) ||
+          typeof queryValues.limit !== 'number' ||
+          rows.length > queryValues.limit
+        ) {
+          throw Error('The provider returned an invalid result page.');
+        }
+        const info = returned.result_info === undefined ? {} : record(returned.result_info);
+        const cursor = info.cursor;
+        if (
+          (cursor !== undefined &&
+            (typeof cursor !== 'string' || cursor.length > 2048 || /\p{Cc}/u.test(cursor))) ||
+          (cursor && cursor === queryValues.cursor) ||
+          (info.count !== undefined && info.count !== rows.length)
+        ) {
+          throw Error('The provider returned invalid pagination.');
+        }
+        const records = rows.map(projectFields);
+        if (new Set(records.map((row) => row[policy.identity])).size !== records.length) {
+          throw Error('The provider returned duplicate records.');
+        }
+        return {
+          name: resource.binding_name,
+          records,
+          pagination: {
+            limit: queryValues.limit,
+            count: records.length,
+            nextCursor: cursor || null,
+            hasMore: cursor === undefined ? null : cursor !== '',
+          },
+        };
+      };
       const output = {
         appId: project.id,
         resourceId: resource.id,
         action: artifact.operationId,
         kind: 'provider-read' as const,
-        data: values,
+        data: policy.collection
+          ? collectionData()
+          : { name: resource.binding_name, ...projectFields(returned.result) },
       };
       if (!safeOutputValidator.validate(output).valid) {
         throw Error('The provider metadata changed unexpectedly.');

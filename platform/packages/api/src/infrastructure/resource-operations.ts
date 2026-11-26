@@ -26,6 +26,7 @@ export type ResourceCaller = {
   project: Project;
   resource: Resource;
   stillAuthorized: () => Promise<boolean>;
+  resolveProviderIdentity?: () => Promise<string | null>;
 };
 type Execution = { bindings: ApiEnv['Bindings']; caller: ResourceCaller };
 const auth: AuthProvider<ResourceCaller, Execution> = {
@@ -265,7 +266,11 @@ function providerSchema(schema: Schema) {
   };
 }
 
-async function providerOperation(resourceType: Resource['type'], bindings: ApiEnv['Bindings']) {
+async function providerOperation(
+  resourceType: Resource['type'],
+  bindings: ApiEnv['Bindings'],
+  caller?: ResourceCaller,
+) {
   const selection = cloudflareProviderReadSelection(resourceType);
   if (
     !selection ||
@@ -273,6 +278,9 @@ async function providerOperation(resourceType: Resource['type'], bindings: ApiEn
     !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
     !bindings.STATIC_ASSETS_R2
   ) {
+    return null;
+  }
+  if (resourceType === 'durable-object' && !(await caller?.resolveProviderIdentity?.())) {
     return null;
   }
   const entry = (await cloudflareOpenApiIndex()).find(
@@ -340,12 +348,13 @@ async function providerOperation(resourceType: Resource['type'], bindings: ApiEn
 export async function resourceOperationsFor(
   resourceType: Resource['type'],
   bindings: ApiEnv['Bindings'],
+  caller?: ResourceCaller,
 ) {
   const registered = operationManifest.filter((entry) => entry.resourceType === resourceType);
   const available = registered.filter((entry) => !!bindings[entry.requires]);
   const names = new Set<string>(available.map((entry) => entry.procedure.name));
   // Decision: A request loads only its selected resource schema. Retaining the full provider catalog's validators would grow Worker isolate memory without a bound.
-  const provider = await providerOperation(resourceType, bindings).catch(() => null);
+  const provider = await providerOperation(resourceType, bindings, caller).catch(() => null);
   const operations = [
     ...(await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
     ...(provider ? [provider.descriptor] : []),

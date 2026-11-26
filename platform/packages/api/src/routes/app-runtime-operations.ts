@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
 import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
+import { resolveOwnedDurableObjectNamespace } from './app-runtime-bindings.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
 import type { ResolveProject } from './app-runtime.ts';
 
@@ -58,10 +59,33 @@ async function ownedResource(
       fresh.type === resource.type &&
       fresh.cf_id === resource.cf_id &&
       fresh.binding_name === resource.binding_name &&
-      fresh.metadata.jurisdiction === resource.metadata.jurisdiction
+      fresh.metadata.jurisdiction === resource.metadata.jurisdiction &&
+      fresh.metadata.namespaceId === resource.metadata.namespaceId &&
+      fresh.metadata.dispatchNamespace === resource.metadata.dispatchNamespace
     );
   };
-  return { project, resource, stillAuthorized };
+  let namespace: string | undefined;
+  const resolveProviderIdentity =
+    resource.type === 'durable-object'
+      ? async () => {
+          if (!(await stillAuthorized())) {
+            return null;
+          }
+          const current = await resolveOwnedDurableObjectNamespace(
+            context.env,
+            context.get('db'),
+            project,
+            resource,
+            () => resolve(context, project.id, body.owner),
+          );
+          if (!current || (namespace !== undefined && namespace !== current)) {
+            return null;
+          }
+          namespace = current;
+          return current;
+        }
+      : undefined;
+  return { project, resource, stillAuthorized, resolveProviderIdentity };
 }
 
 export function appRuntimeOperationRoutes(resolve: ResolveProject) {
@@ -81,8 +105,17 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
       }
-      const { reason, operations } = await resourceOperationsFor(caller.resource.type, context.env);
-      if (!(await caller.stillAuthorized())) {
+      const { reason, operations } = await resourceOperationsFor(
+        caller.resource.type,
+        context.env,
+        caller,
+      );
+      if (
+        !(await caller.stillAuthorized()) ||
+        (operations.length > 0 &&
+          caller.resolveProviderIdentity &&
+          !(await caller.resolveProviderIdentity()))
+      ) {
         return context.json({ error: 'resource_changed' }, 409);
       }
       return context.json({
@@ -116,6 +149,7 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       const { operations, registry, registryNames } = await resourceOperationsFor(
         caller.resource.type,
         context.env,
+        caller,
       );
       const operation = operations.find((entry) => entry.id === body.operation);
       const registryName = registryNames.get(body.operation);
