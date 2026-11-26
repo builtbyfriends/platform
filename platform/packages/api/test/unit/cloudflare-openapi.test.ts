@@ -5,7 +5,10 @@ import { expect, it } from 'vite-plus/test';
 it('compiles bounded Cloudflare schemas, constraints and artifact provenance', () => {
   const output = execFileSync(
     process.execPath,
-    [fileURLToPath(new URL('../../../../../scripts/cloudflare-openapi.test.mjs', import.meta.url))],
+    [
+      '--test-reporter=tap',
+      fileURLToPath(new URL('../../../../../scripts/cloudflare-openapi.test.mjs', import.meta.url)),
+    ],
     { encoding: 'utf8', timeout: 10_000 },
   );
   expect(output).toContain('# pass 12');

@@ -6,6 +6,7 @@ it('validates immutable Cloudflare artifacts and publishes through bounded mocke
   const output = execFileSync(
     process.execPath,
     [
+      '--test-reporter=tap',
       fileURLToPath(
         new URL('../../../../../scripts/publish-cloudflare-openapi.test.mjs', import.meta.url),
       ),

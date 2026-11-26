@@ -23,8 +23,10 @@ Forward implementation: `2b70990` on `codex/infra-runtime`. Historical backport:
 
 Rollback restores the previous API version after checking that this deployment and its settings are still current:
 
+From the historical `platform-runtime-live` worktree:
+
 ```sh
-cd /home/joe/Projects/dedworc/.worktrees/platform-runtime-live && node .local/job-activity/publish.mjs rollback
+node .local/job-activity/publish.mjs rollback
 ```
 
 The previous version is retained. The rollback path has not been executed.

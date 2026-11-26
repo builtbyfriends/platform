@@ -28,8 +28,10 @@ Forward source: `5544c66` on `codex/infra-runtime`. Historical source: `c3f4f6f`
 
 Rollback restores the preceding Activity version after checking that this deployment and its settings are still current:
 
+From the historical `platform-runtime-live` worktree:
+
 ```sh
-cd /home/joe/Projects/dedworc/.worktrees/platform-runtime-live && node .local/database-query/publish.mjs rollback
+node .local/database-query/publish.mjs rollback
 ```
 
 The previous version is retained. The rollback path has not been executed.

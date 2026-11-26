@@ -30,8 +30,10 @@ Forward source: `b5ad5c4` on `codex/infra-runtime`. Historical source: `ec84419`
 
 Rollback restores the preceding queue-delivery version after checking this deployment and its settings are still current:
 
+From the historical `platform-runtime-live` worktree:
+
 ```sh
-cd /home/joe/Projects/dedworc/.worktrees/platform-runtime-live && node .local/database-indexes/publish.mjs rollback
+node .local/database-indexes/publish.mjs rollback
 ```
 
 The previous version is retained. The rollback path has not been executed.
