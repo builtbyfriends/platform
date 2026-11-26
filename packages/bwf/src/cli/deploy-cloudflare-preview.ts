@@ -215,7 +215,7 @@ export async function tryEnablePreviewLogs(
     await enableCloudflarePreviewLogs(context, name);
   } catch (error) {
     log.warn(
-      `deploy: preview ${name} deployed, but bwf could not turn on its logs: ${getErrorMessage(error)}`,
+      `deploy: bwf could not turn on logs for preview ${name}, so it may have none: ${getErrorMessage(error)}`,
     );
   }
 }
@@ -266,6 +266,8 @@ async function deployPreview(run: PreviewRun): Promise<void> {
     return run.exit(1);
   }
 
+  await tryEnablePreviewLogs(context, name);
+
   let url: string | undefined;
 
   try {
@@ -305,8 +307,6 @@ async function deployPreview(run: PreviewRun): Promise<void> {
 
     return run.exit(1);
   }
-
-  await tryEnablePreviewLogs(context, name);
 
   note(`Preview ${name}`, url);
   await checkPreviewHealth(run, url);

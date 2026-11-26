@@ -333,7 +333,9 @@ describe('turning on preview logs', () => {
   it('warns and returns when Cloudflare refuses, so the deploy goes on to the health check', async () => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
     await expect(tryEnablePreviewLogs(context, 'pr-12')).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not turn on its logs'));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('could not turn on logs for preview pr-12'),
+    );
     warn.mockRestore();
   });
 });

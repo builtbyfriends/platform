@@ -1140,10 +1140,26 @@ async function previewLogs(): Promise<Result> {
     throw new Error('Unsupported Cloudflare preview operation.');
   }
   const path = `/accounts/${encodeURIComponent(accountId())}/workers/workers/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`;
-  const current = await cloudflareApiGet(
-    path,
-    `Cloudflare could not read preview ${operation.preview}`,
-  );
+  const read = await fetch(`${apiBaseUrl()}${path}`, {
+    headers: await apiHeaders(),
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const current: unknown = await read.json().catch(() => null);
+  if (read.status === 404) {
+    const created = await postWorkersApi(
+      `/${encodeURIComponent(workerName())}/previews`,
+      { name: operation.preview, observability: PREVIEW_OBSERVABILITY },
+      'POST',
+    );
+    if (created.status < 200 || created.status >= 300) {
+      throw workersApiFailure(`create preview ${operation.preview} with logs on`, created);
+    }
+    return result(0);
+  }
+  if (!read.ok || !isRecord(current)) {
+    throw new Error(`Cloudflare could not read preview ${operation.preview} (HTTP ${read.status})`);
+  }
   const observability = object(current.result).observability;
   const logs = isRecord(observability) ? observability.logs : undefined;
   if (

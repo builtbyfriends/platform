@@ -463,6 +463,22 @@ it.each([
   expect(apiCalls.map((call) => call.method)).toEqual(['GET', 'PATCH']);
 });
 
+it('creates a missing preview with logs on, so its first deployment has them', async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: (method) =>
+      method === 'GET' ? { status: 404, body: { success: false, errors: [] } } : success,
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls.map((call) => call.method)).toEqual(['GET', 'POST']);
+  expect(apiCalls[1]?.body).toEqual({
+    name: 'pr-12',
+    observability: { enabled: true, logs: { enabled: true, invocation_logs: true, persist: true } },
+  });
+});
+
 it("leaves a preview's own observability settings alone when they are already on", async () => {
   const { result, apiCalls } = await runSecretScenario({
     operation: logsOperation,
