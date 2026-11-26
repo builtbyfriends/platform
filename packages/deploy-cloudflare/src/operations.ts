@@ -47,6 +47,7 @@ export type CloudflareOperation =
     } & ConfigTarget)
   | ({ type: 'secret.list' | 'secret.bulk' } & WorkerTarget)
   | ({ type: 'secret.put' | 'secret.delete'; name: string } & WorkerTarget)
+  | ({ type: 'preview.secrets'; preview: string } & WorkerTarget)
   | ({ type: 'deployments.status' | 'deployments.list' | 'versions.list' } & WorkerTarget)
   | ({ type: 'versions.view'; versionId: string; includeSource?: boolean } & WorkerTarget)
   | ({

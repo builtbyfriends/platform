@@ -336,3 +336,71 @@ it('rejects bulk secret values that are not strings', async () => {
   expect(cfCalls).toHaveLength(0);
   expect(apiCalls).toHaveLength(0);
 });
+
+const previewOperation: CloudflareOperation = {
+  type: 'preview.secrets',
+  preview: 'pr-12',
+  configPath: '',
+  workerName: 'my-worker',
+};
+
+const PREVIEW_DEPLOYMENT = '/workers/workers/my-worker/previews/pr-12/deployments/latest';
+
+it("patches a preview's latest deployment with secret_text values", async () => {
+  const { result, apiCalls, apiHeaders, cfCalls } = await runSecretScenario({
+    operation: previewOperation,
+    input: JSON.stringify({ ONE: 'first-value', TWO: 'second-value' }),
+    cf: {},
+    api: (method, path) =>
+      method === 'PATCH' && path === PREVIEW_DEPLOYMENT ? success : { status: 404, body: {} },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls).toEqual([
+    {
+      method: 'PATCH',
+      path: PREVIEW_DEPLOYMENT,
+      body: {
+        env: {
+          ONE: { type: 'secret_text', text: 'first-value' },
+          TWO: { type: 'secret_text', text: 'second-value' },
+        },
+      },
+    },
+  ]);
+  expect(apiHeaders[0]?.['content-type']).toBe('application/merge-patch+json');
+  expect(cfCalls).toHaveLength(0);
+});
+
+it('keeps secret values out of the output of a preview secrets call, on success and on failure', async () => {
+  const succeeded = await runSecretScenario({
+    operation: previewOperation,
+    input: JSON.stringify({ ONE: 'first-value' }),
+    cf: {},
+    api: () => success,
+  });
+  const failed = await runSecretScenario({
+    operation: previewOperation,
+    input: JSON.stringify({ ONE: 'first-value' }),
+    cf: {},
+    api: () => ({
+      status: 400,
+      body: { success: false, errors: [{ code: 10_057, message: 'The binding is not valid.' }] },
+    }),
+  });
+  expect(failed.result.status).toBe(1);
+  expect(failed.result.stderr).toContain('HTTP 400');
+  for (const { result } of [succeeded, failed]) {
+    expect(JSON.stringify(result)).not.toContain('first-value');
+  }
+});
+
+it('rejects preview secret values that are not strings', async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: previewOperation,
+    input: JSON.stringify({ ONE: 1 }),
+    cf: {},
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Secret values must be strings.');
+  expect(apiCalls).toHaveLength(0);
+});

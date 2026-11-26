@@ -982,12 +982,16 @@ function email(): Result {
 async function postWorkersApi(
   path: string,
   body: unknown,
+  method: 'POST' | 'PATCH' = 'POST',
 ): Promise<{ status: number; body: Json | null }> {
   const response = await fetch(
     `${apiBaseUrl()}/accounts/${encodeURIComponent(accountId())}/workers/workers${path}`,
     {
-      method: 'POST',
-      headers: { ...(await apiHeaders()), 'Content-Type': 'application/json' },
+      method,
+      headers: {
+        ...(await apiHeaders()),
+        'Content-Type': method === 'PATCH' ? 'application/merge-patch+json' : 'application/json',
+      },
       body: JSON.stringify(body),
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
@@ -1123,6 +1127,32 @@ async function secrets(): Promise<Result> {
     default:
       throw new Error('Unsupported Cloudflare secret operation.');
   }
+}
+
+// Decision: A preview starts without the live Worker's secrets. This sets them on the preview's latest
+// deployment from stdin, in this process because it holds the token, and returns no value or request
+// body, so nothing a secret holds reaches a log or the result.
+async function previewSecrets(): Promise<Result> {
+  if (operation.type !== 'preview.secrets') {
+    throw new Error('Unsupported Cloudflare preview operation.');
+  }
+  const values = object(JSON.parse(readFileSync(0, 'utf8')));
+  const env: Record<string, { type: 'secret_text'; text: string }> = {};
+  for (const [name, text] of Object.entries(values)) {
+    if (typeof text !== 'string') {
+      throw new Error('Secret values must be strings.');
+    }
+    env[name] = { type: 'secret_text', text };
+  }
+  const response = await postWorkersApi(
+    `/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}/deployments/latest`,
+    { env },
+    'PATCH',
+  );
+  if (response.status < 200 || response.status >= 300) {
+    throw workersApiFailure(`set secrets on preview ${operation.preview}`, response);
+  }
+  return result(0);
 }
 
 async function workerHistory(): Promise<Result> {
@@ -1516,6 +1546,9 @@ async function main(): Promise<Result> {
   }
   if (operation.type.startsWith('secret.')) {
     return secrets();
+  }
+  if (operation.type === 'preview.secrets') {
+    return previewSecrets();
   }
   if (operation.type === 'tail') {
     return tail();
