@@ -1132,6 +1132,36 @@ async function secrets(): Promise<Result> {
 // Decision: A preview starts without the live Worker's secrets. This sets them on the preview's latest
 // deployment from stdin, in this process because it holds the token, and returns no value or request
 // body, so nothing a secret holds reaches a log or the result.
+const PREVIEW_OBSERVABILITY = {
+  enabled: true,
+  logs: { enabled: true, invocation_logs: true, persist: true },
+};
+
+/** Turn on logs for a preview, unless the preview already has observability on from the app's own settings. */
+async function previewLogs(): Promise<Result> {
+  if (operation.type !== 'preview.logs') {
+    throw new Error('Unsupported Cloudflare preview operation.');
+  }
+  const path = `/accounts/${encodeURIComponent(accountId())}/workers/workers/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`;
+  const current = await cloudflareApiGet(
+    path,
+    `Cloudflare could not read preview ${operation.preview}`,
+  );
+  const observability = object(current.result).observability;
+  if (isRecord(observability) && observability.enabled === true) {
+    return result(0);
+  }
+  const response = await postWorkersApi(
+    `/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`,
+    { observability: PREVIEW_OBSERVABILITY },
+    'PATCH',
+  );
+  if (response.status < 200 || response.status >= 300) {
+    throw workersApiFailure(`turn on logs for preview ${operation.preview}`, response);
+  }
+  return result(0);
+}
+
 async function previewSecrets(): Promise<Result> {
   if (operation.type !== 'preview.secrets') {
     throw new Error('Unsupported Cloudflare preview operation.');
@@ -1549,6 +1579,9 @@ async function main(): Promise<Result> {
   }
   if (operation.type === 'preview.secrets') {
     return previewSecrets();
+  }
+  if (operation.type === 'preview.logs') {
+    return previewLogs();
   }
   if (operation.type === 'tail') {
     return tail();

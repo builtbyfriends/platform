@@ -404,3 +404,75 @@ it('rejects preview secret values that are not strings', async () => {
   expect(result.stderr).toContain('Secret values must be strings.');
   expect(apiCalls).toHaveLength(0);
 });
+
+const logsOperation: CloudflareOperation = {
+  type: 'preview.logs',
+  preview: 'pr-12',
+  configPath: '',
+  workerName: 'my-worker',
+};
+
+const PREVIEW = '/workers/workers/my-worker/previews/pr-12';
+
+it('turns on logs for a preview that has observability off', async () => {
+  const { result, apiCalls, apiHeaders } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: (method, path) => {
+      if (method === 'GET' && path === PREVIEW) {
+        return {
+          status: 200,
+          body: { success: true, result: { observability: { enabled: false } } },
+        };
+      }
+      return method === 'PATCH' && path === PREVIEW ? success : { status: 404, body: {} };
+    },
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls).toEqual([
+    { method: 'GET', path: PREVIEW, body: undefined },
+    {
+      method: 'PATCH',
+      path: PREVIEW,
+      body: {
+        observability: {
+          enabled: true,
+          logs: { enabled: true, invocation_logs: true, persist: true },
+        },
+      },
+    },
+  ]);
+  expect(apiHeaders[1]?.['content-type']).toBe('application/merge-patch+json');
+});
+
+it("leaves a preview's own observability settings alone when they are already on", async () => {
+  const { result, apiCalls } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: () => ({
+      status: 200,
+      body: { success: true, result: { observability: { enabled: true } } },
+    }),
+  });
+  expect(result.status, result.stderr).toBe(0);
+  expect(apiCalls.map((call) => call.method)).toEqual(['GET']);
+});
+
+it('fails when Cloudflare refuses to change the preview logs', async () => {
+  const { result } = await runSecretScenario({
+    operation: logsOperation,
+    input: '',
+    cf: {},
+    api: (method) =>
+      method === 'GET'
+        ? { status: 200, body: { success: true, result: {} } }
+        : {
+            status: 400,
+            body: { success: false, errors: [{ code: 1000, message: 'Not valid.' }] },
+          },
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('turn on logs for preview pr-12');
+});

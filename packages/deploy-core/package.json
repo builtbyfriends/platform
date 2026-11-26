@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/deploy-core",
-  "version": "1.13.8",
+  "version": "1.13.9",
   "description": "Shared deployment contracts, manifests, and resource plans for bwf.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {

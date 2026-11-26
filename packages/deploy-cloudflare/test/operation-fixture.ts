@@ -294,6 +294,8 @@ function operationFixtureArgs(operation: CloudflareOperation): Array<string> {
       return ['secret', 'bulk', ...target];
     case 'preview.secrets':
       return ['preview', 'secrets', operation.preview, ...target];
+    case 'preview.logs':
+      return ['preview', 'logs', operation.preview, ...target];
     case 'email.routing.settings':
       return ['email', 'routing', 'settings', operation.domain, ...config, '--env='];
     case 'email.routing.rules.list':

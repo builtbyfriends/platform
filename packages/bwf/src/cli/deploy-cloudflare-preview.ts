@@ -8,7 +8,10 @@ import type { CfCommand } from './cf-version-api.ts';
 import { createCfCommand } from './cf-version-runner.ts';
 import { createCloudflareChildReporter, observeCfCommand } from './cloudflare-child-report.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
-import { resolveCloudflareOperationContext } from './cloudflare-operations.ts';
+import {
+  enableCloudflarePreviewLogs,
+  resolveCloudflareOperationContext,
+} from './cloudflare-operations.ts';
 import {
   assertNotDeclared,
   ensurePreviewDatabase,
@@ -288,6 +291,14 @@ async function deployPreview(run: PreviewRun): Promise<void> {
     );
 
     return run.exit(1);
+  }
+
+  try {
+    await enableCloudflarePreviewLogs(context, name);
+  } catch (error) {
+    log.warn(
+      `deploy: preview ${name} deployed, but bwf could not turn on its logs: ${getErrorMessage(error)}`,
+    );
   }
 
   note(`Preview ${name}`, url);
