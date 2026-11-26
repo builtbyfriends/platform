@@ -270,6 +270,36 @@ describe('live Durable Object runtime', () => {
         await again.cancel();
       });
 
+      it('throws when a connection does not answer, and a second call finishes the job', async () => {
+        let failing = true;
+        const harness = createHarness({
+          fetch: (name, request) =>
+            failing &&
+            name.endsWith(':connection:connection-ana-000009') &&
+            request.url.endsWith('/revoke')
+              ? Promise.resolve(new Response('down', { status: 500 }))
+              : undefined,
+        });
+        const stream = defineLiveStream({ id: `revoke-owner-retry-${crypto.randomUUID()}` });
+        const publisher = stream.withEnv(harness.env);
+        const first = await openAs(harness, stream, 'user:ana', 'connection-ana-000008', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+        const second = await openAs(harness, stream, 'user:ana', 'connection-ana-000009', [
+          { id: 'project', topic: 'project:7' },
+        ]);
+
+        await expect(publisher.revoke({ owner: 'user:ana' })).rejects.toThrow(
+          'Call revoke() again',
+        );
+        failing = false;
+        await expect(publisher.revoke({ owner: 'user:ana' })).resolves.toEqual({ revoked: 1 });
+        await publisher.publish('project:7', { n: 1 });
+        expect(parseData(await readFrame(second))).toMatchObject({ topic: 'project:7' });
+        await first.cancel();
+        await second.cancel();
+      });
+
       it('needs exactly one of connectionId and owner', async () => {
         const harness = createHarness();
         const stream = defineLiveStream({ id: `revoke-owner-bad-${crypto.randomUUID()}` });

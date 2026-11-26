@@ -427,26 +427,33 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       const rows = await this.state.storage.list<OwnerRow>({ prefix: OWNER_ROW_PREFIX });
       const entries = [...rows];
       let revoked = 0;
+      let failed = 0;
       const gone: Array<string> = [];
       for (let offset = 0; offset < entries.length; offset += LIVE_FANOUT_CONCURRENCY) {
         const batch = entries.slice(offset, offset + LIVE_FANOUT_CONCURRENCY);
         const responses = await Promise.all(
           batch.map(([, row]) =>
-            this.connectionStub(message.streamId, row.connectionId).fetch(internalUrl('/revoke'), {
-              method: 'POST',
-              body: JSON.stringify({
-                streamId: message.streamId,
-                connectionId: row.connectionId,
-                topic: message.topic,
-                topicPrefix: message.topicPrefix,
-                reason: message.reason,
-              } satisfies RevokeRequest),
-            }),
+            fetchWithTimeout(
+              this.connectionStub(message.streamId, row.connectionId),
+              internalUrl('/revoke'),
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  streamId: message.streamId,
+                  connectionId: row.connectionId,
+                  topic: message.topic,
+                  topicPrefix: message.topicPrefix,
+                  reason: message.reason,
+                } satisfies RevokeRequest),
+              },
+              message.limits.deliveryAttemptTimeoutMs,
+            ),
           ),
         );
         for (const [index, response] of responses.entries()) {
-          if (!response.ok) {
-            throw new Error(`live: revoke failed with status ${response.status}.`);
+          if (!response?.ok) {
+            failed++;
+            continue;
           }
           const result = (await response.json()) as RevokeResponse;
           revoked += result.revoked;
@@ -458,6 +465,12 @@ export function createLiveDurableObject(): LiveDurableObjectClass {
       }
       if (gone.length > 0) {
         await this.state.storage.delete(gone);
+      }
+      if (failed > 0) {
+        return new Response(
+          `live: ${failed} of ${entries.length} connections did not answer. Call revoke() again.`,
+          { status: 504 },
+        );
       }
       return Response.json({
         revoked,
