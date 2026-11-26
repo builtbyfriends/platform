@@ -1,9 +1,24 @@
+import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { type } from 'arktype';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vite-plus/test';
 import { registerOAuthClient } from '../../src/auth/oauth.ts';
 import app from '../../src/index.ts';
+import {
+  cloudflareOpenApiIndex,
+  cloudflareOpenApiKey,
+} from '../../src/infrastructure/cloudflare-openapi.ts';
+import { cloudflareProviderReadSelection } from '../../src/infrastructure/cloudflare-provider-read.ts';
 import { projects, resources, users } from '../../src/schema.ts';
 import {
   clearTables,
@@ -86,6 +101,7 @@ beforeAll(async () => {
   env = await setupEnv();
 });
 afterAll(teardownEnv);
+afterEach(() => vi.restoreAllMocks());
 beforeEach(async () => {
   await clearTables(env.db);
   registration = await registerOAuthClient(env.db, {
@@ -137,6 +153,167 @@ beforeEach(async () => {
     },
   };
   delete env.DEV_AUTH_BYPASS;
+  env.CF_ACCOUNT_ID = 'test-account-id';
+  env.CF_API_TOKEN = 'test-cf-token';
+});
+
+async function providerResource(kind: 'd1' | 'r2' | 'kv' | 'queue') {
+  const selected = cloudflareProviderReadSelection(kind);
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (candidate) => candidate.method === selected?.method && candidate.path === selected.path,
+  );
+  if (!entry) {
+    throw Error('Missing pinned provider operation');
+  }
+  const key = cloudflareOpenApiKey(entry);
+  const asset = await readFile(
+    new URL(`../fixtures/cloudflare-openapi/${kind}-get.json.gz`, import.meta.url),
+  );
+  await env.STATIC_ASSETS_R2.put(key, asset);
+  env.CF_ACCOUNT_ID = 'a'.repeat(32);
+  const cfId =
+    kind === 'r2'
+      ? 'owned-bucket'
+      : kind === 'd1'
+        ? '11111111-1111-4111-8111-111111111111'
+        : 'b'.repeat(32);
+  const resourceId = 'res_provider';
+  await env.db.insert(resources).values({
+    id: resourceId,
+    project_id: project.id,
+    type: kind,
+    cf_id: cfId,
+    binding_name: 'My resource',
+    metadata: kind === 'r2' ? { jurisdiction: 'eu' } : {},
+  });
+  const selection = { ...scope(), resourceId };
+  const response = await call('projects.resourceOperations', selection);
+  expect(response.status).toBe(200);
+  const descriptor = catalogSchema
+    .assert(await response.json())
+    .data.operations.find((operation) => operation.id === entry.operationId);
+  if (!descriptor) {
+    throw Error('Provider operation was not registered');
+  }
+  const body = {
+    ...selection,
+    operation: descriptor.id,
+    version: descriptor.version,
+    expectedEffect: 'read',
+    input: {},
+  };
+  const data =
+    kind === 'r2'
+      ? { name: cfId, jurisdiction: 'eu', storage_class: 'Standard' }
+      : kind === 'd1'
+        ? { uuid: cfId, name: 'private-name', num_tables: 3 }
+        : kind === 'kv'
+          ? { id: cfId, title: 'private-name', supports_url_encoding: true }
+          : { queue_id: cfId, queue_name: 'private-name', consumers_total_count: 2 };
+  const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+    Response.json({
+      success: true,
+      errors: [],
+      messages: [],
+      result: { ...data, secret: 'private-provider-secret' },
+    }),
+  );
+  return { entry, key, asset, body, descriptor, provider, cfId, data };
+}
+
+describe('schema-backed provider operations', () => {
+  it.each(['d1', 'r2', 'kv', 'queue'] as const)(
+    'discovers and invokes the pinned %s operation through the same registry',
+    async (kind) => {
+      const { body, provider, entry, cfId } = await providerResource(kind);
+      const response = await call('resources.invoke', body);
+      expect(response.status).toBe(200);
+      const output = await response.json();
+      expect(output).toMatchObject({
+        data: { kind: 'provider-read', data: { name: 'My resource' } },
+      });
+      expect(JSON.stringify(output)).not.toContain('private-');
+      expect(JSON.stringify(output)).not.toContain(cfId);
+      expect(provider).toHaveBeenCalledTimes(1);
+      const [url, options] = provider.mock.calls[0];
+      expect(String(url)).toBe(
+        'https://api.cloudflare.com/client/v4' +
+          entry.path.replace('{account_id}', env.CF_ACCOUNT_ID).replace(/\{[^}]+\}/, cfId),
+      );
+      expect(options).toMatchObject({ method: 'GET', redirect: 'error' });
+      if (kind === 'r2') {
+        expect(new Headers(options?.headers).get('cf-r2-jurisdiction')).toBe('eu');
+      }
+      expect(proxy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects stale versions, effect changes, caller-selected scope and mismatched resource types before provider requests', async () => {
+    const { body, provider } = await providerResource('r2');
+    for (const [changed, status] of [
+      [{ version: '0'.repeat(64) }, 409],
+      [{ expectedEffect: 'write' }, 400],
+      [{ confirmation: 'reviewed' }, 400],
+      [{ input: { headers: { 'cf-r2-jurisdiction': 'default' } } }, 400],
+      [{ input: { account_id: 'other' } }, 400],
+      [{ resourceId: 'res_database' }, 404],
+      [{ resourceId: 'res_foreign' }, 404],
+    ] as const) {
+      expect((await call('resources.invoke', { ...body, ...changed })).status).toBe(status);
+    }
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it('stops advertising and invoking when credentials or the verified schema are unavailable', async () => {
+    const { body, key, asset, provider } = await providerResource('kv');
+    const unavailable = async () => {
+      const response = await call('projects.resourceOperations', {
+        ...scope(),
+        resourceId: body.resourceId,
+      });
+      expect(await response.json()).toMatchObject({ data: { available: false, operations: [] } });
+      expect((await call('resources.invoke', body)).status).toBe(404);
+    };
+    env.CF_API_TOKEN = '';
+    await unavailable();
+    env.CF_API_TOKEN = 'test-cf-token';
+    env.CF_ACCOUNT_ID = 'invalid';
+    await unavailable();
+    env.CF_ACCOUNT_ID = 'a'.repeat(32);
+    await env.STATIC_ASSETS_R2.delete(key);
+    await unavailable();
+    await env.STATIC_ASSETS_R2.put(key, new Uint8Array(asset.byteLength));
+    await unavailable();
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it('rechecks ownership metadata after the provider response before exposing data', async () => {
+    const { body, provider, data } = await providerResource('r2');
+    provider.mockImplementationOnce(async () => {
+      await env.db
+        .update(resources)
+        .set({ metadata: { jurisdiction: 'default' } })
+        .where(eq(resources.id, body.resourceId));
+      return Response.json({ success: true, errors: [], messages: [], result: data });
+    });
+    expect((await call('resources.invoke', body)).status).toBe(409);
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates provider data and reports failures without leaking its response', async () => {
+    const { body, provider } = await providerResource('kv');
+    provider.mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        errors: [],
+        messages: [],
+        result: { id: 'foreign', title: 'private-provider-secret' },
+      }),
+    );
+    const response = await call('resources.invoke', body);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: 'PROVIDER_UNAVAILABLE' });
+  });
 });
 
 describe('registered resource operations', () => {

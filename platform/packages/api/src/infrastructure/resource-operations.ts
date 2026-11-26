@@ -5,6 +5,7 @@ import {
   BUILTIN_ERRORS,
   type AuthProvider,
 } from '@builtbyfriends/realtime';
+import { Validator, type Schema } from '@cfworker/json-schema';
 import { type } from 'arktype';
 import type { ApiEnv } from '../env.ts';
 import {
@@ -13,6 +14,11 @@ import {
   type RuntimeActionInput,
 } from '../routes/app-runtime-actions.ts';
 import type { Project, Resource } from '../types.ts';
+import { cloudflareOpenApiIndex, cloudflareOperationSchema } from './cloudflare-openapi.ts';
+import {
+  cloudflareProviderReadSelection,
+  prepareCloudflareProviderRead,
+} from './cloudflare-provider-read.ts';
 import { queryDatabase } from './database-query.ts';
 import { DatabaseQueryError } from './database-select.ts';
 
@@ -243,6 +249,94 @@ export const resourceOperationRegistry = defineRegistry(
   operationManifest.map((entry) => entry.procedure),
 );
 
+function providerSchema(schema: Schema) {
+  const validator = new Validator(schema, '7');
+  return {
+    '~standard': {
+      version: 1 as const,
+      vendor: 'cfworker-json-schema',
+      jsonSchema: { input: () => schema, output: () => schema },
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- The registry validates untrusted operation JSON using its pinned provider schema.
+      validate: (value: unknown) =>
+        validator.validate(value).valid
+          ? { value }
+          : { issues: [{ message: 'The operation data does not match its schema.' }] },
+    },
+  };
+}
+
+async function providerOperation(resourceType: Resource['type'], bindings: ApiEnv['Bindings']) {
+  const selection = cloudflareProviderReadSelection(resourceType);
+  if (
+    !selection ||
+    !bindings.CF_API_TOKEN ||
+    !/^[a-f0-9]{32}$/i.test(bindings.CF_ACCOUNT_ID) ||
+    !bindings.STATIC_ASSETS_R2
+  ) {
+    return null;
+  }
+  const entry = (await cloudflareOpenApiIndex()).find(
+    (candidate) => candidate.method === selection.method && candidate.path === selection.path,
+  );
+  if (!entry) {
+    return null;
+  }
+  const artifact = await cloudflareOperationSchema(bindings.STATIC_ASSETS_R2, entry);
+  if (!artifact) {
+    return null;
+  }
+  const adapter = prepareCloudflareProviderRead(artifact, resourceType);
+  if (!adapter) {
+    return null;
+  }
+  const described = await adapter.describe();
+  const providerErrors = {
+    ...errors,
+    PROVIDER_UNAVAILABLE: { status: 502, message: 'Could not load this resource. Try again.' },
+  } as const;
+  // Decision: Realtime requires dotted camelCase names. The descriptor keeps the provider's exact operation ID and maps it to this request-scoped handler.
+  const operation = procedure('provider.read')
+    .use(owned)
+    .input(providerSchema(adapter.inputSchema))
+    .output(providerSchema(adapter.outputSchema))
+    .errors(providerErrors)
+    .mcp({
+      title: described.title,
+      description: described.description,
+      effect: 'read',
+      idempotent: true,
+    })
+    .handler(async ({ env, input, fail }) => {
+      try {
+        const output = await adapter.read(env.bindings, env.caller, input);
+        if (!(await env.caller.stillAuthorized())) {
+          return fail('RESOURCE_CHANGED');
+        }
+        return output;
+      } catch {
+        if (!(await env.caller.stillAuthorized())) {
+          return fail('RESOURCE_CHANGED');
+        }
+        return fail('PROVIDER_UNAVAILABLE');
+      }
+    });
+  const descriptor = {
+    ...described,
+    errors: Object.entries({ ...BUILTIN_ERRORS, ...providerErrors }).map(([code, error]) => ({
+      code,
+      ...error,
+    })),
+  };
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(descriptor)),
+  );
+  const version = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return { procedure: operation, descriptor: { ...descriptor, version } };
+}
+
 export async function resourceOperationsFor(
   resourceType: Resource['type'],
   bindings: ApiEnv['Bindings'],
@@ -250,13 +344,26 @@ export async function resourceOperationsFor(
   const registered = operationManifest.filter((entry) => entry.resourceType === resourceType);
   const available = registered.filter((entry) => !!bindings[entry.requires]);
   const names = new Set<string>(available.map((entry) => entry.procedure.name));
+  // Decision: A request loads only its selected resource schema. Retaining the full provider catalog's validators would grow Worker isolate memory without a bound.
+  const provider = await providerOperation(resourceType, bindings).catch(() => null);
+  const operations = [
+    ...(await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
+    ...(provider ? [provider.descriptor] : []),
+  ];
   return {
-    reason: !registered.length
-      ? 'Schema-backed operations are not registered for this resource yet.'
-      : !available.length
-        ? 'Resource operations are not connected on this installation.'
-        : null,
-    operations: (await resourceOperationDescriptors()).filter((entry) => names.has(entry.id)),
+    reason: operations.length
+      ? null
+      : !registered.length && !cloudflareProviderReadSelection(resourceType)
+        ? 'Schema-backed operations are not registered for this resource yet.'
+        : 'Resource operations are not connected on this installation.',
+    operations,
+    registryNames: new Map([
+      ...available.map((entry) => [entry.procedure.name, entry.procedure.name] as const),
+      ...(provider ? [[provider.descriptor.id, provider.procedure.name] as const] : []),
+    ]),
+    registry: provider
+      ? defineRegistry([...available.map((entry) => entry.procedure), provider.procedure])
+      : resourceOperationRegistry,
   };
 }
 

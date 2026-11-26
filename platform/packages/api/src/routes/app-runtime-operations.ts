@@ -3,10 +3,7 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getProjectResources } from '../db/resources.ts';
 import type { ApiEnv } from '../env.ts';
-import {
-  resourceOperationRegistry,
-  resourceOperationsFor,
-} from '../infrastructure/resource-operations.ts';
+import { resourceOperationsFor } from '../infrastructure/resource-operations.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
 import type { ResolveProject } from './app-runtime.ts';
 
@@ -60,7 +57,8 @@ async function ownedResource(
       !!fresh &&
       fresh.type === resource.type &&
       fresh.cf_id === resource.cf_id &&
-      fresh.binding_name === resource.binding_name
+      fresh.binding_name === resource.binding_name &&
+      fresh.metadata.jurisdiction === resource.metadata.jurisdiction
     );
   };
   return { project, resource, stillAuthorized };
@@ -115,9 +113,13 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
       }
-      const { operations } = await resourceOperationsFor(caller.resource.type, context.env);
+      const { operations, registry, registryNames } = await resourceOperationsFor(
+        caller.resource.type,
+        context.env,
+      );
       const operation = operations.find((entry) => entry.id === body.operation);
-      if (!operation) {
+      const registryName = registryNames.get(body.operation);
+      if (!operation || !registryName) {
         return context.json({ error: 'operation_unavailable' }, 404);
       }
       if (operation.version !== body.version) {
@@ -132,7 +134,7 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (operation.effect === 'read' && body.confirmation !== undefined) {
         return context.json({ error: 'unexpected_confirmation' }, 400);
       }
-      const result = await resourceOperationRegistry.call(operation.id, body.input, {
+      const result = await registry.call(registryName, body.input, {
         request: context.req.raw,
         env: { bindings: context.env, caller },
         surface: 'direct',
