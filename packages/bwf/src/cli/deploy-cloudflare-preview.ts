@@ -35,7 +35,7 @@ import { getErrorMessage, note } from './output.ts';
 const CF_TIMEOUT_MS = 300_000;
 
 const PREVIEW_SHARES =
-  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues, secrets, Workflows and containers are the live app's, so a preview reads and writes the live data there.";
+  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues, secrets and containers are the live app's, so a preview reads and writes the live data there. A preview has no Workflow binding.";
 
 type PreviewRun = {
   root: string;

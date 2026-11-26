@@ -197,8 +197,23 @@ describe('binding a preview to its own databases', () => {
           INDEX: { type: 'd1', name: 'app-index', id: 'production-id' },
           OWNER: { type: 'durable-object', worker: 'app', exportName: 'NewOwner' },
           OTHER: { type: 'durable-object', worker: 'other-app', exportName: 'Shared' },
+          WELCOME: {
+            type: 'workflow',
+            name: 'welcome',
+            worker: 'app',
+            exportName: 'WelcomeWorkflow',
+          },
+          BILLING: {
+            type: 'workflow',
+            name: 'billing',
+            worker: 'other-app',
+            exportName: 'Billing',
+          },
         },
-        exports: { NewOwner: { type: 'durable-object', storage: 'sqlite' } },
+        exports: {
+          NewOwner: { type: 'durable-object', storage: 'sqlite' },
+          WelcomeWorkflow: { type: 'workflow', name: 'welcome' },
+        },
       },
       manifest: {
         type: 'complete',
@@ -221,9 +236,11 @@ describe('binding a preview to its own databases', () => {
       expect(staged.workers.default.config.env).toEqual({
         INDEX: { type: 'd1', name: 'app-index-pr-7', id: 'preview-id' },
         OTHER: { type: 'durable-object', worker: 'other-app', exportName: 'Shared' },
+        BILLING: { type: 'workflow', name: 'billing', worker: 'other-app', exportName: 'Billing' },
       });
       expect(staged.workers.default.config.exports).toEqual({
         NewOwner: { type: 'durable-object', storage: 'sqlite' },
+        WelcomeWorkflow: { type: 'workflow', name: 'welcome' },
       });
     } finally {
       await prepared?.dispose();

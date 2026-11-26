@@ -81,7 +81,7 @@ If CI runs typechecking before deploy, run `bwf prepare` after installing depend
 
 ## Previews for pull requests {#previews}
 
-On Cloudflare, give each pull request its own copy of the app. A preview has its own Durable Objects and its own D1 databases. KV, R2, queues, secrets, Workflows and containers are still the deployed app's, so a preview can change live data there:
+On Cloudflare, give each pull request its own copy of the app. A preview has its own Durable Objects and its own D1 databases. A preview has no binding to a Workflow. KV, R2, queues, secrets and containers are still the deployed app's, so a preview can change live data there:
 
 ```sh
 bwf deploy --platform cloudflare --preview pr-12

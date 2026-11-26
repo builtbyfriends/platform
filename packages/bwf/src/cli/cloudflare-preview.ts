@@ -9,7 +9,7 @@ export { isPreviewName } from './preview-name.ts';
 const DatabaseEntry = type({ name: 'string', uuid: 'string' });
 const DatabaseList = DatabaseEntry.array().or({ result: DatabaseEntry.array() });
 const CreatedDatabase = type({ uuid: 'string' });
-const OwnDurableObjectBinding = type({ type: "'durable-object'", 'worker?': 'string' });
+const OwnClassBinding = type({ type: "'durable-object' | 'workflow'", 'worker?': 'string' });
 const D1Binding = type({ type: "'d1'", 'name?': 'string', 'id?': 'string' });
 const PreviewDeployOutput = type({ preview_urls: 'string[]' });
 const Json = type('string.json.parse');
@@ -127,8 +127,8 @@ export async function removePreviewDatabase(input: {
   return true;
 }
 
-function isOwnDurableObjectBinding(value: unknown, workerName: string | undefined): boolean {
-  const parsed = OwnDurableObjectBinding(value);
+function isOwnClassBinding(value: unknown, workerName: string | undefined): boolean {
+  const parsed = OwnClassBinding(value);
 
   return (
     !(parsed instanceof type.errors) &&
@@ -166,10 +166,11 @@ export function previewBuild(input: {
         swapped.set(binding, await input.databaseFor(binding, databaseName));
       }
 
-      // Decision: A binding to the Worker's own class reaches the namespace of the live script, which has no class a pull request just added (Cloudflare error 10061) and would share its owners' data with production. The classes stay in exports, so the preview reaches its own owners through ctx.exports.
+      // Decision: A binding to the Worker's own Durable Object class reaches the namespace of the live script, which has no class a pull request just added (Cloudflare error 10061) and would share its owners' data with production. The classes stay in exports, so the preview reaches its own owners through ctx.exports.
+      // Decision: Cloudflare doesn't make a Workflow for a preview: a Workflow binding reaches the deployed app's Workflow, so an instance a preview starts runs there and shows on the live address. The preview gets no binding to its own Workflow, so code that reads one fails in the preview instead of starting live instances.
       const env = Object.fromEntries(
         Object.entries(config.env ?? {})
-          .filter(([, value]) => !isOwnDurableObjectBinding(value, config.name))
+          .filter(([, value]) => !isOwnClassBinding(value, config.name))
           .map(([binding, value]) => [
             binding,
             swapped.has(binding) ? { ...value, ...swapped.get(binding) } : value,
