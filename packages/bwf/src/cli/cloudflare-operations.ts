@@ -183,6 +183,19 @@ export async function setCloudflarePreviewSecrets(
   );
 }
 
+/** Turn on logs for a preview, so Workers Logs hold its requests and `console` output. */
+export async function enableCloudflarePreviewLogs(
+  context: CloudflareOperationContext,
+  preview: string,
+): Promise<void> {
+  await run(context, {
+    type: 'preview.logs',
+    preview,
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
+}
+
 export async function deleteCloudflareSecret(
   context: CloudflareOperationContext,
   name: string,

@@ -1129,6 +1129,58 @@ async function secrets(): Promise<Result> {
   }
 }
 
+const PREVIEW_OBSERVABILITY = {
+  enabled: true,
+  logs: { enabled: true, invocation_logs: true, persist: true },
+};
+
+/** Turn on logs for a preview, unless the preview already has logs on from the app's own settings. */
+async function previewLogs(): Promise<Result> {
+  if (operation.type !== 'preview.logs') {
+    throw new Error('Unsupported Cloudflare preview operation.');
+  }
+  const path = `/accounts/${encodeURIComponent(accountId())}/workers/workers/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`;
+  const read = await fetch(`${apiBaseUrl()}${path}`, {
+    headers: await apiHeaders(),
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  });
+  const current: unknown = await read.json().catch(() => null);
+  if (read.status === 404) {
+    const created = await postWorkersApi(
+      `/${encodeURIComponent(workerName())}/previews`,
+      { name: operation.preview, observability: PREVIEW_OBSERVABILITY },
+      'POST',
+    );
+    if (created.status < 200 || created.status >= 300) {
+      throw workersApiFailure(`create preview ${operation.preview} with logs on`, created);
+    }
+    return result(0);
+  }
+  if (!read.ok || !isRecord(current)) {
+    throw new Error(`Cloudflare could not read preview ${operation.preview} (HTTP ${read.status})`);
+  }
+  const observability = object(current.result).observability;
+  const logs = isRecord(observability) ? observability.logs : undefined;
+  if (
+    isRecord(observability) &&
+    observability.enabled === true &&
+    isRecord(logs) &&
+    logs.enabled === true
+  ) {
+    return result(0);
+  }
+  const response = await postWorkersApi(
+    `/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`,
+    { observability: PREVIEW_OBSERVABILITY },
+    'PATCH',
+  );
+  if (response.status < 200 || response.status >= 300) {
+    throw workersApiFailure(`turn on logs for preview ${operation.preview}`, response);
+  }
+  return result(0);
+}
+
 // Decision: A preview starts without the live Worker's secrets. This sets them on the preview's latest
 // deployment from stdin, in this process because it holds the token, and returns no value or request
 // body, so nothing a secret holds reaches a log or the result.
@@ -1549,6 +1601,9 @@ async function main(): Promise<Result> {
   }
   if (operation.type === 'preview.secrets') {
     return previewSecrets();
+  }
+  if (operation.type === 'preview.logs') {
+    return previewLogs();
   }
   if (operation.type === 'tail') {
     return tail();

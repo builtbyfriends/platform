@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/bwf",
-  "version": "1.13.8",
+  "version": "1.13.9",
   "description": "Full-stack framework and deployment CLI for Cloudflare Workers, powered by Vite.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {

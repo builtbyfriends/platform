@@ -8,7 +8,10 @@ import type { CfCommand } from './cf-version-api.ts';
 import { createCfCommand } from './cf-version-runner.ts';
 import { createCloudflareChildReporter, observeCfCommand } from './cloudflare-child-report.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
-import { resolveCloudflareOperationContext } from './cloudflare-operations.ts';
+import {
+  enableCloudflarePreviewLogs,
+  resolveCloudflareOperationContext,
+} from './cloudflare-operations.ts';
 import {
   assertNotDeclared,
   ensurePreviewDatabase,
@@ -204,6 +207,19 @@ async function checkPreviewHealth(run: PreviewRun, url: string): Promise<void> {
   log.info('Health check passed.');
 }
 
+export async function tryEnablePreviewLogs(
+  context: Parameters<typeof enableCloudflarePreviewLogs>[0],
+  name: string,
+): Promise<void> {
+  try {
+    await enableCloudflarePreviewLogs(context, name);
+  } catch (error) {
+    log.warn(
+      `deploy: bwf could not turn on logs for preview ${name}, so it may have none: ${getErrorMessage(error)}`,
+    );
+  }
+}
+
 async function deployPreview(run: PreviewRun): Promise<void> {
   const { root, name, runCf } = run;
 
@@ -249,6 +265,8 @@ async function deployPreview(run: PreviewRun): Promise<void> {
 
     return run.exit(1);
   }
+
+  await tryEnablePreviewLogs(context, name);
 
   let url: string | undefined;
 
