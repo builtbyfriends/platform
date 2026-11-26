@@ -9,12 +9,16 @@ import { defineEnv } from '../../src/runtime/env-public.ts';
 const cloudflare = vi.hoisted(() => ({
   put: vi.fn(),
   sync: vi.fn(),
+  basePut: vi.fn(),
   resolve: vi.fn(() => ({ workerName: 'app' })),
 }));
 
 vi.mock('../../src/cli/cloudflare-operations.ts', () => ({
+  deleteCloudflarePreviewBaseSecret: vi.fn(),
   deleteCloudflareSecret: vi.fn(),
   listCloudflareSecrets: vi.fn(),
+  readCloudflarePreviewBase: vi.fn(),
+  setCloudflarePreviewBaseSecrets: cloudflare.basePut,
   putCloudflareSecret: cloudflare.put,
   resolveCloudflareOperationContext: cloudflare.resolve,
   syncCloudflareSecrets: cloudflare.sync,
@@ -115,6 +119,21 @@ describe('direct Cloudflare secret validation', () => {
     await runSecretCommand(root, { action: 'put', name: 'API_TOKEN', value: 'secret' });
 
     expect(cloudflare.put).toHaveBeenCalledWith({ workerName: 'app' }, 'API_TOKEN', 'secret');
+  });
+
+  it('sets a preview secret in the Base, not on the live Worker, after it passes validation', async () => {
+    const root = project();
+    defineEnv({ API_TOKEN: string() });
+
+    await runSecretCommand(root, {
+      action: 'put',
+      name: 'API_TOKEN',
+      value: 'secret',
+      preview: true,
+    });
+
+    expect(cloudflare.basePut).toHaveBeenCalledWith({ workerName: 'app' }, { API_TOKEN: 'secret' });
+    expect(cloudflare.put).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,70 +1,45 @@
-import { listCloudflareSecrets, setCloudflarePreviewSecrets } from './cloudflare-operations.ts';
-import type { CloudflareOperationContext } from './cloudflare-operations.ts';
-import { parseDotenvFile } from './secret.ts';
+import { listCloudflareSecrets, readCloudflarePreviewBase } from './cloudflare-operations.ts';
+import type { CloudflareOperationContext, PreviewBase } from './cloudflare-operations.ts';
 
-export type PreviewSecretValues = {
-  names: Array<string>;
-  values: Record<string, string>;
-  missing: Array<string>;
+export type PreviewBaseState = {
+  base: PreviewBase;
+  liveSecrets: Array<string>;
+  missingFromBase: Array<string>;
 };
 
 /**
- * Pair each secret the live Worker holds with a value. Cloudflare never returns a secret's value, so
- * the value comes from an environment variable of the same name, or from the dotenv file
- * `--secrets-file` names. A name with neither is `missing`.
+ * Read the Worker's preview Base and the secrets the live Worker holds. Cloudflare gives each new preview the
+ * Base's secrets, so a live secret the Base lacks is one a new preview starts without. Logs are turned on
+ * in the Base when the app has set no observability there.
  */
-export async function collectPreviewSecrets(
+export async function readPreviewBase(
   context: CloudflareOperationContext,
-  options: { secretsFile?: string; env: NodeJS.ProcessEnv },
-): Promise<PreviewSecretValues> {
-  const names = await listCloudflareSecrets(context);
+): Promise<PreviewBaseState> {
+  const liveSecrets = await listCloudflareSecrets(context);
+  const base = await readCloudflarePreviewBase(context, { ensureLogs: true });
+  const inBase = new Set(base.secrets);
 
-  const fromFile = new Map(
-    options.secretsFile === undefined
-      ? []
-      : parseDotenvFile(options.secretsFile).map(({ name, value }) => [name, value]),
-  );
-
-  const values: Record<string, string> = {};
-  const missing: Array<string> = [];
-
-  for (const name of names) {
-    const value = options.env[name] ?? fromFile.get(name);
-
-    if (value === undefined || value === '') {
-      missing.push(name);
-    } else {
-      values[name] = value;
-    }
-  }
-
-  return { names, values, missing };
+  return {
+    base,
+    liveSecrets,
+    missingFromBase: liveSecrets.filter((name) => !inBase.has(name)),
+  };
 }
 
-/** The message for a failed read of the live app's secrets. A Worker that isn't deployed yet gets the next step. */
-export function liveSecretsFailureMessage(error: Error): string {
-  if (/\b10007\b/.test(error.message)) {
-    return 'deploy: the app has no deployed Worker yet, so a preview has no live secrets to copy and nothing to preview against. Run `bwf deploy --platform cloudflare` once, then run the preview again. Nothing was deployed.';
+/** The message for a failed read of the live app's settings. A Worker that isn't deployed yet gets the next step. */
+export function previewBaseFailureMessage(error: Error): string {
+  if (/\b10007\b|has no Worker named/.test(error.message)) {
+    return 'deploy: the app has no deployed Worker yet, so a preview has nothing to preview against. Run `bwf deploy --platform cloudflare` once, then run the preview again. Nothing was deployed.';
   }
 
-  return `deploy: could not read the live app's secrets: ${error.message}`;
+  return `deploy: could not read the app's preview settings: ${error.message}`;
 }
 
-export function missingPreviewSecretsMessage(missing: ReadonlyArray<string>): string {
+export function missingFromBaseMessage(missing: ReadonlyArray<string>): string {
+  const first = missing[0] ?? 'NAME';
+
   return [
-    `deploy: the live app has ${missing.length === 1 ? 'a secret' : 'secrets'} that bwf has no value for, so a preview would start without ${missing.length === 1 ? 'it' : 'them'}: ${missing.join(', ')}.`,
-    'Cloudflare never returns a secret value. Set each one as an environment variable of the same name, or put them in a dotenv file and pass it with --secrets-file <file>, then run the preview again. Nothing was deployed.',
+    `deploy: the live app has ${missing.length === 1 ? 'a secret' : 'secrets'} that the preview Base lacks, so a new preview starts without ${missing.length === 1 ? 'it' : 'them'}: ${missing.join(', ')}.`,
+    `Set ${missing.length === 1 ? 'it' : 'each one'} once with \`bwf secret put ${first} --preview\`. Cloudflare copies the Base into each new preview. A preview that exists already keeps what it has, so remove it and deploy it again to pick up the Base.`,
   ].join('\n');
-}
-
-export async function applyPreviewSecrets(
-  context: CloudflareOperationContext,
-  preview: string,
-  secrets: PreviewSecretValues,
-): Promise<void> {
-  if (secrets.names.length === 0) {
-    return;
-  }
-
-  await setCloudflarePreviewSecrets(context, preview, secrets.values);
 }

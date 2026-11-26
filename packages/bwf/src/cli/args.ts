@@ -22,7 +22,6 @@ export function parseDeployArgs(
         atomic: { type: 'boolean' },
         preview: { type: 'string' },
         'remove-preview': { type: 'string' },
-        'secrets-file': { type: 'string' },
       },
       allowPositionals: true,
       strict: true,
@@ -40,9 +39,6 @@ export function parseDeployArgs(
       }
       if (optionMatch?.[1] === '--preview' || optionMatch?.[1] === '--remove-preview') {
         throw new Error(`deploy: ${optionMatch[1]} requires a name.`, { cause: error });
-      }
-      if (optionMatch?.[1] === '--secrets-file') {
-        throw new Error('deploy: --secrets-file requires a file path.', { cause: error });
       }
       throw new Error('deploy: --project requires a slug.', { cause: error });
     }
@@ -122,11 +118,6 @@ export function parseDeployArgs(
   if (preview !== undefined && removePreview !== undefined) {
     throw new Error('deploy: use --preview or --remove-preview, not both.');
   }
-  const secretsFile =
-    typeof parsed.values['secrets-file'] === 'string' ? parsed.values['secrets-file'] : undefined;
-  if (secretsFile !== undefined && preview === undefined) {
-    throw new Error('deploy: --secrets-file is used with --preview.');
-  }
   for (const name of [preview, removePreview]) {
     if (name !== undefined && !isPreviewName(name)) {
       throw new Error(
@@ -160,6 +151,5 @@ export function parseDeployArgs(
     atomic,
     preview,
     removePreview,
-    secretsFile,
   };
 }

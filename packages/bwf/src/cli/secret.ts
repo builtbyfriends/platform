@@ -86,6 +86,9 @@ async function resolveSecretBackend(root: string, args: SecretArgs): Promise<Sec
   if (platform === 'cloudflare') {
     return resolveCloudflareSecretBackend(root, args);
   }
+  if (args.preview) {
+    throw new Error('secret: --preview is for apps deployed directly to Cloudflare.');
+  }
   if (platform === 'none') {
     throw new Error('secret: Deployment is disabled. Run `bwf init` to choose a platform.');
   }
@@ -144,13 +147,29 @@ async function resolveCloudflareSecretBackend(
     );
   }
   const {
+    deleteCloudflarePreviewBaseSecret,
     deleteCloudflareSecret,
     listCloudflareSecrets,
     putCloudflareSecret,
+    readCloudflarePreviewBase,
     resolveCloudflareOperationContext,
+    setCloudflarePreviewBaseSecrets,
     syncCloudflareSecrets,
   } = await import('./cloudflare-operations.ts');
   const context = resolveCloudflareOperationContext(root);
+  if (args.preview) {
+    return {
+      target: 'preview Base',
+      list: async () => (await readCloudflarePreviewBase(context, { ensureLogs: false })).secrets,
+      put: (name, value) => setCloudflarePreviewBaseSecrets(context, { [name]: value }),
+      sync: (secrets) =>
+        setCloudflarePreviewBaseSecrets(
+          context,
+          Object.fromEntries(secrets.map(({ name, value }) => [name, value])),
+        ),
+      delete: (name) => deleteCloudflarePreviewBaseSecret(context, name),
+    };
+  }
   return {
     target: 'Cloudflare Worker',
     list: () => listCloudflareSecrets(context),

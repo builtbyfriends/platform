@@ -104,6 +104,9 @@ function operatorHelpTree(): HelpTree {
   );
 }
 
+const PREVIEW_SECRET_OPTION =
+  "Change the Worker's preview Base instead of the live Worker. New previews start with the Base's secrets (Cloudflare apps only)";
+
 const HELP_TREE = {
   connect: {
     summary:
@@ -197,11 +200,6 @@ const HELP_TREE = {
         command: '--preview <name>',
         description:
           'Deploy a Worker Preview with its own Durable Objects and D1 databases (with --platform cloudflare)',
-      },
-      {
-        command: '--secrets-file <file>',
-        description:
-          "Dotenv file with the live app's secret values for a preview. Environment variables of the same names are used first",
       },
       {
         command: '--remove-preview <name>',
@@ -893,14 +891,15 @@ const HELP_TREE = {
       { command: 'sync <file>', description: 'Sync secrets from a dotenv file' },
     ],
     children: {
-      list: withProjectOption('List project secrets.', 'bwf secret list [options]'),
-      put: withProjectOption('Set a project secret.', 'bwf secret put <name> [options]'),
-      delete: withProjectOption('Delete a project secret.', 'bwf secret delete <name> [options]'),
+      list: withSecretOptions('List project secrets.', 'bwf secret list [options]'),
+      put: withSecretOptions('Set a project secret.', 'bwf secret put <name> [options]'),
+      delete: withSecretOptions('Delete a project secret.', 'bwf secret delete <name> [options]'),
       sync: {
         summary: 'Sync secrets from a dotenv file.',
         usage: ['bwf secret sync <file> [options]'],
         options: [
           { command: '--project <name>', description: 'Project name override' },
+          { command: '--preview', description: PREVIEW_SECRET_OPTION },
           {
             command: '--yes',
             description: 'Skip confirmation (required in CI and non-interactive shells)',
@@ -1534,6 +1533,17 @@ function basicSubcommand(summary: string, usage: string, example?: string): Help
     summary,
     usage: [usage],
     examples: example ? [{ command: example, description: summary }] : undefined,
+  };
+}
+
+function withSecretOptions(summary: string, usage: string): HelpPage {
+  return {
+    summary,
+    usage: [usage],
+    options: [
+      { command: '--project <name>', description: 'Project name override' },
+      { command: '--preview', description: PREVIEW_SECRET_OPTION },
+    ],
   };
 }
 

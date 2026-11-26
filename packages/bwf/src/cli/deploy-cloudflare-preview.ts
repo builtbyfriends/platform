@@ -8,10 +8,7 @@ import type { CfCommand } from './cf-version-api.ts';
 import { createCfCommand } from './cf-version-runner.ts';
 import { createCloudflareChildReporter, observeCfCommand } from './cloudflare-child-report.ts';
 import { readCloudflareLink } from './cloudflare-link.ts';
-import {
-  enableCloudflarePreviewLogs,
-  resolveCloudflareOperationContext,
-} from './cloudflare-operations.ts';
+import { resolveCloudflareOperationContext } from './cloudflare-operations.ts';
 import {
   assertNotDeclared,
   ensurePreviewDatabase,
@@ -36,17 +33,15 @@ import type { CloudflareDeployDeps, RunDeployOptions } from './deploy-types.ts';
 import type { CliLogger } from './log-file.ts';
 import { getErrorMessage, note } from './output.ts';
 import {
-  applyPreviewSecrets,
-  collectPreviewSecrets,
-  liveSecretsFailureMessage,
-  missingPreviewSecretsMessage,
+  missingFromBaseMessage,
+  previewBaseFailureMessage,
+  readPreviewBase,
 } from './preview-secrets.ts';
-import type { PreviewSecretValues } from './preview-secrets.ts';
 
 const CF_TIMEOUT_MS = 300_000;
 
 const PREVIEW_SHARES =
-  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues and containers are the live app's, so a preview reads and writes the live data there. A preview has no Workflow binding. It starts without secrets: bwf sets a copy of each secret the live app has, from environment variables or --secrets-file.";
+  "A preview gets its own Durable Objects and its own copy of each D1 database. KV, R2, queues and containers are the live app's, so a preview reads and writes the live data there. A preview has no Workflow binding. It starts with the secrets and settings in the Worker's preview Base: set a secret there once with `bwf secret put NAME --preview`.";
 
 type PreviewRun = {
   root: string;
@@ -207,19 +202,6 @@ async function checkPreviewHealth(run: PreviewRun, url: string): Promise<void> {
   log.info('Health check passed.');
 }
 
-export async function tryEnablePreviewLogs(
-  context: Parameters<typeof enableCloudflarePreviewLogs>[0],
-  name: string,
-): Promise<void> {
-  try {
-    await enableCloudflarePreviewLogs(context, name);
-  } catch (error) {
-    log.warn(
-      `deploy: bwf could not turn on logs for preview ${name}, so it may have none: ${getErrorMessage(error)}`,
-    );
-  }
-}
-
 async function deployPreview(run: PreviewRun): Promise<void> {
   const { root, name, runCf } = run;
 
@@ -227,21 +209,19 @@ async function deployPreview(run: PreviewRun): Promise<void> {
   log.info(PREVIEW_SHARES);
 
   const context = resolveCloudflareOperationContext(root);
-  let secrets: PreviewSecretValues;
 
   try {
-    secrets = await collectPreviewSecrets(context, {
-      secretsFile: run.options.secretsFile,
-      env: process.env,
-    });
+    const state = await readPreviewBase(context);
+
+    if (state.base.logsTurnedOn) {
+      log.info('Turned on logs in the preview Base. New previews take it.');
+    }
+
+    if (state.missingFromBase.length > 0) {
+      log.warn(missingFromBaseMessage(state.missingFromBase));
+    }
   } catch (error) {
-    log.error(liveSecretsFailureMessage(error instanceof Error ? error : new Error(String(error))));
-
-    return run.exit(1);
-  }
-
-  if (secrets.missing.length > 0) {
-    log.error(missingPreviewSecretsMessage(secrets.missing));
+    log.error(previewBaseFailureMessage(error instanceof Error ? error : new Error(String(error))));
 
     return run.exit(1);
   }
@@ -265,8 +245,6 @@ async function deployPreview(run: PreviewRun): Promise<void> {
 
     return run.exit(1);
   }
-
-  await tryEnablePreviewLogs(context, name);
 
   let url: string | undefined;
 
@@ -294,16 +272,6 @@ async function deployPreview(run: PreviewRun): Promise<void> {
 
   if (url === undefined) {
     log.error(`deploy: preview ${name} deployed, but cf gave no address for it.`);
-
-    return run.exit(1);
-  }
-
-  try {
-    await applyPreviewSecrets(context, name, secrets);
-  } catch (error) {
-    log.error(
-      `deploy: preview ${name} deployed, but its secrets could not be set: ${getErrorMessage(error)}`,
-    );
 
     return run.exit(1);
   }

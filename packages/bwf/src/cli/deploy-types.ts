@@ -57,7 +57,6 @@ export type RunDeployOptions = {
   /** Delete the Worker Preview with this name, and the D1 databases made for it. `--platform cloudflare` only. */
   removePreview?: string;
   /** A dotenv file with the values of the live app's secrets, for `--preview`. Environment variables of the same names win. */
-  secretsFile?: string;
   /**
    * `CF_ACCESS_READINESS_ORIGIN` as recorded before project code ran (`null` when unset).
    * `--platform cloudflare` only.

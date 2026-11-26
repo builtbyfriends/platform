@@ -165,17 +165,41 @@ export async function syncCloudflareSecrets(
   );
 }
 
-/** Set secret values on a preview's latest deployment. The values go to the child process on stdin. */
-export async function setCloudflarePreviewSecrets(
+export type PreviewBase = { secrets: Array<string>; logsTurnedOn: boolean };
+
+/**
+ * Read the Worker's preview Base, the settings Cloudflare gives each new preview. With `ensureLogs`, turn
+ * logs on in the Base when the app has set no observability there.
+ */
+export async function readCloudflarePreviewBase(
   context: CloudflareOperationContext,
-  preview: string,
+  options: { ensureLogs: boolean },
+): Promise<PreviewBase> {
+  const result = await run(context, {
+    type: 'preview.base',
+    ensureLogs: options.ensureLogs,
+    configPath: context.configPath,
+    workerName: context.workerName,
+  });
+  const data = requireData(result.data, 'Cloudflare preview Base');
+  if (!isRecord(data) || !Array.isArray(data.secrets)) {
+    throw new Error('Cloudflare preview Base returned an unexpected response.');
+  }
+  return {
+    secrets: data.secrets.filter((name): name is string => typeof name === 'string'),
+    logsTurnedOn: data.logsTurnedOn === true,
+  };
+}
+
+/** Set secret values in the preview Base. The values go to the child process on stdin. */
+export async function setCloudflarePreviewBaseSecrets(
+  context: CloudflareOperationContext,
   values: Readonly<Record<string, string>>,
 ): Promise<void> {
   await run(
     context,
     {
-      type: 'preview.secrets',
-      preview,
+      type: 'preview.base.secrets',
       configPath: context.configPath,
       workerName: context.workerName,
     },
@@ -183,14 +207,13 @@ export async function setCloudflarePreviewSecrets(
   );
 }
 
-/** Turn on logs for a preview, so Workers Logs hold its requests and `console` output. */
-export async function enableCloudflarePreviewLogs(
+export async function deleteCloudflarePreviewBaseSecret(
   context: CloudflareOperationContext,
-  preview: string,
+  name: string,
 ): Promise<void> {
   await run(context, {
-    type: 'preview.logs',
-    preview,
+    type: 'preview.base.secrets',
+    remove: name,
     configPath: context.configPath,
     workerName: context.workerName,
   });

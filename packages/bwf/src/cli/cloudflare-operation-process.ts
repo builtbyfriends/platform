@@ -1134,76 +1134,88 @@ const PREVIEW_OBSERVABILITY = {
   logs: { enabled: true, invocation_logs: true, persist: true },
 };
 
-/** Turn on logs for a preview, unless the preview already has logs on from the app's own settings. */
-async function previewLogs(): Promise<Result> {
-  if (operation.type !== 'preview.logs') {
-    throw new Error('Unsupported Cloudflare preview operation.');
-  }
-  const path = `/accounts/${encodeURIComponent(accountId())}/workers/workers/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`;
-  const read = await fetch(`${apiBaseUrl()}${path}`, {
-    headers: await apiHeaders(),
-    redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
-  });
-  const current: unknown = await read.json().catch(() => null);
-  if (read.status === 404) {
-    const created = await postWorkersApi(
-      `/${encodeURIComponent(workerName())}/previews`,
-      { name: operation.preview, observability: PREVIEW_OBSERVABILITY },
-      'POST',
-    );
-    if (created.status < 200 || created.status >= 300) {
-      throw workersApiFailure(`create preview ${operation.preview} with logs on`, created);
-    }
-    return result(0);
-  }
-  if (!read.ok || !isRecord(current)) {
-    throw new Error(`Cloudflare could not read preview ${operation.preview} (HTTP ${read.status})`);
-  }
-  const observability = object(current.result).observability;
-  const logs = isRecord(observability) ? observability.logs : undefined;
-  if (
-    isRecord(observability) &&
-    observability.enabled === true &&
-    isRecord(logs) &&
-    logs.enabled === true
-  ) {
-    return result(0);
-  }
-  const response = await postWorkersApi(
-    `/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}`,
-    { observability: PREVIEW_OBSERVABILITY },
-    'PATCH',
-  );
-  if (response.status < 200 || response.status >= 300) {
-    throw workersApiFailure(`turn on logs for preview ${operation.preview}`, response);
-  }
-  return result(0);
+function previewBasePath(): string {
+  return `/${encodeURIComponent(workerName())}`;
 }
 
-// Decision: A preview starts without the live Worker's secrets. This sets them on the preview's latest
-// deployment from stdin, in this process because it holds the token, and returns no value or request
-// body, so nothing a secret holds reaches a log or the result.
-async function previewSecrets(): Promise<Result> {
-  if (operation.type !== 'preview.secrets') {
-    throw new Error('Unsupported Cloudflare preview operation.');
+async function readWorkerBase(): Promise<Json> {
+  const response = await fetch(
+    `${apiBaseUrl()}/accounts/${encodeURIComponent(accountId())}/workers/workers${previewBasePath()}`,
+    { headers: await apiHeaders(), redirect: 'error', signal: AbortSignal.timeout(30_000) },
+  );
+  const parsed: unknown = await response.json().catch(() => null);
+  if (response.status === 404) {
+    throw missingWorkerError();
   }
-  const values = object(JSON.parse(readFileSync(0, 'utf8')));
-  const env: Record<string, { type: 'secret_text'; text: string }> = {};
-  for (const [name, text] of Object.entries(values)) {
-    if (typeof text !== 'string') {
-      throw new Error('Secret values must be strings.');
-    }
-    env[name] = { type: 'secret_text', text };
+  if (!response.ok || !isRecord(parsed)) {
+    throw new Error(`Cloudflare could not read the Worker (HTTP ${response.status}).`);
   }
+  const worker = object(parsed.result);
+  const base = worker.previews_base_config;
+  return isRecord(base) ? base : {};
+}
+
+function missingWorkerError(): Error {
+  return new Error(
+    `Cloudflare has no Worker named ${workerName()} yet, so it has no preview Base (HTTP 404). Run bwf deploy --platform cloudflare once, then try again.`,
+  );
+}
+
+async function patchWorkerBase(change: Json, action: string): Promise<void> {
   const response = await postWorkersApi(
-    `/${encodeURIComponent(workerName())}/previews/${encodeURIComponent(operation.preview)}/deployments/latest`,
-    { env },
+    previewBasePath(),
+    { previews_base_config: change },
     'PATCH',
   );
-  if (response.status < 200 || response.status >= 300) {
-    throw workersApiFailure(`set secrets on preview ${operation.preview}`, response);
+  if (response.status === 404) {
+    throw missingWorkerError();
   }
+  if (response.status < 200 || response.status >= 300) {
+    throw workersApiFailure(action, response);
+  }
+}
+
+// Decision: Cloudflare gives each new preview the Worker's Base: its secrets, observability and other
+// settings. The Base is the one place an app sets them, so bwf reads it here and, when asked, turns
+// logs on in it if the app has set no observability of its own. Previews that already exist keep
+// what they had. The result lists secret names only.
+async function previewBase(): Promise<Result> {
+  if (operation.type !== 'preview.base') {
+    throw new Error('Unsupported Cloudflare preview operation.');
+  }
+  const base = await readWorkerBase();
+  let logsTurnedOn = false;
+  if (operation.ensureLogs && !isRecord(base.observability)) {
+    await patchWorkerBase(
+      { observability: PREVIEW_OBSERVABILITY },
+      'turn on logs in the preview Base',
+    );
+    logsTurnedOn = true;
+  }
+  const env = isRecord(base.env) ? base.env : {};
+  return result(0, '', '', { secrets: Object.keys(env).sort(), logsTurnedOn });
+}
+
+// Decision: This sets or removes secrets in the Worker's preview Base from stdin, in this process
+// because it holds the token, and returns no value or request body, so nothing a secret holds
+// reaches a log or the result. Cloudflare copies the Base into each preview made after this call.
+async function previewBaseSecrets(): Promise<Result> {
+  if (operation.type !== 'preview.base.secrets') {
+    throw new Error('Unsupported Cloudflare preview operation.');
+  }
+  const env: Record<string, { type: 'secret_text'; text: string } | null> = {};
+  if (operation.remove !== undefined) {
+    env[operation.remove] = null;
+  } else {
+    const values = object(JSON.parse(readFileSync(0, 'utf8')));
+    for (const [name, text] of Object.entries(values)) {
+      if (typeof text !== 'string') {
+        throw new Error('Secret values must be strings.');
+      }
+      env[name] = { type: 'secret_text', text };
+    }
+  }
+  await patchWorkerBase({ env }, 'change secrets in the preview Base');
   return result(0);
 }
 
@@ -1599,11 +1611,11 @@ async function main(): Promise<Result> {
   if (operation.type.startsWith('secret.')) {
     return secrets();
   }
-  if (operation.type === 'preview.secrets') {
-    return previewSecrets();
+  if (operation.type === 'preview.base') {
+    return previewBase();
   }
-  if (operation.type === 'preview.logs') {
-    return previewLogs();
+  if (operation.type === 'preview.base.secrets') {
+    return previewBaseSecrets();
   }
   if (operation.type === 'tail') {
     return tail();

@@ -9,10 +9,10 @@ export const secretSubcommands: Array<SubcommandDef> = [
 ];
 
 export type SecretArgs =
-  | { action: 'list'; projectName?: string }
-  | { action: 'put'; name: string; value?: string; projectName?: string }
-  | { action: 'delete'; name: string; projectName?: string }
-  | { action: 'sync'; file: string; projectName?: string; yes?: boolean };
+  | { action: 'list'; projectName?: string; preview?: boolean }
+  | { action: 'put'; name: string; value?: string; projectName?: string; preview?: boolean }
+  | { action: 'delete'; name: string; projectName?: string; preview?: boolean }
+  | { action: 'sync'; file: string; projectName?: string; yes?: boolean; preview?: boolean };
 
 export function parseSecretArgs(args: Array<string>): SecretArgs {
   const parsed = parseArgs({
@@ -20,6 +20,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     options: {
       project: { type: 'string' },
       yes: { type: 'boolean' },
+      preview: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: true,
@@ -34,6 +35,17 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
   const yesTokens = tokens.filter((t) => t.kind === 'option' && t.name === 'yes');
   if (yesTokens.length > 1) {
     throw new Error('secret: --yes can only be specified once.');
+  }
+
+  const previewTokens = tokens.filter((t) => t.kind === 'option' && t.name === 'preview');
+  if (previewTokens.length > 1) {
+    throw new Error('secret: --preview can only be specified once.');
+  }
+  const preview = parsed.values.preview === true;
+  if (preview && parsed.values.project !== undefined) {
+    throw new Error(
+      'secret: --preview changes the preview Base of a Cloudflare Worker, so it takes no --project.',
+    );
   }
 
   const projectValue = parsed.values.project;
@@ -54,7 +66,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     if (name) {
       throw new Error('secret: Usage: bwf secret list [--project <name>].');
     }
-    return { action, projectName };
+    return { action, projectName, ...(preview && { preview }) };
   }
 
   if (action === 'put') {
@@ -66,7 +78,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     }
     const eqIndex = name.indexOf('=');
     if (eqIndex === -1) {
-      return { action, name, projectName };
+      return { action, name, projectName, ...(preview && { preview }) };
     }
 
     const key = name.slice(0, eqIndex);
@@ -74,7 +86,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     if (!key || !inlineValue) {
       throw new Error('secret: Usage: bwf secret put <name> [--project <name>].');
     }
-    return { action, name: key, value: inlineValue, projectName };
+    return { action, name: key, value: inlineValue, projectName, ...(preview && { preview }) };
   }
 
   if (action === 'delete') {
@@ -84,7 +96,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     if (value) {
       throw new Error('secret: Usage: bwf secret delete <name> [--project <name>].');
     }
-    return { action, name, projectName };
+    return { action, name, projectName, ...(preview && { preview }) };
   }
 
   if (action === 'sync') {
@@ -94,7 +106,7 @@ export function parseSecretArgs(args: Array<string>): SecretArgs {
     if (value) {
       throw new Error('secret: Usage: bwf secret sync <file> [--project <name>] [--yes].');
     }
-    return { action, file: name, projectName, yes: parsed.values.yes };
+    return { action, file: name, projectName, yes: parsed.values.yes, ...(preview && { preview }) };
   }
 
   throw new Error('secret: Usage: bwf secret <list|put|delete|sync> ...');
