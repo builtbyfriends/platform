@@ -299,6 +299,9 @@ catalogs:
     smol-toml:
       specifier: ^1.9.1
       version: 1.9.1
+    sqlite-parser:
+      specifier: ^1.0.1
+      version: 1.0.1
     typescript:
       specifier: 7.0.2
       version: 7.0.2
@@ -816,6 +819,9 @@ importers:
       shiki:
         specifier: 'catalog:'
         version: 4.6.0
+      sqlite-parser:
+        specifier: 'catalog:'
+        version: 1.0.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: catalog:platform
@@ -5587,6 +5593,11 @@ packages:
     resolution: {integrity: sha512-6CKD38c31SENivxOADeMNLdukOnUxUcflKtzVWzace7Riv1v7cAEym5Cx9Q7gYZ3ezIJI7ZpqecQq8cqNeSSFg==}
     engines: {bun: '>=1.0.0', deno: '>=2.0.0', node: '>=12.0.0'}
 
+  sqlite-parser@1.0.1:
+    resolution: {integrity: sha512-/es+YmgQG+VFbwAQD0Nd0Mdzgky8rW3M85zcy2+Vtk3Sj5ydaMl/lopWPehsjsByGw/swVuXSBeMJFh47doRUw==}
+    engines: {node: '>=4'}
+    hasBin: true
+
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
 
@@ -9743,6 +9754,8 @@ snapshots:
   split2@4.2.0: {}
 
   sql-escaper@1.5.2: {}
+
+  sqlite-parser@1.0.1: {}
 
   std-env@4.3.0: {}
 

@@ -54,7 +54,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-fate": "catalog:",
-    "shiki": "catalog:"
+    "shiki": "catalog:",
+    "sqlite-parser": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:platform",

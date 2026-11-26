@@ -13,6 +13,8 @@ import {
   type RuntimeActionInput,
 } from '../routes/app-runtime-actions.ts';
 import type { Project, Resource } from '../types.ts';
+import { queryDatabase } from './database-query.ts';
+import { DatabaseQueryError } from './database-select.ts';
 
 export type ResourceCaller = {
   project: Project;
@@ -93,6 +95,39 @@ const saveOutput = type({ ...identity, kind: "'file-saved'", key, etag })
 const errors = {
   RESOURCE_CHANGED: { status: 409, message: 'This resource changed. Refresh before continuing.' },
 } as const;
+const queryInput = type({ sql: type('string > 0').atMostLength(8192) }).onUndeclaredKey('reject');
+const queryJson = {
+  ...toJsonSchema(queryInput, 'input'),
+  properties: { sql: { type: 'string', minLength: 1, maxLength: 8192, 'x-maxUtf8Bytes': 8192 } },
+};
+const boundedQuery = {
+  '~standard': {
+    ...queryInput['~standard'],
+    jsonSchema: { input: () => queryJson, output: () => queryJson },
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Standard Schema validates untrusted JSON before any database request.
+    validate: async (value: unknown) => {
+      const result = await queryInput['~standard'].validate(value);
+      if (result.issues) {
+        return result;
+      }
+      return new TextEncoder().encode(result.value.sql).length <= 8192
+        ? result
+        : { issues: [{ message: 'SQL exceeds the 8 KiB UTF-8 limit', path: ['sql'] }] };
+    },
+  },
+};
+const queryOutput = type({
+  ...identity,
+  kind: "'query-rows'",
+  columns: 'string[]',
+  rows: '(string | number | boolean | null)[][]',
+  truncated: 'boolean',
+  cellsTruncated: 'boolean',
+  limit: 'number.integer >= 0',
+  durationMs: 'number >= 0',
+})
+  .onUndeclaredKey('reject')
+  .or(unavailable);
 
 async function run(execution: Execution, action: string, input: RuntimeActionInput) {
   const { bindings, caller } = execution;
@@ -160,7 +195,47 @@ const saveFile = procedure('files.saveText')
     }
   });
 
-export const resourceOperationRegistry = defineRegistry([readFile, saveFile]);
+const readQuery = procedure('database.query')
+  .use(owned)
+  .input(boundedQuery)
+  .output(queryOutput)
+  .errors(errors)
+  .mcp({
+    title: 'Query table',
+    description:
+      'Read one regular app table with SELECT, public columns, filters, aggregates and sorting. Up to 200 rows; protected and generated columns, joins, subqueries, CTEs and writes are unavailable.',
+    effect: 'read',
+    idempotent: true,
+  })
+  .handler(async ({ env, input, fail }) => {
+    let result;
+    try {
+      result = await queryDatabase(env.bindings, env.caller, input.sql);
+    } catch (error) {
+      result = {
+        appId: env.caller.project.id,
+        resourceId: env.caller.resource.id,
+        action: 'database.query',
+        kind: 'unavailable',
+        reason:
+          error instanceof DatabaseQueryError
+            ? error.message
+            : 'Could not run this query. Use a regular app table and try again.',
+      };
+    }
+    if (!(await env.caller.stillAuthorized())) {
+      return fail('RESOURCE_CHANGED');
+    }
+    return queryOutput.assert(result);
+  });
+
+export const resourceOperationRegistry = defineRegistry([readFile, saveFile, readQuery]);
+
+export function resourceOperationSupported(id: string, resourceType: string) {
+  return resourceType === 'r2'
+    ? id === 'files.readText' || id === 'files.saveText'
+    : resourceType === 'd1' && id === 'database.query';
+}
 
 async function describeOperations() {
   return Promise.all(

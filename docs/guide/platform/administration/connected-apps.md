@@ -111,9 +111,23 @@ Send these calls to `POST /app-billing/<call>`. Include `owner: { person }` or `
 | `resources.inspect`  | `{ project, owner, resourceId, prefix?, cursor?, table?, offset? }` | File metadata, database tables or a page of table rows. Select an actual resource ID from the inventory; a binding name alone isn't accepted. |
 | `projects.activity`  | `{ project, owner, cursor? }`                                       | Recent invocation logs and exceptions for the active deployment, newest first. These are app events, not an individual resource's health.     |
 
-File browsing reads up to 50 object names, sizes and modification times per page. A `cursor` continues the listing. It doesn't download, upload or delete content. Database browsing lists up to 200 tables; selecting `table` returns up to 50 rows and `nextOffset`. Previews stop at offset 10,000 and 100 columns. Text cells are shortened to 1,000 characters, binary values display as `[binary]`, and known credential-named columns display as `[redacted]`. This includes password, secret, token, credential, private-key, verification-code, API-key and access-key names. Redaction uses column names; it does not find secrets inside ordinary text or JSON fields. The API constructs read queries; it doesn't accept SQL. Live table changes can shift rows between pages.
+File browsing reads up to 50 object names, sizes and modification times per page. A `cursor` continues the listing. It doesn't download, upload or delete content. Database browsing lists up to 200 tables; selecting `table` returns up to 50 rows and `nextOffset`. Previews stop at offset 10,000 and 100 columns. Text cells are shortened to 1,000 characters, binary values display as `[binary]`, and known credential-named columns display as `[redacted]`. This includes password, secret, token, credential, private-key, verification-code, API-key and access-key names. Redaction uses column names; it does not find secrets inside ordinary text or JSON fields. `resources.inspect` constructs read queries and doesn't accept SQL. Live table changes can shift rows between pages.
 
 Storage reads use the API's private `PLATFORM_PROXY` binding. Without it, reads return `kind: "unavailable"` with a reason. An empty supported page remains a successful page. Other resource kinds can appear in the inventory but don't yet have a data browser.
+
+For a database query console, call `projects.resourceOperations` with `{ project, owner, resourceId }`. A connected D1 database advertises `database.query` with its input and output schemas, version and `read` effect. Invoke it through `resources.invoke` with the same scope, `operation: "database.query"`, the advertised `version`, `expectedEffect: "read"` and `input: { sql }`. Refresh the operation catalog if its version changes.
+
+Queries support one regular app table with `SELECT`, `*`, aliases, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and `LIMIT`. Supported functions are `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `TOTAL`, `LOWER`, `UPPER`, `LENGTH`, `ABS`, `ROUND`, `COALESCE`, `IFNULL` and `NULLIF`. For example:
+
+```sql
+SELECT category, COUNT(*) AS total
+FROM notes
+GROUP BY category
+ORDER BY total DESC
+LIMIT 20
+```
+
+This is a read-only SQL subset. Joins, subqueries, CTEs, views, virtual tables, generated columns, protected columns, offsets and write statements aren't supported. Protected columns can't be used in filters, expressions or sorting either. `*` expands to public, nongenerated columns. The default result limit is 100 rows, capped at 200. A successful `query-rows` result includes `columns`, positional `rows`, `limit`, `durationMs`, `truncated` and `cellsTruncated`. Text cells are capped at 4,096 characters. Results retain their column names when there are no matching rows. A failed or unsupported query returns `kind: "unavailable"` with a reason; show that reason rather than an empty table.
 
 Connected applications can also call `projects.capabilities` with `{ project, owner, resourceId?, product?, cursor?, limit? }`. Omit `product` and `resourceId` to list product groups. Choose a product to browse its operation metadata, or pass an owned resource ID to select its product. The default page contains up to 10 operations; the maximum is 50, and large entries can produce smaller pages. Reuse `nextCursor` with the same project, resource and product until it is `null`. Restart paging when the catalog revision changes.
 

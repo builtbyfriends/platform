@@ -16,6 +16,7 @@ export async function proxyRead(
     params?: Array<string | number>;
     method?: 'all';
   },
+  signal: AbortSignal = AbortSignal.timeout(10_000),
 ) {
   if (!env.PLATFORM_PROXY) {
     throw new Error('Storage inspection is not connected on this installation.');
@@ -23,7 +24,7 @@ export async function proxyRead(
   const response = await env.PLATFORM_PROXY.fetch(`https://proxy${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(10_000),
+    signal,
     body: JSON.stringify({
       ...input,
       projectId: project.id,

@@ -6,6 +6,7 @@ import type { ApiEnv } from '../env.ts';
 import {
   resourceOperationDescriptors,
   resourceOperationRegistry,
+  resourceOperationSupported,
 } from '../infrastructure/resource-operations.ts';
 import { fileOwnerActive } from './app-runtime-files.ts';
 import type { ResolveProject } from './app-runtime.ts';
@@ -83,13 +84,16 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       if (!caller) {
         return context.json({ error: 'unknown_resource' }, 404);
       }
-      const reason =
-        caller.resource.type !== 'r2'
-          ? 'Schema-backed operations are not registered for this resource yet.'
-          : !context.env.PLATFORM_PROXY
-            ? 'File operations are not connected on this installation.'
-            : null;
-      const operations = reason ? [] : await resourceOperationDescriptors();
+      const reason = !['r2', 'd1'].includes(caller.resource.type)
+        ? 'Schema-backed operations are not registered for this resource yet.'
+        : !context.env.PLATFORM_PROXY
+          ? 'Resource operations are not connected on this installation.'
+          : null;
+      const operations = reason
+        ? []
+        : (await resourceOperationDescriptors()).filter((entry) =>
+            resourceOperationSupported(entry.id, caller.resource.type),
+          );
       if (!(await caller.stillAuthorized())) {
         return context.json({ error: 'resource_changed' }, 409);
       }
@@ -124,7 +128,11 @@ export function appRuntimeOperationRoutes(resolve: ResolveProject) {
       const operation = (await resourceOperationDescriptors()).find(
         (entry) => entry.id === body.operation,
       );
-      if (!operation || caller.resource.type !== 'r2' || !context.env.PLATFORM_PROXY) {
+      if (
+        !operation ||
+        !resourceOperationSupported(operation.id, caller.resource.type) ||
+        !context.env.PLATFORM_PROXY
+      ) {
         return context.json({ error: 'operation_unavailable' }, 404);
       }
       if (operation.version !== body.version) {

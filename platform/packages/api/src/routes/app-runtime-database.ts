@@ -57,9 +57,9 @@ export function validDatabaseSort(value: unknown): value is DatabaseSort {
   );
 }
 const databaseQuery =
-  (env: ApiEnv['Bindings'], project: Project, resource: Resource) =>
+  (env: ApiEnv['Bindings'], project: Project, resource: Resource, signal?: AbortSignal) =>
   (sql: string, params: Array<string | number> = []) =>
-    proxyRead(env, project, resource, '/d1/query', { sql, params, method: 'all' });
+    proxyRead(env, project, resource, '/d1/query', { sql, params, method: 'all' }, signal);
 type Query = ReturnType<typeof databaseQuery>;
 async function tables(query: Query) {
   const result = await query(
@@ -117,6 +117,27 @@ async function columns(query: Query, table: string) {
     throw Error('No columns are available for this table.');
   }
   return values;
+}
+export async function databaseSelectSchema(
+  env: ApiEnv['Bindings'],
+  project: Project,
+  resource: Resource,
+  table: string,
+  signal?: AbortSignal,
+) {
+  const query = databaseQuery(env, project, resource, signal);
+  const result = await query(
+    "SELECT type FROM pragma_table_list WHERE schema = 'main' AND name = ? LIMIT 1",
+    [table],
+  );
+  if (
+    !Array.isArray(result.results) ||
+    !isRecord(result.results[0]) ||
+    result.results[0].type !== 'table'
+  ) {
+    throw new OperatorError(400, 'Queries support regular app tables.');
+  }
+  return columns(query, table);
 }
 export async function databaseSchema(
   env: ApiEnv['Bindings'],
