@@ -4404,103 +4404,115 @@ describe('platform installer', () => {
     const routingValues = new Map<string, string>();
     const lifecycleEvents: Array<string> = [];
     const databaseClaims: Array<[string, string]> = [];
-    const install = () =>
-      installPlatform(plan, freshSecrets(), null, {
-        runtime: selectedRuntime,
-        prepareHealthAccess: async () => {
-          if (failHealthToken) {
-            throw new PlatformCloudflareApiError('rejected', 403);
-          }
-        },
-        prepareAppAccess: async () =>
-          JSON.stringify({
-            version: 1,
-            accountId: 'account',
-            mode: appAccess === 'public' ? 'public' : 'protected',
-            managed: true,
-            apiToken: 'app-management-only',
-            identityProviderIds: appAccess === 'public' ? [] : ['idp'],
-            policyIds: appAccess === 'public' ? [] : ['policy'],
-          }),
-        initializeAppAccess: async ({ setupJson, setupToken }) => {
-          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
-          expect(JSON.parse(setupJson).apiToken).toBe('app-management-only');
-          expect(setupToken).toMatch(/^[a-f0-9]{64}$/);
-          expect(captured.apiSecrets?.PLATFORM_APP_ACCESS_SETUP_TOKEN).toBe(setupToken);
-          lifecycleEvents.push('app-access');
-          if (failAppAccess) {
-            throw new Error('app access not ready');
-          }
-        },
-        acquireDatabaseLifecycleLock,
-        claimDatabase: async (_url, installationId, ownershipNonce) => {
-          databaseClaims.push([installationId, ownershipNonce]);
-        },
-        client: {
-          createAiGateway: created,
-          createDnsRecord: async (_zone, name) => ({
-            content: '100::',
-            id: `resource-${resourceIndex++}`,
-            name,
-            proxied: true,
-            type: 'AAAA',
-          }),
-          createZone: async () => {
-            throw new Error('existing zone must not be created');
-          },
-          createKvNamespace: created,
-          createR2Bucket: created,
-          createQueue: created,
-          createDispatchNamespace: created,
-          createHyperdrive: async (account, name) => created(account, name),
-          deleteKvValue: async (_account, _namespace, key) => {
-            lifecycleEvents.push(`delete:${key}`);
-            routingValues.delete(key);
-          },
-          putKvValue: async (_account, _namespace, key, value) => {
-            routingValues.set(key, value);
-            if (key === PLATFORM_DISABLED_KEY) {
-              lifecycleEvents.push(`put:${key}`);
-            }
-            if (key === '__void/platform/installation/v1') {
-              captured.remoteManifest = value;
+    const faults = { appAccess: failAppAccess };
+    const install = (existing: Parameters<typeof installPlatform>[2] = null) =>
+      installPlatform(
+        plan,
+        existing
+          ? freshSecrets({
+              checkpoint: readPendingInstallationSecrets(existing),
+              existingInstallation: true,
+            })
+          : freshSecrets(),
+        existing,
+        {
+          runtime: selectedRuntime,
+          prepareHealthAccess: async () => {
+            if (failHealthToken) {
+              throw new PlatformCloudflareApiError('rejected', 403);
             }
           },
-          putR2Object: async (_account, _bucket, _key, value) => {
-            captured.r2OwnershipMarker = value;
+          prepareAppAccess: async () =>
+            JSON.stringify({
+              version: 1,
+              accountId: 'account',
+              mode: appAccess === 'public' ? 'public' : 'protected',
+              managed: true,
+              apiToken: 'app-management-only',
+              identityProviderIds: appAccess === 'public' ? [] : ['idp'],
+              policyIds: appAccess === 'public' ? [] : ['policy'],
+            }),
+          initializeAppAccess: async ({ setupJson, setupToken }) => {
+            expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+            expect(JSON.parse(setupJson).apiToken).toBe('app-management-only');
+            expect(setupToken).toMatch(/^[a-f0-9]{64}$/);
+            expect(captured.apiSecrets?.PLATFORM_APP_ACCESS_SETUP_TOKEN).toBe(setupToken);
+            lifecycleEvents.push('app-access');
+            if (faults.appAccess) {
+              throw new Error('app access not ready');
+            }
+          },
+          acquireDatabaseLifecycleLock,
+          claimDatabase: async (_url, installationId, ownershipNonce) => {
+            databaseClaims.push([installationId, ownershipNonce]);
+          },
+          client: {
+            createAiGateway: created,
+            createDnsRecord: async (_zone, name) => ({
+              content: '100::',
+              id: `resource-${resourceIndex++}`,
+              name,
+              proxied: true,
+              type: 'AAAA',
+            }),
+            createZone: async () => {
+              throw new Error('existing zone must not be created');
+            },
+            createKvNamespace: created,
+            createR2Bucket: created,
+            createQueue: created,
+            createDispatchNamespace: created,
+            createHyperdrive: async (account, name) => created(account, name),
+            deleteKvValue: async (_account, _namespace, key) => {
+              lifecycleEvents.push(`delete:${key}`);
+              routingValues.delete(key);
+            },
+            putKvValue: async (_account, _namespace, key, value) => {
+              routingValues.set(key, value);
+              if (key === PLATFORM_DISABLED_KEY) {
+                lifecycleEvents.push(`put:${key}`);
+              }
+              if (key === '__void/platform/installation/v1') {
+                captured.remoteManifest = value;
+              }
+            },
+            putR2Object: async (_account, _bucket, _key, value) => {
+              captured.r2OwnershipMarker = value;
+            },
+          },
+          deployWorker: async (config, secrets) => {
+            expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+            expect(routingValues.has(PLATFORM_SANDBOX_DRAIN_KEY)).toBe(false);
+            lifecycleEvents.push(`deploy:${String(config.name)}`);
+            deployed.push(String(config.name));
+            deployedTrafficStates.push(
+              (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
+            );
+            if (String(config.name).endsWith('-api')) {
+              captured.apiSecrets = secrets;
+            }
+          },
+          prepareDatabase,
+          prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
+          revalidateBeforeWorkerDeploy: async () => {},
+          verifyHealth: async () => {
+            expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
+              lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
+            );
+            lifecycleEvents.push('verify');
+          },
+          verifySandboxDrain: async () => {
+            throw new Error('an empty fresh installation must not require a manual drain');
           },
         },
-        deployWorker: async (config, secrets) => {
-          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
-          expect(routingValues.has(PLATFORM_SANDBOX_DRAIN_KEY)).toBe(false);
-          lifecycleEvents.push(`deploy:${String(config.name)}`);
-          deployed.push(String(config.name));
-          deployedTrafficStates.push(
-            (config.vars as Record<string, unknown>).PLATFORM_TRAFFIC_STATE,
-          );
-          if (String(config.name).endsWith('-api')) {
-            captured.apiSecrets = secrets;
-          }
-        },
-        prepareDatabase,
-        prepareSandboxDrain: async () => sandboxDrainPreparation('complete'),
-        revalidateBeforeWorkerDeploy: async () => {},
-        verifyHealth: async () => {
-          expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(
-            lifecycleEvents.includes('verify') ? undefined : PLATFORM_DISABLED_VALUE,
-          );
-          lifecycleEvents.push('verify');
-        },
-        verifySandboxDrain: async () => {
-          throw new Error('an empty fresh installation must not require a manual drain');
-        },
-      });
+      );
     return {
       captured,
       databaseClaims,
       deployed,
       deployedTrafficStates,
       directory,
+      faults,
       install,
       lifecycleEvents,
       plan,
@@ -4631,6 +4643,18 @@ describe('platform installer', () => {
     expect(message).toContain('app access not ready');
     expect(message).toContain('Application traffic is still paused');
     expect(message).toMatch(/bwf platform repair \S+/);
+  });
+
+  it('opens application traffic again when the named command is run after a failure', async () => {
+    const { directory, faults, install, routingValues } = await appAccessInstall({
+      appAccess: 'custom',
+      failAppAccess: true,
+    });
+    await expect(install()).rejects.toThrow('Application traffic is still paused');
+    expect(routingValues.get(PLATFORM_DISABLED_KEY)).toBe(PLATFORM_DISABLED_VALUE);
+    faults.appAccess = false;
+    await install(listInstallationManifests(directory)[0]);
+    expect(routingValues.has(PLATFORM_DISABLED_KEY)).toBe(false);
   });
 
   it('records a rejected app access token before deploying any Worker', async () => {
