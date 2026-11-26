@@ -133,7 +133,7 @@ export async function validateCloudflareArtifacts(
 }
 
 export async function publishCloudflareArtifacts(
-  { directory, bucket, concurrency = 4, dryRun = false },
+  { directory, bucket, concurrency = 4, dryRun = false, skipKeys = [] },
   { environment = process.env, fetcher = fetch, sleep = delay, pinned, onProgress = () => {} } = {},
 ) {
   if (typeof bucket !== 'string' || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) {
@@ -143,12 +143,23 @@ export async function publishCloudflareArtifacts(
     throw Error('Concurrency must be between 1 and 8.');
   }
   const verified = await validateCloudflareArtifacts(directory, pinned);
+  const available = new Set(verified.artifacts.map((artifact) => artifact.key));
+  if (
+    !Array.isArray(skipKeys) ||
+    skipKeys.some((key) => typeof key !== 'string' || !available.has(key)) ||
+    new Set(skipKeys).size !== skipKeys.length
+  ) {
+    throw Error('Resume keys must be unique keys from the verified artifact set.');
+  }
+  const skipped = new Set(skipKeys);
+  const pending = verified.artifacts.filter((artifact) => !skipped.has(artifact.key));
   const summary = {
     source: verified.source,
     bucket,
     objects: verified.artifacts.length,
     bytes: verified.bytes,
     excluded: verified.excluded,
+    skipped: skipped.size,
   };
   if (dryRun) {
     return { ...summary, uploaded: 0, dryRun: true };
@@ -216,22 +227,19 @@ export async function publishCloudflareArtifacts(
       );
     }
   };
-  const workers = Array.from(
-    { length: Math.min(concurrency, verified.artifacts.length) },
-    async () => {
-      while (!stopped && next < verified.artifacts.length) {
-        const artifact = verified.artifacts[next++];
-        try {
-          await upload(artifact);
-          uploaded++;
-          onProgress({ uploaded, total: verified.artifacts.length });
-        } catch (error) {
-          stopped = true;
-          throw error;
-        }
+  const workers = Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
+    while (!stopped && next < pending.length) {
+      const artifact = pending[next++];
+      try {
+        await upload(artifact);
+        uploaded++;
+        onProgress({ uploaded, total: pending.length });
+      } catch (error) {
+        stopped = true;
+        throw error;
       }
-    },
-  );
+    }
+  });
   const outcomes = await Promise.allSettled(workers);
   const failed = outcomes.find((outcome) => outcome.status === 'rejected');
   if (failed) {

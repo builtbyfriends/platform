@@ -74,6 +74,46 @@ async function fixture(count = 2) {
 }
 const options = (value) => ({ directory: value.directory, bucket: 'static-assets-test' });
 
+test('resumes missing artifacts and rejects invalid skip keys before sending requests', async () => {
+  const value = await fixture();
+  try {
+    const verified = await validateCloudflareArtifacts(value.directory, value.pinned);
+    const skipKeys = [verified.artifacts[0].key];
+    const calls = [];
+    const progress = [];
+    const args = {
+      pinned: value.pinned,
+      environment,
+      onProgress: (entry) => progress.push(entry),
+      fetcher: async (url) => {
+        calls.push(url);
+        return new Response(null);
+      },
+    };
+    const report = await publishCloudflareArtifacts({ ...options(value), skipKeys }, args);
+    assert.equal(report.objects, 2);
+    assert.equal(report.skipped, 1);
+    assert.equal(report.uploaded, 1);
+    assert.ok(calls[0].endsWith(verified.artifacts[1].key));
+    assert.deepEqual(progress, [{ uploaded: 1, total: 1 }]);
+    const complete = await publishCloudflareArtifacts(
+      { ...options(value), skipKeys: verified.artifacts.map((artifact) => artifact.key) },
+      args,
+    );
+    assert.equal(complete.uploaded, 0);
+    assert.equal(complete.skipped, 2);
+    for (const invalid of [['outside/key'], [...skipKeys, ...skipKeys], null]) {
+      await assert.rejects(
+        publishCloudflareArtifacts({ ...options(value), skipKeys: invalid }, args),
+        /Resume keys/,
+      );
+    }
+    assert.equal(calls.length, 1);
+  } finally {
+    await value.close();
+  }
+});
+
 test('preflights the entire set and supports credential-free dry runs without a request', async () => {
   const value = await fixture();
   try {

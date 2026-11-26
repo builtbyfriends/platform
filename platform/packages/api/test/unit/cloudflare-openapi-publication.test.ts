@@ -12,6 +12,6 @@ it('validates immutable Cloudflare artifacts and publishes through bounded mocke
     ],
     { encoding: 'utf8', timeout: 10_000 },
   );
-  expect(output).toContain('# pass 9');
+  expect(output).toContain('# pass 10');
   expect(output).toContain('# fail 0');
 });
