@@ -4,6 +4,7 @@ import { authContext, type AuthState, type AuthUser } from './auth.ts';
 import type { BwfAuthEnv, BwfAuthRuntimeOptions } from './better-auth-shared.ts';
 import { withRuntimeEnv } from './env.ts';
 import type { CloudEnv } from './handler.ts';
+import { ownNamespace } from './own-namespace.ts';
 import type {
   AnyWebSocketDefinition,
   RoomActionContext,
@@ -546,7 +547,7 @@ function getStub(
   route: WebSocketRouteMeta,
   params: Record<string, string>,
 ) {
-  const binding = env[route.bindingName] as DurableObjectNamespace | undefined;
+  const binding = ownNamespace<DurableObjectNamespace>(env, route.bindingName, route.className);
   if (!binding) {
     return null;
   }

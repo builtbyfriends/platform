@@ -497,7 +497,9 @@ describe('detectFramework', () => {
       const entry = readFileSync(join(root, '.bwf', 'entry.ts'), 'utf8');
       expect(entry).toContain('PlatformLiveStreamDurableObject');
       expect(entry).toContain('export { PlatformLiveStreamDurableObject };');
-      expect(entry).toContain('__setLiveBindingName("BWF_LIVE");');
+      expect(entry).toContain(
+        '__setLiveBindingName("BWF_LIVE", "PlatformLiveStreamDurableObject");',
+      );
     } finally {
       cwd.mockRestore();
     }

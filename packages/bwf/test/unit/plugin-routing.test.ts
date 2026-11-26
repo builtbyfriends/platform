@@ -919,7 +919,9 @@ describe('routingPlugin', () => {
       await runBuildStart(plugin);
 
       const entry = readFileSync(entryPath, 'utf8');
-      expect(entry).toContain('__setLiveBindingName("BWF_LIVE")');
+      expect(entry).toContain(
+        '__setLiveBindingName("BWF_LIVE", "PlatformLiveStreamDurableObject")',
+      );
       if (dev) {
         expect(entry).toContain('__setLiveDev(true);');
       } else {

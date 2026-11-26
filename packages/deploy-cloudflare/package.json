@@ -1,6 +1,6 @@
 {
   "name": "@builtbyfriends/deploy-cloudflare",
-  "version": "1.13.5",
+  "version": "1.13.6",
   "description": "Cloudflare deployment primitives for bwf runtimes and deployment adapters.",
   "homepage": "https://github.com/builtbyfriends/platform",
   "bugs": {

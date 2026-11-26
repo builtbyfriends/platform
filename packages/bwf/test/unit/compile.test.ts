@@ -576,7 +576,7 @@ describe('compileWorkerEntry', () => {
 
     expect(code).toContain('PlatformLiveStreamDurableObject');
     expect(code).toContain('export { PlatformLiveStreamDurableObject };');
-    expect(code).toContain('__setLiveBindingName("BWF_LIVE");');
+    expect(code).toContain('__setLiveBindingName("BWF_LIVE", "PlatformLiveStreamDurableObject");');
   });
 
   it('re-exports the configured live Durable Object class', () => {
@@ -596,7 +596,9 @@ describe('compileWorkerEntry', () => {
     expect(code).toContain(
       'export { PlatformLiveStreamDurableObject as PlatformLiveStreamDurableObject_abcd1234 };',
     );
-    expect(code).toContain('__setLiveBindingName("BWF_LIVE_abcd1234");');
+    expect(code).toContain(
+      '__setLiveBindingName("BWF_LIVE_abcd1234", "PlatformLiveStreamDurableObject_abcd1234");',
+    );
   });
 
   it('turns on live dev error messages only in the dev entry', () => {
@@ -617,7 +619,9 @@ describe('compileWorkerEntry', () => {
     expect(devCode).toContain('__setLiveDev(true);');
 
     const prodCode = compileWorkerEntry(options);
-    expect(prodCode).toContain('__setLiveBindingName("BWF_LIVE");');
+    expect(prodCode).toContain(
+      '__setLiveBindingName("BWF_LIVE", "PlatformLiveStreamDurableObject");',
+    );
     expect(prodCode).not.toContain('__setLiveDev');
     expect(compileWorkerEntry({ ...options, dev: false })).not.toContain('__setLiveDev');
     expect(compileWorkerEntry({ ...options, live: false, dev: true })).not.toContain(
@@ -640,7 +644,7 @@ describe('compileWorkerEntry', () => {
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
     expect(code).toContain('export { __PlatformSandbox as SandboxV1 };');
-    expect(code).toContain('__setSandboxBindingName("SANDBOX");');
+    expect(code).toContain('__setSandboxBindingName("SANDBOX", "SandboxV1");');
   });
 
   it('exports the configured Sandbox Durable Object subclass via BwfPlatformSandbox', () => {
@@ -661,7 +665,7 @@ describe('compileWorkerEntry', () => {
     );
     expect(code).not.toContain('from "@cloudflare/sandbox"');
     expect(code).toContain('export class CodeSandbox extends __PlatformSandbox {}');
-    expect(code).toContain('__setSandboxBindingName("CODE");');
+    expect(code).toContain('__setSandboxBindingName("CODE", "CodeSandbox");');
   });
 
   it('uses the resolved sandbox runtime path when one is provided', () => {
