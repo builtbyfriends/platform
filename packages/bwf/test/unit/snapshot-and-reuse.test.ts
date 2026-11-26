@@ -7,6 +7,12 @@ describe('snapshot versions', () => {
     expect(snapshotVersion('1.13.9', '133', 'a1b2c3d4e5f6')).toBe('1.13.9-snap.133.ga1b2c3d');
   });
 
+  it('names the next release when the base version is already released', () => {
+    expect(snapshotVersion('1.13.9', '133', 'a1b2c3d4e5f6', true)).toBe(
+      '1.13.10-snap.133.ga1b2c3d',
+    );
+  });
+
   it('keeps an all-digit commit id a valid prerelease part', () => {
     expect(snapshotVersion('1.13.9', '133', '0123456789ab')).toBe('1.13.9-snap.133.g0123456');
   });
