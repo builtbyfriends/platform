@@ -78,11 +78,18 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
         run: |
           {
+            echo "<!-- bwf-snapshot -->"
             echo "Snapshot \`@builtbyfriends/bwf@$VERSION\` is published. Pin it exactly in a branch to try this change."
             echo "The same version is on every package in this repository."
-          } | tee -a "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/comment.md"
+          } > "$RUNNER_TEMP/comment.md"
+          tail -n +2 "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$NUMBER" ]; then
-            gh pr comment "$NUMBER" --edit-last --create-if-none --body-file "$RUNNER_TEMP/comment.md"
+            id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" --paginate --jq '[.[] | select(.body | startswith("<!-- bwf-snapshot -->"))] | last | .id // empty')
+            if [ -n "$id" ]; then
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$RUNNER_TEMP/comment.md" >/dev/null
+            else
+              gh pr comment "$NUMBER" --body-file "$RUNNER_TEMP/comment.md"
+            fi
           fi
 
   clean-up:

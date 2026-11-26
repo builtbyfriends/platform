@@ -89,6 +89,8 @@ jobs:
   # every one of them passed and the files at its head are the same files as this commit. A push that comes from no
   # merged pull request, a head with different files from main, a failed lookup and a tag push still run the full checks. The push to main
   # still runs ci.yml for the Windows tests, and it doesn't hold the publish.
+  # The reuse needs a check named "done" (the CI workflow's last job). Renaming it turns the reuse off, which is safe but silent, so the
+  # script prints a line when the pull request has no such check.
   reuse-checks:
     name: Reuse the pull request's checks
     needs: [release-tag, validate-release]

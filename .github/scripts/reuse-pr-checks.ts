@@ -44,7 +44,9 @@ export function reuseDecision(input: {
     notPassing.length > 0 ||
     !runs.some((run) => run.name === 'done' && run.conclusion === 'success')
   ) {
-    const names = notPassing.map((run) => run.name).join(', ') || 'no finished "done" check';
+    const names =
+      notPassing.map((run) => run.name).join(', ') ||
+      'no successful check named "done", which the reuse needs; if it was renamed, update this script';
     return {
       reuse: false,
       why: `Pull request #${number} has checks that haven't passed (${names}), so the full checks run.`,
