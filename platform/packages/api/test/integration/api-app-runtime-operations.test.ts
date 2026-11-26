@@ -111,6 +111,7 @@ afterEach(async () => {
         'r2-get-bucket-public-policy',
         'r2-get-bucket-cors-policy',
         'r2-put-bucket-cors-policy',
+        "workers-kv-namespace-list-a-namespace'-s-keys",
       ].includes(entry.operationId)
     ) {
       await env.STATIC_ASSETS_R2.delete(cloudflareOpenApiKey(entry));
@@ -811,6 +812,154 @@ describe('schema-backed provider operations', () => {
     const response = await call('resources.invoke', body);
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ error: 'PROVIDER_UNAVAILABLE' });
+  });
+});
+
+describe('owned provider collection operations', () => {
+  async function keys() {
+    const metadata = await providerResource('kv');
+    const entry = (await cloudflareOpenApiIndex()).find(
+      (candidate) => candidate.operationId === "workers-kv-namespace-list-a-namespace'-s-keys",
+    );
+    if (!entry) {
+      throw Error('Missing pinned key list schema');
+    }
+    const key = cloudflareOpenApiKey(entry);
+    const asset = await readFile(
+      new URL('../fixtures/cloudflare-openapi/kv-keys-get.json.gz', import.meta.url),
+    );
+    await env.STATIC_ASSETS_R2.put(key, asset);
+    const selection = { ...scope(), resourceId: metadata.body.resourceId };
+    const list = async () => {
+      const response = await call('projects.resourceOperations', selection);
+      expect(response.status).toBe(200);
+      return catalogSchema.assert(await response.json()).data.operations;
+    };
+    const descriptor = (await list()).find((operation) => operation.id === entry.operationId);
+    if (!descriptor) {
+      throw Error('Key list operation was not registered');
+    }
+    const body = {
+      ...selection,
+      operation: descriptor.id,
+      version: descriptor.version,
+      expectedEffect: 'read',
+      input: { query: { prefix: 'session:', limit: 10 } },
+    };
+    const page = {
+      success: true,
+      errors: [],
+      messages: [],
+      result: [{ name: 'session:one', metadata: { secret: 'private-value' } }],
+      result_info: { count: 1, cursor: 'next+/=' },
+    };
+    metadata.provider.mockImplementation(async () => Response.json(page));
+    return { metadata, body, list, key, asset, page };
+  }
+
+  it('discovers independent metadata and collection capabilities, then pages the owned namespace', async () => {
+    const { metadata, body, list } = await keys();
+    expect(await list()).toEqual(
+      expect.arrayContaining([
+        metadata.descriptor,
+        expect.objectContaining({ id: body.operation, effect: 'read' }),
+      ]),
+    );
+    const response = await call('resources.invoke', body);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result).toMatchObject({
+      data: {
+        appId: project.id,
+        resourceId: body.resourceId,
+        action: body.operation,
+        kind: 'provider-read',
+        data: {
+          records: [{ name: 'session:one' }],
+          pagination: { limit: 10, nextCursor: 'next+/=', hasMore: true },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private-');
+    expect(new URL(String(metadata.provider.mock.calls[0][0])).pathname).toBe(
+      `/client/v4/accounts/${env.CF_ACCOUNT_ID}/storage/kv/namespaces/${metadata.cfId}/keys`,
+    );
+    metadata.provider.mockResolvedValueOnce(
+      Response.json({
+        success: true,
+        errors: [],
+        messages: [],
+        result: [{ name: 'session:two', expiration: 0 }],
+        result_info: { count: 1, cursor: '' },
+      }),
+    );
+    const last = await call('resources.invoke', {
+      ...body,
+      input: { query: { ...body.input.query, cursor: 'next+/=' } },
+    });
+    expect(last.status).toBe(200);
+    expect(await last.json()).toMatchObject({
+      data: {
+        data: {
+          records: [{ name: 'session:two', expiration: 0 }],
+          pagination: { nextCursor: null, hasMore: false },
+        },
+      },
+    });
+    expect(new URL(String(metadata.provider.mock.calls[1][0])).searchParams.get('prefix')).toBe(
+      'session:',
+    );
+    expect(proxy).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale versions, changed effects and cross-tenant or provider scope overrides before access', async () => {
+    const { metadata, body } = await keys();
+    for (const [change, status] of [
+      [{ version: '0'.repeat(64) }, 409],
+      [{ expectedEffect: 'write' }, 400],
+      [{ resourceId: 'res_foreign' }, 404],
+      [{ owner: { person: 'someone-else' } }, 404],
+      [{ input: { query: { namespace_id: 'c'.repeat(32) } } }, 400],
+      [{ input: { account_id: 'c'.repeat(32) } }, 400],
+      [{ input: { query: { limit: 201 } } }, 400],
+    ] as const) {
+      expect((await call('resources.invoke', { ...body, ...change })).status).toBe(status);
+    }
+    expect(metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('keeps metadata usable when the collection schema disappears or fails integrity checks', async () => {
+    const { metadata, body, list, key, asset } = await keys();
+    for (const broken of ['missing', 'damaged']) {
+      if (broken === 'missing') {
+        await env.STATIC_ASSETS_R2.delete(key);
+      } else {
+        await env.STATIC_ASSETS_R2.put(key, new Uint8Array(asset.length));
+      }
+      expect(await list()).toEqual([metadata.descriptor]);
+      expect((await call('resources.invoke', body)).status).toBe(404);
+    }
+    expect(metadata.provider).not.toHaveBeenCalled();
+  });
+
+  it('withholds returned keys after ownership changes and reports provider errors without their content', async () => {
+    const { metadata, body, page } = await keys();
+    metadata.provider.mockResolvedValueOnce(
+      Response.json({ error: 'private-diagnostic' }, { status: 403 }),
+    );
+    const failure = await call('resources.invoke', body);
+    expect(failure.status).toBe(502);
+    expect(JSON.stringify(await failure.json())).not.toContain('private-');
+    metadata.provider.mockImplementationOnce(async () => {
+      await env.db
+        .update(resources)
+        .set({ cf_id: 'c'.repeat(32) })
+        .where(eq(resources.id, body.resourceId));
+      return Response.json(page);
+    });
+    const changed = await call('resources.invoke', body);
+    expect(changed.status).toBe(409);
+    expect(JSON.stringify(await changed.json())).not.toContain('session:one');
   });
 });
 

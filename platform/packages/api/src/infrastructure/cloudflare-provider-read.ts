@@ -47,19 +47,33 @@ const policies: Array<{
   path: string;
   parameter: string;
   identity: string;
+  identitySource?: 'resolved';
+  identityPattern?: string;
   responseOwnership?: 'selected-resource';
   parameterAlternative?: number;
   fields: Array<string>;
   structured?: { fields: { [key: string]: ReadFields } };
-  collection?: { defaultLimit: number; maxItems: number };
+  collection?: {
+    defaultLimit: number;
+    maxItems: number;
+    recordIdentity: Schema;
+    identityMaxBytes?: number;
+    query?: { [name: string]: { schema: Schema; maxBytes: number } };
+  };
 }> = [
   {
     type: 'durable-object',
     path: '/accounts/{account_id}/workers/durable_objects/namespaces/{id}/objects',
     parameter: 'id',
     identity: 'id',
+    identitySource: 'resolved',
+    identityPattern: '^[a-fA-F0-9]{32}$',
     fields: ['id', 'hasStoredData'],
-    collection: { defaultLimit: 50, maxItems: 200 },
+    collection: {
+      defaultLimit: 50,
+      maxItems: 200,
+      recordIdentity: { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
+    },
   },
   {
     type: 'd1',
@@ -109,6 +123,30 @@ const policies: Array<{
     parameter: 'namespace_id',
     identity: 'id',
     fields: ['jurisdiction', 'mode', 'supports_url_encoding'],
+  },
+  {
+    type: 'kv',
+    path: '/accounts/{account_id}/storage/kv/namespaces/{namespace_id}/keys',
+    parameter: 'namespace_id',
+    identity: 'name',
+    identityPattern: '^[a-fA-F0-9]{32}$',
+    fields: ['name', 'expiration'],
+    collection: {
+      defaultLimit: 50,
+      maxItems: 200,
+      recordIdentity: { type: 'string', minLength: 1, maxLength: 512 },
+      identityMaxBytes: 512,
+      query: {
+        prefix: {
+          schema: {
+            type: 'string',
+            maxLength: 512,
+            pattern: '^[^\\u0000-\\u001f\\u007f-\\u009f]*$',
+          },
+          maxBytes: 512,
+        },
+      },
+    },
   },
   {
     type: 'hyperdrive',
@@ -522,6 +560,21 @@ export function prepareCloudflareProviderRead(
     }
   }
   if (policy.collection) {
+    const approved = new Set(['limit', 'cursor', ...Object.keys(policy.collection.query ?? {})]);
+    if (
+      [...parameters.values()].some(
+        (parameter) => parameter.in === 'query' && !approved.has(String(parameter.name)),
+      )
+    ) {
+      throw Error('The provider collection contains an unapproved query parameter.');
+    }
+    for (const [name, bound] of Object.entries(policy.collection.query ?? {})) {
+      const parameter = parameters.get(`query:${name}`);
+      if (!parameter) {
+        throw Error('The provider collection query no longer matches its schema.');
+      }
+      parameter.schema = { allOf: [parameter.schema, bound.schema] };
+    }
     const limit = parameters.get('query:limit');
     const cursor = parameters.get('query:cursor');
     if (!limit || !cursor) {
@@ -609,10 +662,7 @@ export function prepareCloudflareProviderRead(
               properties: {
                 ...properties,
                 [policy.identity]: {
-                  allOf: [
-                    properties[policy.identity],
-                    { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
-                  ],
+                  allOf: [properties[policy.identity], policy.collection.recordIdentity],
                 },
               },
             },
@@ -695,9 +745,10 @@ export function prepareCloudflareProviderRead(
       fetcher: typeof fetch = fetch,
     ) {
       const { resource, project, stillAuthorized } = caller;
-      const providerIdentity = policy.collection
-        ? await caller.resolveProviderIdentity?.()
-        : resource.cf_id;
+      const providerIdentity =
+        policy.identitySource === 'resolved'
+          ? await caller.resolveProviderIdentity?.()
+          : resource.cf_id;
       if (
         resource.type !== policy.type ||
         resource.project_id !== project.id ||
@@ -706,7 +757,7 @@ export function prepareCloudflareProviderRead(
         !providerIdentity ||
         /[\\/?#\p{Cc}]/u.test(providerIdentity) ||
         ['.', '..'].includes(providerIdentity) ||
-        (policy.collection && !/^[a-f0-9]{32}$/i.test(providerIdentity))
+        (policy.identityPattern && !new RegExp(policy.identityPattern).test(providerIdentity))
       ) {
         throw Error('This provider resource is not connected.');
       }
@@ -714,6 +765,12 @@ export function prepareCloudflareProviderRead(
       const query = selected.query === undefined ? {} : selected.query;
       if (!inputValidator.validate({ ...selected, query }).valid) {
         throw Error('Check the operation input fields.');
+      }
+      for (const [name, bound] of Object.entries(policy.collection?.query ?? {})) {
+        const value = record(query)[name];
+        if (typeof value === 'string' && new TextEncoder().encode(value).length > bound.maxBytes) {
+          throw Error('Check the operation input fields.');
+        }
       }
       const queryValues = record({
         ...(policy.collection ? { limit: policy.collection.defaultLimit } : {}),
@@ -803,7 +860,8 @@ export function prepareCloudflareProviderRead(
       }
       if (
         !(await stillAuthorized()) ||
-        (policy.collection && (await caller.resolveProviderIdentity?.()) !== providerIdentity)
+        (policy.identitySource === 'resolved' &&
+          (await caller.resolveProviderIdentity?.()) !== providerIdentity)
       ) {
         throw Error('This resource changed. Refresh before continuing.');
       }
@@ -843,6 +901,19 @@ export function prepareCloudflareProviderRead(
           throw Error('The provider returned invalid pagination.');
         }
         const records = rows.map(projectFields);
+        const identityMaxBytes = policy.collection?.identityMaxBytes;
+        if (
+          identityMaxBytes &&
+          records.some((row) => {
+            const identity = row[policy.identity];
+            return (
+              typeof identity !== 'string' ||
+              new TextEncoder().encode(identity).length > identityMaxBytes
+            );
+          })
+        ) {
+          throw Error('The provider returned an invalid record identity.');
+        }
         if (new Set(records.map((row) => row[policy.identity])).size !== records.length) {
           throw Error('The provider returned duplicate records.');
         }
@@ -871,7 +942,7 @@ export function prepareCloudflareProviderRead(
             },
       };
       if (
-        structured &&
+        (structured || policy.collection) &&
         new TextEncoder().encode(JSON.stringify(output)).length > projectionLimits.bytes
       ) {
         throw Error('The projected provider response is too large.');
